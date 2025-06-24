@@ -1,0 +1,5 @@
+**/obj/
+**/bin/
+.vs/
+/BenchmarkDotNet.Artifacts/**
+/Nuget.Config
