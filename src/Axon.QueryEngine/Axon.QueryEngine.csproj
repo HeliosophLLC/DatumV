@@ -4,4 +4,10 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="HDF.PInvoke.1.10" Version="1.10.612" />
+    <PackageReference Include="Parquet.Net" Version="5.5.0" />
+    <PackageReference Include="Superpower" Version="3.1.0" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,4 @@
+[
+  {"id": 1, "name": "Alice", "tags": ["a", "b"]},
+  {"id": 2, "name": "Bob", "extra": {"nested": true}}
+]
