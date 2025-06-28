@@ -25,7 +25,8 @@ try
         "query" => await RunQueryAsync(statement, catalog),
         "explore" => await RunExploreAsync(statement, catalog, options.Limit),
         "stats" => await RunStatsAsync(statement, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', or 'stats'.")
+        "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', or 'explain'.")
     };
 }
 catch (ArgumentException ex)
@@ -266,6 +267,36 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
         Console.WriteLine();
     }
 
+    return 0;
+}
+
+static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog catalog, bool analyze)
+{
+    QueryPlanner planner = new(catalog);
+    IQueryOperator plan = planner.Plan(statement);
+
+    // Build the static explain plan from the original operator tree.
+    ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
+
+    if (analyze)
+    {
+        // Wrap the tree with instrumented operators, execute, and collect metrics.
+        InstrumentedOperator instrumentedRoot = InstrumentedOperator.InstrumentTree(plan);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        // Consume all rows to collect timing.
+        await foreach (Row _ in instrumentedRoot.ExecuteAsync(context))
+        {
+        }
+
+        InstrumentedOperator.PopulateMetrics(explainPlan, instrumentedRoot);
+    }
+
+    Console.WriteLine(explainPlan.Render());
     return 0;
 }
 

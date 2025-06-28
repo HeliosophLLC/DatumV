@@ -20,6 +20,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the row limit for explore mode.</summary>
     public int Limit { get; set; } = 10;
 
+    /// <summary>Gets or sets whether to run EXPLAIN ANALYZE (with execution metrics).</summary>
+    public bool Analyze { get; set; }
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -29,11 +32,14 @@ internal sealed class CliOptions
 
         if (args.Length < 2)
         {
-            throw new ArgumentException("Usage: axon <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>]");
+            throw new ArgumentException("Usage: axon <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze]");
         }
 
         options.Command = args[0].ToLowerInvariant();
         options.Sql = args[1];
+
+        // Special handling: "explain" can have "--analyze" before or after sql
+        // but otherwise needs the same source args.
 
         for (int i = 2; i < args.Length; i++)
         {
@@ -62,6 +68,10 @@ internal sealed class CliOptions
                     }
                     options.Limit = limit;
                     i++;
+                    break;
+
+                case "--analyze":
+                    options.Analyze = true;
                     break;
 
                 default:

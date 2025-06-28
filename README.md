@@ -85,6 +85,7 @@ axon query "
 | `query` | Execute a SQL query. Supports INTO for file output. |
 | `explore` | Print the first N rows of a query result to the console. |
 | `stats` | Execute a query and print per-column statistics. |
+| `explain` | Show the query execution plan without running it. |
 
 ### Flags
 
@@ -93,6 +94,7 @@ axon query "
 | `--catalog <path>` | Path to a JSON catalog file defining table sources. |
 | `--source <def>` | Inline source definition. Format: `provider:name=path[;key=value]`. Repeatable. |
 | `--limit <n>` | Row limit for explore mode (default: 10). |
+| `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 
 At least one of `--catalog` or `--source` is required. Both can be mixed; `--source` entries override same-named catalog entries.
 
@@ -425,6 +427,66 @@ The `stats` command collects per-column statistics:
 | Distinct count estimate | CardinalityAccumulator | HyperLogLog via CardinalityEstimation (±2% for >1000 values) |
 
 Accumulators support `Merge()` for parallel collection using Chan et al. algorithm for combining Welford's running statistics.
+
+## EXPLAIN
+
+The `explain` command shows the query execution plan as a tree. Two modes are supported:
+
+### Static EXPLAIN
+
+Shows the operator tree structure, join strategies, filter predicates, and warnings — without executing the query:
+
+```bash
+axon explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
+```
+
+```
+Limit (limit: 100)
+└─ Sort (x ASC)
+    ⚠ ORDER BY materializes all input rows for sorting.
+    └─ Project (x, y)
+        └─ Filter (predicate: x > 0)
+            └─ Scan (table: data, provider: csv, columns: [*])
+```
+
+### EXPLAIN ANALYZE
+
+Add `--analyze` to actually execute the query and report runtime metrics — row counts, filter selectivity, self time, and total time per operator:
+
+```bash
+axon explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
+```
+
+```
+Filter (predicate: x > 0.5)  |  rows in: 10,000 → out: 4,987 (49.9%)  |  self: 1.2 ms  |  total: 8.7 ms
+└─ Scan (table: data, provider: csv, columns: [*])  |  rows: 10,000  |  self: 7.5 ms  |  total: 7.5 ms
+```
+
+### Warnings
+
+The explain plan emits warnings about potential performance issues:
+
+| Warning | Trigger |
+|---------|---------|
+| ORDER BY materializes all input rows | Any ORDER BY clause |
+| CROSS JOIN produces a cartesian product | CROSS JOIN |
+| FULL OUTER JOIN materializes both sides | FULL OUTER JOIN |
+| LIKE predicate requires full scan | LIKE in WHERE |
+
+### Programmatic API
+
+```csharp
+// Static explain
+IQueryOperator plan = planner.Plan(statement);
+ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
+Console.WriteLine(explainPlan.Render());
+
+// EXPLAIN ANALYZE
+InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(plan);
+await foreach (Row row in instrumented.ExecuteAsync(context)) { }
+InstrumentedOperator.PopulateMetrics(explainPlan, instrumented);
+Console.WriteLine(explainPlan.Render());
+```
 
 ## Benchmarks
 
