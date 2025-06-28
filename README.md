@@ -588,6 +588,7 @@ The `stats` command collects per-column statistics:
 | Top-K values | TopKAccumulator | All columns (default K=10) |
 | Min, Max, Mean, Variance, StdDev | NumericAccumulator | Scalar, UInt8 |
 | Histogram | HistogramAccumulator | Scalar, UInt8 (reservoir sampling, 50 bins) |
+| Percentiles (P1–P99) | QuantileAccumulator | Scalar, UInt8 (reservoir sampling, linear interpolation) |
 | Min/Max string length | StringLengthAccumulator | String, JsonValue |
 | Element count range, element-wise min/max/mean/var/std | VectorStatsAccumulator | Vector, Matrix, Tensor |
 | Rank range (dimensionality) | VectorStatsAccumulator | Vector, Matrix, Tensor |
@@ -639,7 +640,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 
 | DataKind | Manifest Type | Extra Fields |
 |----------|--------------|---------------|
-| Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram |
+| Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram, quantiles |
 | String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
 | Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats |
 | Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats |
@@ -669,6 +670,7 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinc
       "variance": 28341558.2,
       "standardDeviation": 5323.7,
       "histogram": { "binEdges": [...], "counts": [...] },
+      "quantiles": { "p01": 1.0, "p05": 29097.5, "p25": 145371.8, "p50": 291485.3, "p75": 436598.8, "p95": 553881.1, "p99": 581929.0 },
       "entropy": 11.2,
       "entropyApproximate": false,
       "topKValues": []

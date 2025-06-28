@@ -24,6 +24,7 @@ public sealed class StatisticsCollectorTests
         Assert.Contains("cardinality", columnStats.Results.Keys);
         Assert.Contains("top_k", columnStats.Results.Keys);
         Assert.Contains("numeric", columnStats.Results.Keys);
+        Assert.Contains("quantile", columnStats.Results.Keys);
     }
 
     [Fact]

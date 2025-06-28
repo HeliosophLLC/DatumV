@@ -74,6 +74,9 @@ public sealed class NumericFeatureManifest : FeatureManifest
 
     /// <summary>Gets the histogram data.</summary>
     public required HistogramData Histogram { get; init; }
+
+    /// <summary>Gets the percentile/quantile data, or null if not computed.</summary>
+    public QuantileData? Quantiles { get; init; }
 }
 
 /// <summary>
@@ -94,6 +97,19 @@ public sealed class StringFeatureManifest : FeatureManifest
     /// <summary>Gets the maximum string length.</summary>
     public required int MaxLength { get; init; }
 }
+
+/// <summary>
+/// Percentile data for numeric columns.
+/// </summary>
+/// <param name="P01">1st percentile.</param>
+/// <param name="P05">5th percentile.</param>
+/// <param name="P25">25th percentile (first quartile).</param>
+/// <param name="P50">50th percentile (median).</param>
+/// <param name="P75">75th percentile (third quartile).</param>
+/// <param name="P95">95th percentile.</param>
+/// <param name="P99">99th percentile.</param>
+public sealed record QuantileData(
+    double P01, double P05, double P25, double P50, double P75, double P95, double P99);
 
 /// <summary>
 /// Aggregate numeric summary used within vector, tensor, image, and binary manifests.

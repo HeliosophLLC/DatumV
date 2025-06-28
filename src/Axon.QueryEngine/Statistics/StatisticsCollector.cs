@@ -100,6 +100,7 @@ public sealed class StatisticsCollector
         {
             accumulators.Add(new NumericAccumulator());
             accumulators.Add(new HistogramAccumulator());
+            accumulators.Add(new QuantileAccumulator());
         }
 
         if (kind is DataKind.String or DataKind.JsonValue)

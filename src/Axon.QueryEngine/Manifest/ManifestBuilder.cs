@@ -98,6 +98,7 @@ public static class ManifestBuilder
                                      new NumericResult(0, double.NaN, double.NaN, double.NaN, 0, 0);
         HistogramResult histogramResult = GetResultValue<HistogramResult>(stats, "histogram") ??
                                           new HistogramResult([], []);
+        QuantileResult? quantileResult = GetResultValue<QuantileResult>(stats, "quantile");
 
         return new NumericFeatureManifest
         {
@@ -113,6 +114,10 @@ public static class ManifestBuilder
             Variance = numericResult.Variance,
             StandardDeviation = numericResult.StandardDeviation,
             Histogram = new HistogramData(histogramResult.BinEdges, histogramResult.Counts),
+            Quantiles = quantileResult is not null
+                ? new QuantileData(quantileResult.P01, quantileResult.P05, quantileResult.P25,
+                    quantileResult.P50, quantileResult.P75, quantileResult.P95, quantileResult.P99)
+                : null,
             Entropy = entropyResult?.Value,
             EntropyApproximate = entropyResult?.Approximate
         };
