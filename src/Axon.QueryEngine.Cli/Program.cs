@@ -7,6 +7,7 @@ using Axon.QueryEngine.Execution;
 using Axon.QueryEngine.Functions;
 using Axon.QueryEngine.Model;
 using Axon.QueryEngine.Output;
+using Axon.QueryEngine.Manifest;
 using Axon.QueryEngine.Output.Writers;
 using Axon.QueryEngine.Parsing;
 using Axon.QueryEngine.Parsing.Ast;
@@ -26,7 +27,8 @@ try
         "explore" => await RunExploreAsync(statement, catalog, options.Limit),
         "stats" => await RunStatsAsync(statement, catalog),
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', or 'explain'.")
+        "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', or 'manifest'.")
     };
 }
 catch (ArgumentException ex)
@@ -297,6 +299,56 @@ static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog c
     }
 
     Console.WriteLine(explainPlan.Render());
+    return 0;
+}
+
+static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog catalog, string? outputPath)
+{
+    QueryPlanner planner = new(catalog);
+    IQueryOperator plan = planner.Plan(statement);
+
+    ExecutionContext context = new(
+        CancellationToken.None,
+        FunctionRegistry.CreateDefault(),
+        catalog);
+
+    StatisticsCollector collector = new();
+    ProgressReporter progress = new();
+    Dictionary<string, DataKind> columnKinds = new();
+    long rowCount = 0;
+
+    await foreach (Row row in plan.ExecuteAsync(context))
+    {
+        // Capture column kinds from the first row
+        if (rowCount == 0)
+        {
+            foreach (string columnName in row.ColumnNames)
+            {
+                columnKinds[columnName] = row[columnName].Kind;
+            }
+        }
+
+        collector.AddRow(row);
+        rowCount++;
+        progress.ReportRow();
+    }
+
+    progress.WriteSummary();
+
+    IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+    QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount);
+    string json = ManifestSerializer.Serialize(manifest);
+
+    if (outputPath is not null)
+    {
+        await File.WriteAllTextAsync(outputPath, json);
+        Console.WriteLine($"Manifest written to: {outputPath}");
+    }
+    else
+    {
+        Console.WriteLine(json);
+    }
+
     return 0;
 }
 

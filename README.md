@@ -86,6 +86,7 @@ axon query "
 | `explore` | Print the first N rows of a query result to the console. |
 | `stats` | Execute a query and print per-column statistics. |
 | `explain` | Show the query execution plan without running it. |
+| `manifest` | Generate a JSON manifest with per-column feature statistics. |
 
 ### Flags
 
@@ -95,6 +96,7 @@ axon query "
 | `--source <def>` | Inline source definition. Format: `provider:name=path[;key=value]`. Repeatable. |
 | `--limit <n>` | Row limit for explore mode (default: 10). |
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
+| `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |
 
 At least one of `--catalog` or `--source` is required. Both can be mixed; `--source` entries override same-named catalog entries.
 
@@ -417,16 +419,119 @@ Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:
 
 The `stats` command collects per-column statistics:
 
-| Statistic | Source | Description |
-|-----------|--------|-------------|
-| Non-null count | CountAccumulator | Number of non-null, non-empty values |
-| Null/empty count | CountAccumulator | Number of null or empty values |
-| Min, Max, Mean, Variance, StdDev | NumericAccumulator | Welford's online algorithm (numerically stable) |
-| Min/Max string length | StringLengthAccumulator | For String and JsonValue columns |
-| Top-K values | TopKAccumulator | Most frequent values (configurable K, default 10) |
-| Distinct count estimate | CardinalityAccumulator | HyperLogLog via CardinalityEstimation (±2% for >1000 values) |
+| Statistic | Source | Applies To |
+|-----------|--------|------------|
+| Non-null count | CountAccumulator | All columns |
+| Null/empty count | CountAccumulator | All columns |
+| Distinct count estimate | CardinalityAccumulator | All columns (HyperLogLog, ±2%) |
+| Top-K values | TopKAccumulator | All columns (default K=10) |
+| Min, Max, Mean, Variance, StdDev | NumericAccumulator | Scalar, UInt8 |
+| Histogram | HistogramAccumulator | Scalar, UInt8 (reservoir sampling, 50 bins) |
+| Min/Max string length | StringLengthAccumulator | String, JsonValue |
+| Element count range, element-wise min/max/mean/var/std | VectorStatsAccumulator | Vector, Matrix, Tensor |
+| Rank range (dimensionality) | VectorStatsAccumulator | Vector, Matrix, Tensor |
+| Width/Height range, channel distribution | ImageStatsAccumulator | Image (header-only parsing) |
+| File size min/max/mean/var/std | ImageStatsAccumulator | Image |
+| Byte-length min/max/mean/var/std | BinarySizeAccumulator | UInt8Array |
+| Earliest/Latest date | TemporalRangeAccumulator | Date, DateTime |
 
 Accumulators support `Merge()` for parallel collection using Chan et al. algorithm for combining Welford's running statistics.
+
+### Image header parsing
+
+The `ImageStatsAccumulator` extracts dimensions and channel count from image headers without full decoding — no external image library required:
+
+| Format | Detection |
+|--------|-----------|
+| JPEG | SOF0/SOF2 marker → width, height, components |
+| PNG | IHDR chunk → width, height, color type → channels |
+| WebP | VP8/VP8L/VP8X → width, height, alpha flag → channels |
+
+## Manifest
+
+The `manifest` command generates a structured JSON manifest describing every column in a query result with type-specific statistics.
+
+### Usage
+
+```bash
+# Print to stdout
+axon manifest "SELECT * FROM data" --source csv:data=measurements.csv
+
+# Write to file
+axon manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
+```
+
+### Feature types
+
+Each column produces a polymorphic `FeatureManifest` subclass based on its `DataKind`:
+
+| DataKind | Manifest Type | Extra Fields |
+|----------|--------------|---------------|
+| Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram |
+| String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
+| Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats |
+| Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats |
+| Image | `ImageFeatureManifest` | width/height ranges, channelCounts, undecodableCount, fileSizeStats |
+| UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
+| Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
+
+All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinctCount`, `topKValues`.
+
+### Example output
+
+```json
+{
+  "rowCount": 5000,
+  "generatedAtUtc": "2026-03-15T12:00:00Z",
+  "features": [
+    {
+      "type": "numeric",
+      "name": "image_id",
+      "kind": "Scalar",
+      "count": 5000,
+      "nullCount": 0,
+      "estimatedDistinctCount": 4998,
+      "min": 1.0,
+      "max": 581929.0,
+      "mean": 291485.3,
+      "variance": 28341558.2,
+      "standardDeviation": 5323.7,
+      "histogram": { "binEdges": [...], "counts": [...] },
+      "topKValues": []
+    },
+    {
+      "type": "image",
+      "name": "file_bytes",
+      "kind": "Image",
+      "count": 5000,
+      "nullCount": 0,
+      "estimatedDistinctCount": 5000,
+      "minWidth": 128,
+      "maxWidth": 4096,
+      "minHeight": 96,
+      "maxHeight": 3072,
+      "channelCounts": { "3": 4950, "4": 50 },
+      "undecodableCount": 0,
+      "fileSizeStats": { "count": 5000, "min": 5234, "max": 2456789, "mean": 178234.5, ... },
+      "topKValues": []
+    }
+  ]
+}
+```
+
+### Programmatic API
+
+```csharp
+StatisticsCollector collector = new();
+// ... feed rows ...
+
+IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Scalar, ["name"] = DataKind.String };
+
+QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount);
+string json = ManifestSerializer.Serialize(manifest);
+await ManifestSerializer.WriteToFileAsync(manifest, "manifest.json");
+```
 
 ## EXPLAIN
 

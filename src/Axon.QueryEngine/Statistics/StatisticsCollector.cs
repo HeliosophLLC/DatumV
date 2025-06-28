@@ -99,11 +99,32 @@ public sealed class StatisticsCollector
         if (kind is DataKind.Scalar or DataKind.UInt8)
         {
             accumulators.Add(new NumericAccumulator());
+            accumulators.Add(new HistogramAccumulator());
         }
 
         if (kind is DataKind.String or DataKind.JsonValue)
         {
             accumulators.Add(new StringLengthAccumulator());
+        }
+
+        if (kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor)
+        {
+            accumulators.Add(new VectorStatsAccumulator());
+        }
+
+        if (kind is DataKind.Image)
+        {
+            accumulators.Add(new ImageStatsAccumulator());
+        }
+
+        if (kind is DataKind.UInt8Array)
+        {
+            accumulators.Add(new BinarySizeAccumulator());
+        }
+
+        if (kind is DataKind.Date or DataKind.DateTime)
+        {
+            accumulators.Add(new TemporalRangeAccumulator());
         }
 
         return accumulators;

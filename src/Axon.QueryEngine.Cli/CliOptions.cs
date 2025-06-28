@@ -23,6 +23,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets whether to run EXPLAIN ANALYZE (with execution metrics).</summary>
     public bool Analyze { get; set; }
 
+    /// <summary>Gets or sets the output file path for the manifest command.</summary>
+    public string? OutputPath { get; set; }
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -32,7 +35,7 @@ internal sealed class CliOptions
 
         if (args.Length < 2)
         {
-            throw new ArgumentException("Usage: axon <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze]");
+            throw new ArgumentException("Usage: axon <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>]");
         }
 
         options.Command = args[0].ToLowerInvariant();
@@ -72,6 +75,14 @@ internal sealed class CliOptions
 
                 case "--analyze":
                     options.Analyze = true;
+                    break;
+
+                case "--output":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--output requires a path argument");
+                    }
+                    options.OutputPath = args[++i];
                     break;
 
                 default:

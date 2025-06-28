@@ -5,6 +5,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Axon.QueryEngine.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CardinalityEstimation" Version="1.14.0" />
     <PackageReference Include="PureHDF" Version="2.1.1" />
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
