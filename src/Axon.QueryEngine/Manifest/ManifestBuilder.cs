@@ -3,6 +3,7 @@ namespace Axon.QueryEngine.Manifest;
 using Axon.QueryEngine.Model;
 using Axon.QueryEngine.Statistics;
 using Axon.QueryEngine.Statistics.Accumulators;
+using Axon.QueryEngine.Statistics.Interactions;
 
 /// <summary>
 /// Builds a <see cref="QueryResultsManifest"/> from collected column statistics,
@@ -17,10 +18,12 @@ public static class ManifestBuilder
     /// <param name="statistics">Per-column statistics from <see cref="StatisticsCollector"/>.</param>
     /// <param name="columnKinds">Map of column name to <see cref="DataKind"/>, used to select the correct manifest subclass.</param>
     /// <param name="rowCount">Total number of rows in the result set.</param>
+    /// <param name="interactions">Optional pairwise column interaction results.</param>
     public static QueryResultsManifest Build(
         IReadOnlyDictionary<string, ColumnStatistics> statistics,
         IReadOnlyDictionary<string, DataKind> columnKinds,
-        long rowCount)
+        long rowCount,
+        IReadOnlyList<ColumnInteractionResult>? interactions = null)
     {
         List<FeatureManifest> features = new();
 
@@ -31,11 +34,33 @@ public static class ManifestBuilder
             features.Add(manifest);
         }
 
+        List<ColumnInteraction>? mappedInteractions = null;
+
+        if (interactions is { Count: > 0 })
+        {
+            mappedInteractions = new List<ColumnInteraction>(interactions.Count);
+
+            foreach (ColumnInteractionResult result in interactions)
+            {
+                mappedInteractions.Add(new ColumnInteraction
+                {
+                    ColumnA = result.ColumnA,
+                    ColumnB = result.ColumnB,
+                    Pearson = result.Pearson,
+                    Spearman = result.Spearman,
+                    CramerV = result.CramerV,
+                    AnovaFStatistic = result.AnovaFStatistic,
+                    MutualInformation = result.MutualInformation
+                });
+            }
+        }
+
         return new QueryResultsManifest
         {
             RowCount = rowCount,
             GeneratedAtUtc = DateTime.UtcNow,
-            Features = features
+            Features = features,
+            Interactions = mappedInteractions
         };
     }
 
@@ -50,23 +75,24 @@ public static class ManifestBuilder
         long nullCount = countResult?.NullOrEmpty ?? 0;
         long distinctCount = cardinalityResult?.EstimatedDistinctCount ?? 0;
         IReadOnlyList<FrequencyEntry> topK = MapTopK(topKResult);
+        EntropyResult? entropyResult = GetResultValue<EntropyResult>(stats, "entropy");
 
         return kind switch
         {
-            DataKind.Scalar or DataKind.UInt8 => BuildNumericManifest(name, kind, count, nullCount, distinctCount, topK, stats),
-            DataKind.String or DataKind.JsonValue => BuildStringManifest(name, kind, count, nullCount, distinctCount, topK, stats),
+            DataKind.Scalar or DataKind.UInt8 => BuildNumericManifest(name, kind, count, nullCount, distinctCount, topK, entropyResult, stats),
+            DataKind.String or DataKind.JsonValue => BuildStringManifest(name, kind, count, nullCount, distinctCount, topK, entropyResult, stats),
             DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, distinctCount, topK, stats),
             DataKind.Matrix or DataKind.Tensor => BuildTensorManifest(name, kind, count, nullCount, distinctCount, topK, stats),
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, distinctCount, topK, stats),
             DataKind.UInt8Array => BuildBinaryManifest(name, kind, count, nullCount, distinctCount, topK, stats),
-            DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, distinctCount, topK, stats),
+            DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, distinctCount, topK, entropyResult, stats),
             _ => BuildFallbackManifest(name, kind, count, nullCount, distinctCount, topK)
         };
     }
 
     private static NumericFeatureManifest BuildNumericManifest(
         string name, DataKind kind, long count, long nullCount, long distinctCount,
-        IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         NumericResult numericResult = GetResultValue<NumericResult>(stats, "numeric") ??
                                      new NumericResult(0, double.NaN, double.NaN, double.NaN, 0, 0);
@@ -86,13 +112,15 @@ public static class ManifestBuilder
             Mean = numericResult.Mean,
             Variance = numericResult.Variance,
             StandardDeviation = numericResult.StandardDeviation,
-            Histogram = new HistogramData(histogramResult.BinEdges, histogramResult.Counts)
+            Histogram = new HistogramData(histogramResult.BinEdges, histogramResult.Counts),
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate
         };
     }
 
     private static StringFeatureManifest BuildStringManifest(
         string name, DataKind kind, long count, long nullCount, long distinctCount,
-        IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         StringLengthResult stringResult = GetResultValue<StringLengthResult>(stats, "string_length") ??
                                           new StringLengthResult(0, 0, 0);
@@ -106,7 +134,9 @@ public static class ManifestBuilder
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
             MinLength = stringResult.MinLength,
-            MaxLength = stringResult.MaxLength
+            MaxLength = stringResult.MaxLength,
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate
         };
     }
 
@@ -201,7 +231,7 @@ public static class ManifestBuilder
 
     private static TemporalFeatureManifest BuildTemporalManifest(
         string name, DataKind kind, long count, long nullCount, long distinctCount,
-        IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         TemporalRangeResult temporalResult = GetResultValue<TemporalRangeResult>(stats, "temporal_range") ??
                                               new TemporalRangeResult(null, null);
@@ -215,7 +245,9 @@ public static class ManifestBuilder
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
             Earliest = temporalResult.Earliest,
-            Latest = temporalResult.Latest
+            Latest = temporalResult.Latest,
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate
         };
     }
 

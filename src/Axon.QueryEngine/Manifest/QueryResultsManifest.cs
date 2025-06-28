@@ -14,4 +14,7 @@ public sealed class QueryResultsManifest
 
     /// <summary>Gets the per-column feature manifests.</summary>
     public required IReadOnlyList<FeatureManifest> Features { get; init; }
+
+    /// <summary>Gets the pairwise column interaction statistics, or null if not computed.</summary>
+    public IReadOnlyList<ColumnInteraction>? Interactions { get; init; }
 }

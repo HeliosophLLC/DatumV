@@ -43,6 +43,12 @@ public abstract class FeatureManifest
 
     /// <summary>Gets the top-K most frequent values.</summary>
     public required IReadOnlyList<FrequencyEntry> TopKValues { get; init; }
+
+    /// <summary>Gets the Shannon entropy of the value distribution in bits, or null if not applicable.</summary>
+    public double? Entropy { get; init; }
+
+    /// <summary>Gets whether the entropy value is an approximate lower bound due to frequency map capping.</summary>
+    public bool? EntropyApproximate { get; init; }
 }
 
 /// <summary>

@@ -127,6 +127,11 @@ public sealed class StatisticsCollector
             accumulators.Add(new TemporalRangeAccumulator());
         }
 
+        if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime)
+        {
+            accumulators.Add(new EntropyAccumulator());
+        }
+
         return accumulators;
     }
 }

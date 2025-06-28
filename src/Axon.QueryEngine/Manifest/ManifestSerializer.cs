@@ -59,6 +59,7 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(FrequencyEntry))]
 [JsonSerializable(typeof(HistogramData))]
 [JsonSerializable(typeof(NumericSummaryData))]
+[JsonSerializable(typeof(ColumnInteraction))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,

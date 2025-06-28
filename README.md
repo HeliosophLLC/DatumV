@@ -434,6 +434,7 @@ The `stats` command collects per-column statistics:
 | File size min/max/mean/var/std | ImageStatsAccumulator | Image |
 | Byte-length min/max/mean/var/std | BinarySizeAccumulator | UInt8Array |
 | Earliest/Latest date | TemporalRangeAccumulator | Date, DateTime |
+| Shannon entropy | EntropyAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
 
 Accumulators support `Merge()` for parallel collection using Chan et al. algorithm for combining Welford's running statistics.
 
@@ -446,7 +447,17 @@ The `ImageStatsAccumulator` extracts dimensions and channel count from image hea
 | JPEG | SOF0/SOF2 marker → width, height, components |
 | PNG | IHDR chunk → width, height, color type → channels |
 | WebP | VP8/VP8L/VP8X → width, height, alpha flag → channels |
+### Column interactions
 
+The `manifest` command also computes pairwise interaction statistics between eligible columns (Scalar, UInt8, String, JsonValue, Date, DateTime). Image, binary, and multidimensional columns are excluded.
+
+| Measure | Pair Type | Algorithm |
+|---------|-----------|----------|
+| Pearson r | Numeric × Numeric | Online co-moment (West 1979), O(1) memory |
+| Spearman ρ | Numeric × Numeric | Reservoir sampling (10K pairs) → rank transform → Pearson on ranks |
+| Cramér's V | Categorical × Categorical | Bounded contingency table (1K categories), χ² → V |
+| ANOVA F | Categorical × Numeric | Per-group Welford (1K groups), F = MS_between / MS_within |
+| Mutual Information | All | Reservoir sampling (10K pairs), numeric bins (20), MI in bits |
 ## Manifest
 
 The `manifest` command generates a structured JSON manifest describing every column in a query result with type-specific statistics.
@@ -475,7 +486,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
 
-All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinctCount`, `topKValues`.
+All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinctCount`, `topKValues`, `entropy`, `entropyApproximate`.
 
 ### Example output
 
@@ -497,6 +508,8 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinc
       "variance": 28341558.2,
       "standardDeviation": 5323.7,
       "histogram": { "binEdges": [...], "counts": [...] },
+      "entropy": 11.2,
+      "entropyApproximate": false,
       "topKValues": []
     },
     {
@@ -515,6 +528,15 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinc
       "fileSizeStats": { "count": 5000, "min": 5234, "max": 2456789, "mean": 178234.5, ... },
       "topKValues": []
     }
+  ],
+  "interactions": [
+    {
+      "columnA": "image_id",
+      "columnB": "width",
+      "pearson": 0.02,
+      "spearman": 0.03,
+      "mutualInformation": 0.15
+    }
   ]
 }
 ```
@@ -523,12 +545,14 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinc
 
 ```csharp
 StatisticsCollector collector = new();
+ColumnInteractionCollector interactionCollector = new();
 // ... feed rows ...
 
 IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
 Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Scalar, ["name"] = DataKind.String };
 
-QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount);
+QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount, interactions);
 string json = ManifestSerializer.Serialize(manifest);
 await ManifestSerializer.WriteToFileAsync(manifest, "manifest.json");
 ```

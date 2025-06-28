@@ -12,6 +12,7 @@ using Axon.QueryEngine.Output.Writers;
 using Axon.QueryEngine.Parsing;
 using Axon.QueryEngine.Parsing.Ast;
 using Axon.QueryEngine.Statistics;
+using Axon.QueryEngine.Statistics.Interactions;
 using ExecutionContext = Axon.QueryEngine.Execution.ExecutionContext;
 
 try
@@ -313,6 +314,7 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
         catalog);
 
     StatisticsCollector collector = new();
+    ColumnInteractionCollector interactionCollector = new();
     ProgressReporter progress = new();
     Dictionary<string, DataKind> columnKinds = new();
     long rowCount = 0;
@@ -329,6 +331,7 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
         }
 
         collector.AddRow(row);
+        interactionCollector.AddRow(row);
         rowCount++;
         progress.ReportRow();
     }
@@ -336,7 +339,8 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
     progress.WriteSummary();
 
     IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-    QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount);
+    IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
+    QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount, interactions);
     string json = ManifestSerializer.Serialize(manifest);
 
     if (outputPath is not null)
