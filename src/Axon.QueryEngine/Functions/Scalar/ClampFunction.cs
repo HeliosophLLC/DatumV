@@ -43,7 +43,7 @@ public sealed class ClampFunction : IScalarFunction
         switch (input.Kind)
         {
             case DataKind.Scalar:
-                return DataValue.FromScalar(Math.Clamp(input.AsScalar(), min, max));
+                return DataValue.FromScalar(System.Math.Clamp(input.AsScalar(), min, max));
 
             case DataKind.Vector:
             {
@@ -51,7 +51,7 @@ public sealed class ClampFunction : IScalarFunction
                 float[] result = new float[source.Length];
                 for (int index = 0; index < source.Length; index++)
                 {
-                    result[index] = Math.Clamp(source[index], min, max);
+                    result[index] = System.Math.Clamp(source[index], min, max);
                 }
                 return DataValue.FromVector(result);
             }
@@ -62,7 +62,7 @@ public sealed class ClampFunction : IScalarFunction
                 float[] result = new float[source.Length];
                 for (int index = 0; index < source.Length; index++)
                 {
-                    result[index] = Math.Clamp(source[index], min, max);
+                    result[index] = System.Math.Clamp(source[index], min, max);
                 }
                 return DataValue.FromMatrix(result, rows, columns);
             }
@@ -73,7 +73,7 @@ public sealed class ClampFunction : IScalarFunction
                 float[] result = new float[source.Length];
                 for (int index = 0; index < source.Length; index++)
                 {
-                    result[index] = Math.Clamp(source[index], min, max);
+                    result[index] = System.Math.Clamp(source[index], min, max);
                 }
                 return DataValue.FromTensor(result, shape);
             }

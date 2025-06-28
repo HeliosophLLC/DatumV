@@ -58,7 +58,7 @@ public sealed class CastFunction : IScalarFunction
             (DataKind.UInt8, DataKind.Scalar) => DataValue.FromScalar(input.AsUInt8()),
 
             // Scalar -> UInt8 (truncate)
-            (DataKind.Scalar, DataKind.UInt8) => DataValue.FromUInt8((byte)Math.Clamp(input.AsScalar(), 0, 255)),
+            (DataKind.Scalar, DataKind.UInt8) => DataValue.FromUInt8((byte)System.Math.Clamp(input.AsScalar(), 0, 255)),
 
             // String -> Scalar
             (DataKind.String, DataKind.Scalar) => DataValue.FromScalar(

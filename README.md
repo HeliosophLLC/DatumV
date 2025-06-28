@@ -335,7 +335,168 @@ SELECT reshape(embedding, 16, 16) AS matrix_embed FROM features
 
 -- Type casting
 SELECT id, cast(score, 'UInt8') AS byte_score FROM data
+
+-- Math functions
+SELECT abs(delta), sqrt(variance), pow(base_val, 2) FROM metrics
+
+-- ML activations on embeddings
+SELECT sigmoid(score), relu(raw_output), gelu(activation) FROM model_outputs
+
+-- Vector reductions
+SELECT vec_mean(embedding), vec_norm(embedding), vec_std(features) FROM vectors
+
+-- Distance computation
+SELECT cosine_similarity(query_vec, doc_vec) AS similarity FROM search_results
+
+-- Softmax normalization
+SELECT softmax(logits) AS probabilities FROM predictions
+
+-- Vector manipulation
+SELECT vec_slice(embedding, 0, 128) AS half, vec_sort(scores) FROM data
+
+-- Utility
+SELECT coalesce(primary_score, fallback_score) AS score FROM results
 ```
+
+### Math — Basic Arithmetic (8)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `abs` | `abs(x)` | Absolute value. Element-wise for vectors/matrices/tensors. |
+| `sign` | `sign(x)` | Returns -1, 0, or 1. Element-wise. |
+| `negate` | `negate(x)` | Negation (-x). Element-wise. |
+| `mod` | `mod(a, b)` | Modulus (a % b). Element-wise with broadcast. |
+| `add` | `add(a, b)` | Addition. Element-wise with scalar broadcast. |
+| `subtract` | `subtract(a, b)` | Subtraction. Element-wise with scalar broadcast. |
+| `multiply` | `multiply(a, b)` | Multiplication. Element-wise with scalar broadcast. |
+| `divide` | `divide(a, b)` | Division. Element-wise with scalar broadcast. |
+
+### Math — Powers, Roots & Logarithms (10)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sqrt` | `sqrt(x)` | Square root. |
+| `cbrt` | `cbrt(x)` | Cube root. |
+| `square` | `square(x)` | Square (x²). |
+| `exp` | `exp(x)` | Natural exponential (eˣ). |
+| `exp2` | `exp2(x)` | Base-2 exponential (2ˣ). |
+| `ln` | `ln(x)` | Natural logarithm. |
+| `log2` | `log2(x)` | Base-2 logarithm. |
+| `log10` | `log10(x)` | Base-10 logarithm. |
+| `pow` | `pow(base, exp)` | Power function. Element-wise with broadcast. |
+| `log` | `log(x, base)` | Logarithm with custom base. |
+
+### Math — Trigonometric & Hyperbolic (14)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sin` | `sin(x)` | Sine (radians). |
+| `cos` | `cos(x)` | Cosine (radians). |
+| `tan` | `tan(x)` | Tangent (radians). |
+| `asin` | `asin(x)` | Arc sine → radians. |
+| `acos` | `acos(x)` | Arc cosine → radians. |
+| `atan` | `atan(x)` | Arc tangent → radians. |
+| `atan2` | `atan2(y, x)` | Two-argument arc tangent. |
+| `sinh` | `sinh(x)` | Hyperbolic sine. |
+| `cosh` | `cosh(x)` | Hyperbolic cosine. |
+| `tanh` | `tanh(x)` | Hyperbolic tangent. |
+| `degrees` | `degrees(x)` | Radians → degrees. |
+| `radians` | `radians(x)` | Degrees → radians. |
+| `pi` | `pi()` | Returns π constant. |
+| `euler` | `euler()` | Returns Euler's number e. |
+
+### Math — Rounding & Quantization (7)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `ceil` | `ceil(x)` | Round up to nearest integer. |
+| `floor` | `floor(x)` | Round down to nearest integer. |
+| `truncate` | `truncate(x)` | Remove fractional part toward zero. |
+| `round` | `round(x, [decimals])` | Round to nearest integer or specified decimal places. |
+| `quantize` | `quantize(x, step)` | Round to nearest multiple of step. |
+| `bucketize` | `bucketize(val, boundaries)` | Assign value to bucket index based on sorted boundary vector. |
+| `clip` | `clip(x, min, max)` | Clip to range (alias for clamp). |
+
+### Math — ML Activation Functions (12)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `sigmoid` | `sigmoid(x)` | Logistic sigmoid σ(x) = 1/(1+e⁻ˣ). |
+| `relu` | `relu(x)` | Rectified Linear Unit max(0, x). |
+| `selu` | `selu(x)` | Scaled Exponential Linear Unit. |
+| `gelu` | `gelu(x)` | Gaussian Error Linear Unit (fast approximation). |
+| `swish` | `swish(x)` | Swish activation x·σ(x). |
+| `softplus` | `softplus(x)` | Softplus ln(1+eˣ). |
+| `softsign` | `softsign(x)` | Softsign x/(1+\|x\|). |
+| `mish` | `mish(x)` | Mish activation x·tanh(softplus(x)). |
+| `hard_sigmoid` | `hard_sigmoid(x)` | Piecewise linear approximation of sigmoid. |
+| `hard_swish` | `hard_swish(x)` | Hard Swish x·hard_sigmoid(x). |
+| `leaky_relu` | `leaky_relu(x, [alpha])` | Leaky ReLU with configurable slope (default α=0.01). |
+| `elu` | `elu(x, [alpha])` | Exponential Linear Unit (default α=1.0). |
+
+### Math — Softmax & Normalization (3)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `softmax` | `softmax(vec)` | Numerically stable softmax → probability vector. |
+| `log_softmax` | `log_softmax(vec)` | Log-softmax via log-sum-exp trick. |
+| `l2_normalize` | `l2_normalize(vec)` | L2 normalize to unit length. |
+
+### Math — Vector Reductions (14)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `vec_sum` | `vec_sum(x)` | Sum of all elements → Scalar. |
+| `vec_mean` | `vec_mean(x)` | Mean of all elements → Scalar. |
+| `vec_min` | `vec_min(x)` | Minimum element → Scalar. |
+| `vec_max` | `vec_max(x)` | Maximum element → Scalar. |
+| `vec_std` | `vec_std(x)` | Population standard deviation → Scalar. |
+| `vec_var` | `vec_var(x)` | Population variance → Scalar. |
+| `vec_median` | `vec_median(x)` | Median → Scalar. |
+| `vec_argmin` | `vec_argmin(x)` | Index of minimum element → Scalar. |
+| `vec_argmax` | `vec_argmax(x)` | Index of maximum element → Scalar. |
+| `vec_norm` | `vec_norm(x, [p])` | Lp norm (default p=2). p=∞ for max-norm. |
+| `vec_count_nonzero` | `vec_count_nonzero(x)` | Count of non-zero elements → Scalar. |
+| `vec_any` | `vec_any(x)` | 1 if any element is non-zero, else 0. |
+| `vec_all` | `vec_all(x)` | 1 if all elements are non-zero, else 0. |
+| `vec_product` | `vec_product(x)` | Product of all elements → Scalar. |
+
+### Math — Vector Manipulation (10)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `vec_slice` | `vec_slice(vec, start, len)` | Extract sub-vector by position and length. |
+| `vec_concat` | `vec_concat(v1, v2, ...)` | Concatenate two or more vectors. |
+| `vec_reverse` | `vec_reverse(vec)` | Reverse element order. |
+| `vec_sort` | `vec_sort(vec)` | Sort ascending (returns copy). |
+| `vec_unique` | `vec_unique(vec)` | Unique elements preserving first-occurrence order. |
+| `vec_flatten` | `vec_flatten(x)` | Flatten Matrix/Tensor to Vector. |
+| `vec_pad` | `vec_pad(vec, len, fill)` | Pad vector to target length with fill value. |
+| `vec_repeat` | `vec_repeat(vec, count)` | Repeat vector n times. |
+| `linspace` | `linspace(start, stop, n)` | Generate n evenly spaced values from start to stop. |
+| `arange` | `arange(start, stop, step)` | Generate values with fixed step (excludes stop). |
+
+### Math — Distance & Similarity (5)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `cosine_similarity` | `cosine_similarity(a, b)` | Cosine similarity [-1, 1] between two vectors. |
+| `euclidean_distance` | `euclidean_distance(a, b)` | Euclidean (L2) distance between two vectors. |
+| `manhattan_distance` | `manhattan_distance(a, b)` | Manhattan (L1) distance between two vectors. |
+| `dot` | `dot(a, b)` | Dot product of two vectors. |
+| `hamming_distance` | `hamming_distance(a, b)` | Hamming distance between two strings. |
+
+### Math — Utility & Conditional (7)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `coalesce` | `coalesce(a, b, ...)` | Returns first non-null argument. |
+| `greatest` | `greatest(a, b, ...)` | Returns maximum of scalar arguments. |
+| `least` | `least(a, b, ...)` | Returns minimum of scalar arguments. |
+| `is_nan` | `is_nan(x)` | Returns 1 if NaN, 0 otherwise. |
+| `is_finite` | `is_finite(x)` | Returns 1 if finite, 0 if NaN or infinite. |
+| `if_null` | `if_null(x, default)` | Returns x if not null, otherwise default. |
+| `random` | `random()` | Random float in [0, 1). |
 
 ## Data Providers
 
