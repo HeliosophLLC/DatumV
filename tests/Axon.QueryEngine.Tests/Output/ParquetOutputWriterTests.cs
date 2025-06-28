@@ -136,6 +136,105 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         Assert.Equal("high", rows[0]["label"].AsString());
     }
 
+    [Fact]
+    public async Task FinalizeAsync_BinaryColumn_ExternalizesToImagesFolder()
+    {
+        string path = Path.Combine(_tempDir, "with_images.parquet");
+
+        // JPEG magic bytes + dummy payload.
+        byte[] jpegBytes = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, .. new byte[100]];
+
+        Schema schema = new([
+            new ColumnInfo("name", DataKind.String, false),
+            new ColumnInfo("data", DataKind.UInt8Array, false)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("name", DataValue.FromString("photo1")),
+            ("data", DataValue.FromUInt8Array(jpegBytes))));
+        await writer.WriteRowAsync(CreateRow(
+            ("name", DataValue.FromString("photo2")),
+            ("data", DataValue.FromUInt8Array(jpegBytes))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        // Verify images/ directory was created.
+        string imagesDir = Path.Combine(_tempDir, "images");
+        Assert.True(Directory.Exists(imagesDir));
+
+        // Verify two .jpg files were created.
+        string[] imageFiles = Directory.GetFiles(imagesDir, "*.jpg");
+        Assert.Equal(2, imageFiles.Length);
+
+        // Verify each file has the correct bytes.
+        foreach (string imageFile in imageFiles)
+        {
+            byte[] written = File.ReadAllBytes(imageFile);
+            Assert.Equal(jpegBytes, written);
+        }
+
+        // Verify the Parquet column contains relative paths, not raw bytes.
+        using FileStream stream = File.OpenRead(path);
+        using ParquetReader reader = await ParquetReader.CreateAsync(stream);
+        using Parquet.ParquetRowGroupReader rowGroup = reader.OpenRowGroupReader(0);
+        Parquet.Data.DataColumn dataColumn = await rowGroup.ReadColumnAsync(reader.Schema.DataFields[1]);
+
+        string[] paths = (string[])dataColumn.Data;
+        Assert.Equal(2, paths.Length);
+        Assert.StartsWith("images/", paths[0]);
+        Assert.EndsWith(".jpg", paths[0]);
+
+        // Verify summary includes image files.
+        Assert.True(summary.FilesCreated.Count > 1);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_PngBytes_DetectedCorrectly()
+    {
+        string path = Path.Combine(_tempDir, "png_images.parquet");
+
+        // PNG magic bytes.
+        byte[] pngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, .. new byte[50]];
+
+        Schema schema = new([
+            new ColumnInfo("image", DataKind.Image, false)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("image", DataValue.FromImage(pngBytes))));
+        await writer.FinalizeAsync();
+
+        string imagesDir = Path.Combine(_tempDir, "images");
+        string[] imageFiles = Directory.GetFiles(imagesDir, "*.png");
+        Assert.Single(imageFiles);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_UnknownBytes_UsesBinExtension()
+    {
+        string path = Path.Combine(_tempDir, "binary.parquet");
+
+        byte[] rawBytes = [0x01, 0x02, 0x03, 0x04, 0x05];
+
+        Schema schema = new([
+            new ColumnInfo("blob", DataKind.UInt8Array, false)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("blob", DataValue.FromUInt8Array(rawBytes))));
+        await writer.FinalizeAsync();
+
+        string imagesDir = Path.Combine(_tempDir, "images");
+        string[] binFiles = Directory.GetFiles(imagesDir, "*.bin");
+        Assert.Single(binFiles);
+        Assert.Equal(rawBytes, File.ReadAllBytes(binFiles[0]));
+    }
+
     private static Row CreateRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = new string[columns.Length];

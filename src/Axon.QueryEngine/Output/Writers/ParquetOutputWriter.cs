@@ -7,12 +7,16 @@ using Parquet.Schema;
 
 /// <summary>
 /// Writes query results to Parquet files. Buffers rows and writes as a single row group on finalize.
+/// Binary columns (<see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Image"/>) are externalized
+/// to an <c>images/</c> folder next to the Parquet file, with GUID filenames and the relative path
+/// stored as a string column in the Parquet data.
 /// </summary>
 public sealed class ParquetOutputWriter : IOutputWriter
 {
     private readonly string _filePath;
     private Schema? _schema;
     private readonly List<Row> _rows = new();
+    private readonly List<string> _externalizedFiles = new();
     private long _rowsWritten;
 
     /// <summary>
@@ -58,6 +62,9 @@ public sealed class ParquetOutputWriter : IOutputWriter
             throw new InvalidOperationException("Writer not initialized. Call InitializeAsync first.");
         }
 
+        // Externalize binary columns to images/ folder before building Parquet.
+        ExternalizeBinaryColumns(_schema);
+
         ParquetSchema parquetSchema = BuildParquetSchema(_schema);
 
         using FileStream stream = File.Create(_filePath);
@@ -74,13 +81,103 @@ public sealed class ParquetOutputWriter : IOutputWriter
         }
 
         long bytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath).Length : 0;
-        return new OutputSummary(_rowsWritten, bytesWritten, [_filePath]);
+
+        List<string> allFiles = [_filePath, .. _externalizedFiles];
+        return new OutputSummary(_rowsWritten, bytesWritten, allFiles);
     }
 
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
+    }
+
+    private void ExternalizeBinaryColumns(Schema schema)
+    {
+        string parquetDir = Path.GetDirectoryName(_filePath) ?? ".";
+        string imagesDir = Path.Combine(parquetDir, "images");
+        bool imagesDirCreated = false;
+
+        for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
+        {
+            ColumnInfo column = schema.Columns[columnIndex];
+            if (column.Kind is not (DataKind.UInt8Array or DataKind.Image))
+            {
+                continue;
+            }
+
+            if (!imagesDirCreated)
+            {
+                Directory.CreateDirectory(imagesDir);
+                imagesDirCreated = true;
+            }
+
+            for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
+            {
+                Row row = _rows[rowIndex];
+                DataValue value = row[column.Name];
+
+                if (value.IsNull)
+                {
+                    // Replace with a null-path marker.
+                    row = ReplaceColumnValue(row, column.Name, DataValue.FromString(""));
+                    _rows[rowIndex] = row;
+                    continue;
+                }
+
+                byte[] bytes = column.Kind == DataKind.Image
+                    ? value.AsImage()
+                    : value.AsUInt8Array();
+
+                string extension = DetectFileExtension(bytes);
+                string fileName = $"{Guid.NewGuid():N}{extension}";
+                string absolutePath = Path.Combine(imagesDir, fileName);
+
+                File.WriteAllBytes(absolutePath, bytes);
+                _externalizedFiles.Add(absolutePath);
+
+                // Replace the binary value with the relative path string.
+                string relativePath = $"images/{fileName}";
+                row = ReplaceColumnValue(row, column.Name, DataValue.FromString(relativePath));
+                _rows[rowIndex] = row;
+            }
+        }
+    }
+
+    private static Row ReplaceColumnValue(Row row, string columnName, DataValue newValue)
+    {
+        string[] names = new string[row.FieldCount];
+        DataValue[] values = new DataValue[row.FieldCount];
+
+        for (int i = 0; i < row.FieldCount; i++)
+        {
+            names[i] = row.ColumnNames[i];
+            values[i] = row.ColumnNames[i] == columnName ? newValue : row[i];
+        }
+
+        return new Row(names, values);
+    }
+
+    private static string DetectFileExtension(byte[] bytes)
+    {
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+        {
+            return ".jpg";
+        }
+
+        if (bytes.Length >= 8
+            && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
+            && bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A)
+        {
+            return ".png";
+        }
+
+        if (bytes.Length >= 4 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46)
+        {
+            return ".webp";
+        }
+
+        return ".bin";
     }
 
     private static ParquetSchema BuildParquetSchema(Schema schema)
@@ -94,6 +191,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
             {
                 DataKind.Scalar => new DataField<float>(column.Name),
                 DataKind.UInt8 => new DataField<int>(column.Name),
+                DataKind.UInt8Array or DataKind.Image => new DataField<string>(column.Name),
                 DataKind.String => new DataField<string>(column.Name),
                 DataKind.JsonValue => new DataField<string>(column.Name),
                 DataKind.Date => new DataField<string>(column.Name),
@@ -109,10 +207,12 @@ public sealed class ParquetOutputWriter : IOutputWriter
     {
         int rowCount = _rows.Count;
 
+        // After externalization, binary columns have been replaced with string paths.
         return column.Kind switch
         {
             DataKind.Scalar => BuildFloatColumn(field, column.Name, rowCount),
             DataKind.UInt8 => BuildIntColumn(field, column.Name, rowCount),
+            DataKind.UInt8Array or DataKind.Image => BuildExternalizedPathColumn(field, column.Name, rowCount),
             DataKind.String => BuildStringColumn(field, column),
             DataKind.JsonValue => BuildJsonColumn(field, column.Name, rowCount),
             DataKind.Date => BuildDateColumn(field, column.Name, rowCount),
@@ -140,6 +240,19 @@ public sealed class ParquetOutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = value.IsNull ? 0 : value.AsUInt8();
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildExternalizedPathColumn(DataField field, string columnName, int rowCount)
+    {
+        // After externalization, these cells contain string paths.
+        string[] data = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? "" : value.AsString();
         }
 
         return new DataColumn(field, data);
