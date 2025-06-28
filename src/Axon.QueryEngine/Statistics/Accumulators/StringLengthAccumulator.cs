@@ -1,0 +1,86 @@
+namespace Axon.QueryEngine.Statistics.Accumulators;
+
+using Axon.QueryEngine.Model;
+
+/// <summary>
+/// Accumulates min and max string length for string-typed columns.
+/// </summary>
+public sealed class StringLengthAccumulator : IStatisticAccumulator
+{
+    private long _count;
+    private int _minLength = int.MaxValue;
+    private int _maxLength = int.MinValue;
+
+    /// <summary>Gets the number of string values observed.</summary>
+    public long Count => _count;
+
+    /// <summary>Gets the minimum string length.</summary>
+    public int MinLength => _count > 0 ? _minLength : 0;
+
+    /// <summary>Gets the maximum string length.</summary>
+    public int MaxLength => _count > 0 ? _maxLength : 0;
+
+    /// <inheritdoc />
+    public void Add(DataValue value)
+    {
+        if (value.IsNull)
+        {
+            return;
+        }
+
+        if (value.Kind is not DataKind.String and not DataKind.JsonValue)
+        {
+            return;
+        }
+
+        string stringValue = value.Kind == DataKind.JsonValue ? value.AsJsonValue() : value.AsString();
+        int length = stringValue.Length;
+
+        _count++;
+
+        if (length < _minLength)
+        {
+            _minLength = length;
+        }
+
+        if (length > _maxLength)
+        {
+            _maxLength = length;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Merge(IStatisticAccumulator other)
+    {
+        if (other is not StringLengthAccumulator otherString || otherString._count == 0)
+        {
+            return;
+        }
+
+        if (_count == 0)
+        {
+            _count = otherString._count;
+            _minLength = otherString._minLength;
+            _maxLength = otherString._maxLength;
+            return;
+        }
+
+        _count += otherString._count;
+        _minLength = Math.Min(_minLength, otherString._minLength);
+        _maxLength = Math.Max(_maxLength, otherString._maxLength);
+    }
+
+    /// <inheritdoc />
+    public StatisticResult GetResult()
+    {
+        return new StatisticResult("string_length", new StringLengthResult(_count, MinLength, MaxLength));
+    }
+}
+
+/// <summary>
+/// Contains the string length accumulation results.
+/// </summary>
+/// <param name="Count">Number of string values processed.</param>
+/// <param name="MinLength">Shortest string length.</param>
+/// <param name="MaxLength">Longest string length.</param>
+public sealed record StringLengthResult(long Count, int MinLength, int MaxLength);

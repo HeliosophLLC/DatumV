@@ -1,0 +1,508 @@
+# Axon.QueryEngine
+
+A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, ZIP, HDF5, and Parquet files into ML-ready output formats with optional sharding.
+
+## Overview
+
+Axon.QueryEngine provides a SQL-based ETL pipeline designed for machine learning dataset preparation. It parses a subset of SQL (SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT), executes queries against file-based data sources, and writes results to HDF5, Parquet, or CSV output with configurable sharding.
+
+Key features:
+- **SQL interface** — familiar syntax for data selection, filtering, joining, and projection
+- **Five data providers** — CSV, JSON, ZIP, HDF5, Parquet
+- **Three output formats** — HDF5, Parquet, CSV with SHARD ON support
+- **Lazy evaluation** — expressions in SELECT are deferred until values are needed
+- **Rich type system** — Scalar, Vector, Matrix, Tensor, UInt8, Image, String, Date, DateTime, JSON
+- **Built-in statistics** — HyperLogLog cardinality, Welford's online mean/variance, top-K frequency
+- **Streaming execution** — IAsyncEnumerable pipeline with projection and predicate pushdown
+
+## Installation
+
+### As a .NET library
+
+```bash
+dotnet add package Axon.QueryEngine
+```
+
+### As a CLI tool
+
+```bash
+dotnet tool install --global Axon.QueryEngine.Cli
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/your-org/Axon.QueryEngine.git
+cd Axon.QueryEngine
+dotnet build
+dotnet test
+```
+
+#### Publish a self-contained single-file binary
+
+```bash
+dotnet publish src/Axon.QueryEngine.Cli -c Release -r win-x64
+dotnet publish src/Axon.QueryEngine.Cli -c Release -r linux-x64
+dotnet publish src/Axon.QueryEngine.Cli -c Release -r osx-arm64
+```
+
+## Quick Start
+
+### 1. Query a CSV file
+
+```bash
+axon explore "SELECT name, score FROM data WHERE score > 90" --source "csv:data=./iris.csv"
+```
+
+### 2. Join ZIP + JSON (COCO-like pipeline)
+
+```bash
+axon query "
+  SELECT img.file_name, cap.caption
+  FROM images AS img
+  INNER JOIN captions AS cap ON img.id = cap.image_id
+  WHERE len(cap.caption) > 20
+  LIMIT 100
+" --source "zip:images=./train2017.zip" --source "json:captions=./captions.json"
+```
+
+### 3. ETL with sharded output
+
+```bash
+axon query "
+  SELECT id, normalize(value) AS norm_value, category
+  FROM data
+  INTO CSV 'output/result.csv' SHARD ON sample_count 10000
+" --source "csv:data=./large_dataset.csv"
+```
+
+## CLI Reference
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `query` | Execute a SQL query. Supports INTO for file output. |
+| `explore` | Print the first N rows of a query result to the console. |
+| `stats` | Execute a query and print per-column statistics. |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--catalog <path>` | Path to a JSON catalog file defining table sources. |
+| `--source <def>` | Inline source definition. Format: `provider:name=path[;key=value]`. Repeatable. |
+| `--limit <n>` | Row limit for explore mode (default: 10). |
+
+At least one of `--catalog` or `--source` is required. Both can be mixed; `--source` entries override same-named catalog entries.
+
+### Source definition format
+
+```
+provider:name=path[;key=value;...]
+```
+
+Examples:
+```
+csv:data=./data.csv;delimiter=,;header=true
+json:annotations=./coco.json
+zip:images=./train2017.zip
+hdf5:features=./embeddings.h5
+parquet:labels=./labels.parquet
+```
+
+### Catalog file format
+
+JSON array of table descriptors:
+
+```json
+[
+  {
+    "Provider": "csv",
+    "Name": "iris",
+    "FilePath": "./datasets/iris.csv",
+    "Options": { "delimiter": ",", "header": "true" }
+  },
+  {
+    "Provider": "json",
+    "Name": "annotations",
+    "FilePath": "./datasets/coco.json",
+    "Options": {}
+  }
+]
+```
+
+## SQL Reference
+
+### SELECT
+
+```sql
+SELECT *
+SELECT col1, col2, col3
+SELECT a.col1, b.col2
+SELECT col1 AS alias, normalize(col2) AS norm_col
+SELECT table_alias.*
+```
+
+### FROM
+
+```sql
+FROM table_name
+FROM table_name AS alias
+FROM (SELECT ... FROM ...) AS subquery
+```
+
+### JOIN
+
+All five join types are supported:
+
+```sql
+-- INNER JOIN: only matching rows
+SELECT * FROM a INNER JOIN b ON a.id = b.id
+
+-- LEFT JOIN: all rows from left, matching from right
+SELECT * FROM a LEFT JOIN b ON a.id = b.id
+
+-- RIGHT JOIN: all rows from right, matching from left
+SELECT * FROM a RIGHT JOIN b ON a.id = b.id
+
+-- FULL OUTER JOIN: all rows from both sides
+SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id
+
+-- CROSS JOIN: cartesian product
+SELECT * FROM a CROSS JOIN b
+```
+
+NULL keys never match (SQL three-valued logic). Hash join is used for INNER/LEFT/RIGHT/FULL OUTER; nested loop for CROSS.
+
+### WHERE
+
+```sql
+WHERE col > 10
+WHERE col1 = 'value' AND col2 < 100
+WHERE col IN ('a', 'b', 'c')
+WHERE col BETWEEN 10 AND 50
+WHERE col LIKE 'prefix_%'
+WHERE col IS NULL
+WHERE col IS NOT NULL
+WHERE NOT (col1 > 10 OR col2 < 5)
+```
+
+Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`, `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`.
+
+### INTO
+
+Write query results to a file:
+
+```sql
+SELECT * FROM data INTO CSV 'output.csv'
+SELECT * FROM data INTO PARQUET 'output.parquet'
+SELECT * FROM data INTO HDF5 'output.h5'
+```
+
+With sharding:
+
+```sql
+-- New shard every 10,000 rows: output_shard_00000.csv, output_shard_00001.csv, ...
+SELECT * FROM data INTO CSV 'output.csv' SHARD ON sample_count 10000
+
+-- New shard every 100MB
+SELECT * FROM data INTO PARQUET 'output.parquet' SHARD ON byte_size 104857600
+```
+
+### ORDER BY / LIMIT / OFFSET
+
+```sql
+SELECT * FROM data ORDER BY score DESC
+SELECT * FROM data ORDER BY category ASC, score DESC
+SELECT * FROM data LIMIT 100
+SELECT * FROM data LIMIT 100 OFFSET 50
+SELECT * FROM data ORDER BY score DESC LIMIT 10
+```
+
+When ORDER BY + LIMIT are combined, a bounded priority queue (top-N sort) avoids materializing the full result set.
+
+### Subqueries
+
+```sql
+SELECT id, name FROM (
+  SELECT id, name, value FROM data WHERE value > 100
+) AS filtered
+WHERE name LIKE 'item_%'
+```
+
+## Type System
+
+### DataKind values
+
+| DataKind | Description | Internal representation |
+|----------|-------------|------------------------|
+| `Scalar` | 32-bit float | `float` |
+| `UInt8` | Unsigned 8-bit integer | `byte` |
+| `Vector` | Rank-1 float array | `float[]` |
+| `Matrix` | Rank-2 float array | `float[]` + shape `[rows, cols]` |
+| `Tensor` | N-dimensional float array | `float[]` + `int[]` shape |
+| `UInt8Array` | Raw byte array | `byte[]` |
+| `Image` | Encoded image bytes | `byte[]` |
+| `String` | Unicode text | `string` |
+| `Date` | Calendar date | `DateOnly` |
+| `DateTime` | Date and time | `DateTime` |
+| `JsonValue` | Raw JSON string | `string` |
+
+### Type conversions
+
+Implicit widening (automatic):
+- `UInt8` → `Scalar`
+- `Scalar` → `Vector[1]`
+- `Vector` → `Tensor` (rank 1)
+- `Matrix` → `Tensor` (rank 2)
+
+Explicit narrowing via `CAST(value AS type)`:
+- `Scalar` → `UInt8` (truncates)
+- `Tensor` → `Vector` (requires rank 1)
+- `Tensor` → `Matrix` (requires rank 2)
+
+### Vector, Matrix, and Tensor relationship
+
+All three store a flat `float[]` buffer internally:
+- **Vector**: `float[]` with implicit shape `[length]`
+- **Matrix**: `float[]` with shape `[rows, cols]`
+- **Tensor**: `float[]` with arbitrary `int[]` shape
+
+Conversion between them is zero-copy when ranks match. Use `reshape()` to reinterpret shape without copying (element count must match).
+
+## Functions Reference
+
+### Numeric / Array
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `normalize` | `normalize(val, [min], [max])` | Normalize to 0–1 range. Byte/byte[]: default 0–255. Scalar/Vector: requires min/max. |
+| `clamp` | `clamp(val, min, max)` | Clamp value to [min, max]. Works on Scalar, Vector, Matrix, Tensor. |
+| `denormalize` | `denormalize(val, factor)` | Multiply by factor (reverse of normalize). |
+| `reshape` | `reshape(tensor, dim1, dim2, ...)` | Reinterpret tensor shape without copying. Element count must match. |
+
+### String
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `len` | `len(val)` | Length of string or collection. |
+| `mid` | `mid(str, start, length)` | Extract substring by position and length (0-based). |
+| `substring` | `substring(str, start, [length])` | Extract substring from start position (0-based). |
+| `get_filename` | `get_filename(path)` | Return file name with extension from path. |
+| `get_file_extension` | `get_file_extension(path)` | Return extension (with dot) from path. |
+| `get_path` | `get_path(path)` | Return directory portion of path. |
+
+### JSON Column Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `json_value` | `json_value(col, path)` | Extract scalar from JSON string at path. Returns String, Scalar, or null. |
+| `json_query` | `json_query(col, path)` | Extract JSON fragment (array/object). Returns JsonValue or Vector if all-numeric. |
+| `json_exists` | `json_exists(col, path)` | Returns 1.0 if path exists in JSON, 0.0 otherwise. |
+| `json_array_length` | `json_array_length(col, [path])` | Count elements in JSON array at root or path. |
+
+### Type Conversion
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `cast` | `cast(val, targetKind)` | Explicit type conversion. |
+
+### Table-Valued Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `unnest` | `unnest(array_col)` | Expand array-valued column into separate rows. Works with Vector, UInt8Array, JsonValue arrays. |
+
+### Example SQL with functions
+
+```sql
+-- Normalize a numeric column
+SELECT id, normalize(score, 0, 100) AS norm_score FROM data
+
+-- JSON extraction
+SELECT json_value(metadata, '$.category') AS cat FROM records
+
+-- String manipulation
+SELECT id, get_filename(file_path) AS name FROM files WHERE len(file_path) > 10
+
+-- Reshape vectors
+SELECT reshape(embedding, 16, 16) AS matrix_embed FROM features
+
+-- Type casting
+SELECT id, cast(score, 'UInt8') AS byte_score FROM data
+```
+
+## Data Providers
+
+### CSV
+
+Reads RFC 4180 CSV files. Auto-detects numeric vs string columns from the first 100 rows.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `delimiter` | Field delimiter character | `,` |
+| `header` | Whether first row is header | `true` |
+
+Columns: derived from header row. Numeric values parsed as Scalar, others as String.
+
+### JSON
+
+Reads JSON files using System.Text.Json streaming. Supports root arrays.
+
+Each object in the array becomes a row with properties as columns. Nested objects/arrays become JsonValue columns for extraction via `json_value()` / `json_query()`.
+
+### ZIP
+
+Reads ZIP archives via System.IO.Compression.
+
+Yields rows with two columns:
+- `file_name` (String) — eager, always available
+- `file_bytes` (UInt8Array) — lazy via `LazyDataValue`, decompressed only on access
+
+### HDF5
+
+Reads HDF5 files via PureHDF (managed .NET).
+
+Each 1-D dataset becomes a column. 2-D datasets yield one vector per row. Grouped datasets use flattened names (e.g., `group/dataset`).
+
+### Parquet
+
+Reads Parquet files via Parquet.Net low-level API.
+
+Maps Parquet types to DataKind: INT32/INT64 → Scalar, FLOAT/DOUBLE → Scalar, BYTE_ARRAY (UTF8) → String, BYTE_ARRAY → UInt8Array.
+
+## Execution Model
+
+### Streaming pipeline
+
+Queries execute as an `IAsyncEnumerable<Row>` pipeline:
+
+```
+ScanOperator → FilterOperator → ProjectOperator → OrderByOperator → LimitOperator
+```
+
+Each operator pulls rows from its child on demand. No intermediate materialization unless required (ORDER BY, JOIN build side).
+
+### Lazy evaluation
+
+`ProjectOperator` wraps all SELECT expression results as `LazyDataValue` thunks. Values materialize only when accessed:
+
+```sql
+-- load_image is NOT called here...
+SELECT load_image(file_bytes) AS raw_image FROM archive
+
+-- ...it is called here, only for rows passing the WHERE filter
+SELECT resize(raw_image, 224, 224) FROM (
+  SELECT load_image(file_bytes) AS raw_image, caption FROM archive
+) AS inner
+WHERE len(caption) > 20
+```
+
+### Projection and predicate pushdown
+
+The query planner analyzes column references in SELECT/WHERE/ON and passes required-column sets down to `ScanOperator`, allowing providers to skip unreferenced columns. WHERE predicates referencing only one table are pushed below JoinOperator.
+
+### Join implementation
+
+Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:
+- Build side: smaller table materialized into `Dictionary<DataValue, List<Row>>`
+- Probe side: larger table streamed row-by-row against the hash table
+- NULL keys never match (SQL semantics)
+- CROSS JOIN uses nested loop (cartesian product)
+
+## Statistics
+
+The `stats` command collects per-column statistics:
+
+| Statistic | Source | Description |
+|-----------|--------|-------------|
+| Non-null count | CountAccumulator | Number of non-null, non-empty values |
+| Null/empty count | CountAccumulator | Number of null or empty values |
+| Min, Max, Mean, Variance, StdDev | NumericAccumulator | Welford's online algorithm (numerically stable) |
+| Min/Max string length | StringLengthAccumulator | For String and JsonValue columns |
+| Top-K values | TopKAccumulator | Most frequent values (configurable K, default 10) |
+| Distinct count estimate | CardinalityAccumulator | HyperLogLog via CardinalityEstimation (±2% for >1000 values) |
+
+Accumulators support `Merge()` for parallel collection using Chan et al. algorithm for combining Welford's running statistics.
+
+## Benchmarks
+
+Run benchmarks with:
+
+```bash
+dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*"
+```
+
+Available benchmark suites:
+
+| Suite | Measures |
+|-------|----------|
+| `ParsingBenchmarks` | SQL tokenization and parsing at various complexity levels |
+| `ProviderBenchmarks` | Read throughput for CSV and JSON at 1K and 10K rows |
+| `ExecutionBenchmarks` | Full query execution: scan, filter, project, join, order+limit |
+| `StatisticsBenchmarks` | Statistics collection overhead and merge performance |
+| `OutputBenchmarks` | CSV write throughput, with and without sharding |
+
+Run a specific suite:
+
+```bash
+dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*Parsing*"
+```
+
+## Project Structure
+
+```
+Axon.QueryEngine/
+  src/
+    Axon.QueryEngine/             # Core library
+      Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo
+      Parsing/                    # SQL tokenizer and parser (Superpower)
+      Catalog/                    # Table catalog, providers (CSV, JSON, ZIP, HDF5, Parquet)
+      Execution/                  # Query planner, operators, expression evaluator
+      Functions/                  # Scalar and table-valued functions
+      Statistics/                 # Column statistics with pluggable accumulators
+      Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
+    Axon.QueryEngine.Cli/         # CLI tool (query, explore, stats commands)
+  tests/
+    Axon.QueryEngine.Tests/       # 600+ unit tests
+  benchmarks/
+    Axon.QueryEngine.Benchmarks/  # BenchmarkDotNet performance tests
+```
+
+## Building & Testing
+
+```bash
+# Build everything
+dotnet build
+
+# Run all tests
+dotnet test
+
+# Run benchmarks
+dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*"
+```
+
+## Roadmap
+
+The following features are architecturally accounted for but deferred from V1:
+
+- **GROUP BY / Aggregation**: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING
+- **Spill-to-disk joins**: Grace hash join for datasets too large for memory
+- **Adaptive batch sizing**: Auto-tune based on row size estimates and available memory
+- **Excel provider**: Read .xlsx files (ITableProvider interface is ready)
+- **UNION / INTERSECT / EXCEPT**: Set operations between query results
+- **Window functions**: ROW_NUMBER, RANK, LAG, LEAD with OVER/PARTITION BY
+- **User-defined functions**: Plugin DLL support via FunctionRegistry
+- **Pipe mode**: Stream results to stdout as CSV/JSON/NDJSON
+- **Cost-based optimizer**: Replace greedy join heuristic with cost model
+- **Index / bloom filter acceleration**: Skip non-matching partitions
+- **Remote data sources**: HTTP/S3/Azure Blob providers
+- **Schema caching**: Skip re-inference on repeated queries
+- **EXPLAIN**: Print operator tree without executing
+- **Checkpointing**: Resume failed ETL runs from the last completed shard
+- **Data validation**: CHECK constraints / VALIDATE clause for data quality gates
+
+## License
+
+MIT
