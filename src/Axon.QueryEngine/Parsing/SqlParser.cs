@@ -162,12 +162,20 @@ public static class SqlParser
     //   Unary: -, NOT (handled as unary above)
     //   Primary: literals, columns, function calls, parenthesized
 
-    /// <summary>Multiplication and division (highest binary precedence).</summary>
+    /// <summary>Exponentiation (highest binary precedence).</summary>
+    private static readonly TokenListParser<SqlToken, Expression> Power =
+        SP.Chain(
+            Token.EqualTo(SqlToken.Caret).Select(_ => BinaryOperator.Power),
+            PrimaryExpression,
+            (op, left, right) => new BinaryExpression(left, op, right));
+
+    /// <summary>Multiplication, division, and modulo.</summary>
     private static readonly TokenListParser<SqlToken, Expression> Multiplicative =
         SP.Chain(
             Token.EqualTo(SqlToken.Star).Select(_ => BinaryOperator.Multiply)
-                .Or(Token.EqualTo(SqlToken.Slash).Select(_ => BinaryOperator.Divide)),
-            PrimaryExpression,
+                .Or(Token.EqualTo(SqlToken.Slash).Select(_ => BinaryOperator.Divide))
+                .Or(Token.EqualTo(SqlToken.Percent).Select(_ => BinaryOperator.Modulo)),
+            Power,
             (op, left, right) => new BinaryExpression(left, op, right));
 
     /// <summary>Addition and subtraction.</summary>

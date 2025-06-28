@@ -194,6 +194,12 @@ public enum BinaryOperator
     /// <summary>Division (/).</summary>
     Divide,
 
+    /// <summary>Modulo (%).</summary>
+    Modulo,
+
+    /// <summary>Exponentiation (^).</summary>
+    Power,
+
     /// <summary>Equality (=).</summary>
     Equal,
 

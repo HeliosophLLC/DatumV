@@ -545,6 +545,50 @@ public class SqlParserTests
         Assert.Equal(UnaryOperator.Negate, unary.Operator);
     }
 
+    [Fact]
+    public void ModuloOperator()
+    {
+        SelectStatement result = Parse("SELECT a % b FROM t");
+
+        BinaryExpression modulo = Assert.IsType<BinaryExpression>(result.Columns[0].Expression);
+        Assert.Equal(BinaryOperator.Modulo, modulo.Operator);
+    }
+
+    [Fact]
+    public void PowerOperator()
+    {
+        SelectStatement result = Parse("SELECT a ^ b FROM t");
+
+        BinaryExpression power = Assert.IsType<BinaryExpression>(result.Columns[0].Expression);
+        Assert.Equal(BinaryOperator.Power, power.Operator);
+    }
+
+    [Fact]
+    public void PowerPrecedenceHigherThanMultiply()
+    {
+        SelectStatement result = Parse("SELECT a * b ^ c FROM t");
+
+        // ^ has higher precedence than *, so: a * (b ^ c)
+        BinaryExpression multiply = Assert.IsType<BinaryExpression>(result.Columns[0].Expression);
+        Assert.Equal(BinaryOperator.Multiply, multiply.Operator);
+
+        BinaryExpression power = Assert.IsType<BinaryExpression>(multiply.Right);
+        Assert.Equal(BinaryOperator.Power, power.Operator);
+    }
+
+    [Fact]
+    public void ModuloPrecedenceSameAsMultiply()
+    {
+        SelectStatement result = Parse("SELECT a + b % c FROM t");
+
+        // % has same precedence as *, higher than +: a + (b % c)
+        BinaryExpression add = Assert.IsType<BinaryExpression>(result.Columns[0].Expression);
+        Assert.Equal(BinaryOperator.Add, add.Operator);
+
+        BinaryExpression modulo = Assert.IsType<BinaryExpression>(add.Right);
+        Assert.Equal(BinaryOperator.Modulo, modulo.Operator);
+    }
+
     // ───────────────────── CAST ─────────────────────
 
     [Fact]

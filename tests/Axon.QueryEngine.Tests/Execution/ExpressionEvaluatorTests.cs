@@ -144,6 +144,42 @@ public class ExpressionEvaluatorTests
         Assert.True(float.IsNaN(result.AsScalar()));
     }
 
+    [Fact]
+    public void BinaryModulo()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression(10),
+                BinaryOperator.Modulo,
+                new LiteralExpression(3)),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void BinaryModuloByZero_ReturnsNaN()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression(10),
+                BinaryOperator.Modulo,
+                new LiteralExpression(0)),
+            MakeRow());
+        Assert.True(float.IsNaN(result.AsScalar()));
+    }
+
+    [Fact]
+    public void BinaryPower()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression(2),
+                BinaryOperator.Power,
+                new LiteralExpression(10)),
+            MakeRow());
+        Assert.Equal(1024f, result.AsScalar());
+    }
+
     // ─────────────── Comparisons ───────────────
 
     [Fact]

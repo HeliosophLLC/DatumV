@@ -69,6 +69,8 @@ public static class SqlTokenizer
             .Match(Character.EqualTo('+'), SqlToken.Plus)
             .Match(Character.EqualTo('-'), SqlToken.Minus)
             .Match(Character.EqualTo('/'), SqlToken.Slash)
+            .Match(Character.EqualTo('%'), SqlToken.Percent)
+            .Match(Character.EqualTo('^'), SqlToken.Caret)
 
             // String literals (before keywords and identifiers)
             .Match(StringLiteralToken, SqlToken.StringLiteral)

@@ -158,4 +158,10 @@ public enum SqlToken
 
     /// <summary>The / (slash / division) arithmetic operator.</summary>
     Slash,
+
+    /// <summary>The % (percent / modulo) arithmetic operator.</summary>
+    Percent,
+
+    /// <summary>The ^ (caret / power) arithmetic operator.</summary>
+    Caret,
 }

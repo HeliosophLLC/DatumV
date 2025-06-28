@@ -167,6 +167,8 @@ public sealed class ExpressionEvaluator
                 BinaryOperator.Subtract => ArithmeticOp(left, right, static (a, b) => a - b),
                 BinaryOperator.Multiply => ArithmeticOp(left, right, static (a, b) => a * b),
                 BinaryOperator.Divide => ArithmeticOp(left, right, static (a, b) => b != 0f ? a / b : float.NaN),
+                BinaryOperator.Modulo => ArithmeticOp(left, right, static (a, b) => b != 0f ? a % b : float.NaN),
+                BinaryOperator.Power => ArithmeticOp(left, right, static (a, b) => MathF.Pow(a, b)),
                 BinaryOperator.Equal => CompareValues(left, right, 0),
                 BinaryOperator.NotEqual => CompareValues(left, right, 0, negate: true),
                 BinaryOperator.LessThan => CompareValues(left, right, -1),
