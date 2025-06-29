@@ -136,4 +136,101 @@ public sealed class VectorStatsAccumulatorTests
         VectorStatsAccumulator accumulator = new();
         Assert.Equal("vector_stats", accumulator.GetResult().Name);
     }
+
+    [Fact]
+    public void Add_WithZeroElements_CountsZerosCorrectly()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromVector([0.0f, 1.0f, 0.0f, 2.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(2, result.ZeroElementCount);
+        Assert.Equal(0.5, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(0, result.ZeroVectorCount);
+    }
+
+    [Fact]
+    public void Add_AllZeroVector_DetectsZeroVector()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(3, result.ZeroElementCount);
+        Assert.Equal(1.0, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(1, result.ZeroVectorCount);
+    }
+
+    [Fact]
+    public void Add_MixedZeroAndNonZeroVectors_TracksCorrectly()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+        accumulator.Add(DataValue.FromVector([0.0f, 0.2f, 0.0f]));
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(8, result.ZeroElementCount);
+        Assert.Equal(8.0 / 9.0, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(2, result.ZeroVectorCount);
+    }
+
+    [Fact]
+    public void Add_NoZeroElements_ZeroCountsAreZero()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.ZeroElementCount);
+        Assert.Equal(0.0, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(0, result.ZeroVectorCount);
+    }
+
+    [Fact]
+    public void Add_EmptyAccumulator_ZeroStatsAreZero()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.ZeroElementCount);
+        Assert.Equal(0.0, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(0, result.ZeroVectorCount);
+    }
+
+    [Fact]
+    public void Merge_CombinesZeroCounts()
+    {
+        VectorStatsAccumulator first = new();
+        first.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+
+        VectorStatsAccumulator second = new();
+        second.Add(DataValue.FromVector([0.0f, 1.0f]));
+        second.Add(DataValue.FromVector([0.0f, 0.0f]));
+
+        first.Merge(second);
+
+        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
+        Assert.Equal(3, result.ValueCount);
+        Assert.Equal(6, result.ZeroElementCount);
+        Assert.Equal(6.0 / 7.0, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(2, result.ZeroVectorCount);
+    }
+
+    [Fact]
+    public void Add_Matrix_TracksZeroElements()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromMatrix([0.0f, 0.0f, 0.0f, 0.0f], 2, 2));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(4, result.ZeroElementCount);
+        Assert.Equal(1.0, result.ZeroElementRatio, 1e-10);
+        Assert.Equal(1, result.ZeroVectorCount);
+    }
 }

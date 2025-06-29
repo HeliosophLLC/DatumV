@@ -148,6 +148,15 @@ public sealed class VectorFeatureManifest : FeatureManifest
 
     /// <summary>Gets aggregate element-wise numeric statistics across all vectors.</summary>
     public required NumericSummaryData ElementStats { get; init; }
+
+    /// <summary>Gets the total number of elements exactly equal to zero.</summary>
+    public required long ZeroElementCount { get; init; }
+
+    /// <summary>Gets the ratio of zero elements to total element count.</summary>
+    public required double ZeroElementRatio { get; init; }
+
+    /// <summary>Gets the number of vectors where every element is zero.</summary>
+    public required long ZeroVectorCount { get; init; }
 }
 
 /// <summary>
@@ -169,6 +178,15 @@ public sealed class TensorFeatureManifest : FeatureManifest
 
     /// <summary>Gets aggregate element-wise numeric statistics across all tensors.</summary>
     public required NumericSummaryData ElementStats { get; init; }
+
+    /// <summary>Gets the total number of elements exactly equal to zero.</summary>
+    public required long ZeroElementCount { get; init; }
+
+    /// <summary>Gets the ratio of zero elements to total element count.</summary>
+    public required double ZeroElementRatio { get; init; }
+
+    /// <summary>Gets the number of tensors where every element is zero.</summary>
+    public required long ZeroVectorCount { get; init; }
 }
 
 /// <summary>

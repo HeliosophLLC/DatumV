@@ -159,7 +159,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ??
-                                         new VectorStatsResult(0, 0, 0, 0, 0, new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0));
+                                         new VectorStatsResult(0, 0, 0, 0, 0, new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), 0, 0, 0);
 
         return new VectorFeatureManifest
         {
@@ -173,7 +173,10 @@ public static class ManifestBuilder
             TopKValues = topK,
             MinLength = vectorResult.MinElementCount,
             MaxLength = vectorResult.MaxElementCount,
-            ElementStats = ToSummaryData(vectorResult.ElementStats)
+            ElementStats = ToSummaryData(vectorResult.ElementStats),
+            ZeroElementCount = vectorResult.ZeroElementCount,
+            ZeroElementRatio = vectorResult.ZeroElementRatio,
+            ZeroVectorCount = vectorResult.ZeroVectorCount
         };
     }
 
@@ -182,7 +185,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ??
-                                         new VectorStatsResult(0, 0, 0, 0, 0, new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0));
+                                         new VectorStatsResult(0, 0, 0, 0, 0, new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), 0, 0, 0);
 
         return new TensorFeatureManifest
         {
@@ -198,7 +201,10 @@ public static class ManifestBuilder
             MaxRank = vectorResult.MaxRank,
             MinElementCount = vectorResult.MinElementCount,
             MaxElementCount = vectorResult.MaxElementCount,
-            ElementStats = ToSummaryData(vectorResult.ElementStats)
+            ElementStats = ToSummaryData(vectorResult.ElementStats),
+            ZeroElementCount = vectorResult.ZeroElementCount,
+            ZeroElementRatio = vectorResult.ZeroElementRatio,
+            ZeroVectorCount = vectorResult.ZeroVectorCount
         };
     }
 

@@ -593,6 +593,7 @@ The `stats` command collects per-column statistics:
 | Min/Max string length | StringLengthAccumulator | String, JsonValue |
 | Element count range, element-wise min/max/mean/var/std | VectorStatsAccumulator | Vector, Matrix, Tensor |
 | Rank range (dimensionality) | VectorStatsAccumulator | Vector, Matrix, Tensor |
+| Zero element count, Zero element ratio, Zero vector count | VectorStatsAccumulator | Vector, Matrix, Tensor |
 | Width/Height range, channel distribution | ImageStatsAccumulator | Image (header-only parsing) |
 | File size min/max/mean/var/std | ImageStatsAccumulator | Image |
 | Byte-length min/max/mean/var/std | BinarySizeAccumulator | UInt8Array |
@@ -643,8 +644,8 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 |----------|--------------|---------------|
 | Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram, quantiles, zeroCount, zeroRatio |
 | String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
-| Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats |
-| Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats |
+| Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
+| Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
 | Image | `ImageFeatureManifest` | width/height ranges, channelCounts, undecodableCount, fileSizeStats |
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
