@@ -99,7 +99,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         NumericResult numericResult = GetResultValue<NumericResult>(stats, "numeric") ??
-                                     new NumericResult(0, double.NaN, double.NaN, double.NaN, 0, 0, 0, 0);
+                                     new NumericResult(0, double.NaN, double.NaN, double.NaN, 0, 0, 0, 0, 0, 0);
         HistogramResult histogramResult = GetResultValue<HistogramResult>(stats, "histogram") ??
                                           new HistogramResult([], []);
         QuantileResult? quantileResult = GetResultValue<QuantileResult>(stats, "quantile");
@@ -128,7 +128,9 @@ public static class ManifestBuilder
             Entropy = entropyResult?.Value,
             EntropyApproximate = entropyResult?.Approximate,
             ZeroCount = numericResult.ZeroCount,
-            ZeroRatio = numericResult.ZeroRatio
+            ZeroRatio = numericResult.ZeroRatio,
+            OutlierCount = numericResult.OutlierCount,
+            OutlierRatio = numericResult.OutlierRatio
         };
     }
 

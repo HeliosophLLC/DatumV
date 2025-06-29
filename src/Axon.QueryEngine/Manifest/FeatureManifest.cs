@@ -95,6 +95,12 @@ public sealed class NumericFeatureManifest : FeatureManifest
 
     /// <summary>Gets the ratio of zero values to total count.</summary>
     public required double ZeroRatio { get; init; }
+
+    /// <summary>Gets the number of values with |x - mean| / stddev &gt; 3 (Z-score outliers).</summary>
+    public required long OutlierCount { get; init; }
+
+    /// <summary>Gets the ratio of outlier values to total count.</summary>
+    public required double OutlierRatio { get; init; }
 }
 
 /// <summary>

@@ -297,4 +297,103 @@ public sealed class NumericAccumulatorTests
         Assert.Equal(3, result.ZeroCount);
         Assert.Equal(0.6, result.ZeroRatio, 1e-10);
     }
+
+    [Fact]
+    public void Add_WithClearOutlier_DetectsOutlier()
+    {
+        NumericAccumulator accumulator = new();
+
+        // Add many similar values to establish a stable mean/stddev
+        for (int i = 0; i < 100; i++)
+        {
+            accumulator.Add(DataValue.FromScalar(50.0f + (i % 5)));
+        }
+
+        // Add a value far from the mean
+        accumulator.Add(DataValue.FromScalar(500.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.True(result.OutlierCount > 0, "Expected at least one outlier detected");
+        Assert.True(result.OutlierRatio > 0.0);
+    }
+
+    [Fact]
+    public void Add_NoOutliers_OutlierCountIsZero()
+    {
+        NumericAccumulator accumulator = new();
+
+        // Tight cluster of values — no outliers
+        accumulator.Add(DataValue.FromScalar(10.0f));
+        accumulator.Add(DataValue.FromScalar(10.1f));
+        accumulator.Add(DataValue.FromScalar(10.2f));
+        accumulator.Add(DataValue.FromScalar(9.9f));
+        accumulator.Add(DataValue.FromScalar(9.8f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.OutlierCount);
+        Assert.Equal(0.0, result.OutlierRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Add_SingleValue_NoOutliersPossible()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(42.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.OutlierCount);
+        Assert.Equal(0.0, result.OutlierRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Add_AllSameValue_StdDevZero_NoOutliers()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromScalar(5.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.OutlierCount);
+        Assert.Equal(0.0, result.OutlierRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Add_NoValues_OutlierCountIsZero()
+    {
+        NumericAccumulator accumulator = new();
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.OutlierCount);
+        Assert.Equal(0.0, result.OutlierRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Merge_CombinesOutlierCounts()
+    {
+        NumericAccumulator first = new();
+        for (int i = 0; i < 100; i++)
+        {
+            first.Add(DataValue.FromScalar(50.0f));
+        }
+        first.Add(DataValue.FromScalar(500.0f));
+
+        NumericAccumulator second = new();
+        for (int i = 0; i < 100; i++)
+        {
+            second.Add(DataValue.FromScalar(50.0f));
+        }
+        second.Add(DataValue.FromScalar(500.0f));
+
+        long firstOutliers = ((NumericResult)first.GetResult().Value!).OutlierCount;
+        long secondOutliers = ((NumericResult)second.GetResult().Value!).OutlierCount;
+
+        first.Merge(second);
+
+        NumericResult result = (NumericResult)first.GetResult().Value!;
+        Assert.Equal(firstOutliers + secondOutliers, result.OutlierCount);
+    }
 }

@@ -10,6 +10,7 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 {
     private long _count;
     private long _zeroCount;
+    private long _outlierCount;
     private double _min = double.PositiveInfinity;
     private double _max = double.NegativeInfinity;
     private double _mean;
@@ -75,6 +76,20 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         _mean += delta / _count;
         double delta2 = numericValue - _mean;
         _m2 += delta * delta2;
+
+        // Z-score outlier detection: |x - mean| / stddev > 3
+        if (_count >= 2)
+        {
+            double variance = _m2 / _count;
+            if (variance > 0)
+            {
+                double stdDev = Math.Sqrt(variance);
+                if (Math.Abs(numericValue - _mean) / stdDev > 3.0)
+                {
+                    _outlierCount++;
+                }
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -89,6 +104,7 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         {
             _count = otherNumeric._count;
             _zeroCount = otherNumeric._zeroCount;
+            _outlierCount = otherNumeric._outlierCount;
             _min = otherNumeric._min;
             _max = otherNumeric._max;
             _mean = otherNumeric._mean;
@@ -106,6 +122,7 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         _mean = combinedMean;
         _m2 = combinedM2;
         _zeroCount += otherNumeric._zeroCount;
+        _outlierCount += otherNumeric._outlierCount;
         _min = Math.Min(_min, otherNumeric._min);
         _max = Math.Max(_max, otherNumeric._max);
     }
@@ -114,8 +131,9 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     public StatisticResult GetResult()
     {
         double zeroRatio = _count > 0 ? (double)_zeroCount / _count : 0.0;
+        double outlierRatio = _count > 0 ? (double)_outlierCount / _count : 0.0;
         return new StatisticResult("numeric", new NumericResult(
-            _count, Min, Max, Mean, Variance, StandardDeviation, _zeroCount, zeroRatio));
+            _count, Min, Max, Mean, Variance, StandardDeviation, _zeroCount, zeroRatio, _outlierCount, outlierRatio));
     }
 }
 
@@ -130,4 +148,6 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 /// <param name="StandardDeviation">Population standard deviation.</param>
 /// <param name="ZeroCount">Number of values exactly equal to zero.</param>
 /// <param name="ZeroRatio">Ratio of zero values to total count.</param>
-public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, long ZeroCount, double ZeroRatio);
+/// <param name="OutlierCount">Number of values with Z-score greater than 3.</param>
+/// <param name="OutlierRatio">Ratio of outlier values to total count.</param>
+public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio);

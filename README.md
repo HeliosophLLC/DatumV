@@ -588,6 +588,7 @@ The `stats` command collects per-column statistics:
 | Top-K values | TopKAccumulator | All columns (default K=10) |
 | Min, Max, Mean, Variance, StdDev | NumericAccumulator | Scalar, UInt8 |
 | Zero count, Zero ratio | NumericAccumulator | Scalar, UInt8 |
+| Outlier count, Outlier ratio | NumericAccumulator | Scalar, UInt8 (Z-score > 3) |
 | Histogram | HistogramAccumulator | Scalar, UInt8 (reservoir sampling, 50 bins) |
 | Percentiles (P1–P99) | QuantileAccumulator | Scalar, UInt8 (reservoir sampling, linear interpolation) |
 | Min/Max string length | StringLengthAccumulator | String, JsonValue |
@@ -642,7 +643,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 
 | DataKind | Manifest Type | Extra Fields |
 |----------|--------------|---------------|
-| Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram, quantiles, zeroCount, zeroRatio |
+| Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram, quantiles, zeroCount, zeroRatio, outlierCount, outlierRatio |
 | String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
 | Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
 | Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
