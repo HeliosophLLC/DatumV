@@ -77,6 +77,7 @@ public sealed class ManifestSerializerTests
         Assert.Contains("\"rowCount\":", json);
         Assert.Contains("\"generatedAtUtc\":", json);
         Assert.Contains("\"estimatedDistinctCount\":", json);
+        Assert.Contains("\"validCount\":", json);
         Assert.Contains("\"isConstant\":", json);
         Assert.Contains("\"topKValues\":", json);
         Assert.Contains("\"standardDeviation\":", json);

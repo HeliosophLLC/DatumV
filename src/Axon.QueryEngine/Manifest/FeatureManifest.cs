@@ -38,6 +38,9 @@ public abstract class FeatureManifest
     /// <summary>Gets the number of null or empty values.</summary>
     public required long NullCount { get; init; }
 
+    /// <summary>Gets the number of valid (non-null, non-empty) values.</summary>
+    public required long ValidCount { get; init; }
+
     /// <summary>Gets the HyperLogLog-estimated distinct value count.</summary>
     public required long EstimatedDistinctCount { get; init; }
 

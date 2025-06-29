@@ -651,7 +651,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
 
-All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinctCount`, `topKValues`, `dominantValueRatio`, `entropy`, `entropyApproximate`.
+All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `estimatedDistinctCount`, `topKValues`, `dominantValueRatio`, `entropy`, `entropyApproximate`.
 
 ### Example output
 
@@ -666,6 +666,7 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinc
       "kind": "Scalar",
       "count": 5000,
       "nullCount": 0,
+      "validCount": 5000,
       "estimatedDistinctCount": 4998,
       "min": 1.0,
       "max": 581929.0,
@@ -685,6 +686,7 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `estimatedDistinc
       "kind": "Image",
       "count": 5000,
       "nullCount": 0,
+      "validCount": 5000,
       "estimatedDistinctCount": 5000,
       "minWidth": 128,
       "maxWidth": 4096,

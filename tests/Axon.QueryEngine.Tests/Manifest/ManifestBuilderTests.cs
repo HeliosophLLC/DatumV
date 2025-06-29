@@ -28,6 +28,7 @@ public sealed class ManifestBuilderTests
         Assert.Equal(DataKind.Scalar, feature.Kind);
         Assert.Equal(3, feature.Count);
         Assert.Equal(0, feature.NullCount);
+        Assert.Equal(3, feature.ValidCount);
         Assert.Equal(1.0, feature.Min);
         Assert.Equal(3.0, feature.Max);
         Assert.Equal(2.0, feature.Mean, 1e-10);
@@ -196,6 +197,7 @@ public sealed class ManifestBuilderTests
         NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
         Assert.Equal(1, feature.Count);
         Assert.Equal(1, feature.NullCount);
+        Assert.Equal(1, feature.ValidCount);
     }
 
     [Fact]
