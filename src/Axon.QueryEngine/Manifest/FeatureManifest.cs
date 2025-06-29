@@ -41,6 +41,9 @@ public abstract class FeatureManifest
     /// <summary>Gets the HyperLogLog-estimated distinct value count.</summary>
     public required long EstimatedDistinctCount { get; init; }
 
+    /// <summary>Gets whether the column contains at most one distinct value.</summary>
+    public bool IsConstant => EstimatedDistinctCount <= 1;
+
     /// <summary>Gets the top-K most frequent values.</summary>
     public required IReadOnlyList<FrequencyEntry> TopKValues { get; init; }
 

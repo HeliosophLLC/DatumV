@@ -326,6 +326,58 @@ public sealed class ManifestBuilderTests
         Assert.Equal(0, feature.MissingRuns);
     }
 
+    [Fact]
+    public void Build_ConstantColumn_IsConstantTrue()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("price", DataValue.FromScalar(0.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromScalar(0.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromScalar(0.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.True(feature.IsConstant);
+        Assert.Equal(1, feature.EstimatedDistinctCount);
+    }
+
+    [Fact]
+    public void Build_VaryingColumn_IsConstantFalse()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("price", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromScalar(2.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromScalar(3.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.False(feature.IsConstant);
+    }
+
+    [Fact]
+    public void Build_AllNullColumn_IsConstantTrue()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("price", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("price", DataValue.Null(DataKind.Scalar)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.True(feature.IsConstant);
+        Assert.Equal(0, feature.EstimatedDistinctCount);
+    }
+
     private static Row MakeRow(string columnName, DataValue value)
     {
         return new Row([columnName], [value]);
