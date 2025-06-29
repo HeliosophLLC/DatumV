@@ -233,4 +233,142 @@ public sealed class VectorStatsAccumulatorTests
         Assert.Equal(1.0, result.ZeroElementRatio, 1e-10);
         Assert.Equal(1, result.ZeroVectorCount);
     }
+
+    // --- L2 Norm Tests ---
+
+    [Fact]
+    public void Add_SingleVector_ComputesNormCorrectly()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        // ||[3, 4]||₂ = 5.0
+        accumulator.Add(DataValue.FromVector([3.0f, 4.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(5.0, result.NormMin, 1e-10);
+        Assert.Equal(5.0, result.NormMax, 1e-10);
+        Assert.Equal(5.0, result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Add_MultipleVectors_TracksNormMinMaxMean()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        // ||[1, 0]||₂ = 1.0
+        accumulator.Add(DataValue.FromVector([1.0f, 0.0f]));
+        // ||[3, 4]||₂ = 5.0
+        accumulator.Add(DataValue.FromVector([3.0f, 4.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(1.0, result.NormMin, 1e-10);
+        Assert.Equal(5.0, result.NormMax, 1e-10);
+        Assert.Equal(3.0, result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Add_ZeroVector_NormIsZero()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(0.0, result.NormMin, 1e-10);
+        Assert.Equal(0.0, result.NormMax, 1e-10);
+        Assert.Equal(0.0, result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Add_EmptyAccumulator_NormsAreNaN()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.True(double.IsNaN(result.NormMin));
+        Assert.True(double.IsNaN(result.NormMax));
+        Assert.True(double.IsNaN(result.NormMean));
+    }
+
+    [Fact]
+    public void Add_NullValues_NormsUnaffected()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.Null(DataKind.Vector));
+        // ||[3, 4]||₂ = 5.0
+        accumulator.Add(DataValue.FromVector([3.0f, 4.0f]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(5.0, result.NormMin, 1e-10);
+        Assert.Equal(5.0, result.NormMax, 1e-10);
+        Assert.Equal(5.0, result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Merge_CombinesNormStats()
+    {
+        VectorStatsAccumulator first = new();
+        // ||[1, 0]||₂ = 1.0
+        first.Add(DataValue.FromVector([1.0f, 0.0f]));
+
+        VectorStatsAccumulator second = new();
+        // ||[3, 4]||₂ = 5.0
+        second.Add(DataValue.FromVector([3.0f, 4.0f]));
+        // ||[0, 2]||₂ = 2.0
+        second.Add(DataValue.FromVector([0.0f, 2.0f]));
+
+        first.Merge(second);
+
+        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
+        Assert.Equal(1.0, result.NormMin, 1e-10);
+        Assert.Equal(5.0, result.NormMax, 1e-10);
+        // Mean: (1.0 + 5.0 + 2.0) / 3 ≈ 2.6667
+        Assert.Equal(8.0 / 3.0, result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Add_Matrix_ComputesNorm()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        // ||[1, 2, 3, 4]||₂ = sqrt(1+4+9+16) = sqrt(30)
+        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(Math.Sqrt(30.0), result.NormMin, 1e-10);
+        Assert.Equal(Math.Sqrt(30.0), result.NormMax, 1e-10);
+        Assert.Equal(Math.Sqrt(30.0), result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Add_Tensor_ComputesNorm()
+    {
+        VectorStatsAccumulator accumulator = new();
+
+        // ||[1, 1, 1, 1, 1, 1, 1, 1]||₂ = sqrt(8)
+        accumulator.Add(DataValue.FromTensor([1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f], [2, 2, 2]));
+
+        VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
+        Assert.Equal(Math.Sqrt(8.0), result.NormMin, 1e-10);
+        Assert.Equal(Math.Sqrt(8.0), result.NormMax, 1e-10);
+        Assert.Equal(Math.Sqrt(8.0), result.NormMean, 1e-10);
+    }
+
+    [Fact]
+    public void Merge_IntoEmpty_CopiesNormStats()
+    {
+        VectorStatsAccumulator first = new();
+        VectorStatsAccumulator second = new();
+
+        // ||[3, 4]||₂ = 5.0
+        second.Add(DataValue.FromVector([3.0f, 4.0f]));
+
+        first.Merge(second);
+
+        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
+        Assert.Equal(5.0, result.NormMin, 1e-10);
+        Assert.Equal(5.0, result.NormMax, 1e-10);
+        Assert.Equal(5.0, result.NormMean, 1e-10);
+    }
 }

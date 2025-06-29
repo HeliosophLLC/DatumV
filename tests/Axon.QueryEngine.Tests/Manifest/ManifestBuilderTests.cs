@@ -74,6 +74,11 @@ public sealed class ManifestBuilderTests
         Assert.Equal(5, feature.ElementStats.Count);
         Assert.Equal(1.0, feature.ElementStats.Min);
         Assert.Equal(5.0, feature.ElementStats.Max);
+
+        // ||[1,2,3]||₂ = sqrt(14), ||[4,5]||₂ = sqrt(41)
+        Assert.Equal(Math.Sqrt(14.0), feature.NormMin, 1e-10);
+        Assert.Equal(Math.Sqrt(41.0), feature.NormMax, 1e-10);
+        Assert.Equal((Math.Sqrt(14.0) + Math.Sqrt(41.0)) / 2.0, feature.NormMean, 1e-10);
     }
 
     [Fact]

@@ -163,8 +163,7 @@ public static class ManifestBuilder
         string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
-        VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ??
-                                         new VectorStatsResult(0, 0, 0, 0, 0, new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), 0, 0, 0);
+        VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ?? VectorStatsResult.Empty;
 
         return new VectorFeatureManifest
         {
@@ -182,7 +181,10 @@ public static class ManifestBuilder
             ElementStats = ToSummaryData(vectorResult.ElementStats),
             ZeroElementCount = vectorResult.ZeroElementCount,
             ZeroElementRatio = vectorResult.ZeroElementRatio,
-            ZeroVectorCount = vectorResult.ZeroVectorCount
+            ZeroVectorCount = vectorResult.ZeroVectorCount,
+            NormMin = vectorResult.NormMin,
+            NormMax = vectorResult.NormMax,
+            NormMean = vectorResult.NormMean
         };
     }
 
@@ -190,8 +192,7 @@ public static class ManifestBuilder
         string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
-        VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ??
-                                         new VectorStatsResult(0, 0, 0, 0, 0, new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), 0, 0, 0);
+        VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ?? VectorStatsResult.Empty;
 
         return new TensorFeatureManifest
         {
@@ -211,7 +212,10 @@ public static class ManifestBuilder
             ElementStats = ToSummaryData(vectorResult.ElementStats),
             ZeroElementCount = vectorResult.ZeroElementCount,
             ZeroElementRatio = vectorResult.ZeroElementRatio,
-            ZeroVectorCount = vectorResult.ZeroVectorCount
+            ZeroVectorCount = vectorResult.ZeroVectorCount,
+            NormMin = vectorResult.NormMin,
+            NormMax = vectorResult.NormMax,
+            NormMean = vectorResult.NormMean
         };
     }
 

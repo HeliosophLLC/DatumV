@@ -169,6 +169,15 @@ public sealed class VectorFeatureManifest : FeatureManifest
 
     /// <summary>Gets the number of vectors where every element is zero.</summary>
     public required long ZeroVectorCount { get; init; }
+
+    /// <summary>Gets the minimum L2 norm across all vectors.</summary>
+    public required double NormMin { get; init; }
+
+    /// <summary>Gets the maximum L2 norm across all vectors.</summary>
+    public required double NormMax { get; init; }
+
+    /// <summary>Gets the mean L2 norm across all vectors.</summary>
+    public required double NormMean { get; init; }
 }
 
 /// <summary>
@@ -199,6 +208,15 @@ public sealed class TensorFeatureManifest : FeatureManifest
 
     /// <summary>Gets the number of tensors where every element is zero.</summary>
     public required long ZeroVectorCount { get; init; }
+
+    /// <summary>Gets the minimum L2 norm across all tensors.</summary>
+    public required double NormMin { get; init; }
+
+    /// <summary>Gets the maximum L2 norm across all tensors.</summary>
+    public required double NormMax { get; init; }
+
+    /// <summary>Gets the mean L2 norm across all tensors.</summary>
+    public required double NormMean { get; init; }
 }
 
 /// <summary>

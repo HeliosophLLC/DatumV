@@ -25,6 +25,11 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
     private double _elementMean;
     private double _elementM2;
 
+    // L2 norm tracking across vectors
+    private double _normMin = double.PositiveInfinity;
+    private double _normMax = double.NegativeInfinity;
+    private double _normMean;
+
     /// <inheritdoc />
     public void Add(DataValue value)
     {
@@ -83,13 +88,15 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
             _maxRank = rank;
         }
 
-        // Welford's across all elements
+        // Welford's across all elements + sum-of-squares for L2 norm
         bool allZero = true;
+        double sumOfSquares = 0.0;
 
         for (int i = 0; i < elements.Length; i++)
         {
             double v = elements[i];
             _elementCount++;
+            sumOfSquares += v * v;
 
             if (v == 0.0)
             {
@@ -115,6 +122,22 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
             double delta2 = v - _elementMean;
             _elementM2 += delta * delta2;
         }
+
+        // L2 norm for this vector/matrix/tensor
+        double norm = Math.Sqrt(sumOfSquares);
+
+        if (norm < _normMin)
+        {
+            _normMin = norm;
+        }
+
+        if (norm > _normMax)
+        {
+            _normMax = norm;
+        }
+
+        // Incremental mean of norms
+        _normMean += (norm - _normMean) / _count;
 
         if (allZero)
         {
@@ -144,6 +167,9 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
             _elementMax = otherVector._elementMax;
             _elementMean = otherVector._elementMean;
             _elementM2 = otherVector._elementM2;
+            _normMin = otherVector._normMin;
+            _normMax = otherVector._normMax;
+            _normMean = otherVector._normMean;
             return;
         }
 
@@ -156,6 +182,13 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
         _maxRank = Math.Max(_maxRank, otherVector._maxRank);
         _elementMin = Math.Min(_elementMin, otherVector._elementMin);
         _elementMax = Math.Max(_elementMax, otherVector._elementMax);
+
+        // Merge L2 norm stats
+        _normMin = Math.Min(_normMin, otherVector._normMin);
+        _normMax = Math.Max(_normMax, otherVector._normMax);
+
+        long prevCount = _count - otherVector._count;
+        _normMean = (prevCount * _normMean + otherVector._count * otherVector._normMean) / _count;
 
         // Parallel Welford merge (Chan et al.)
         long combinedCount = _elementCount + otherVector._elementCount;
@@ -194,7 +227,10 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
                 Math.Sqrt(variance)),
             _zeroElementCount,
             zeroElementRatio,
-            _zeroVectorCount));
+            _zeroVectorCount,
+            _count > 0 ? _normMin : double.NaN,
+            _count > 0 ? _normMax : double.NaN,
+            _count > 0 ? _normMean : double.NaN));
     }
 }
 
@@ -222,6 +258,9 @@ public sealed record NumericSummary(
 /// <param name="ZeroElementCount">Total number of elements exactly equal to zero.</param>
 /// <param name="ZeroElementRatio">Ratio of zero elements to total element count.</param>
 /// <param name="ZeroVectorCount">Number of values where every element is zero.</param>
+/// <param name="NormMin">Minimum L2 norm across all values.</param>
+/// <param name="NormMax">Maximum L2 norm across all values.</param>
+/// <param name="NormMean">Mean L2 norm across all values.</param>
 public sealed record VectorStatsResult(
     long ValueCount,
     int MinElementCount,
@@ -231,4 +270,14 @@ public sealed record VectorStatsResult(
     NumericSummary ElementStats,
     long ZeroElementCount,
     double ZeroElementRatio,
-    long ZeroVectorCount);
+    long ZeroVectorCount,
+    double NormMin,
+    double NormMax,
+    double NormMean)
+{
+    /// <summary>An empty result with zero counts and NaN for all numeric summaries.</summary>
+    public static VectorStatsResult Empty { get; } = new(
+        0, 0, 0, 0, 0,
+        new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
+        0, 0, 0, double.NaN, double.NaN, double.NaN);
+}
