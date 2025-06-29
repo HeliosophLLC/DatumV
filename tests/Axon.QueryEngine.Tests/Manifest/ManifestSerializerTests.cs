@@ -253,4 +253,25 @@ public sealed class ManifestSerializerTests
 
         Assert.Contains("\"missingRuns\": 2", json);
     }
+
+    [Fact]
+    public void Serialize_DominantValueRatio_PresentInJson()
+    {
+        StatisticsCollector collector = new();
+
+        for (int i = 0; i < 9; i++)
+        {
+            collector.AddRow(new Row(["x"], [DataValue.FromString("same")]));
+        }
+
+        collector.AddRow(new Row(["x"], [DataValue.FromString("other")]));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.String };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 10);
+        string json = ManifestSerializer.Serialize(manifest);
+
+        Assert.Contains("\"dominantValueRatio\": 0.9", json);
+    }
 }

@@ -378,6 +378,67 @@ public sealed class ManifestBuilderTests
         Assert.Equal(0, feature.EstimatedDistinctCount);
     }
 
+    [Fact]
+    public void Build_DominantValueRatio_NearConstant()
+    {
+        StatisticsCollector collector = new();
+
+        for (int i = 0; i < 99; i++)
+        {
+            collector.AddRow(MakeRow("status", DataValue.FromString("active")));
+        }
+
+        collector.AddRow(MakeRow("status", DataValue.FromString("inactive")));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["status"] = DataKind.String };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 100);
+
+        StringFeatureManifest feature = Assert.IsType<StringFeatureManifest>(manifest.Features[0]);
+        Assert.NotNull(feature.DominantValueRatio);
+        Assert.Equal(0.99, feature.DominantValueRatio!.Value, 1e-10);
+    }
+
+    [Fact]
+    public void Build_DominantValueRatio_UniformDistribution()
+    {
+        StatisticsCollector collector = new();
+
+        for (int i = 0; i < 20; i++)
+        {
+            collector.AddRow(MakeRow("cat", DataValue.FromString("A")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("B")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("C")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("D")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("E")));
+        }
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["cat"] = DataKind.String };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 100);
+
+        StringFeatureManifest feature = Assert.IsType<StringFeatureManifest>(manifest.Features[0]);
+        Assert.NotNull(feature.DominantValueRatio);
+        Assert.Equal(0.2, feature.DominantValueRatio!.Value, 1e-10);
+    }
+
+    [Fact]
+    public void Build_DominantValueRatio_ZeroRows_IsNull()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Null(feature.DominantValueRatio);
+    }
+
     private static Row MakeRow(string columnName, DataValue value)
     {
         return new Row([columnName], [value]);

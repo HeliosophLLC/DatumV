@@ -78,23 +78,24 @@ public static class ManifestBuilder
         double? nullRatio = rowCount > 0 ? (double)nullCount / rowCount : null;
         long? missingRuns = missingRunsResult?.RunCount;
         IReadOnlyList<FrequencyEntry> topK = MapTopK(topKResult);
+        double? dominantValueRatio = rowCount > 0 && topK.Count > 0 ? (double)topK[0].Frequency / rowCount : null;
         EntropyResult? entropyResult = GetResultValue<EntropyResult>(stats, "entropy");
 
         return kind switch
         {
-            DataKind.Scalar or DataKind.UInt8 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, entropyResult, stats),
-            DataKind.String or DataKind.JsonValue => BuildStringManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, entropyResult, stats),
-            DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.Matrix or DataKind.Tensor => BuildTensorManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.UInt8Array => BuildBinaryManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, stats),
-            DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK, entropyResult, stats),
-            _ => BuildFallbackManifest(name, kind, count, nullCount, nullRatio, missingRuns, distinctCount, topK)
+            DataKind.Scalar or DataKind.UInt8 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.String or DataKind.JsonValue => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
+            DataKind.Matrix or DataKind.Tensor => BuildTensorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
+            DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
+            DataKind.UInt8Array => BuildBinaryManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
+            DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            _ => BuildFallbackManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK)
         };
     }
 
     private static NumericFeatureManifest BuildNumericManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         NumericResult numericResult = GetResultValue<NumericResult>(stats, "numeric") ??
@@ -110,6 +111,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -131,7 +133,7 @@ public static class ManifestBuilder
     }
 
     private static StringFeatureManifest BuildStringManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         StringLengthResult stringResult = GetResultValue<StringLengthResult>(stats, "string_length") ??
@@ -144,6 +146,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -155,7 +158,7 @@ public static class ManifestBuilder
     }
 
     private static VectorFeatureManifest BuildVectorManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ??
@@ -168,6 +171,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -181,7 +185,7 @@ public static class ManifestBuilder
     }
 
     private static TensorFeatureManifest BuildTensorManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         VectorStatsResult vectorResult = GetResultValue<VectorStatsResult>(stats, "vector_stats") ??
@@ -194,6 +198,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -209,7 +214,7 @@ public static class ManifestBuilder
     }
 
     private static ImageFeatureManifest BuildImageManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         ImageStatsResult imageResult = GetResultValue<ImageStatsResult>(stats, "image_stats") ??
@@ -223,6 +228,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -237,7 +243,7 @@ public static class ManifestBuilder
     }
 
     private static BinaryFeatureManifest BuildBinaryManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         BinarySizeResult binaryResult = GetResultValue<BinarySizeResult>(stats, "binary_size") ??
@@ -250,6 +256,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -258,7 +265,7 @@ public static class ManifestBuilder
     }
 
     private static TemporalFeatureManifest BuildTemporalManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         TemporalRangeResult temporalResult = GetResultValue<TemporalRangeResult>(stats, "temporal_range") ??
@@ -271,6 +278,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
@@ -282,7 +290,7 @@ public static class ManifestBuilder
     }
 
     private static StringFeatureManifest BuildFallbackManifest(
-        string name, DataKind kind, long count, long nullCount, double? nullRatio, long? missingRuns, long distinctCount,
+        string name, DataKind kind, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
         IReadOnlyList<FrequencyEntry> topK)
     {
         return new StringFeatureManifest
@@ -292,6 +300,7 @@ public static class ManifestBuilder
             Count = count,
             NullCount = nullCount,
             NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
             MissingRuns = missingRuns,
             EstimatedDistinctCount = distinctCount,
             TopKValues = topK,
