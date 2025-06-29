@@ -224,4 +224,77 @@ public sealed class NumericAccumulatorTests
         NumericAccumulator accumulator = new();
         Assert.Equal("numeric", accumulator.GetResult().Name);
     }
+
+    [Fact]
+    public void Add_WithZeros_CountsZerosCorrectly()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(2.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(2, result.ZeroCount);
+        Assert.Equal(0.5, result.ZeroRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Add_AllZeros_ZeroRatioIsOne()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(0.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(3, result.ZeroCount);
+        Assert.Equal(1.0, result.ZeroRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Add_NoZeros_ZeroCountIsZero()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromScalar(3.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.ZeroCount);
+        Assert.Equal(0.0, result.ZeroRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Add_NoValues_ZeroRatioIsZero()
+    {
+        NumericAccumulator accumulator = new();
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.ZeroCount);
+        Assert.Equal(0.0, result.ZeroRatio, 1e-10);
+    }
+
+    [Fact]
+    public void Merge_CombinesZeroCounts()
+    {
+        NumericAccumulator first = new();
+        first.Add(DataValue.FromScalar(0.0f));
+        first.Add(DataValue.FromScalar(1.0f));
+
+        NumericAccumulator second = new();
+        second.Add(DataValue.FromScalar(0.0f));
+        second.Add(DataValue.FromScalar(0.0f));
+        second.Add(DataValue.FromScalar(5.0f));
+
+        first.Merge(second);
+
+        NumericResult result = (NumericResult)first.GetResult().Value!;
+        Assert.Equal(5, result.Count);
+        Assert.Equal(3, result.ZeroCount);
+        Assert.Equal(0.6, result.ZeroRatio, 1e-10);
+    }
 }

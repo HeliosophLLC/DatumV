@@ -9,6 +9,7 @@ using Axon.QueryEngine.Model;
 public sealed class NumericAccumulator : IStatisticAccumulator
 {
     private long _count;
+    private long _zeroCount;
     private double _min = double.PositiveInfinity;
     private double _max = double.NegativeInfinity;
     private double _mean;
@@ -54,6 +55,11 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 
         _count++;
 
+        if (numericValue == 0.0)
+        {
+            _zeroCount++;
+        }
+
         if (numericValue < _min)
         {
             _min = numericValue;
@@ -82,6 +88,7 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         if (_count == 0)
         {
             _count = otherNumeric._count;
+            _zeroCount = otherNumeric._zeroCount;
             _min = otherNumeric._min;
             _max = otherNumeric._max;
             _mean = otherNumeric._mean;
@@ -98,6 +105,7 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         _count = combinedCount;
         _mean = combinedMean;
         _m2 = combinedM2;
+        _zeroCount += otherNumeric._zeroCount;
         _min = Math.Min(_min, otherNumeric._min);
         _max = Math.Max(_max, otherNumeric._max);
     }
@@ -105,8 +113,9 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     /// <inheritdoc />
     public StatisticResult GetResult()
     {
+        double zeroRatio = _count > 0 ? (double)_zeroCount / _count : 0.0;
         return new StatisticResult("numeric", new NumericResult(
-            _count, Min, Max, Mean, Variance, StandardDeviation));
+            _count, Min, Max, Mean, Variance, StandardDeviation, _zeroCount, zeroRatio));
     }
 }
 
@@ -119,4 +128,6 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 /// <param name="Mean">Arithmetic mean.</param>
 /// <param name="Variance">Population variance.</param>
 /// <param name="StandardDeviation">Population standard deviation.</param>
-public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation);
+/// <param name="ZeroCount">Number of values exactly equal to zero.</param>
+/// <param name="ZeroRatio">Ratio of zero values to total count.</param>
+public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, long ZeroCount, double ZeroRatio);

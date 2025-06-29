@@ -77,6 +77,12 @@ public sealed class NumericFeatureManifest : FeatureManifest
 
     /// <summary>Gets the percentile/quantile data, or null if not computed.</summary>
     public QuantileData? Quantiles { get; init; }
+
+    /// <summary>Gets the number of values exactly equal to zero.</summary>
+    public required long ZeroCount { get; init; }
+
+    /// <summary>Gets the ratio of zero values to total count.</summary>
+    public required double ZeroRatio { get; init; }
 }
 
 /// <summary>
