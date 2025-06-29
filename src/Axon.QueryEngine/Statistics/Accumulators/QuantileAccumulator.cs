@@ -90,19 +90,37 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
         if (_samples.Count == 0)
         {
             return new StatisticResult("quantile", new QuantileResult(
-                double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN));
+                double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN,
+                double.NaN, double.NaN, double.NaN, 0, 0.0));
         }
 
         _samples.Sort();
 
+        double p25 = Percentile(0.25);
+        double p75 = Percentile(0.75);
+        double iqr = p75 - p25;
+        double lowerFence = p25 - 1.5 * iqr;
+        double upperFence = p75 + 1.5 * iqr;
+
+        // Count outliers using binary search on the sorted reservoir
+        int belowCount = LowerBound((float)lowerFence);
+        int aboveCount = _samples.Count - UpperBound((float)upperFence);
+        long outlierCount = belowCount + aboveCount;
+        double outlierRatio = (double)outlierCount / _samples.Count;
+
         return new StatisticResult("quantile", new QuantileResult(
             P01: Percentile(0.01),
             P05: Percentile(0.05),
-            P25: Percentile(0.25),
+            P25: p25,
             P50: Percentile(0.50),
-            P75: Percentile(0.75),
+            P75: p75,
             P95: Percentile(0.95),
-            P99: Percentile(0.99)));
+            P99: Percentile(0.99),
+            Iqr: iqr,
+            LowerFence: lowerFence,
+            UpperFence: upperFence,
+            OutlierCount: outlierCount,
+            OutlierRatio: outlierRatio));
     }
 
     /// <summary>
@@ -124,10 +142,58 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
         double fraction = index - lower;
         return _samples[lower] * (1.0 - fraction) + _samples[upper] * fraction;
     }
+
+    /// <summary>
+    /// Returns the index of the first element that is not less than <paramref name="value"/>.
+    /// </summary>
+    private int LowerBound(float value)
+    {
+        int lo = 0, hi = _samples.Count;
+
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+
+            if (_samples[mid] < value)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+
+        return lo;
+    }
+
+    /// <summary>
+    /// Returns the index of the first element that is greater than <paramref name="value"/>.
+    /// </summary>
+    private int UpperBound(float value)
+    {
+        int lo = 0, hi = _samples.Count;
+
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+
+            if (_samples[mid] <= value)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+
+        return lo;
+    }
 }
 
 /// <summary>
-/// Contains computed percentile values from the quantile accumulator.
+/// Contains computed percentile values and IQR outlier statistics from the quantile accumulator.
 /// </summary>
 /// <param name="P01">1st percentile.</param>
 /// <param name="P05">5th percentile.</param>
@@ -136,10 +202,17 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
 /// <param name="P75">75th percentile (third quartile).</param>
 /// <param name="P95">95th percentile.</param>
 /// <param name="P99">99th percentile.</param>
+/// <param name="Iqr">Interquartile range (P75 − P25).</param>
+/// <param name="LowerFence">Lower Tukey fence (P25 − 1.5 × IQR). Values below this are outliers.</param>
+/// <param name="UpperFence">Upper Tukey fence (P75 + 1.5 × IQR). Values above this are outliers.</param>
+/// <param name="OutlierCount">Number of sampled values outside the fences.</param>
+/// <param name="OutlierRatio">Ratio of outlier values to total sampled values.</param>
 public sealed record QuantileResult(
-    double P01, double P05, double P25, double P50, double P75, double P95, double P99)
+    double P01, double P05, double P25, double P50, double P75, double P95, double P99,
+    double Iqr, double LowerFence, double UpperFence, long OutlierCount, double OutlierRatio)
 {
     /// <inheritdoc />
     public override string ToString() =>
-        $"P1={P01:F2}, P5={P05:F2}, P25={P25:F2}, P50={P50:F2}, P75={P75:F2}, P95={P95:F2}, P99={P99:F2}";
+        $"P1={P01:F2}, P5={P05:F2}, P25={P25:F2}, P50={P50:F2}, P75={P75:F2}, P95={P95:F2}, P99={P99:F2}, " +
+        $"IQR={Iqr:F2}, Fences=[{LowerFence:F2}, {UpperFence:F2}], Outliers={OutlierCount} ({OutlierRatio:P1})";
 }

@@ -274,4 +274,17 @@ public sealed class ManifestSerializerTests
 
         Assert.Contains("\"dominantValueRatio\": 0.9", json);
     }
+
+    [Fact]
+    public void Serialize_NumericManifest_ContainsIqrOutlierFields()
+    {
+        QueryResultsManifest manifest = BuildNumericManifest();
+        string json = ManifestSerializer.Serialize(manifest);
+
+        Assert.Contains("\"iqr\":", json);
+        Assert.Contains("\"lowerFence\":", json);
+        Assert.Contains("\"upperFence\":", json);
+        Assert.Contains("\"outlierCount\":", json);
+        Assert.Contains("\"outlierRatio\":", json);
+    }
 }

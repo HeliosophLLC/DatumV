@@ -132,8 +132,14 @@ public sealed class StringFeatureManifest : FeatureManifest
 /// <param name="P75">75th percentile (third quartile).</param>
 /// <param name="P95">95th percentile.</param>
 /// <param name="P99">99th percentile.</param>
+/// <param name="Iqr">Interquartile range (P75 − P25).</param>
+/// <param name="LowerFence">Lower Tukey fence (P25 − 1.5 × IQR). Values below this are outliers.</param>
+/// <param name="UpperFence">Upper Tukey fence (P75 + 1.5 × IQR). Values above this are outliers.</param>
+/// <param name="OutlierCount">Number of sampled values outside the fences.</param>
+/// <param name="OutlierRatio">Ratio of outlier values to total sampled values.</param>
 public sealed record QuantileData(
-    double P01, double P05, double P25, double P50, double P75, double P95, double P99);
+    double P01, double P05, double P25, double P50, double P75, double P95, double P99,
+    double Iqr, double LowerFence, double UpperFence, long OutlierCount, double OutlierRatio);
 
 /// <summary>
 /// Aggregate numeric summary used within vector, tensor, image, and binary manifests.

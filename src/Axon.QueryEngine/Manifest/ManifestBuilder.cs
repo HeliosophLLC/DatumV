@@ -123,7 +123,9 @@ public static class ManifestBuilder
             Histogram = new HistogramData(histogramResult.BinEdges, histogramResult.Counts),
             Quantiles = quantileResult is not null
                 ? new QuantileData(quantileResult.P01, quantileResult.P05, quantileResult.P25,
-                    quantileResult.P50, quantileResult.P75, quantileResult.P95, quantileResult.P99)
+                    quantileResult.P50, quantileResult.P75, quantileResult.P95, quantileResult.P99,
+                    quantileResult.Iqr, quantileResult.LowerFence, quantileResult.UpperFence,
+                    quantileResult.OutlierCount, quantileResult.OutlierRatio)
                 : null,
             Entropy = entropyResult?.Value,
             EntropyApproximate = entropyResult?.Approximate,
