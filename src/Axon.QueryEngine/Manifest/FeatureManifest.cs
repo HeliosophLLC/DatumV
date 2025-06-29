@@ -44,6 +44,12 @@ public abstract class FeatureManifest
     /// <summary>Gets the top-K most frequent values.</summary>
     public required IReadOnlyList<FrequencyEntry> TopKValues { get; init; }
 
+    /// <summary>Gets the ratio of null/empty values to total rows, or null if row count is zero.</summary>
+    public double? NullRatio { get; init; }
+
+    /// <summary>Gets the number of contiguous runs of null/empty values in the column.</summary>
+    public long? MissingRuns { get; init; }
+
     /// <summary>Gets the Shannon entropy of the value distribution in bits, or null if not applicable.</summary>
     public double? Entropy { get; init; }
 

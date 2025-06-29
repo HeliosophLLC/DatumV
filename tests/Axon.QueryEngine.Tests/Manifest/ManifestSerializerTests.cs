@@ -219,4 +219,37 @@ public sealed class ManifestSerializerTests
 
         return ManifestBuilder.Build(stats, kinds, 1);
     }
+
+    [Fact]
+    public void Serialize_NullRatio_PresentInJson()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(new Row(["x"], [DataValue.FromScalar(1.0f)]));
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Scalar)]));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+        string json = ManifestSerializer.Serialize(manifest);
+
+        Assert.Contains("\"nullRatio\": 0.5", json);
+    }
+
+    [Fact]
+    public void Serialize_MissingRuns_PresentInJson()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Scalar)]));
+        collector.AddRow(new Row(["x"], [DataValue.FromScalar(1.0f)]));
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Scalar)]));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+        string json = ManifestSerializer.Serialize(manifest);
+
+        Assert.Contains("\"missingRuns\": 2", json);
+    }
 }

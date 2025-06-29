@@ -234,6 +234,98 @@ public sealed class ManifestBuilderTests
         Assert.True(manifest.GeneratedAtUtc <= DateTime.UtcNow);
     }
 
+    [Fact]
+    public void Build_NullRatio_ComputedCorrectly()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(3.0f)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 4);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(0.5, feature.NullRatio!.Value, 1e-10);
+    }
+
+    [Fact]
+    public void Build_NullRatio_ZeroRows_IsNull()
+    {
+        StatisticsCollector collector = new();
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        // No columns in stats when no rows added — build with empty stats but rowCount 0
+        // Add at least one row so the column exists, then build with rowCount = 0
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        stats = collector.GetStatistics();
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Null(feature.NullRatio);
+    }
+
+    [Fact]
+    public void Build_NullRatio_NoNulls_IsZero()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(0.0, feature.NullRatio!.Value, 1e-10);
+    }
+
+    [Fact]
+    public void Build_MissingRuns_TrackedCorrectly()
+    {
+        StatisticsCollector collector = new();
+        // Run 1: [null, null]
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        // non-null
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        // Run 2: [null]
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        // non-null
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 5);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(2, feature.MissingRuns);
+    }
+
+    [Fact]
+    public void Build_MissingRuns_NoNulls_IsZero()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.Equal(0, feature.MissingRuns);
+    }
+
     private static Row MakeRow(string columnName, DataValue value)
     {
         return new Row([columnName], [value]);

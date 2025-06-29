@@ -93,7 +93,8 @@ public sealed class StatisticsCollector
         [
             new CountAccumulator(),
             new CardinalityAccumulator(),
-            new TopKAccumulator(_topK)
+            new TopKAccumulator(_topK),
+            new MissingRunsAccumulator()
         ];
 
         if (kind is DataKind.Scalar or DataKind.UInt8)
