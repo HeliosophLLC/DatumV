@@ -191,6 +191,34 @@ public sealed class StatisticsCollectorTests
         Assert.Equal("my_column", stats["my_column"].ColumnName);
     }
 
+    [Fact]
+    public void AddRow_ImageColumn_CollectsImageStats()
+    {
+        StatisticsCollector collector = new();
+
+        // Minimal JPEG: SOI + SOF0
+        byte[] jpeg = new byte[20];
+        jpeg[0] = 0xFF;
+        jpeg[1] = 0xD8;
+        jpeg[2] = 0xFF;
+        jpeg[3] = 0xC0;
+        jpeg[4] = 0x00;
+        jpeg[5] = 0x0B;
+        jpeg[6] = 0x08;
+        jpeg[7] = 0x01; jpeg[8] = 0xE0; // height 480
+        jpeg[9] = 0x02; jpeg[10] = 0x80; // width 640
+        jpeg[11] = 0x03; // 3 channels
+
+        collector.AddRow(CreateRow(("img", DataValue.FromImage(jpeg))));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Assert.Contains("image_stats", stats["img"].Results.Keys);
+
+        ImageStatsResult imageResult = (ImageStatsResult)stats["img"].Results["image_stats"].Value!;
+        Assert.Equal(1, imageResult.ImageCount);
+        Assert.NotNull(imageResult.AspectRatioHistogram);
+    }
+
     private static Row CreateRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = new string[columns.Length];

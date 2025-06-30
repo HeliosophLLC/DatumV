@@ -231,7 +231,7 @@ public static class ManifestBuilder
     {
         ImageStatsResult imageResult = GetResultValue<ImageStatsResult>(stats, "image_stats") ??
                                        new ImageStatsResult(0, 0, 0, 0, 0, new Dictionary<int, long>(), 0,
-                                           new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0));
+                                           new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), null);
 
         return new ImageFeatureManifest
         {
@@ -251,7 +251,10 @@ public static class ManifestBuilder
             MaxHeight = imageResult.MaxHeight,
             ChannelCounts = imageResult.ChannelCounts,
             UndecodableCount = imageResult.UndecodableCount,
-            FileSizeStats = ToSummaryData(imageResult.FileSizeStats)
+            FileSizeStats = ToSummaryData(imageResult.FileSizeStats),
+            AspectRatioHistogram = imageResult.AspectRatioHistogram is { } arh
+                ? new HistogramData(arh.BinEdges, arh.Counts)
+                : null
         };
     }
 

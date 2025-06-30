@@ -9,6 +9,9 @@ using Axon.QueryEngine.Model;
 /// </summary>
 public sealed class ImageStatsAccumulator : IStatisticAccumulator
 {
+    private const int MaxAspectSamples = 100_000;
+    private const int AspectBinCount = 20;
+
     private long _count;
     private int _minWidth = int.MaxValue;
     private int _maxWidth = int.MinValue;
@@ -23,6 +26,11 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private double _sizeMax = double.NegativeInfinity;
     private double _sizeMean;
     private double _sizeM2;
+
+    // Aspect ratio reservoir sampling
+    private readonly List<float> _aspectSamples = new();
+    private readonly Random _aspectRandom = new(42);
+    private long _aspectTotalCount;
 
     /// <inheritdoc />
     public void Add(DataValue value)
@@ -102,6 +110,27 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
         {
             _channelCounts[dimensions.Channels] = 1;
         }
+
+        // Track aspect ratio
+        if (dimensions.Height > 0)
+        {
+            float aspectRatio = (float)dimensions.Width / dimensions.Height;
+            _aspectTotalCount++;
+
+            if (_aspectSamples.Count < MaxAspectSamples)
+            {
+                _aspectSamples.Add(aspectRatio);
+            }
+            else
+            {
+                long j = _aspectRandom.NextInt64(_aspectTotalCount);
+
+                if (j < MaxAspectSamples)
+                {
+                    _aspectSamples[(int)j] = aspectRatio;
+                }
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -125,6 +154,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _sizeMax = otherImage._sizeMax;
             _sizeMean = otherImage._sizeMean;
             _sizeM2 = otherImage._sizeM2;
+            _aspectTotalCount = otherImage._aspectTotalCount;
+            _aspectSamples.AddRange(otherImage._aspectSamples);
 
             foreach (KeyValuePair<int, long> entry in otherImage._channelCounts)
             {
@@ -166,6 +197,21 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _sizeMax = Math.Max(_sizeMax, otherImage._sizeMax);
             _sizeCount = combinedCount;
         }
+
+        // Merge aspect ratio samples
+        _aspectTotalCount += otherImage._aspectTotalCount;
+        _aspectSamples.AddRange(otherImage._aspectSamples);
+
+        if (_aspectSamples.Count > MaxAspectSamples)
+        {
+            for (int i = _aspectSamples.Count - 1; i > 0; i--)
+            {
+                int j = _aspectRandom.Next(i + 1);
+                (_aspectSamples[i], _aspectSamples[j]) = (_aspectSamples[j], _aspectSamples[i]);
+            }
+
+            _aspectSamples.RemoveRange(MaxAspectSamples, _aspectSamples.Count - MaxAspectSamples);
+        }
     }
 
     /// <inheritdoc />
@@ -188,7 +234,54 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
                 _sizeCount > 0 ? _sizeMax : double.NaN,
                 _sizeCount > 0 ? _sizeMean : double.NaN,
                 sizeVariance,
-                Math.Sqrt(sizeVariance))));
+                Math.Sqrt(sizeVariance)),
+            BuildAspectRatioHistogram()));
+    }
+
+    private HistogramResult? BuildAspectRatioHistogram()
+    {
+        if (_aspectSamples.Count == 0)
+        {
+            return null;
+        }
+
+        _aspectSamples.Sort();
+
+        float min = _aspectSamples[0];
+        float max = _aspectSamples[^1];
+
+        if (Math.Abs(max - min) < float.Epsilon)
+        {
+            return new HistogramResult([min, max], [_aspectSamples.Count]);
+        }
+
+        int effectiveBinCount = Math.Min(AspectBinCount, _aspectSamples.Count);
+        double binWidth = (double)(max - min) / effectiveBinCount;
+
+        double[] binEdges = new double[effectiveBinCount + 1];
+
+        for (int i = 0; i <= effectiveBinCount; i++)
+        {
+            binEdges[i] = min + i * binWidth;
+        }
+
+        binEdges[^1] = max;
+
+        long[] counts = new long[effectiveBinCount];
+
+        foreach (float sample in _aspectSamples)
+        {
+            int bin = (int)((sample - min) / binWidth);
+
+            if (bin >= effectiveBinCount)
+            {
+                bin = effectiveBinCount - 1;
+            }
+
+            counts[bin]++;
+        }
+
+        return new HistogramResult(binEdges, counts);
     }
 
     /// <summary>
@@ -412,6 +505,7 @@ public sealed record ImageDimensions(int Width, int Height, int Channels);
 /// <param name="ChannelCounts">Distribution of channel counts (key=channels, value=count).</param>
 /// <param name="UndecodableCount">Number of images whose headers could not be parsed.</param>
 /// <param name="FileSizeStats">Aggregate file size statistics in bytes.</param>
+/// <param name="AspectRatioHistogram">Optional histogram of aspect ratios.</param>
 public sealed record ImageStatsResult(
     long ImageCount,
     int MinWidth,
@@ -420,4 +514,5 @@ public sealed record ImageStatsResult(
     int MaxHeight,
     IReadOnlyDictionary<int, long> ChannelCounts,
     long UndecodableCount,
-    NumericSummary FileSizeStats);
+    NumericSummary FileSizeStats,
+    HistogramResult? AspectRatioHistogram);

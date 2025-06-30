@@ -258,6 +258,76 @@ public sealed class ImageStatsAccumulatorTests
     }
 
     [Fact]
+    public void Add_MultipleImages_BuildsAspectRatioHistogram()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        // Landscape (800/600 ≈ 1.333), Portrait (600/800 = 0.75), Square (500/500 = 1.0)
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.NotNull(result.AspectRatioHistogram);
+        Assert.True(result.AspectRatioHistogram.Counts.Count > 0);
+        Assert.Equal(3, result.AspectRatioHistogram.Counts.Sum());
+    }
+
+    [Fact]
+    public void Add_SingleImage_AspectRatioHistogramSingleBin()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.NotNull(result.AspectRatioHistogram);
+        Assert.Single(result.AspectRatioHistogram.Counts);
+        Assert.Equal(1, result.AspectRatioHistogram.Counts[0]);
+    }
+
+    [Fact]
+    public void Merge_TwoAccumulators_CombinesAspectRatioSamples()
+    {
+        ImageStatsAccumulator first = new();
+        ImageStatsAccumulator second = new();
+
+        first.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // landscape
+        second.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3))); // portrait
+
+        first.Merge(second);
+
+        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
+
+        Assert.NotNull(result.AspectRatioHistogram);
+        Assert.Equal(2, result.AspectRatioHistogram.Counts.Sum());
+    }
+
+    [Fact]
+    public void Add_UndecodableImages_NoAspectRatioContribution()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Null(result.AspectRatioHistogram);
+    }
+
+    [Fact]
+    public void GetResult_NoDecodableImages_NullAspectRatioHistogram()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Null(result.AspectRatioHistogram);
+    }
+
+    [Fact]
     public void JpegWithPrecedingMarkers_ParsesCorrectly()
     {
         // JPEG with APP0 marker (JFIF) before SOF0
