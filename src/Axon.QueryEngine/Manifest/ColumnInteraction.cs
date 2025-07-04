@@ -26,4 +26,10 @@ public sealed class ColumnInteraction
 
     /// <summary>Gets mutual information in bits (all pair types).</summary>
     public double? MutualInformation { get; init; }
+
+    /// <summary>Gets Theil's U(A|B): how much column B reduces uncertainty about column A. Range [0, 1].</summary>
+    public double? TheilUAB { get; init; }
+
+    /// <summary>Gets Theil's U(B|A): how much column A reduces uncertainty about column B. Range [0, 1].</summary>
+    public double? TheilUBA { get; init; }
 }

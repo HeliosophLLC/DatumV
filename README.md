@@ -623,6 +623,7 @@ The `manifest` command also computes pairwise interaction statistics between eli
 | Cramér's V | Categorical × Categorical | Bounded contingency table (1K categories), χ² → V |
 | ANOVA F | Categorical × Numeric | Per-group Welford (1K groups), F = MS_between / MS_within |
 | Mutual Information | All | Reservoir sampling (10K pairs), numeric bins (20), MI in bits |
+| Theil's U | All | Asymmetric uncertainty coefficient U(A|B) = MI / H(A), derived from MI reservoir |
 ## Manifest
 
 The `manifest` command generates a structured JSON manifest describing every column in a query result with type-specific statistics.
@@ -704,7 +705,9 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
       "columnB": "width",
       "pearson": 0.02,
       "spearman": 0.03,
-      "mutualInformation": 0.15
+      "mutualInformation": 0.15,
+      "theilUAB": 0.01,
+      "theilUBA": 0.02
     }
   ]
 }

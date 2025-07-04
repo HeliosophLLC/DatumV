@@ -79,9 +79,18 @@ public sealed class MutualInformationAccumulator
     /// </summary>
     public double GetValue()
     {
+        return GetDetailedValue().MutualInformation;
+    }
+
+    /// <summary>
+    /// Returns mutual information together with Theil's U (uncertainty coefficient) in both
+    /// directions. U(A|B) = MI / H(A) measures how much B reduces uncertainty about A.
+    /// </summary>
+    public MutualInformationResult GetDetailedValue()
+    {
         if (_reservoir.Count < 2)
         {
-            return double.NaN;
+            return new MutualInformationResult(double.NaN, double.NaN, double.NaN);
         }
 
         // Discretize values into string keys
@@ -124,7 +133,33 @@ public sealed class MutualInformationAccumulator
             }
         }
 
-        return Math.Max(0, mi); // MI is non-negative; clamp numerical errors
+        mi = Math.Max(0, mi); // MI is non-negative; clamp numerical errors
+
+        // Compute marginal entropies for Theil's U
+        double hA = ComputeEntropy(marginalA, n);
+        double hB = ComputeEntropy(marginalB, n);
+
+        double theilUAB = hA > 0 ? mi / hA : double.NaN;
+        double theilUBA = hB > 0 ? mi / hB : double.NaN;
+
+        return new MutualInformationResult(mi, theilUAB, theilUBA);
+    }
+
+    private static double ComputeEntropy(Dictionary<string, long> frequencies, int n)
+    {
+        double h = 0;
+
+        foreach (long count in frequencies.Values)
+        {
+            double p = (double)count / n;
+
+            if (p > 0)
+            {
+                h -= p * Math.Log2(p);
+            }
+        }
+
+        return h;
     }
 
     private static string[] Discretize(List<object> values, bool isNumeric)
@@ -221,3 +256,14 @@ public sealed class MutualInformationAccumulator
         return kind is DataKind.Scalar or DataKind.UInt8;
     }
 }
+
+/// <summary>
+/// Contains mutual information and Theil's U (uncertainty coefficient) values.
+/// </summary>
+/// <param name="MutualInformation">Mutual information I(X;Y) ≥ 0 in bits.</param>
+/// <param name="TheilUAB">U(A|B) = MI / H(A). How much column B reduces uncertainty about column A. Range [0, 1].</param>
+/// <param name="TheilUBA">U(B|A) = MI / H(B). How much column A reduces uncertainty about column B. Range [0, 1].</param>
+public readonly record struct MutualInformationResult(
+    double MutualInformation,
+    double TheilUAB,
+    double TheilUBA);

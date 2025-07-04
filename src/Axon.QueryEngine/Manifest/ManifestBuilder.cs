@@ -50,7 +50,9 @@ public static class ManifestBuilder
                     Spearman = result.Spearman,
                     CramerV = result.CramerV,
                     AnovaFStatistic = result.AnovaFStatistic,
-                    MutualInformation = result.MutualInformation
+                    MutualInformation = result.MutualInformation,
+                    TheilUAB = result.TheilUAB,
+                    TheilUBA = result.TheilUBA
                 });
             }
         }

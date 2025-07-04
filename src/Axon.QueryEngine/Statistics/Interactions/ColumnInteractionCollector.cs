@@ -50,7 +50,11 @@ public sealed class ColumnInteractionCollector
             double? spearman = NanToNull(pair.Spearman?.GetValue());
             double? cramerV = NanToNull(pair.CramerV?.GetValue());
             double? anovaF = NanToNull(pair.Anova?.GetValue());
-            double? mi = NanToNull(pair.MutualInformation?.GetValue());
+
+            MutualInformationResult? miResult = pair.MutualInformation?.GetDetailedValue();
+            double? mi = NanToNull(miResult?.MutualInformation);
+            double? theilUAB = NanToNull(miResult?.TheilUAB);
+            double? theilUBA = NanToNull(miResult?.TheilUBA);
 
             results.Add(new ColumnInteractionResult(
                 pair.ColumnA,
@@ -59,7 +63,9 @@ public sealed class ColumnInteractionCollector
                 spearman,
                 cramerV,
                 anovaF,
-                mi));
+                mi,
+                theilUAB,
+                theilUBA));
         }
 
         return results;
@@ -166,6 +172,8 @@ public sealed class ColumnInteractionCollector
 /// <param name="CramerV">Cramér's V association (categorical × categorical only).</param>
 /// <param name="AnovaFStatistic">ANOVA F-statistic (categorical × numeric only).</param>
 /// <param name="MutualInformation">Mutual information in bits (all pair types).</param>
+/// <param name="TheilUAB">Theil's U(A|B): how much column B reduces uncertainty about column A. Range [0, 1].</param>
+/// <param name="TheilUBA">Theil's U(B|A): how much column A reduces uncertainty about column B. Range [0, 1].</param>
 public sealed record ColumnInteractionResult(
     string ColumnA,
     string ColumnB,
@@ -173,4 +181,6 @@ public sealed record ColumnInteractionResult(
     double? Spearman,
     double? CramerV,
     double? AnovaFStatistic,
-    double? MutualInformation);
+    double? MutualInformation,
+    double? TheilUAB,
+    double? TheilUBA);

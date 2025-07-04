@@ -26,6 +26,8 @@ public sealed class ColumnInteractionCollectorTests
         Assert.NotNull(result.Pearson);
         Assert.NotNull(result.Spearman);
         Assert.NotNull(result.MutualInformation);
+        Assert.NotNull(result.TheilUAB);
+        Assert.NotNull(result.TheilUBA);
         Assert.Null(result.CramerV);
         Assert.Null(result.AnovaFStatistic);
     }
@@ -48,6 +50,8 @@ public sealed class ColumnInteractionCollectorTests
         Assert.Single(results);
         Assert.NotNull(results[0].CramerV);
         Assert.NotNull(results[0].MutualInformation);
+        Assert.NotNull(results[0].TheilUAB);
+        Assert.NotNull(results[0].TheilUBA);
         Assert.Null(results[0].Pearson);
         Assert.Null(results[0].Spearman);
         Assert.Null(results[0].AnovaFStatistic);
@@ -71,6 +75,8 @@ public sealed class ColumnInteractionCollectorTests
         Assert.Single(results);
         Assert.NotNull(results[0].AnovaFStatistic);
         Assert.NotNull(results[0].MutualInformation);
+        Assert.NotNull(results[0].TheilUAB);
+        Assert.NotNull(results[0].TheilUBA);
         Assert.Null(results[0].Pearson);
         Assert.Null(results[0].Spearman);
         Assert.Null(results[0].CramerV);

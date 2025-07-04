@@ -380,3 +380,139 @@ public sealed class MutualInformationAccumulatorTests
         Assert.True(result > 0, $"Expected positive MI but got {result}");
     }
 }
+
+public sealed class TheilUTests
+{
+    [Fact]
+    public void GetDetailedValue_PerfectPrediction_ReturnsOne()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.String, DataKind.String);
+
+        // Perfect 1-to-1 mapping: knowing B perfectly predicts A and vice versa
+        for (int i = 0; i < 1000; i++)
+        {
+            string value = (i % 5).ToString();
+            accumulator.Add(DataValue.FromString(value), DataValue.FromString(value));
+        }
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        Assert.Equal(1.0, result.TheilUAB, precision: 5);
+        Assert.Equal(1.0, result.TheilUBA, precision: 5);
+    }
+
+    [Fact]
+    public void GetDetailedValue_IndependentColumns_ReturnsNearZero()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.String, DataKind.String);
+        Random random = new(42);
+
+        string[] catsA = ["red", "green", "blue"];
+        string[] catsB = ["circle", "square", "triangle"];
+
+        for (int i = 0; i < 5000; i++)
+        {
+            accumulator.Add(
+                DataValue.FromString(catsA[random.Next(3)]),
+                DataValue.FromString(catsB[random.Next(3)]));
+        }
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        Assert.True(result.TheilUAB < 0.05, $"Expected near zero TheilUAB but got {result.TheilUAB}");
+        Assert.True(result.TheilUBA < 0.05, $"Expected near zero TheilUBA but got {result.TheilUBA}");
+    }
+
+    [Fact]
+    public void GetDetailedValue_AsymmetricRelationship_ProducesAsymmetricU()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.String, DataKind.String);
+
+        // A has 2 categories, B has 4. Knowing B determines A but not vice versa.
+        // A = "even"/"odd", B = "0"/"1"/"2"/"3"
+        for (int i = 0; i < 2000; i++)
+        {
+            string b = (i % 4).ToString();
+            string a = (i % 4) % 2 == 0 ? "even" : "odd";
+            accumulator.Add(DataValue.FromString(a), DataValue.FromString(b));
+        }
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        // U(A|B) should be 1.0 — knowing B perfectly determines A
+        Assert.Equal(1.0, result.TheilUAB, precision: 5);
+
+        // U(B|A) should be 0.5 — knowing A only halves the uncertainty about B
+        // H(B) = 2 bits, MI = 1 bit, so U(B|A) = 1/2
+        Assert.True(result.TheilUBA < result.TheilUAB,
+            $"Expected TheilUBA ({result.TheilUBA}) < TheilUAB ({result.TheilUAB})");
+        Assert.Equal(0.5, result.TheilUBA, precision: 5);
+    }
+
+    [Fact]
+    public void GetDetailedValue_ResultInUnitRange()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.String, DataKind.String);
+
+        for (int i = 0; i < 500; i++)
+        {
+            string a = (i % 7).ToString();
+            string b = (i % 3).ToString();
+            accumulator.Add(DataValue.FromString(a), DataValue.FromString(b));
+        }
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        Assert.InRange(result.TheilUAB, 0.0, 1.0);
+        Assert.InRange(result.TheilUBA, 0.0, 1.0);
+    }
+
+    [Fact]
+    public void GetDetailedValue_ConstantColumnA_ReturnsNaNForUAB()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.String, DataKind.String);
+
+        // Column A is constant → H(A) = 0 → U(A|B) is undefined
+        for (int i = 0; i < 100; i++)
+        {
+            accumulator.Add(
+                DataValue.FromString("constant"),
+                DataValue.FromString((i % 3).ToString()));
+        }
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        Assert.True(double.IsNaN(result.TheilUAB), $"Expected NaN for TheilUAB but got {result.TheilUAB}");
+    }
+
+    [Fact]
+    public void GetDetailedValue_InsufficientData_ReturnsNaN()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.String, DataKind.String);
+
+        accumulator.Add(DataValue.FromString("a"), DataValue.FromString("b"));
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        Assert.True(double.IsNaN(result.TheilUAB));
+        Assert.True(double.IsNaN(result.TheilUBA));
+    }
+
+    [Fact]
+    public void GetDetailedValue_NumericColumns_ComputesTheilU()
+    {
+        MutualInformationAccumulator accumulator = new(DataKind.Scalar, DataKind.Scalar);
+
+        // Perfectly correlated numeric values
+        for (int i = 0; i < 1000; i++)
+        {
+            accumulator.Add(DataValue.FromScalar(i), DataValue.FromScalar(i * 2.0f));
+        }
+
+        MutualInformationResult result = accumulator.GetDetailedValue();
+
+        // After discretization into bins, should show high dependence
+        Assert.True(result.TheilUAB > 0.5, $"Expected high TheilUAB but got {result.TheilUAB}");
+        Assert.True(result.TheilUBA > 0.5, $"Expected high TheilUBA but got {result.TheilUBA}");
+    }
+}
