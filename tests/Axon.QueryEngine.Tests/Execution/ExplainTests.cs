@@ -11,6 +11,8 @@ namespace Axon.QueryEngine.Tests.Execution;
 
 public class ExplainTests
 {
+    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
+
     private static readonly string FixturesPath = Path.Combine(
         AppContext.BaseDirectory, "Fixtures");
 
@@ -31,7 +33,7 @@ public class ExplainTests
     public void Explain_ScanOnly_ProducesScanNode()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -50,7 +52,7 @@ public class ExplainTests
     public void Explain_FilterOverScan_ProducesFilterNode()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -75,7 +77,7 @@ public class ExplainTests
         TableCatalog catalog = CreateCatalogWithCsv("left", "l.csv");
         catalog.Register(new TableDescriptor("csv", "right", "r.csv", new Dictionary<string, string>()));
 
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -106,7 +108,7 @@ public class ExplainTests
         TableCatalog catalog = CreateCatalogWithCsv("a", "a.csv");
         catalog.Register(new TableDescriptor("csv", "b", "b.csv", new Dictionary<string, string>()));
 
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -127,7 +129,7 @@ public class ExplainTests
     public void Explain_OrderBy_WarnsAboutMaterialization()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -148,7 +150,7 @@ public class ExplainTests
     public void Explain_LimitWithOffset_ShowsLimitAndOffset()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -168,7 +170,7 @@ public class ExplainTests
     public void Explain_ProjectWithAlias_ShowsColumnExpressions()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [
@@ -194,7 +196,7 @@ public class ExplainTests
     public void Explain_FilterWithLike_WarnsAboutFullScan()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -214,7 +216,7 @@ public class ExplainTests
     public void Explain_Subquery_ShowsAlias()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement innerQuery = new(
             Columns: [new SelectAllColumns()],
@@ -236,7 +238,7 @@ public class ExplainTests
     public void Explain_ComplexPlan_ContainsAllLayers()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectColumn(new ColumnReference("x"))],
@@ -389,7 +391,7 @@ public class ExplainTests
         }
 
         TableCatalog catalog = CreateCatalogWithCsv("data", csvPath);
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -424,7 +426,7 @@ public class ExplainTests
         }
 
         TableCatalog catalog = CreateCatalogWithCsv("data", csvPath);
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         // WHERE clause that will filter some rows.
         SelectStatement statement = new(
@@ -463,7 +465,7 @@ public class ExplainTests
         }
 
         TableCatalog catalog = CreateCatalogWithCsv("data", csvPath);
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -493,7 +495,7 @@ public class ExplainTests
     public void InstrumentTree_PreservesOperatorStructure()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectColumn(new ColumnReference("x"))],
@@ -528,7 +530,7 @@ public class ExplainTests
         }
 
         TableCatalog catalog = CreateCatalogWithCsv("data", csvPath);
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -668,7 +670,7 @@ public class ExplainTests
     public void Render_FullExplainPlan_ProducesReadableTree()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectColumn(new ColumnReference("x"))],
@@ -699,7 +701,7 @@ public class ExplainTests
     public void Explain_AliasedTable_ShowsAlias()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -720,7 +722,7 @@ public class ExplainTests
         TableCatalog catalog = CreateCatalogWithCsv("a", "a.csv");
         catalog.Register(new TableDescriptor("csv", "b", "b.csv", new Dictionary<string, string>()));
 
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],

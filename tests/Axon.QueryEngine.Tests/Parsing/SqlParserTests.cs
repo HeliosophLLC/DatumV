@@ -508,6 +508,58 @@ public class SqlParserTests
         Assert.Equal("inner_q", inner.Alias);
     }
 
+    // ───────────────────── Function source in FROM ─────────────────────
+
+    [Fact]
+    public void FunctionSourceInFrom()
+    {
+        SelectStatement result = Parse(
+            "SELECT x FROM RANGE(0, 360) AS r");
+
+        FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
+        Assert.Equal("RANGE", source.FunctionName);
+        Assert.Equal(2, source.Arguments.Count);
+        Assert.Equal("r", source.Alias);
+    }
+
+    [Fact]
+    public void FunctionSourceWithoutAlias()
+    {
+        SelectStatement result = Parse(
+            "SELECT x FROM RANGE(0, 10)");
+
+        FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
+        Assert.Equal("RANGE", source.FunctionName);
+        Assert.Null(source.Alias);
+    }
+
+    [Fact]
+    public void FunctionSourceWithThreeArguments()
+    {
+        SelectStatement result = Parse(
+            "SELECT x FROM RANGE(0, 360, 0.5) AS r");
+
+        FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
+        Assert.Equal("RANGE", source.FunctionName);
+        Assert.Equal(3, source.Arguments.Count);
+        Assert.Equal("r", source.Alias);
+    }
+
+    [Fact]
+    public void FunctionSourceInCrossJoin()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t1 CROSS JOIN RANGE(1, 10) AS r");
+
+        Assert.IsType<TableReference>(result.From.Source);
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        FunctionSource joined = Assert.IsType<FunctionSource>(result.Joins[0].Source);
+        Assert.Equal("RANGE", joined.FunctionName);
+        Assert.Equal("r", joined.Alias);
+    }
+
     // ───────────────────── Arithmetic expressions ─────────────────────
 
     [Fact]

@@ -205,6 +205,7 @@ public sealed class FunctionRegistry
 
         // Table-valued
         registry.RegisterTableValued(new TableValued.UnnestFunction());
+        registry.RegisterTableValued(new TableValued.RangeFunction());
 
         return registry;
     }

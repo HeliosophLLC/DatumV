@@ -342,9 +342,27 @@ public static class SqlParser
         from alias in Token.EqualTo(SqlToken.Identifier)
         select (TableSource)new SubquerySource(query, GetTokenText(alias));
 
-    /// <summary>A table source: either a subquery or a table reference.</summary>
+    /// <summary>
+    /// A table-valued function source: identifier(args) [AS alias].
+    /// Must be tried before table reference because both start with Identifier.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, TableSource> FunctionSourceParser =
+        from name in Token.EqualTo(SqlToken.Identifier)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from args in SP.Ref(() => ExpressionParser!)
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from alias in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            select GetTokenText(aliasName)
+        ).OptionalOrDefault()
+        select (TableSource)new FunctionSource(GetTokenText(name), args, alias);
+
+    /// <summary>A table source: subquery, function call, or table reference.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> TableSourceParser =
         SubquerySourceParser.Try()
+            .Or(FunctionSourceParser.Try())
             .Or(TableReferenceParser);
 
     /// <summary>FROM table_source</summary>

@@ -1,5 +1,6 @@
 using Axon.QueryEngine.Catalog;
 using Axon.QueryEngine.Execution.Operators;
+using Axon.QueryEngine.Functions;
 using Axon.QueryEngine.Model;
 using Axon.QueryEngine.Parsing.Ast;
 
@@ -14,14 +15,17 @@ namespace Axon.QueryEngine.Execution;
 public sealed class QueryPlanner
 {
     private readonly TableCatalog _catalog;
+    private readonly FunctionRegistry _functionRegistry;
 
     /// <summary>
-    /// Creates a query planner for the given table catalog.
+    /// Creates a query planner for the given table catalog and function registry.
     /// </summary>
     /// <param name="catalog">The catalog used to resolve table names.</param>
-    public QueryPlanner(TableCatalog catalog)
+    /// <param name="functionRegistry">The registry used to resolve table-valued functions.</param>
+    public QueryPlanner(TableCatalog catalog, FunctionRegistry functionRegistry)
     {
         _catalog = catalog;
+        _functionRegistry = functionRegistry;
     }
 
     /// <summary>
@@ -78,6 +82,7 @@ public sealed class QueryPlanner
         {
             TableReference tableRef => PlanTableReference(tableRef),
             SubquerySource subquery => PlanSubquery(subquery),
+            FunctionSource functionSource => PlanFunctionSource(functionSource),
             _ => throw new InvalidOperationException(
                 $"Unsupported table source type: {source.GetType().Name}."),
         };
@@ -103,5 +108,25 @@ public sealed class QueryPlanner
     {
         IQueryOperator innerPlan = Plan(subquery.Query);
         return new SubqueryOperator(innerPlan, subquery.Alias);
+    }
+
+    private IQueryOperator PlanFunctionSource(FunctionSource functionSource)
+    {
+        ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.FunctionName);
+
+        if (function is null)
+        {
+            throw new InvalidOperationException(
+                $"Unknown table-valued function: '{functionSource.FunctionName}'.");
+        }
+
+        IQueryOperator sourceOperator = new FunctionSourceOperator(function, functionSource.Arguments);
+
+        if (functionSource.Alias is not null)
+        {
+            sourceOperator = new AliasOperator(sourceOperator, functionSource.Alias);
+        }
+
+        return sourceOperator;
     }
 }

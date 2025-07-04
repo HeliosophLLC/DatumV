@@ -79,7 +79,7 @@ public class ExecutionBenchmarks
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
         SelectStatement statement = SqlParser.Parse("SELECT * FROM data");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(statement);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
@@ -94,7 +94,7 @@ public class ExecutionBenchmarks
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
         SelectStatement statement = SqlParser.Parse("SELECT id, name, value FROM data WHERE value > 500");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(statement);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
@@ -109,7 +109,7 @@ public class ExecutionBenchmarks
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
         SelectStatement statement = SqlParser.Parse("SELECT id, name FROM data");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(statement);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
@@ -125,7 +125,7 @@ public class ExecutionBenchmarks
         FunctionRegistry functions = BuildFunctions();
         SelectStatement statement = SqlParser.Parse(
             "SELECT a.id, a.name, b.description FROM data AS a INNER JOIN lookup AS b ON a.id = b.lookup_id");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(statement);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
@@ -140,7 +140,7 @@ public class ExecutionBenchmarks
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
         SelectStatement statement = SqlParser.Parse("SELECT id, name, value FROM data ORDER BY value DESC LIMIT 100");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(statement);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 

@@ -154,6 +154,26 @@ SELECT table_alias.*
 FROM table_name
 FROM table_name AS alias
 FROM (SELECT ... FROM ...) AS subquery
+FROM RANGE(0, 360) AS r
+```
+
+Table-valued functions can be used as data sources in FROM and JOIN clauses:
+
+```sql
+-- Generate rows with Value 0 through 360 (inclusive)
+SELECT r.[Value] FROM RANGE(0, 360) AS r
+
+-- With a custom step
+SELECT r.[Value] FROM RANGE(0, 1, 0.1) AS r
+
+-- Compute a sine wave
+SELECT r.[Value] AS x, ((SIN(2.0 * PI() * r.[Value]) + 1.0) / 2.0) AS y
+FROM RANGE(0, 360) AS r
+
+-- Use in a CROSS JOIN
+SELECT t.name, r.[Value] AS angle
+FROM data AS t
+CROSS JOIN RANGE(0, 360) AS r
 ```
 
 ### JOIN
@@ -317,6 +337,7 @@ Conversion between them is zero-copy when ranks match. Use `reshape()` to reinte
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `unnest` | `unnest(array_col)` | Expand array-valued column into separate rows. Works with Vector, UInt8Array, JsonValue arrays. |
+| `range` | `range(start, end[, step])` | Generate a sequence of rows with a `Value` column from start to end (inclusive). Default step is 1. |
 
 ### Example SQL with functions
 

@@ -11,6 +11,8 @@ namespace Axon.QueryEngine.Tests.Execution;
 
 public class QueryPlannerTests
 {
+    private static readonly FunctionRegistry DefaultFunctions = FunctionRegistry.CreateDefault();
+
     private static TableCatalog CreateCatalogWithCsv(string tableName, string csvPath)
     {
         TableCatalog catalog = new();
@@ -25,7 +27,7 @@ public class QueryPlannerTests
     public void Plan_SimpleSelect_ProducesScanOperator()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -41,7 +43,7 @@ public class QueryPlannerTests
     public void Plan_SelectWithWhere_ProducesFilterOverScan()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -62,7 +64,7 @@ public class QueryPlannerTests
     public void Plan_SelectWithProjection_ProducesProjectOverScan()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectColumn(new ColumnReference("a"), "col_a")],
@@ -79,7 +81,7 @@ public class QueryPlannerTests
     public void Plan_SelectWithWhereAndProjection_ProducesProjectOverFilterOverScan()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectColumn(new ColumnReference("a"))],
@@ -107,7 +109,7 @@ public class QueryPlannerTests
         catalog.Register(new TableDescriptor("csv", "left_table", "left.csv", new Dictionary<string, string>()));
         catalog.Register(new TableDescriptor("csv", "right_table", "right.csv", new Dictionary<string, string>()));
 
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -131,7 +133,7 @@ public class QueryPlannerTests
     public void Plan_WithOrderBy_ProducesOrderByOperator()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -150,7 +152,7 @@ public class QueryPlannerTests
     public void Plan_WithLimit_ProducesLimitOperator()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -168,7 +170,7 @@ public class QueryPlannerTests
     public void Plan_WithOffset_ProducesLimitWithOffset()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -188,7 +190,7 @@ public class QueryPlannerTests
     public void Plan_WithOrderByAndLimit_ProducesLimitOverOrderBy()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -210,7 +212,7 @@ public class QueryPlannerTests
     public void Plan_WithAlias_ProducesAliasOperator()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -227,7 +229,7 @@ public class QueryPlannerTests
     public void Plan_Subquery_ProducesSubqueryOperator()
     {
         TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement innerSelect = new(
             Columns: [new SelectAllColumns()],
@@ -246,7 +248,7 @@ public class QueryPlannerTests
     public void Plan_UnknownTable_Throws()
     {
         TableCatalog catalog = new();
-        QueryPlanner planner = new(catalog);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
 
         SelectStatement statement = new(
             Columns: [new SelectAllColumns()],
@@ -270,7 +272,7 @@ public class QueryPlannerTests
             catalog.RegisterProvider("csv", () => new CsvTableProvider());
             catalog.Register(new TableDescriptor("csv", "people", csvPath, new Dictionary<string, string>()));
 
-            QueryPlanner planner = new(catalog);
+            QueryPlanner planner = new(catalog, DefaultFunctions);
 
             // SELECT * FROM people WHERE age > 28
             SelectStatement statement = new(
@@ -317,7 +319,7 @@ public class QueryPlannerTests
             catalog.RegisterProvider("csv", () => new CsvTableProvider());
             catalog.Register(new TableDescriptor("csv", "data", csvPath, new Dictionary<string, string>()));
 
-            QueryPlanner planner = new(catalog);
+            QueryPlanner planner = new(catalog, DefaultFunctions);
 
             // SELECT * FROM data ORDER BY val ASC LIMIT 3
             SelectStatement statement = new(

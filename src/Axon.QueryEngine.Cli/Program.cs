@@ -141,12 +141,13 @@ static TableDescriptor ParseSourceDefinition(string source)
 
 static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog catalog)
 {
-    QueryPlanner planner = new(catalog);
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry);
     IQueryOperator plan = planner.Plan(statement);
 
     ExecutionContext context = new(
         CancellationToken.None,
-        FunctionRegistry.CreateDefault(),
+        functionRegistry,
         catalog);
 
     ProgressReporter progress = new();
@@ -202,12 +203,13 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
 
 static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog catalog, int limit)
 {
-    QueryPlanner planner = new(catalog);
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry);
     IQueryOperator plan = planner.Plan(statement);
 
     ExecutionContext context = new(
         CancellationToken.None,
-        FunctionRegistry.CreateDefault(),
+        functionRegistry,
         catalog);
 
     int count = 0;
@@ -236,12 +238,13 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
 
 static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog catalog)
 {
-    QueryPlanner planner = new(catalog);
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry);
     IQueryOperator plan = planner.Plan(statement);
 
     ExecutionContext context = new(
         CancellationToken.None,
-        FunctionRegistry.CreateDefault(),
+        functionRegistry,
         catalog);
 
     StatisticsCollector collector = new();
@@ -275,7 +278,8 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
 
 static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog catalog, bool analyze)
 {
-    QueryPlanner planner = new(catalog);
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry);
     IQueryOperator plan = planner.Plan(statement);
 
     // Build the static explain plan from the original operator tree.
@@ -288,7 +292,7 @@ static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog c
 
         ExecutionContext context = new(
             CancellationToken.None,
-            FunctionRegistry.CreateDefault(),
+            functionRegistry,
             catalog);
 
         // Consume all rows to collect timing.
@@ -305,12 +309,13 @@ static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog c
 
 static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog catalog, string? outputPath)
 {
-    QueryPlanner planner = new(catalog);
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry);
     IQueryOperator plan = planner.Plan(statement);
 
     ExecutionContext context = new(
         CancellationToken.None,
-        FunctionRegistry.CreateDefault(),
+        functionRegistry,
         catalog);
 
     StatisticsCollector collector = new();
