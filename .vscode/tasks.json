@@ -1,0 +1,22 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Pack NuGet (Local)",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"pack",
+				"src/Axon.QueryEngine/Axon.QueryEngine.csproj",
+				"-c",
+				"Release",
+				"-o",
+				"${env:USERPROFILE}/.nuget/local"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		}
+	]
+}

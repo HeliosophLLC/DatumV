@@ -8,6 +8,10 @@
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsTrimmable>true</IsTrimmable>
+    <IsPackable>true</IsPackable>
+    <PackageId>Axon.QueryEngine</PackageId>
+    <Version>0.1.0</Version>
+    <Description>High-performance dataset query engine for ML ETL pipelines.</Description>
   </PropertyGroup>
 
   <ItemGroup>
