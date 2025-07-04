@@ -15,6 +15,8 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     private double _max = double.NegativeInfinity;
     private double _mean;
     private double _m2; // Sum of squared deviations from the mean (for Welford's)
+    private double _m3; // Third central moment accumulator (for skewness)
+    private double _m4; // Fourth central moment accumulator (for kurtosis)
 
     /// <summary>Gets the number of numeric values observed.</summary>
     public long Count => _count;
@@ -33,6 +35,12 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 
     /// <summary>Gets the population standard deviation.</summary>
     public double StandardDeviation => Math.Sqrt(Variance);
+
+    /// <summary>Gets the skewness (third standardized moment). Zero when count &lt; 3 or variance is zero.</summary>
+    public double Skewness => _count > 2 && _m2 > 0 ? Math.Sqrt((double)_count) * _m3 / Math.Pow(_m2, 1.5) : 0.0;
+
+    /// <summary>Gets the kurtosis (fourth standardized moment). Zero when count &lt; 4 or variance is zero.</summary>
+    public double Kurtosis => _count > 3 && _m2 > 0 ? (double)_count * _m4 / (_m2 * _m2) : 0.0;
 
     /// <inheritdoc />
     public void Add(DataValue value)
@@ -71,11 +79,17 @@ public sealed class NumericAccumulator : IStatisticAccumulator
             _max = numericValue;
         }
 
-        // Welford's online algorithm for mean and variance
+        // Welford's online algorithm extended to higher moments (Terriberry 2008)
         double delta = numericValue - _mean;
-        _mean += delta / _count;
-        double delta2 = numericValue - _mean;
-        _m2 += delta * delta2;
+        double deltaN = delta / _count;
+        double deltaN2 = deltaN * deltaN;
+        double term1 = delta * deltaN * (_count - 1);
+
+        _m4 += term1 * deltaN2 * ((double)_count * _count - 3.0 * _count + 3.0)
+             + 6.0 * deltaN2 * _m2 - 4.0 * deltaN * _m3;
+        _m3 += term1 * deltaN * (_count - 2) - 3.0 * deltaN * _m2;
+        _m2 += term1;
+        _mean += deltaN;
 
         // Z-score outlier detection: |x - mean| / stddev > 3
         if (_count >= 2)
@@ -109,18 +123,38 @@ public sealed class NumericAccumulator : IStatisticAccumulator
             _max = otherNumeric._max;
             _mean = otherNumeric._mean;
             _m2 = otherNumeric._m2;
+            _m3 = otherNumeric._m3;
+            _m4 = otherNumeric._m4;
             return;
         }
 
-        // Parallel Welford merge (Chan et al.)
+        // Parallel merge of central moments (Pébay 2008)
         long combinedCount = _count + otherNumeric._count;
         double delta = otherNumeric._mean - _mean;
-        double combinedMean = _mean + delta * otherNumeric._count / combinedCount;
-        double combinedM2 = _m2 + otherNumeric._m2 + delta * delta * _count * otherNumeric._count / combinedCount;
+        double delta2 = delta * delta;
+        double delta3 = delta2 * delta;
+        double delta4 = delta2 * delta2;
+        double nA = _count;
+        double nB = otherNumeric._count;
+        double nCombined = combinedCount;
+
+        double combinedM4 = _m4 + otherNumeric._m4
+            + delta4 * nA * nB * (nA * nA - nA * nB + nB * nB) / (nCombined * nCombined * nCombined)
+            + 6.0 * delta2 * (nA * nA * otherNumeric._m2 + nB * nB * _m2) / (nCombined * nCombined)
+            + 4.0 * delta * (nA * otherNumeric._m3 - nB * _m3) / nCombined;
+
+        double combinedM3 = _m3 + otherNumeric._m3
+            + delta3 * nA * nB * (nA - nB) / (nCombined * nCombined)
+            + 3.0 * delta * (nA * otherNumeric._m2 - nB * _m2) / nCombined;
+
+        double combinedMean = _mean + delta * nB / nCombined;
+        double combinedM2 = _m2 + otherNumeric._m2 + delta2 * nA * nB / nCombined;
 
         _count = combinedCount;
         _mean = combinedMean;
         _m2 = combinedM2;
+        _m3 = combinedM3;
+        _m4 = combinedM4;
         _zeroCount += otherNumeric._zeroCount;
         _outlierCount += otherNumeric._outlierCount;
         _min = Math.Min(_min, otherNumeric._min);
@@ -133,7 +167,8 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         double zeroRatio = _count > 0 ? (double)_zeroCount / _count : 0.0;
         double outlierRatio = _count > 0 ? (double)_outlierCount / _count : 0.0;
         return new StatisticResult("numeric", new NumericResult(
-            _count, Min, Max, Mean, Variance, StandardDeviation, _zeroCount, zeroRatio, _outlierCount, outlierRatio));
+            _count, Min, Max, Mean, Variance, StandardDeviation, Skewness, Kurtosis,
+            _zeroCount, zeroRatio, _outlierCount, outlierRatio));
     }
 }
 
@@ -146,8 +181,10 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 /// <param name="Mean">Arithmetic mean.</param>
 /// <param name="Variance">Population variance.</param>
 /// <param name="StandardDeviation">Population standard deviation.</param>
+/// <param name="Skewness">Skewness (third standardized moment). Positive indicates right-skewed distribution.</param>
+/// <param name="Kurtosis">Kurtosis (fourth standardized moment). Normal distribution yields approximately 3.</param>
 /// <param name="ZeroCount">Number of values exactly equal to zero.</param>
 /// <param name="ZeroRatio">Ratio of zero values to total count.</param>
 /// <param name="OutlierCount">Number of values with Z-score greater than 3.</param>
 /// <param name="OutlierRatio">Ratio of outlier values to total count.</param>
-public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio);
+public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, double Skewness, double Kurtosis, long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio);

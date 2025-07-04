@@ -87,6 +87,12 @@ public sealed class NumericFeatureManifest : FeatureManifest
     /// <summary>Gets the population standard deviation.</summary>
     public required double StandardDeviation { get; init; }
 
+    /// <summary>Gets the skewness (third standardized moment). Positive indicates right-skewed distribution.</summary>
+    public required double Skewness { get; init; }
+
+    /// <summary>Gets the kurtosis (fourth standardized moment). Normal distribution yields approximately 3.</summary>
+    public required double Kurtosis { get; init; }
+
     /// <summary>Gets the histogram data.</summary>
     public required HistogramData Histogram { get; init; }
 
