@@ -722,6 +722,7 @@ The `stats` command collects per-column statistics:
 | Rank range (dimensionality) | VectorStatsAccumulator | Vector, Matrix, Tensor |
 | Zero element count, Zero element ratio, Zero vector count | VectorStatsAccumulator | Vector, Matrix, Tensor |
 | Width/Height range, channel distribution | ImageStatsAccumulator | Image (header-only parsing) |
+| Orientation distribution (landscape/portrait/square) | ImageStatsAccumulator | Image |
 | Megapixel distribution (min/max/mean/var/std) | ImageStatsAccumulator | Image |
 | Aspect ratio min/max/mean/std | ImageStatsAccumulator | Image |
 | File size min/max/mean/var/std | ImageStatsAccumulator | Image |
@@ -785,7 +786,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 | String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
 | Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
 | Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
-| Image | `ImageFeatureManifest` | width/height ranges, channelCounts, undecodableCount, fileSizeStats, megapixelStats, aspectRatioStats |
+| Image | `ImageFeatureManifest` | width/height ranges, channelCounts, orientationCounts, undecodableCount, fileSizeStats, megapixelStats, aspectRatioStats |
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
 
@@ -838,6 +839,7 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
       "minHeight": 96,
       "maxHeight": 3072,
       "channelCounts": { "3": 4950, "4": 50 },
+      "orientationCounts": { "landscape": 3100, "portrait": 1700, "square": 200 },
       "undecodableCount": 0,
       "fileSizeStats": { "count": 5000, "min": 5234, "max": 2456789, "mean": 178234.5, ... },
       "megapixelStats": { "count": 5000, "min": 0.012, "max": 12.58, "mean": 2.15, "variance": 3.42, "standardDeviation": 1.85 },

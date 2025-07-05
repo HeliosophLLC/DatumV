@@ -263,6 +263,9 @@ public sealed class ImageFeatureManifest : FeatureManifest
     /// <summary>Gets the distribution of channel counts (key = channels, value = image count).</summary>
     public required IReadOnlyDictionary<int, long> ChannelCounts { get; init; }
 
+    /// <summary>Gets the distribution of image orientations (landscape, portrait, square).</summary>
+    public required IReadOnlyDictionary<string, long> OrientationCounts { get; init; }
+
     /// <summary>Gets the number of images whose format could not be identified.</summary>
     public required long UndecodableCount { get; init; }
 

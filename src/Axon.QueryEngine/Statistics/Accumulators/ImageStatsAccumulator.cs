@@ -19,6 +19,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private int _minHeight = int.MaxValue;
     private int _maxHeight = int.MinValue;
     private readonly Dictionary<int, long> _channelCounts = new();
+    private readonly Dictionary<string, long> _orientationCounts = new();
     private long _undecodableCount;
 
     // File size Welford accumulators
@@ -126,6 +127,20 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _channelCounts[dimensions.Channels] = 1;
         }
 
+        // Track orientation
+        string orientation = dimensions.Width > dimensions.Height ? "landscape"
+                           : dimensions.Height > dimensions.Width ? "portrait"
+                           : "square";
+
+        if (_orientationCounts.TryGetValue(orientation, out long orientationCount))
+        {
+            _orientationCounts[orientation] = orientationCount + 1;
+        }
+        else
+        {
+            _orientationCounts[orientation] = 1;
+        }
+
         // Track megapixel count
         double megapixels = (double)dimensions.Width * dimensions.Height / 1_000_000.0;
         _megapixelCount++;
@@ -225,6 +240,11 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
                 _channelCounts[entry.Key] = entry.Value;
             }
 
+            foreach (KeyValuePair<string, long> entry in otherImage._orientationCounts)
+            {
+                _orientationCounts[entry.Key] = entry.Value;
+            }
+
             return;
         }
 
@@ -245,6 +265,19 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             else
             {
                 _channelCounts[entry.Key] = entry.Value;
+            }
+        }
+
+        // Merge orientation counts
+        foreach (KeyValuePair<string, long> entry in otherImage._orientationCounts)
+        {
+            if (_orientationCounts.TryGetValue(entry.Key, out long existingOrientation))
+            {
+                _orientationCounts[entry.Key] = existingOrientation + entry.Value;
+            }
+            else
+            {
+                _orientationCounts[entry.Key] = entry.Value;
             }
         }
 
@@ -318,6 +351,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             decodedCount > 0 ? _minHeight : 0,
             decodedCount > 0 ? _maxHeight : 0,
             new Dictionary<int, long>(_channelCounts),
+            new Dictionary<string, long>(_orientationCounts),
             _undecodableCount,
             new NumericSummary(
                 _sizeCount,
@@ -400,6 +434,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
 /// <param name="MinHeight">Minimum image height.</param>
 /// <param name="MaxHeight">Maximum image height.</param>
 /// <param name="ChannelCounts">Distribution of channel counts (key=channels, value=count).</param>
+/// <param name="OrientationCounts">Distribution of image orientations (landscape, portrait, square).</param>
 /// <param name="UndecodableCount">Number of images whose headers could not be parsed.</param>
 /// <param name="FileSizeStats">Aggregate file size statistics in bytes.</param>
 /// <param name="MegapixelStats">Summary statistics (min, max, mean, variance, stdDev) for megapixel counts (width × height / 1,000,000).</param>
@@ -412,6 +447,7 @@ public sealed record ImageStatsResult(
     int MinHeight,
     int MaxHeight,
     IReadOnlyDictionary<int, long> ChannelCounts,
+    IReadOnlyDictionary<string, long> OrientationCounts,
     long UndecodableCount,
     NumericSummary FileSizeStats,
     NumericSummary MegapixelStats,

@@ -471,4 +471,53 @@ public sealed class ImageStatsAccumulatorTests
 
         Assert.Equal(0, result.MegapixelStats.Count);
     }
+
+    [Fact]
+    public void Add_MixedOrientations_TracksDistribution()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // landscape
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3)));  // portrait
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));  // square
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // landscape
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(2, result.OrientationCounts["landscape"]);
+        Assert.Equal(1, result.OrientationCounts["portrait"]);
+        Assert.Equal(1, result.OrientationCounts["square"]);
+    }
+
+    [Fact]
+    public void Merge_TwoAccumulators_CombinesOrientationCounts()
+    {
+        ImageStatsAccumulator first = new();
+        ImageStatsAccumulator second = new();
+
+        first.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // landscape
+        first.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));  // square
+        second.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3))); // portrait
+        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // landscape
+
+        first.Merge(second);
+
+        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
+
+        Assert.Equal(2, result.OrientationCounts["landscape"]);
+        Assert.Equal(1, result.OrientationCounts["portrait"]);
+        Assert.Equal(1, result.OrientationCounts["square"]);
+    }
+
+    [Fact]
+    public void Add_UndecodableImages_NoOrientationContribution()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Empty(result.OrientationCounts);
+    }
 }
