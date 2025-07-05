@@ -213,6 +213,24 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.IfNullFunction());
         registry.RegisterScalar(new Math.RandomFunction());
 
+        // Image — Metadata
+        registry.RegisterScalar(new Image.ImageWidthFunction());
+        registry.RegisterScalar(new Image.ImageHeightFunction());
+        registry.RegisterScalar(new Image.ImageChannelsFunction());
+        registry.RegisterScalar(new Image.ImagePixelCountFunction());
+        registry.RegisterScalar(new Image.ImageDimensionsFunction());
+
+        // Image — Decode
+        registry.RegisterScalar(new Image.DecodeImageFunction());
+
+        // Image — Transforms
+        registry.RegisterScalar(new Image.ResizeImageFunction());
+        registry.RegisterScalar(new Image.CropImageFunction());
+        registry.RegisterScalar(new Image.GrayscaleImageFunction());
+        registry.RegisterScalar(new Image.RotateImageFunction());
+        registry.RegisterScalar(new Image.NoiseImageFunction());
+        registry.RegisterScalar(new Image.BlurImageFunction());
+
         // Table-valued
         registry.RegisterTableValued(new TableValued.UnnestFunction());
         registry.RegisterTableValued(new TableValued.RangeFunction());

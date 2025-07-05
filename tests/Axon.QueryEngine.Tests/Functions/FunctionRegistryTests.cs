@@ -17,8 +17,11 @@ public class FunctionRegistryTests
             "normalize", "clamp", "denormalize", "reshape",
             "len", "mid", "substring",
             "get_filename", "get_file_extension", "get_path",
-            "cast",
+            "cast", "to_epoch", "date_part", "cyclical_encode",
             "json_value", "json_query", "json_exists", "json_array_length",
+            "width", "height", "channels", "pixel_count", "dimensions",
+            "decode_image",
+            "resize", "crop", "grayscale", "rotate", "noise", "blur",
         ];
 
         foreach (string name in expectedNames)

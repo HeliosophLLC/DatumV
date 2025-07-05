@@ -435,6 +435,14 @@ SELECT vec_slice(embedding, 0, 128) AS half, vec_sort(scores) FROM data
 
 -- Utility
 SELECT coalesce(primary_score, fallback_score) AS score FROM results
+
+-- Image preprocessing pipeline
+SELECT resize(file_bytes, 224, 224) AS img, label FROM images
+SELECT decode_image(resize(file_bytes, 224, 224)) AS pixels FROM images
+SELECT width(file_bytes) AS w, height(file_bytes) AS h FROM images WHERE pixel_count(file_bytes) > 1000000
+
+-- Image augmentation
+SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_images
 ```
 
 ### Math — Basic Arithmetic (8)
@@ -586,6 +594,35 @@ SELECT coalesce(primary_score, fallback_score) AS score FROM results
 | `is_finite` | `is_finite(x)` | Returns 1 if finite, 0 if NaN or infinite. |
 | `if_null` | `if_null(x, default)` | Returns x if not null, otherwise default. |
 | `random` | `random()` | Random float in [0, 1). |
+
+### Image — Metadata (5)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `width` | `width(img)` | Image width in pixels (header-only, no full decode). |
+| `height` | `height(img)` | Image height in pixels (header-only). |
+| `channels` | `channels(img)` | Number of color channels (header-only). |
+| `pixel_count` | `pixel_count(img)` | Total pixel count (width × height, header-only). |
+| `dimensions` | `dimensions(img, format)` | Dimension vector in specified format: `'HWC'`, `'CHW'`, `'WH'`, or `'WHC'`. |
+
+### Image — Decode (1)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `decode_image` | `decode_image(img)` | Decode to [H, W, 4] RGBA float tensor (values 0–255). |
+
+### Image — Transforms (6)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `resize` | `resize(img, w, h[, fmt])` | Resize image to target width/height. |
+| `crop` | `crop(img, x, y, w, h[, fmt])` | Crop rectangular region. |
+| `grayscale` | `grayscale(img[, fmt])` | Convert to grayscale (BT.601 luminance). |
+| `rotate` | `rotate(img, degrees[, fmt])` | Rotate by arbitrary angle. Canvas expands for non-90° rotations. |
+| `noise` | `noise(img, type, val[, fmt])` | Add noise. Type: `'gaussian'` (val=stddev) or `'salt_pepper'` (val=ratio). |
+| `blur` | `blur(img, radius[, fmt])` | Gaussian blur with the given sigma radius. |
+
+> All transform functions accept an optional trailing `fmt` argument (`'jpeg'`, `'png'`, `'webp'`) to control output encoding. Default preserves the original format.
 
 ## Data Providers
 
@@ -755,7 +792,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `estimatedDistinctCount`, `isConstant`, `isNearConstant`, `topKValues`, `dominantValueRatio`, `nullRatio`, `missingRuns`, `entropy`, `entropyApproximate`.
 
 | Derived Flag | Definition | Purpose |
-|--------------|------------|---------|
+|--------------|------------|--------|
 | `isConstant` | `estimatedDistinctCount <= 1` | Constant columns carry no information and break many model types. |
 | `isNearConstant` | `dominantValueRatio > 0.98` | A single value dominates more than 98 % of rows — the column is likely a useless feature. |
 

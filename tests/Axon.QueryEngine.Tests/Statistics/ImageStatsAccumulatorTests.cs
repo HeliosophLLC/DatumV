@@ -1,5 +1,6 @@
 namespace Axon.QueryEngine.Tests.Statistics;
 
+using Axon.QueryEngine.Functions.Image;
 using Axon.QueryEngine.Model;
 using Axon.QueryEngine.Statistics;
 using Axon.QueryEngine.Statistics.Accumulators;
@@ -81,7 +82,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] jpeg = MakeJpegHeader(640, 480, 3);
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(jpeg);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(jpeg);
 
         Assert.NotNull(dims);
         Assert.Equal(640, dims.Width);
@@ -94,7 +95,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] jpeg = MakeJpegHeader(320, 240, 1);
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(jpeg);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(jpeg);
 
         Assert.NotNull(dims);
         Assert.Equal(320, dims.Width);
@@ -107,7 +108,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] png = MakePngHeader(1920, 1080, 2); // color type 2 = RGB
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(png);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(png);
 
         Assert.NotNull(dims);
         Assert.Equal(1920, dims.Width);
@@ -120,7 +121,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] png = MakePngHeader(256, 256, 6); // color type 6 = RGBA
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(png);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(png);
 
         Assert.NotNull(dims);
         Assert.Equal(256, dims.Width);
@@ -133,7 +134,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] png = MakePngHeader(64, 64, 0); // color type 0 = Grayscale
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(png);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(png);
 
         Assert.NotNull(dims);
         Assert.Equal(1, dims.Channels);
@@ -144,7 +145,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] garbage = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09];
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(garbage);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(garbage);
 
         Assert.Null(dims);
     }
@@ -154,7 +155,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         byte[] tiny = [0xFF, 0xD8];
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(tiny);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(tiny);
 
         Assert.Null(dims);
     }
@@ -413,7 +414,7 @@ public sealed class ImageStatsAccumulatorTests
         data[28] = 0x00; // width low byte = 768
         data[29] = 0x03; // 3 channels
 
-        ImageDimensions? dims = ImageStatsAccumulator.TryParseHeader(data);
+        ImageDimensions? dims = ImageHeaderParser.TryParseHeader(data);
 
         Assert.NotNull(dims);
         Assert.Equal(768, dims.Width);
