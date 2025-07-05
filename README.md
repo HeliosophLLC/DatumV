@@ -537,10 +537,11 @@ SELECT coalesce(primary_score, fallback_score) AS score FROM results
 | `vec_all` | `vec_all(x)` | 1 if all elements are non-zero, else 0. |
 | `vec_product` | `vec_product(x)` | Product of all elements → Scalar. |
 
-### Math — Vector Manipulation (10)
+### Math — Vector Manipulation (11)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `vec` | `vec(a, b, ...)` | Construct a vector from scalars and/or vectors. Scalars contribute one element; vectors are flattened in order. |
 | `vec_slice` | `vec_slice(vec, start, len)` | Extract sub-vector by position and length. |
 | `vec_concat` | `vec_concat(v1, v2, ...)` | Concatenate two or more vectors. |
 | `vec_reverse` | `vec_reverse(vec)` | Reverse element order. |
