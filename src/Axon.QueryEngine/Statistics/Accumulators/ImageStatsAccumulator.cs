@@ -481,4 +481,12 @@ public sealed record ImageStatsResult(
     NumericSummary FileSizeStats,
     NumericSummary MegapixelStats,
     NumericSummary AspectRatioStats,
-    HistogramResult? AspectRatioHistogram);
+    HistogramResult? AspectRatioHistogram)
+{
+    /// <summary>An empty result with zero counts and NaN for all numeric summaries.</summary>
+    public static ImageStatsResult Empty { get; } = new(
+        0, 0, 0, 0, 0,
+        new Dictionary<int, long>(), new Dictionary<string, long>(),
+        0, 0, 0,
+        NumericSummary.Empty, NumericSummary.Empty, NumericSummary.Empty, null);
+}

@@ -187,4 +187,8 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 /// <param name="ZeroRatio">Ratio of zero values to total count.</param>
 /// <param name="OutlierCount">Number of values with Z-score greater than 3.</param>
 /// <param name="OutlierRatio">Ratio of outlier values to total count.</param>
-public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, double Skewness, double Kurtosis, long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio);
+public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, double Skewness, double Kurtosis, long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio)
+{
+    /// <summary>An empty result with zero counts and NaN for all numeric fields.</summary>
+    public static NumericResult Empty { get; } = new(0, double.NaN, double.NaN, double.NaN, 0, 0, 0, 0, 0, 0, 0, 0);
+}

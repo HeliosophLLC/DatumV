@@ -102,9 +102,9 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         NumericResult numericResult = GetResultValue<NumericResult>(stats, "numeric") ??
-                                     new NumericResult(0, double.NaN, double.NaN, double.NaN, 0, 0, 0, 0, 0, 0, 0, 0);
+                                     NumericResult.Empty;
         HistogramResult histogramResult = GetResultValue<HistogramResult>(stats, "histogram") ??
-                                          new HistogramResult([], []);
+                                          HistogramResult.Empty;
         QuantileResult? quantileResult = GetResultValue<QuantileResult>(stats, "quantile");
 
         return new NumericFeatureManifest
@@ -147,7 +147,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         StringLengthResult stringResult = GetResultValue<StringLengthResult>(stats, "string_length") ??
-                                          new StringLengthResult(0, 0, 0);
+                                          StringLengthResult.Empty;
 
         return new StringFeatureManifest
         {
@@ -235,10 +235,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         ImageStatsResult imageResult = GetResultValue<ImageStatsResult>(stats, "image_stats") ??
-                                       new ImageStatsResult(0, 0, 0, 0, 0, new Dictionary<int, long>(), new Dictionary<string, long>(), 0, 0, 0,
-                                           new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
-                                           new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
-                                           new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), null);
+                                       ImageStatsResult.Empty;
 
         return new ImageFeatureManifest
         {
@@ -279,7 +276,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         BinarySizeResult binaryResult = GetResultValue<BinarySizeResult>(stats, "binary_size") ??
-                                        new BinarySizeResult(new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0));
+                                        BinarySizeResult.Empty;
 
         return new BinaryFeatureManifest
         {
@@ -302,7 +299,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult, ColumnStatistics stats)
     {
         TemporalRangeResult temporalResult = GetResultValue<TemporalRangeResult>(stats, "temporal_range") ??
-                                              new TemporalRangeResult(null, null);
+                                              TemporalRangeResult.Empty;
 
         return new TemporalFeatureManifest
         {

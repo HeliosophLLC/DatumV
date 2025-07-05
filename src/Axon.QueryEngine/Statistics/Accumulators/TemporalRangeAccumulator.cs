@@ -124,4 +124,8 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
 /// </summary>
 /// <param name="Earliest">ISO 8601 string of the earliest value, or null if no values observed.</param>
 /// <param name="Latest">ISO 8601 string of the latest value, or null if no values observed.</param>
-public sealed record TemporalRangeResult(string? Earliest, string? Latest);
+public sealed record TemporalRangeResult(string? Earliest, string? Latest)
+{
+    /// <summary>An empty result with no earliest or latest value.</summary>
+    public static TemporalRangeResult Empty { get; } = new(null, null);
+}

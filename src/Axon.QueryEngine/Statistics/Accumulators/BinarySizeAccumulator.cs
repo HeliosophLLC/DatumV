@@ -95,4 +95,8 @@ public sealed class BinarySizeAccumulator : IStatisticAccumulator
 /// Contains binary size accumulation results.
 /// </summary>
 /// <param name="SizeStats">Byte-length statistics for binary values.</param>
-public sealed record BinarySizeResult(NumericSummary SizeStats);
+public sealed record BinarySizeResult(NumericSummary SizeStats)
+{
+    /// <summary>An empty result with no size data.</summary>
+    public static BinarySizeResult Empty { get; } = new(NumericSummary.Empty);
+}

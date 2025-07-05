@@ -244,7 +244,11 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
 /// <param name="Variance">Population variance.</param>
 /// <param name="StandardDeviation">Population standard deviation.</param>
 public sealed record NumericSummary(
-    long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation);
+    long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation)
+{
+    /// <summary>An empty summary with zero count and NaN for all numeric fields.</summary>
+    public static NumericSummary Empty { get; } = new(0, double.NaN, double.NaN, double.NaN, 0, 0);
+}
 
 /// <summary>
 /// Contains vector/matrix/tensor statistics.
@@ -278,6 +282,6 @@ public sealed record VectorStatsResult(
     /// <summary>An empty result with zero counts and NaN for all numeric summaries.</summary>
     public static VectorStatsResult Empty { get; } = new(
         0, 0, 0, 0, 0,
-        new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
+        NumericSummary.Empty,
         0, 0, 0, double.NaN, double.NaN, double.NaN);
 }

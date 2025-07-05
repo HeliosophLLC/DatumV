@@ -156,4 +156,8 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 /// </summary>
 /// <param name="BinEdges">Edge values defining the bins (length = bin count + 1).</param>
 /// <param name="Counts">Number of values in each bin (length = bin count).</param>
-public sealed record HistogramResult(IReadOnlyList<double> BinEdges, IReadOnlyList<long> Counts);
+public sealed record HistogramResult(IReadOnlyList<double> BinEdges, IReadOnlyList<long> Counts)
+{
+    /// <summary>An empty histogram with no bins.</summary>
+    public static HistogramResult Empty { get; } = new([], []);
+}

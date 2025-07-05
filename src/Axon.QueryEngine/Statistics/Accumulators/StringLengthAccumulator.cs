@@ -83,4 +83,8 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
 /// <param name="Count">Number of string values processed.</param>
 /// <param name="MinLength">Shortest string length.</param>
 /// <param name="MaxLength">Longest string length.</param>
-public sealed record StringLengthResult(long Count, int MinLength, int MaxLength);
+public sealed record StringLengthResult(long Count, int MinLength, int MaxLength)
+{
+    /// <summary>An empty result with zero count and zero lengths.</summary>
+    public static StringLengthResult Empty { get; } = new(0, 0, 0);
+}
