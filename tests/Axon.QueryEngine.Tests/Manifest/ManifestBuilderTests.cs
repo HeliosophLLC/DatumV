@@ -446,6 +446,88 @@ public sealed class ManifestBuilderTests
         Assert.Null(feature.DominantValueRatio);
     }
 
+    [Fact]
+    public void Build_NearConstantColumn_IsNearConstantTrue()
+    {
+        StatisticsCollector collector = new();
+
+        for (int i = 0; i < 99; i++)
+        {
+            collector.AddRow(MakeRow("status", DataValue.FromString("active")));
+        }
+
+        collector.AddRow(MakeRow("status", DataValue.FromString("inactive")));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["status"] = DataKind.String };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 100);
+
+        StringFeatureManifest feature = Assert.IsType<StringFeatureManifest>(manifest.Features[0]);
+        Assert.True(feature.IsNearConstant);
+    }
+
+    [Fact]
+    public void Build_UniformColumn_IsNearConstantFalse()
+    {
+        StatisticsCollector collector = new();
+
+        for (int i = 0; i < 20; i++)
+        {
+            collector.AddRow(MakeRow("cat", DataValue.FromString("A")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("B")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("C")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("D")));
+            collector.AddRow(MakeRow("cat", DataValue.FromString("E")));
+        }
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["cat"] = DataKind.String };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 100);
+
+        StringFeatureManifest feature = Assert.IsType<StringFeatureManifest>(manifest.Features[0]);
+        Assert.False(feature.IsNearConstant);
+    }
+
+    [Fact]
+    public void Build_ZeroRows_IsNearConstantFalse()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
+
+        NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
+        Assert.False(feature.IsNearConstant);
+    }
+
+    [Fact]
+    public void Build_BoundaryRatio_IsNearConstantFalse()
+    {
+        StatisticsCollector collector = new();
+
+        // 98 of one value + 2 of another in 100 rows = exactly 0.98 ratio
+        for (int i = 0; i < 98; i++)
+        {
+            collector.AddRow(MakeRow("flag", DataValue.FromString("yes")));
+        }
+
+        collector.AddRow(MakeRow("flag", DataValue.FromString("no")));
+        collector.AddRow(MakeRow("flag", DataValue.FromString("no")));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.String };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 100);
+
+        StringFeatureManifest feature = Assert.IsType<StringFeatureManifest>(manifest.Features[0]);
+        Assert.False(feature.IsNearConstant);
+    }
+
     private static Row MakeRow(string columnName, DataValue value)
     {
         return new Row([columnName], [value]);

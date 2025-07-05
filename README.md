@@ -679,7 +679,12 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
 
-All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `estimatedDistinctCount`, `topKValues`, `dominantValueRatio`, `entropy`, `entropyApproximate`.
+All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `estimatedDistinctCount`, `isConstant`, `isNearConstant`, `topKValues`, `dominantValueRatio`, `nullRatio`, `missingRuns`, `entropy`, `entropyApproximate`.
+
+| Derived Flag | Definition | Purpose |
+|--------------|------------|---------|
+| `isConstant` | `estimatedDistinctCount <= 1` | Constant columns carry no information and break many model types. |
+| `isNearConstant` | `dominantValueRatio > 0.98` | A single value dominates more than 98 % of rows — the column is likely a useless feature. |
 
 ### Example output
 
@@ -705,6 +710,8 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
       "quantiles": { "p01": 1.0, "p05": 29097.5, "p25": 145371.8, "p50": 291485.3, "p75": 436598.8, "p95": 553881.1, "p99": 581929.0 },
       "entropy": 11.2,
       "entropyApproximate": false,
+      "isConstant": false,
+      "isNearConstant": false,
       "dominantValueRatio": 0.0002,
       "topKValues": []
     },

@@ -47,6 +47,14 @@ public abstract class FeatureManifest
     /// <summary>Gets whether the column contains at most one distinct value.</summary>
     public bool IsConstant => EstimatedDistinctCount <= 1;
 
+    /// <summary>
+    /// Gets whether the column is near-constant, meaning a single value dominates
+    /// more than 98% of rows. Uses a hard-coded threshold of 0.98 on
+    /// <see cref="DominantValueRatio"/>. Near-constant columns are typically
+    /// useless as features in machine learning models.
+    /// </summary>
+    public bool IsNearConstant => DominantValueRatio.HasValue && DominantValueRatio.Value > 0.98;
+
     /// <summary>Gets the top-K most frequent values.</summary>
     public required IReadOnlyList<FrequencyEntry> TopKValues { get; init; }
 
