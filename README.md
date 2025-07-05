@@ -726,6 +726,7 @@ The `stats` command collects per-column statistics:
 | Megapixel distribution (min/max/mean/var/std) | ImageStatsAccumulator | Image |
 | Aspect ratio min/max/mean/std | ImageStatsAccumulator | Image |
 | File size min/max/mean/var/std | ImageStatsAccumulator | Image |
+| Extreme dimension counts (tiny/huge) | ImageStatsAccumulator | Image |
 | Byte-length min/max/mean/var/std | BinarySizeAccumulator | UInt8Array |
 | Earliest/Latest date | TemporalRangeAccumulator | Date, DateTime |
 | Shannon entropy | EntropyAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
@@ -747,6 +748,18 @@ The `ImageStatsAccumulator` extracts dimensions and channel count from image hea
 | JPEG | SOF0/SOF2 marker → width, height, components |
 | PNG | IHDR chunk → width, height, color type → channels |
 | WebP | VP8/VP8L/VP8X → width, height, alpha flag → channels |
+
+### Extreme dimension detection
+
+Images with extreme dimensions are flagged for automatic dataset warnings:
+
+| Flag | Condition | Use case |
+|------|-----------|----------|
+| Tiny | width < 32 or height < 32 | Thumbnails, corrupted images, accidental micro-crops |
+| Huge | width > 4096 or height > 4096 | DSLR originals, unresized captures, memory-heavy outliers |
+
+Thresholds are defined as the `TinyThreshold` (32) and `HugeThreshold` (4096) constants on `ImageStatsAccumulator`. Only successfully decoded images are evaluated — undecodable images (unknown dimensions) are excluded from both counts.
+
 ### Column interactions
 
 The `manifest` command also computes pairwise interaction statistics between columns. Numeric (Scalar, UInt8) and categorical (String, JsonValue, Date, DateTime) columns receive value-based measures appropriate to their pair type. Image, binary, and multidimensional columns participate in missingness correlation only.
@@ -786,7 +799,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 | String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
 | Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
 | Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
-| Image | `ImageFeatureManifest` | width/height ranges, channelCounts, orientationCounts, undecodableCount, fileSizeStats, megapixelStats, aspectRatioStats |
+| Image | `ImageFeatureManifest` | width/height ranges, channelCounts, orientationCounts, undecodableCount, tinyImageCount, hugeImageCount, fileSizeStats, megapixelStats, aspectRatioStats |
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
 
@@ -841,6 +854,8 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
       "channelCounts": { "3": 4950, "4": 50 },
       "orientationCounts": { "landscape": 3100, "portrait": 1700, "square": 200 },
       "undecodableCount": 0,
+      "tinyImageCount": 0,
+      "hugeImageCount": 0,
       "fileSizeStats": { "count": 5000, "min": 5234, "max": 2456789, "mean": 178234.5, ... },
       "megapixelStats": { "count": 5000, "min": 0.012, "max": 12.58, "mean": 2.15, "variance": 3.42, "standardDeviation": 1.85 },
       "aspectRatioStats": { "count": 5000, "min": 0.5, "max": 3.1, "mean": 1.28, "variance": 0.048, "standardDeviation": 0.22 },

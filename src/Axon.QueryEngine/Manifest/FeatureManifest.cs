@@ -269,6 +269,12 @@ public sealed class ImageFeatureManifest : FeatureManifest
     /// <summary>Gets the number of images whose format could not be identified.</summary>
     public required long UndecodableCount { get; init; }
 
+    /// <summary>Gets the number of images with width or height below 32 pixels.</summary>
+    public required long TinyImageCount { get; init; }
+
+    /// <summary>Gets the number of images with width or height above 4096 pixels.</summary>
+    public required long HugeImageCount { get; init; }
+
     /// <summary>Gets file size statistics in bytes.</summary>
     public required NumericSummaryData FileSizeStats { get; init; }
 

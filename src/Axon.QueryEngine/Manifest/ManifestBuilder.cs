@@ -235,7 +235,7 @@ public static class ManifestBuilder
         IReadOnlyList<FrequencyEntry> topK, ColumnStatistics stats)
     {
         ImageStatsResult imageResult = GetResultValue<ImageStatsResult>(stats, "image_stats") ??
-                                       new ImageStatsResult(0, 0, 0, 0, 0, new Dictionary<int, long>(), new Dictionary<string, long>(), 0,
+                                       new ImageStatsResult(0, 0, 0, 0, 0, new Dictionary<int, long>(), new Dictionary<string, long>(), 0, 0, 0,
                                            new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
                                            new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
                                            new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), null);
@@ -259,6 +259,8 @@ public static class ManifestBuilder
             ChannelCounts = imageResult.ChannelCounts,
             OrientationCounts = imageResult.OrientationCounts,
             UndecodableCount = imageResult.UndecodableCount,
+            TinyImageCount = imageResult.TinyImageCount,
+            HugeImageCount = imageResult.HugeImageCount,
             FileSizeStats = ToSummaryData(imageResult.FileSizeStats),
             MegapixelStats = imageResult.MegapixelStats.Count > 0
                 ? ToSummaryData(imageResult.MegapixelStats)

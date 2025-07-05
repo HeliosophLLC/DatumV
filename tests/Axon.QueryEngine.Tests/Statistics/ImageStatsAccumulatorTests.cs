@@ -520,4 +520,69 @@ public sealed class ImageStatsAccumulatorTests
 
         Assert.Empty(result.OrientationCounts);
     }
+
+    [Fact]
+    public void Add_TinyImages_CountsCorrectly()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(16, 16, 3)));   // both dims < 32
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(31, 100, 3)));  // width < 32
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 20, 3)));  // height < 32
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3))); // normal
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(3, result.TinyImageCount);
+        Assert.Equal(0, result.HugeImageCount);
+    }
+
+    [Fact]
+    public void Add_HugeImages_CountsCorrectly()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(5000, 3000, 3))); // width > 4096
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(3000, 5000, 3))); // height > 4096
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));   // normal
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(2, result.HugeImageCount);
+        Assert.Equal(0, result.TinyImageCount);
+    }
+
+    [Fact]
+    public void Add_NormalImages_ZeroExtremeCounts()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(256, 256, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(0, result.TinyImageCount);
+        Assert.Equal(0, result.HugeImageCount);
+    }
+
+    [Fact]
+    public void Merge_TwoAccumulators_CombinesExtremeCounts()
+    {
+        ImageStatsAccumulator first = new();
+        ImageStatsAccumulator second = new();
+
+        first.Add(DataValue.FromImage(MakeJpegHeader(16, 16, 3)));    // tiny
+        first.Add(DataValue.FromImage(MakeJpegHeader(5000, 3000, 3))); // huge
+        second.Add(DataValue.FromImage(MakeJpegHeader(10, 10, 3)));   // tiny
+        second.Add(DataValue.FromImage(MakeJpegHeader(8000, 6000, 3))); // huge
+
+        first.Merge(second);
+
+        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
+
+        Assert.Equal(2, result.TinyImageCount);
+        Assert.Equal(2, result.HugeImageCount);
+    }
 }

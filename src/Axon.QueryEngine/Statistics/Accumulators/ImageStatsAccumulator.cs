@@ -13,6 +13,12 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private const int MaxAspectSamples = 100_000;
     private const int AspectBinCount = 20;
 
+    /// <summary>Width or height below this threshold flags an image as tiny.</summary>
+    internal const int TinyThreshold = 32;
+
+    /// <summary>Width or height above this threshold flags an image as huge.</summary>
+    internal const int HugeThreshold = 4096;
+
     private long _count;
     private int _minWidth = int.MaxValue;
     private int _maxWidth = int.MinValue;
@@ -21,6 +27,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private readonly Dictionary<int, long> _channelCounts = new();
     private readonly Dictionary<string, long> _orientationCounts = new();
     private long _undecodableCount;
+    private long _tinyImageCount;
+    private long _hugeImageCount;
 
     // File size Welford accumulators
     private long _sizeCount;
@@ -96,6 +104,17 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
         {
             _undecodableCount++;
             return;
+        }
+
+        // Track extreme dimensions
+        if (dimensions.Width < TinyThreshold || dimensions.Height < TinyThreshold)
+        {
+            _tinyImageCount++;
+        }
+
+        if (dimensions.Width > HugeThreshold || dimensions.Height > HugeThreshold)
+        {
+            _hugeImageCount++;
         }
 
         if (dimensions.Width < _minWidth)
@@ -217,6 +236,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _minHeight = otherImage._minHeight;
             _maxHeight = otherImage._maxHeight;
             _undecodableCount = otherImage._undecodableCount;
+            _tinyImageCount = otherImage._tinyImageCount;
+            _hugeImageCount = otherImage._hugeImageCount;
             _sizeCount = otherImage._sizeCount;
             _sizeMin = otherImage._sizeMin;
             _sizeMax = otherImage._sizeMax;
@@ -254,6 +275,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
         _minHeight = Math.Min(_minHeight, otherImage._minHeight);
         _maxHeight = Math.Max(_maxHeight, otherImage._maxHeight);
         _undecodableCount += otherImage._undecodableCount;
+        _tinyImageCount += otherImage._tinyImageCount;
+        _hugeImageCount += otherImage._hugeImageCount;
 
         // Merge channel counts
         foreach (KeyValuePair<int, long> entry in otherImage._channelCounts)
@@ -353,6 +376,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             new Dictionary<int, long>(_channelCounts),
             new Dictionary<string, long>(_orientationCounts),
             _undecodableCount,
+            _tinyImageCount,
+            _hugeImageCount,
             new NumericSummary(
                 _sizeCount,
                 _sizeCount > 0 ? _sizeMin : double.NaN,
@@ -436,6 +461,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
 /// <param name="ChannelCounts">Distribution of channel counts (key=channels, value=count).</param>
 /// <param name="OrientationCounts">Distribution of image orientations (landscape, portrait, square).</param>
 /// <param name="UndecodableCount">Number of images whose headers could not be parsed.</param>
+/// <param name="TinyImageCount">Number of images with width &lt; 32 or height &lt; 32 pixels.</param>
+/// <param name="HugeImageCount">Number of images with width &gt; 4096 or height &gt; 4096 pixels.</param>
 /// <param name="FileSizeStats">Aggregate file size statistics in bytes.</param>
 /// <param name="MegapixelStats">Summary statistics (min, max, mean, variance, stdDev) for megapixel counts (width × height / 1,000,000).</param>
 /// <param name="AspectRatioStats">Summary statistics (min, max, mean, variance, stdDev) for aspect ratios (width/height).</param>
@@ -449,6 +476,8 @@ public sealed record ImageStatsResult(
     IReadOnlyDictionary<int, long> ChannelCounts,
     IReadOnlyDictionary<string, long> OrientationCounts,
     long UndecodableCount,
+    long TinyImageCount,
+    long HugeImageCount,
     NumericSummary FileSizeStats,
     NumericSummary MegapixelStats,
     NumericSummary AspectRatioStats,
