@@ -27,6 +27,13 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private double _sizeMean;
     private double _sizeM2;
 
+    // Aspect ratio Welford accumulators
+    private long _aspectCount;
+    private double _aspectMin = double.PositiveInfinity;
+    private double _aspectMax = double.NegativeInfinity;
+    private double _aspectMean;
+    private double _aspectM2;
+
     // Aspect ratio reservoir sampling
     private readonly List<float> _aspectSamples = new();
     private readonly Random _aspectRandom = new(42);
@@ -115,6 +122,25 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
         if (dimensions.Height > 0)
         {
             float aspectRatio = (float)dimensions.Width / dimensions.Height;
+
+            // Track aspect ratio summary statistics
+            _aspectCount++;
+
+            if (aspectRatio < _aspectMin)
+            {
+                _aspectMin = aspectRatio;
+            }
+
+            if (aspectRatio > _aspectMax)
+            {
+                _aspectMax = aspectRatio;
+            }
+
+            double aspectDelta = aspectRatio - _aspectMean;
+            _aspectMean += aspectDelta / _aspectCount;
+            double aspectDelta2 = aspectRatio - _aspectMean;
+            _aspectM2 += aspectDelta * aspectDelta2;
+
             _aspectTotalCount++;
 
             if (_aspectSamples.Count < MaxAspectSamples)
@@ -154,6 +180,11 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _sizeMax = otherImage._sizeMax;
             _sizeMean = otherImage._sizeMean;
             _sizeM2 = otherImage._sizeM2;
+            _aspectCount = otherImage._aspectCount;
+            _aspectMin = otherImage._aspectMin;
+            _aspectMax = otherImage._aspectMax;
+            _aspectMean = otherImage._aspectMean;
+            _aspectM2 = otherImage._aspectM2;
             _aspectTotalCount = otherImage._aspectTotalCount;
             _aspectSamples.AddRange(otherImage._aspectSamples);
 
@@ -198,6 +229,19 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _sizeCount = combinedCount;
         }
 
+        // Parallel Welford merge for aspect ratio
+        if (otherImage._aspectCount > 0)
+        {
+            long combinedAspectCount = _aspectCount + otherImage._aspectCount;
+            double aspectDelta = otherImage._aspectMean - _aspectMean;
+            _aspectMean += aspectDelta * otherImage._aspectCount / combinedAspectCount;
+            _aspectM2 += otherImage._aspectM2 +
+                         aspectDelta * aspectDelta * _aspectCount * otherImage._aspectCount / combinedAspectCount;
+            _aspectMin = Math.Min(_aspectMin, otherImage._aspectMin);
+            _aspectMax = Math.Max(_aspectMax, otherImage._aspectMax);
+            _aspectCount = combinedAspectCount;
+        }
+
         // Merge aspect ratio samples
         _aspectTotalCount += otherImage._aspectTotalCount;
         _aspectSamples.AddRange(otherImage._aspectSamples);
@@ -218,6 +262,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     public StatisticResult GetResult()
     {
         double sizeVariance = _sizeCount > 1 ? _sizeM2 / _sizeCount : 0.0;
+        double aspectVariance = _aspectCount > 1 ? _aspectM2 / _aspectCount : 0.0;
         long decodedCount = _count - _undecodableCount;
 
         return new StatisticResult("image_stats", new ImageStatsResult(
@@ -235,6 +280,13 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
                 _sizeCount > 0 ? _sizeMean : double.NaN,
                 sizeVariance,
                 Math.Sqrt(sizeVariance)),
+            new NumericSummary(
+                _aspectCount,
+                _aspectCount > 0 ? _aspectMin : double.NaN,
+                _aspectCount > 0 ? _aspectMax : double.NaN,
+                _aspectCount > 0 ? _aspectMean : double.NaN,
+                aspectVariance,
+                Math.Sqrt(aspectVariance)),
             BuildAspectRatioHistogram()));
     }
 
@@ -505,6 +557,7 @@ public sealed record ImageDimensions(int Width, int Height, int Channels);
 /// <param name="ChannelCounts">Distribution of channel counts (key=channels, value=count).</param>
 /// <param name="UndecodableCount">Number of images whose headers could not be parsed.</param>
 /// <param name="FileSizeStats">Aggregate file size statistics in bytes.</param>
+/// <param name="AspectRatioStats">Summary statistics (min, max, mean, variance, stdDev) for aspect ratios (width/height).</param>
 /// <param name="AspectRatioHistogram">Optional histogram of aspect ratios.</param>
 public sealed record ImageStatsResult(
     long ImageCount,
@@ -515,4 +568,5 @@ public sealed record ImageStatsResult(
     IReadOnlyDictionary<int, long> ChannelCounts,
     long UndecodableCount,
     NumericSummary FileSizeStats,
+    NumericSummary AspectRatioStats,
     HistogramResult? AspectRatioHistogram);

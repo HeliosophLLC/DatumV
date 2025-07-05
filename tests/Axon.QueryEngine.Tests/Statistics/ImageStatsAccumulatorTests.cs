@@ -315,6 +315,7 @@ public sealed class ImageStatsAccumulatorTests
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
         Assert.Null(result.AspectRatioHistogram);
+        Assert.Equal(0, result.AspectRatioStats.Count);
     }
 
     [Fact]
@@ -325,6 +326,61 @@ public sealed class ImageStatsAccumulatorTests
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
         Assert.Null(result.AspectRatioHistogram);
+        Assert.Equal(0, result.AspectRatioStats.Count);
+    }
+
+    [Fact]
+    public void Add_MultipleImages_TracksAspectRatioStats()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        // Landscape 800/600 ≈ 1.333, Portrait 600/800 = 0.75, Square 500/500 = 1.0
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(3, result.AspectRatioStats.Count);
+        Assert.Equal(0.75, result.AspectRatioStats.Min, 2);
+        Assert.Equal(800.0 / 600.0, result.AspectRatioStats.Max, 2);
+        Assert.True(result.AspectRatioStats.Mean > 0.9 && result.AspectRatioStats.Mean < 1.1);
+        Assert.True(result.AspectRatioStats.StandardDeviation > 0);
+    }
+
+    [Fact]
+    public void Add_SingleImage_AspectRatioStatsHasZeroVariance()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(1, result.AspectRatioStats.Count);
+        Assert.Equal(640.0 / 480.0, result.AspectRatioStats.Min, 3);
+        Assert.Equal(640.0 / 480.0, result.AspectRatioStats.Max, 3);
+        Assert.Equal(640.0 / 480.0, result.AspectRatioStats.Mean, 3);
+        Assert.Equal(0.0, result.AspectRatioStats.Variance);
+    }
+
+    [Fact]
+    public void Merge_TwoAccumulators_CombinesAspectRatioStats()
+    {
+        ImageStatsAccumulator first = new();
+        ImageStatsAccumulator second = new();
+
+        first.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // ~1.333
+        second.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3))); // 0.75
+
+        first.Merge(second);
+
+        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
+
+        Assert.Equal(2, result.AspectRatioStats.Count);
+        Assert.Equal(0.75, result.AspectRatioStats.Min, 2);
+        Assert.Equal(800.0 / 600.0, result.AspectRatioStats.Max, 2);
+        Assert.True(result.AspectRatioStats.StandardDeviation > 0);
     }
 
     [Fact]

@@ -119,6 +119,9 @@ public sealed class ManifestBuilderTests
         Assert.Equal(480, feature.MaxHeight);
         Assert.Equal(1, feature.ChannelCounts[3]);
         Assert.True(feature.FileSizeStats.Count > 0);
+        Assert.NotNull(feature.AspectRatioStats);
+        Assert.Equal(1, feature.AspectRatioStats.Count);
+        Assert.Equal(640.0 / 480.0, feature.AspectRatioStats.Mean, 3);
     }
 
     [Fact]
