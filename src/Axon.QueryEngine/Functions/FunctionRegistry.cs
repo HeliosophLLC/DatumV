@@ -185,6 +185,7 @@ public sealed class FunctionRegistry
 
         // Math — Vector Manipulation
         registry.RegisterScalar(new Math.VecFunction());
+        registry.RegisterScalar(new Math.TensorFunction());
         registry.RegisterScalar(new Math.VecSliceFunction());
         registry.RegisterScalar(new Math.VecConcatFunction());
         registry.RegisterScalar(new Math.VecReverseFunction());

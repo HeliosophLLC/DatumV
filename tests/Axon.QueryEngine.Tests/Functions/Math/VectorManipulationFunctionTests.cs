@@ -294,4 +294,67 @@ public class VectorManipulationFunctionTests
     {
         Assert.Throws<ArgumentException>(() => new VecFunction().ValidateArguments([DataKind.String]));
     }
+
+    [Fact]
+    public void Tensor_TwoVectors()
+    {
+        TensorFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromVector([1f, 2f, 3f]),
+            DataValue.FromVector([4f, 5f, 6f])
+        ]);
+        Assert.Equal(DataKind.Matrix, result.Kind);
+        float[] data = result.AsMatrix(out int rows, out int columns);
+        Assert.Equal(2, rows);
+        Assert.Equal(3, columns);
+        Assert.Equal([1f, 2f, 3f, 4f, 5f, 6f], data);
+    }
+
+    [Fact]
+    public void Tensor_ThreeVectors()
+    {
+        TensorFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromVector([1f, 2f]),
+            DataValue.FromVector([3f, 4f]),
+            DataValue.FromVector([5f, 6f])
+        ]);
+        float[] data = result.AsMatrix(out int rows, out int columns);
+        Assert.Equal(3, rows);
+        Assert.Equal(2, columns);
+        Assert.Equal([1f, 2f, 3f, 4f, 5f, 6f], data);
+    }
+
+    [Fact]
+    public void Tensor_Null_ReturnsNull()
+    {
+        TensorFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromVector([1f, 2f]),
+            DataValue.Null(DataKind.Vector)
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Tensor_MismatchedLengths_Throws()
+    {
+        TensorFunction function = new();
+        Assert.Throws<ArgumentException>(() => function.Execute([
+            DataValue.FromVector([1f, 2f, 3f]),
+            DataValue.FromVector([4f, 5f])
+        ]));
+    }
+
+    [Fact]
+    public void Tensor_Validate_SingleVector_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new TensorFunction().ValidateArguments([DataKind.Vector]));
+    }
+
+    [Fact]
+    public void Tensor_Validate_NonVector_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new TensorFunction().ValidateArguments([DataKind.Scalar, DataKind.Vector]));
+    }
 }

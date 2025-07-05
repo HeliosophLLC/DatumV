@@ -97,6 +97,54 @@ public sealed class VecFunction : IScalarFunction
 }
 
 /// <summary>
+/// Stacks two or more equal-length vectors as rows into a Matrix: tensor(v1, v2, ...).
+/// Each vector becomes one row. All vectors must have the same length.
+/// </summary>
+public sealed class TensorFunction : IScalarFunction
+{
+    /// <inheritdoc />
+    public string Name => "tensor";
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length < 2)
+            throw new ArgumentException("tensor() requires at least 2 arguments.");
+        for (int i = 0; i < argumentKinds.Length; i++)
+        {
+            if (argumentKinds[i] is not DataKind.Vector)
+                throw new ArgumentException($"tensor() argument {i + 1} must be a Vector.");
+        }
+        return DataKind.Matrix;
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    {
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) return DataValue.Null(DataKind.Matrix);
+        }
+
+        int columns = arguments[0].AsVector().Length;
+        for (int i = 1; i < arguments.Length; i++)
+        {
+            if (arguments[i].AsVector().Length != columns)
+                throw new ArgumentException($"tensor() all vectors must have the same length. Vector 1 has {columns} elements but vector {i + 1} has {arguments[i].AsVector().Length}.");
+        }
+
+        int rows = arguments.Length;
+        float[] result = new float[rows * columns];
+        for (int i = 0; i < rows; i++)
+        {
+            Array.Copy(arguments[i].AsVector(), 0, result, i * columns, columns);
+        }
+
+        return DataValue.FromMatrix(result, rows, columns);
+    }
+}
+
+/// <summary>
 /// Concatenates two or more vectors: vec_concat(v1, v2, ...).
 /// </summary>
 public sealed class VecConcatFunction : IScalarFunction

@@ -548,11 +548,12 @@ SELECT coalesce(primary_score, fallback_score) AS score FROM results
 | `rdim` | `rdim(x, axis)` | Size of a specific dimension → Scalar. |
 | `shape` | `shape(x)` | All dimension sizes → Vector. |
 
-### Math — Vector Manipulation (11)
+### Math — Vector Manipulation (12)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `vec` | `vec(a, b, ...)` | Construct a vector from scalars and/or vectors. Scalars contribute one element; vectors are flattened in order. |
+| `tensor` | `tensor(v1, v2, ...)` | Stack two or more equal-length vectors as rows into a Matrix with shape [N, M]. |
 | `vec_slice` | `vec_slice(vec, start, len)` | Extract sub-vector by position and length. |
 | `vec_concat` | `vec_concat(v1, v2, ...)` | Concatenate two or more vectors. |
 | `vec_reverse` | `vec_reverse(vec)` | Reverse element order. |
