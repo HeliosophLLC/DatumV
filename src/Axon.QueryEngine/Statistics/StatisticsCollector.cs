@@ -132,6 +132,7 @@ public sealed class StatisticsCollector
         if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime)
         {
             accumulators.Add(new EntropyAccumulator());
+            accumulators.Add(new CategoricalDiagnosticsAccumulator(_topK));
         }
 
         return accumulators;

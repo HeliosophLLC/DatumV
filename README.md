@@ -621,8 +621,14 @@ The `stats` command collects per-column statistics:
 | Byte-length min/max/mean/var/std | BinarySizeAccumulator | UInt8Array |
 | Earliest/Latest date | TemporalRangeAccumulator | Date, DateTime |
 | Shannon entropy | EntropyAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
+| Top-K coverage ratio | CategoricalDiagnosticsAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
+| Rare category ratio | CategoricalDiagnosticsAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
 
 Accumulators support `Merge()` for parallel collection using Chan et al. algorithm for combining Welford's running statistics.
+
+### Rare category threshold
+
+Categories with fewer than 5 observations are classified as rare. This threshold is a fixed heuristic — low enough to avoid flagging moderately infrequent values, high enough to catch singletons and near-singletons that often indicate data entry errors or extreme long-tail categories. The threshold is defined as the `RareThreshold` constant on `CategoricalDiagnosticsAccumulator`.
 
 ### Image header parsing
 
