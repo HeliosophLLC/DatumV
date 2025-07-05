@@ -27,6 +27,13 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private double _sizeMean;
     private double _sizeM2;
 
+    // Megapixel Welford accumulators
+    private long _megapixelCount;
+    private double _megapixelMin = double.PositiveInfinity;
+    private double _megapixelMax = double.NegativeInfinity;
+    private double _megapixelMean;
+    private double _megapixelM2;
+
     // Aspect ratio Welford accumulators
     private long _aspectCount;
     private double _aspectMin = double.PositiveInfinity;
@@ -118,6 +125,25 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _channelCounts[dimensions.Channels] = 1;
         }
 
+        // Track megapixel count
+        double megapixels = (double)dimensions.Width * dimensions.Height / 1_000_000.0;
+        _megapixelCount++;
+
+        if (megapixels < _megapixelMin)
+        {
+            _megapixelMin = megapixels;
+        }
+
+        if (megapixels > _megapixelMax)
+        {
+            _megapixelMax = megapixels;
+        }
+
+        double megapixelDelta = megapixels - _megapixelMean;
+        _megapixelMean += megapixelDelta / _megapixelCount;
+        double megapixelDelta2 = megapixels - _megapixelMean;
+        _megapixelM2 += megapixelDelta * megapixelDelta2;
+
         // Track aspect ratio
         if (dimensions.Height > 0)
         {
@@ -180,6 +206,11 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _sizeMax = otherImage._sizeMax;
             _sizeMean = otherImage._sizeMean;
             _sizeM2 = otherImage._sizeM2;
+            _megapixelCount = otherImage._megapixelCount;
+            _megapixelMin = otherImage._megapixelMin;
+            _megapixelMax = otherImage._megapixelMax;
+            _megapixelMean = otherImage._megapixelMean;
+            _megapixelM2 = otherImage._megapixelM2;
             _aspectCount = otherImage._aspectCount;
             _aspectMin = otherImage._aspectMin;
             _aspectMax = otherImage._aspectMax;
@@ -229,6 +260,19 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             _sizeCount = combinedCount;
         }
 
+        // Parallel Welford merge for megapixels
+        if (otherImage._megapixelCount > 0)
+        {
+            long combinedMegapixelCount = _megapixelCount + otherImage._megapixelCount;
+            double megapixelDelta = otherImage._megapixelMean - _megapixelMean;
+            _megapixelMean += megapixelDelta * otherImage._megapixelCount / combinedMegapixelCount;
+            _megapixelM2 += otherImage._megapixelM2 +
+                            megapixelDelta * megapixelDelta * _megapixelCount * otherImage._megapixelCount / combinedMegapixelCount;
+            _megapixelMin = Math.Min(_megapixelMin, otherImage._megapixelMin);
+            _megapixelMax = Math.Max(_megapixelMax, otherImage._megapixelMax);
+            _megapixelCount = combinedMegapixelCount;
+        }
+
         // Parallel Welford merge for aspect ratio
         if (otherImage._aspectCount > 0)
         {
@@ -262,6 +306,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     public StatisticResult GetResult()
     {
         double sizeVariance = _sizeCount > 1 ? _sizeM2 / _sizeCount : 0.0;
+        double megapixelVariance = _megapixelCount > 1 ? _megapixelM2 / _megapixelCount : 0.0;
         double aspectVariance = _aspectCount > 1 ? _aspectM2 / _aspectCount : 0.0;
         long decodedCount = _count - _undecodableCount;
 
@@ -280,6 +325,13 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
                 _sizeCount > 0 ? _sizeMean : double.NaN,
                 sizeVariance,
                 Math.Sqrt(sizeVariance)),
+            new NumericSummary(
+                _megapixelCount,
+                _megapixelCount > 0 ? _megapixelMin : double.NaN,
+                _megapixelCount > 0 ? _megapixelMax : double.NaN,
+                _megapixelCount > 0 ? _megapixelMean : double.NaN,
+                megapixelVariance,
+                Math.Sqrt(megapixelVariance)),
             new NumericSummary(
                 _aspectCount,
                 _aspectCount > 0 ? _aspectMin : double.NaN,
@@ -557,6 +609,7 @@ public sealed record ImageDimensions(int Width, int Height, int Channels);
 /// <param name="ChannelCounts">Distribution of channel counts (key=channels, value=count).</param>
 /// <param name="UndecodableCount">Number of images whose headers could not be parsed.</param>
 /// <param name="FileSizeStats">Aggregate file size statistics in bytes.</param>
+/// <param name="MegapixelStats">Summary statistics (min, max, mean, variance, stdDev) for megapixel counts (width × height / 1,000,000).</param>
 /// <param name="AspectRatioStats">Summary statistics (min, max, mean, variance, stdDev) for aspect ratios (width/height).</param>
 /// <param name="AspectRatioHistogram">Optional histogram of aspect ratios.</param>
 public sealed record ImageStatsResult(
@@ -568,5 +621,6 @@ public sealed record ImageStatsResult(
     IReadOnlyDictionary<int, long> ChannelCounts,
     long UndecodableCount,
     NumericSummary FileSizeStats,
+    NumericSummary MegapixelStats,
     NumericSummary AspectRatioStats,
     HistogramResult? AspectRatioHistogram);

@@ -44,6 +44,7 @@ public sealed class ManifestSerializerTests
         Assert.Contains("\"maxWidth\":", json);
         Assert.Contains("\"channelCounts\":", json);
         Assert.Contains("\"fileSizeStats\":", json);
+        Assert.Contains("\"megapixelStats\":", json);
         Assert.Contains("\"aspectRatioStats\":", json);
     }
 

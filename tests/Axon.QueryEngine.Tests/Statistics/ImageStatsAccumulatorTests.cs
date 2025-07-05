@@ -420,4 +420,54 @@ public sealed class ImageStatsAccumulatorTests
         Assert.Equal(512, dims.Height);
         Assert.Equal(3, dims.Channels);
     }
+
+    [Fact]
+    public void Add_MultipleImages_TracksMegapixelStats()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        // 800×600 = 0.48 MP, 1920×1080 = 2.0736 MP, 320×240 = 0.0768 MP
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(3, result.MegapixelStats.Count);
+        Assert.Equal(320.0 * 240 / 1_000_000.0, result.MegapixelStats.Min, 4);
+        Assert.Equal(1920.0 * 1080 / 1_000_000.0, result.MegapixelStats.Max, 4);
+        Assert.True(result.MegapixelStats.Mean > 0);
+        Assert.True(result.MegapixelStats.StandardDeviation > 0);
+    }
+
+    [Fact]
+    public void Merge_TwoAccumulators_CombinesMegapixelStats()
+    {
+        ImageStatsAccumulator first = new();
+        ImageStatsAccumulator second = new();
+
+        first.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));   // 0.3072 MP
+        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // 2.0736 MP
+
+        first.Merge(second);
+
+        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
+
+        Assert.Equal(2, result.MegapixelStats.Count);
+        Assert.Equal(640.0 * 480 / 1_000_000.0, result.MegapixelStats.Min, 4);
+        Assert.Equal(1920.0 * 1080 / 1_000_000.0, result.MegapixelStats.Max, 4);
+        Assert.True(result.MegapixelStats.StandardDeviation > 0);
+    }
+
+    [Fact]
+    public void Add_UndecodableImages_NoMegapixelContribution()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(0, result.MegapixelStats.Count);
+    }
 }

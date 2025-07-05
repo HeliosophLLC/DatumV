@@ -269,6 +269,9 @@ public sealed class ImageFeatureManifest : FeatureManifest
     /// <summary>Gets file size statistics in bytes.</summary>
     public required NumericSummaryData FileSizeStats { get; init; }
 
+    /// <summary>Gets megapixel (width × height / 1,000,000) summary statistics.</summary>
+    public NumericSummaryData? MegapixelStats { get; init; }
+
     /// <summary>Gets aspect ratio (width/height) summary statistics.</summary>
     public NumericSummaryData? AspectRatioStats { get; init; }
 

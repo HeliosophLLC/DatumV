@@ -237,6 +237,7 @@ public static class ManifestBuilder
         ImageStatsResult imageResult = GetResultValue<ImageStatsResult>(stats, "image_stats") ??
                                        new ImageStatsResult(0, 0, 0, 0, 0, new Dictionary<int, long>(), 0,
                                            new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
+                                           new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0),
                                            new NumericSummary(0, double.NaN, double.NaN, double.NaN, 0, 0), null);
 
         return new ImageFeatureManifest
@@ -258,6 +259,9 @@ public static class ManifestBuilder
             ChannelCounts = imageResult.ChannelCounts,
             UndecodableCount = imageResult.UndecodableCount,
             FileSizeStats = ToSummaryData(imageResult.FileSizeStats),
+            MegapixelStats = imageResult.MegapixelStats.Count > 0
+                ? ToSummaryData(imageResult.MegapixelStats)
+                : null,
             AspectRatioStats = imageResult.AspectRatioStats.Count > 0
                 ? ToSummaryData(imageResult.AspectRatioStats)
                 : null,
