@@ -393,6 +393,13 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
                 megapixelVariance,
                 Math.Sqrt(megapixelVariance)),
             new NumericSummary(
+                _megapixelCount,
+                _megapixelCount > 0 ? _megapixelMin * 1_000_000.0 : double.NaN,
+                _megapixelCount > 0 ? _megapixelMax * 1_000_000.0 : double.NaN,
+                _megapixelCount > 0 ? _megapixelMean * 1_000_000.0 : double.NaN,
+                megapixelVariance * 1_000_000.0 * 1_000_000.0,
+                Math.Sqrt(megapixelVariance) * 1_000_000.0),
+            new NumericSummary(
                 _aspectCount,
                 _aspectCount > 0 ? _aspectMin : double.NaN,
                 _aspectCount > 0 ? _aspectMax : double.NaN,
@@ -465,6 +472,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
 /// <param name="HugeImageCount">Number of images with width &gt; 4096 or height &gt; 4096 pixels.</param>
 /// <param name="FileSizeStats">Aggregate file size statistics in bytes.</param>
 /// <param name="MegapixelStats">Summary statistics (min, max, mean, variance, stdDev) for megapixel counts (width × height / 1,000,000).</param>
+/// <param name="PixelCountStats">Summary statistics (min, max, mean, variance, stdDev) for total pixel count (width × height).</param>
 /// <param name="AspectRatioStats">Summary statistics (min, max, mean, variance, stdDev) for aspect ratios (width/height).</param>
 /// <param name="AspectRatioHistogram">Optional histogram of aspect ratios.</param>
 public sealed record ImageStatsResult(
@@ -480,6 +488,7 @@ public sealed record ImageStatsResult(
     long HugeImageCount,
     NumericSummary FileSizeStats,
     NumericSummary MegapixelStats,
+    NumericSummary PixelCountStats,
     NumericSummary AspectRatioStats,
     HistogramResult? AspectRatioHistogram)
 {
@@ -488,5 +497,5 @@ public sealed record ImageStatsResult(
         0, 0, 0, 0, 0,
         new Dictionary<int, long>(), new Dictionary<string, long>(),
         0, 0, 0,
-        NumericSummary.Empty, NumericSummary.Empty, NumericSummary.Empty, null);
+        NumericSummary.Empty, NumericSummary.Empty, NumericSummary.Empty, NumericSummary.Empty, null);
 }

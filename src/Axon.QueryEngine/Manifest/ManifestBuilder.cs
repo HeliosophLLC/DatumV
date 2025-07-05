@@ -262,6 +262,9 @@ public static class ManifestBuilder
             MegapixelStats = imageResult.MegapixelStats.Count > 0
                 ? ToSummaryData(imageResult.MegapixelStats)
                 : null,
+            PixelCountStats = imageResult.PixelCountStats.Count > 0
+                ? ToSummaryData(imageResult.PixelCountStats)
+                : null,
             AspectRatioStats = imageResult.AspectRatioStats.Count > 0
                 ? ToSummaryData(imageResult.AspectRatioStats)
                 : null,

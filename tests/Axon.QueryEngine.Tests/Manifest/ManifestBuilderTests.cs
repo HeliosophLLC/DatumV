@@ -126,6 +126,9 @@ public sealed class ManifestBuilderTests
         Assert.NotNull(feature.MegapixelStats);
         Assert.Equal(1, feature.MegapixelStats.Count);
         Assert.Equal(640.0 * 480 / 1_000_000.0, feature.MegapixelStats.Mean, 4);
+        Assert.NotNull(feature.PixelCountStats);
+        Assert.Equal(1, feature.PixelCountStats.Count);
+        Assert.Equal(640.0 * 480, feature.PixelCountStats.Mean, 0);
     }
 
     [Fact]

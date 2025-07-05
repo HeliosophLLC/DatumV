@@ -585,4 +585,58 @@ public sealed class ImageStatsAccumulatorTests
         Assert.Equal(2, result.TinyImageCount);
         Assert.Equal(2, result.HugeImageCount);
     }
+
+    [Fact]
+    public void Add_MultipleImages_TracksPixelCountStats()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        // 800×600 = 480,000 px, 1920×1080 = 2,073,600 px, 320×240 = 76,800 px
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(3, result.PixelCountStats.Count);
+        Assert.Equal(76_800.0, result.PixelCountStats.Min, 0);
+        Assert.Equal(2_073_600.0, result.PixelCountStats.Max, 0);
+        Assert.True(result.PixelCountStats.Mean > 0);
+        Assert.True(result.PixelCountStats.StandardDeviation > 0);
+    }
+
+    [Fact]
+    public void Merge_TwoAccumulators_CombinesPixelCountStats()
+    {
+        ImageStatsAccumulator first = new();
+        ImageStatsAccumulator second = new();
+
+        first.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));   // 307,200 px
+        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // 2,073,600 px
+
+        first.Merge(second);
+
+        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
+
+        Assert.Equal(2, result.PixelCountStats.Count);
+        Assert.Equal(307_200.0, result.PixelCountStats.Min, 0);
+        Assert.Equal(2_073_600.0, result.PixelCountStats.Max, 0);
+        Assert.True(result.PixelCountStats.StandardDeviation > 0);
+    }
+
+    [Fact]
+    public void Add_SingleImage_PixelCountStatsHasZeroVariance()
+    {
+        ImageStatsAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+
+        ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
+
+        Assert.Equal(1, result.PixelCountStats.Count);
+        Assert.Equal(307_200.0, result.PixelCountStats.Min, 0);
+        Assert.Equal(307_200.0, result.PixelCountStats.Max, 0);
+        Assert.Equal(307_200.0, result.PixelCountStats.Mean, 0);
+        Assert.Equal(0.0, result.PixelCountStats.Variance);
+    }
 }
