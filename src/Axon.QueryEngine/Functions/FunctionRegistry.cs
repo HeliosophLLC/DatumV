@@ -178,6 +178,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.VecAllFunction());
         registry.RegisterScalar(new Math.VecProductFunction());
 
+        // Math — Tensor Introspection
+        registry.RegisterScalar(new Math.RankFunction());
+        registry.RegisterScalar(new Math.RdimFunction());
+        registry.RegisterScalar(new Math.ShapeFunction());
+
         // Math — Vector Manipulation
         registry.RegisterScalar(new Math.VecFunction());
         registry.RegisterScalar(new Math.VecSliceFunction());

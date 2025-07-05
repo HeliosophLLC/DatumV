@@ -418,6 +418,9 @@ SELECT abs(delta), sqrt(variance), pow(base_val, 2) FROM metrics
 -- ML activations on embeddings
 SELECT sigmoid(score), relu(raw_output), gelu(activation) FROM model_outputs
 
+-- Tensor introspection
+SELECT rank(weights) AS ndim, shape(weights) AS dims, rdim(weights, 0) AS rows FROM features
+
 -- Vector reductions
 SELECT vec_mean(embedding), vec_norm(embedding), vec_std(features) FROM vectors
 
@@ -536,6 +539,14 @@ SELECT coalesce(primary_score, fallback_score) AS score FROM results
 | `vec_any` | `vec_any(x)` | 1 if any element is non-zero, else 0. |
 | `vec_all` | `vec_all(x)` | 1 if all elements are non-zero, else 0. |
 | `vec_product` | `vec_product(x)` | Product of all elements → Scalar. |
+
+### Math — Tensor Introspection (3)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `rank` | `rank(x)` | Number of dimensions → Scalar. Vector=1, Matrix=2, Tensor=N. |
+| `rdim` | `rdim(x, axis)` | Size of a specific dimension → Scalar. |
+| `shape` | `shape(x)` | All dimension sizes → Vector. |
 
 ### Math — Vector Manipulation (11)
 
