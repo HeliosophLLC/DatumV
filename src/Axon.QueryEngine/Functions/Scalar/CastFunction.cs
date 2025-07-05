@@ -100,6 +100,14 @@ public sealed class CastFunction : IScalarFunction
             (DataKind.DateTime, DataKind.String) => DataValue.FromString(
                 input.AsDateTime().ToString("O", CultureInfo.InvariantCulture)),
 
+            // Date -> Scalar (epoch days since 1970-01-01)
+            (DataKind.Date, DataKind.Scalar) => DataValue.FromScalar(
+                input.AsDate().DayNumber - DateOnly.FromDateTime(System.DateTime.UnixEpoch).DayNumber),
+
+            // DateTime -> Scalar (epoch seconds since 1970-01-01T00:00:00Z)
+            (DataKind.DateTime, DataKind.Scalar) => DataValue.FromScalar(
+                (float)(input.AsDateTime().ToUniversalTime() - System.DateTime.UnixEpoch).TotalSeconds),
+
             // String -> JsonValue
             (DataKind.String, DataKind.JsonValue) => DataValue.FromJsonValue(input.AsString()),
 

@@ -86,6 +86,9 @@ public sealed class FunctionRegistry
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());
+        registry.RegisterScalar(new Scalar.ToEpochFunction());
+        registry.RegisterScalar(new Scalar.DatePartFunction());
+        registry.RegisterScalar(new Scalar.CyclicalEncodeFunction());
 
         // JSON
         registry.RegisterScalar(new Scalar.JsonValueFunction());

@@ -176,4 +176,26 @@ public class CastFunctionTests
         ]);
         Assert.Equal(10f, result.AsScalar());
     }
+
+    [Fact]
+    public void Cast_DateToScalar_EpochDays()
+    {
+        // 2000-01-01 is 10957 days after 1970-01-01.
+        DataValue result = _function.Execute([
+            DataValue.FromDate(new DateOnly(2000, 1, 1)),
+            DataValue.FromString("Scalar")
+        ]);
+        Assert.Equal(10957f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Cast_DateTimeToScalar_EpochSeconds()
+    {
+        // 2000-01-01T00:00:00Z is 946684800 seconds after Unix epoch.
+        DataValue result = _function.Execute([
+            DataValue.FromDateTime(new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+            DataValue.FromString("Scalar")
+        ]);
+        Assert.Equal(946684800f, result.AsScalar());
+    }
 }

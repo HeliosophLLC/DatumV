@@ -285,6 +285,8 @@ Explicit narrowing via `CAST(value AS type)`:
 - `Scalar` → `UInt8` (truncates)
 - `Tensor` → `Vector` (requires rank 1)
 - `Tensor` → `Matrix` (requires rank 2)
+- `Date` → `Scalar` (epoch days since 1970-01-01)
+- `DateTime` → `Scalar` (epoch seconds since 1970-01-01T00:00:00Z, float32)
 
 ### Vector, Matrix, and Tensor relationship
 
@@ -330,7 +332,60 @@ Conversion between them is zero-copy when ranks match. Use `reshape()` to reinte
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `cast` | `cast(val, targetKind)` | Explicit type conversion. |
+| `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Scalar yields epoch days; DateTime→Scalar yields epoch seconds. |
+| `to_epoch` | `to_epoch(val)` | Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Scalar. |
+
+### Temporal Feature Extraction
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `date_part` | `date_part(part, val)` | Extract a named component from a Date or DateTime as Scalar. |
+| `cyclical_encode` | `cyclical_encode(val, period)` | Encode a Scalar as a 2-element Vector `[sin(2π·val/period), cos(2π·val/period)]`. |
+
+#### `date_part` supported parts
+
+| Part Name | Returns | Example |
+|-----------|---------|----------|
+| `year` | Year number | 2026 |
+| `month` | 1–12 | 3 |
+| `day` | 1–31 | 16 |
+| `day_of_week` | 0 (Sunday) – 6 (Saturday) | 1 (Monday) |
+| `hour` | 0–23 (Date returns 0) | 14 |
+| `minute` | 0–59 (Date returns 0) | 30 |
+| `second` | 0–59 (Date returns 0) | 45 |
+| `day_of_year` | 1–366 | 75 |
+| `week_of_year` | 1–53 (ISO 8601) | 12 |
+| `quarter` | 1–4 | 1 |
+| `is_weekend` | 0 or 1 | 0 |
+
+#### Temporal ML encoding examples
+
+```sql
+-- Convert date to epoch days for use as a numeric feature
+SELECT to_epoch(date_col) AS epoch_days FROM data
+
+-- Equivalent via CAST
+SELECT CAST(date_col AS Scalar) AS epoch_days FROM data
+
+-- Extract individual components
+SELECT date_part('year', date_col) AS year,
+       date_part('month', date_col) AS month,
+       date_part('day_of_week', date_col) AS dow
+FROM data
+
+-- Cyclical encoding for periodic features (preserves month 12 → 1 proximity)
+SELECT cyclical_encode(date_part('month', date_col), 12) AS month_encoded,
+       cyclical_encode(date_part('hour', datetime_col), 24) AS hour_encoded
+FROM data
+
+-- Full temporal feature vector via concatenation
+SELECT vec_concat(
+    cyclical_encode(date_part('month', d), 12),
+    cyclical_encode(date_part('day_of_week', d), 7),
+    cyclical_encode(date_part('hour', d), 24)
+) AS temporal_features
+FROM data
+```
 
 ### Table-Valued Functions
 
