@@ -43,6 +43,60 @@ public sealed class VecSliceFunction : IScalarFunction
 }
 
 /// <summary>
+/// Constructs a vector from one or more scalar or vector arguments: vec(a, b, ...).
+/// Scalars contribute a single element; vectors are flattened in order.
+/// </summary>
+public sealed class VecFunction : IScalarFunction
+{
+    /// <inheritdoc />
+    public string Name => "vec";
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length < 1)
+            throw new ArgumentException("vec() requires at least 1 argument.");
+        for (int i = 0; i < argumentKinds.Length; i++)
+        {
+            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8 or DataKind.Vector))
+                throw new ArgumentException($"vec() argument {i + 1} must be Scalar, UInt8, or Vector.");
+        }
+        return DataKind.Vector;
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    {
+        int totalLength = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) return DataValue.Null(DataKind.Vector);
+            totalLength += arguments[i].Kind is DataKind.Vector ? arguments[i].AsVector().Length : 1;
+        }
+
+        float[] result = new float[totalLength];
+        int offset = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].Kind is DataKind.Vector)
+            {
+                float[] source = arguments[i].AsVector();
+                Array.Copy(source, 0, result, offset, source.Length);
+                offset += source.Length;
+            }
+            else
+            {
+                result[offset++] = arguments[i].Kind is DataKind.UInt8
+                    ? arguments[i].AsUInt8()
+                    : arguments[i].AsScalar();
+            }
+        }
+
+        return DataValue.FromVector(result);
+    }
+}
+
+/// <summary>
 /// Concatenates two or more vectors: vec_concat(v1, v2, ...).
 /// </summary>
 public sealed class VecConcatFunction : IScalarFunction

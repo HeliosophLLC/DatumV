@@ -179,6 +179,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.VecProductFunction());
 
         // Math — Vector Manipulation
+        registry.RegisterScalar(new Math.VecFunction());
         registry.RegisterScalar(new Math.VecSliceFunction());
         registry.RegisterScalar(new Math.VecConcatFunction());
         registry.RegisterScalar(new Math.VecReverseFunction());

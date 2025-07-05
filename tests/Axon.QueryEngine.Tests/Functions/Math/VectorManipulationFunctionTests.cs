@@ -223,4 +223,75 @@ public class VectorManipulationFunctionTests
     {
         Assert.Throws<ArgumentException>(() => new VecConcatFunction().ValidateArguments([DataKind.Vector]));
     }
+
+    [Fact]
+    public void Vec_AllScalars()
+    {
+        VecFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromScalar(1),
+            DataValue.FromScalar(2),
+            DataValue.FromScalar(3)
+        ]);
+        Assert.Equal([1f, 2f, 3f], result.AsVector());
+    }
+
+    [Fact]
+    public void Vec_AllVectors()
+    {
+        VecFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromVector([1f, 2f]),
+            DataValue.FromVector([3f, 4f])
+        ]);
+        Assert.Equal([1f, 2f, 3f, 4f], result.AsVector());
+    }
+
+    [Fact]
+    public void Vec_MixedScalarsAndVectors()
+    {
+        VecFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromScalar(1),
+            DataValue.FromVector([2f, 3f]),
+            DataValue.FromScalar(4)
+        ]);
+        Assert.Equal([1f, 2f, 3f, 4f], result.AsVector());
+    }
+
+    [Fact]
+    public void Vec_SingleScalar()
+    {
+        VecFunction function = new();
+        DataValue result = function.Execute([DataValue.FromScalar(5)]);
+        Assert.Equal([5f], result.AsVector());
+    }
+
+    [Fact]
+    public void Vec_SingleVector()
+    {
+        VecFunction function = new();
+        DataValue result = function.Execute([DataValue.FromVector([1f, 2f])]);
+        Assert.Equal([1f, 2f], result.AsVector());
+    }
+
+    [Fact]
+    public void Vec_Null_ReturnsNull()
+    {
+        VecFunction function = new();
+        DataValue result = function.Execute([DataValue.FromScalar(1), DataValue.Null(DataKind.Vector)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Vec_Validate_NoArguments_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new VecFunction().ValidateArguments([]));
+    }
+
+    [Fact]
+    public void Vec_Validate_InvalidType_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new VecFunction().ValidateArguments([DataKind.String]));
+    }
 }
