@@ -52,7 +52,8 @@ public static class ManifestBuilder
                     AnovaFStatistic = result.AnovaFStatistic,
                     MutualInformation = result.MutualInformation,
                     TheilUAB = result.TheilUAB,
-                    TheilUBA = result.TheilUBA
+                    TheilUBA = result.TheilUBA,
+                    MissingnessCorrelation = result.MissingnessCorrelation
                 });
             }
         }

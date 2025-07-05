@@ -34,6 +34,7 @@ public sealed class ColumnInteractionCollector
             pair.CramerV?.Add(valueA, valueB);
             pair.Anova?.Add(valueA, valueB);
             pair.MutualInformation?.Add(valueA, valueB);
+            pair.MissingnessCorrelation?.Add(valueA, valueB);
         }
     }
 
@@ -56,6 +57,8 @@ public sealed class ColumnInteractionCollector
             double? theilUAB = NanToNull(miResult?.TheilUAB);
             double? theilUBA = NanToNull(miResult?.TheilUBA);
 
+            double? missingnessCorrelation = NanToNull(pair.MissingnessCorrelation?.GetValue());
+
             results.Add(new ColumnInteractionResult(
                 pair.ColumnA,
                 pair.ColumnB,
@@ -65,7 +68,8 @@ public sealed class ColumnInteractionCollector
                 anovaF,
                 mi,
                 theilUAB,
-                theilUBA));
+                theilUBA,
+                missingnessCorrelation));
         }
 
         return results;
@@ -73,26 +77,22 @@ public sealed class ColumnInteractionCollector
 
     private void Initialize(Row row)
     {
-        // Discover eligible columns (skip Image, UInt8Array, Vector, Matrix, Tensor)
-        List<(string Name, DataKind Kind)> eligible = new();
+        // Discover all columns for pairwise interaction analysis
+        List<(string Name, DataKind Kind)> columns = new();
 
         foreach (string columnName in row.ColumnNames)
         {
             DataKind kind = row[columnName].Kind;
-
-            if (IsEligibleKind(kind))
-            {
-                eligible.Add((columnName, kind));
-            }
+            columns.Add((columnName, kind));
         }
 
         // Create accumulators for each pair
-        for (int i = 0; i < eligible.Count; i++)
+        for (int i = 0; i < columns.Count; i++)
         {
-            for (int j = i + 1; j < eligible.Count; j++)
+            for (int j = i + 1; j < columns.Count; j++)
             {
-                (string nameA, DataKind kindA) = eligible[i];
-                (string nameB, DataKind kindB) = eligible[j];
+                (string nameA, DataKind kindA) = columns[i];
+                (string nameB, DataKind kindB) = columns[j];
 
                 bool aIsNumeric = IsNumericKind(kindA);
                 bool bIsNumeric = IsNumericKind(kindB);
@@ -102,7 +102,8 @@ public sealed class ColumnInteractionCollector
                 PairState pair = new()
                 {
                     ColumnA = nameA,
-                    ColumnB = nameB
+                    ColumnB = nameB,
+                    MissingnessCorrelation = new MissingnessCorrelationAccumulator()
                 };
 
                 // Numeric × Numeric: Pearson, Spearman, MI
@@ -118,12 +119,13 @@ public sealed class ColumnInteractionCollector
                     pair.CramerV = new CramerVAccumulator();
                     pair.MutualInformation = new MutualInformationAccumulator(kindA, kindB);
                 }
-                // Mixed: ANOVA, MI
+                // Mixed (numeric × categorical): ANOVA, MI
                 else if ((aIsNumeric && bIsCategorical) || (aIsCategorical && bIsNumeric))
                 {
                     pair.Anova = new AnovaAccumulator(firstIsCategorical: aIsCategorical);
                     pair.MutualInformation = new MutualInformationAccumulator(kindA, kindB);
                 }
+                // Otherwise (at least one ineligible kind): missingness correlation only
 
                 _pairs.Add(pair);
             }
@@ -140,11 +142,6 @@ public sealed class ColumnInteractionCollector
         return kind is DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime;
     }
 
-    private static bool IsEligibleKind(DataKind kind)
-    {
-        return IsNumericKind(kind) || IsCategoricalKind(kind);
-    }
-
     private static double? NanToNull(double? value)
     {
         return value is null || double.IsNaN(value.Value) ? null : value;
@@ -159,6 +156,7 @@ public sealed class ColumnInteractionCollector
         public CramerVAccumulator? CramerV { get; set; }
         public AnovaAccumulator? Anova { get; set; }
         public MutualInformationAccumulator? MutualInformation { get; set; }
+        public MissingnessCorrelationAccumulator? MissingnessCorrelation { get; set; }
     }
 }
 
@@ -174,6 +172,7 @@ public sealed class ColumnInteractionCollector
 /// <param name="MutualInformation">Mutual information in bits (all pair types).</param>
 /// <param name="TheilUAB">Theil's U(A|B): how much column B reduces uncertainty about column A. Range [0, 1].</param>
 /// <param name="TheilUBA">Theil's U(B|A): how much column A reduces uncertainty about column B. Range [0, 1].</param>
+/// <param name="MissingnessCorrelation">Pearson correlation between null masks of the two columns. Range [-1, 1].</param>
 public sealed record ColumnInteractionResult(
     string ColumnA,
     string ColumnB,
@@ -183,4 +182,5 @@ public sealed record ColumnInteractionResult(
     double? AnovaFStatistic,
     double? MutualInformation,
     double? TheilUAB,
-    double? TheilUBA);
+    double? TheilUBA,
+    double? MissingnessCorrelation);

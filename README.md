@@ -696,7 +696,7 @@ The `ImageStatsAccumulator` extracts dimensions and channel count from image hea
 | WebP | VP8/VP8L/VP8X → width, height, alpha flag → channels |
 ### Column interactions
 
-The `manifest` command also computes pairwise interaction statistics between eligible columns (Scalar, UInt8, String, JsonValue, Date, DateTime). Image, binary, and multidimensional columns are excluded.
+The `manifest` command also computes pairwise interaction statistics between columns. Numeric (Scalar, UInt8) and categorical (String, JsonValue, Date, DateTime) columns receive value-based measures appropriate to their pair type. Image, binary, and multidimensional columns participate in missingness correlation only.
 
 | Measure | Pair Type | Algorithm |
 |---------|-----------|----------|
@@ -704,8 +704,11 @@ The `manifest` command also computes pairwise interaction statistics between eli
 | Spearman ρ | Numeric × Numeric | Reservoir sampling (10K pairs) → rank transform → Pearson on ranks |
 | Cramér's V | Categorical × Categorical | Bounded contingency table (1K categories), χ² → V |
 | ANOVA F | Categorical × Numeric | Per-group Welford (1K groups), F = MS_between / MS_within |
-| Mutual Information | All | Reservoir sampling (10K pairs), numeric bins (20), MI in bits |
-| Theil's U | All | Asymmetric uncertainty coefficient U(A|B) = MI / H(A), derived from MI reservoir |
+| Mutual Information | Numeric & Categorical | Reservoir sampling (10K pairs), numeric bins (20), MI in bits |
+| Theil's U | Numeric & Categorical | Asymmetric uncertainty coefficient U(A\|B) = MI / H(A), derived from MI reservoir |
+| Missingness Correlation | All | Pearson r between null masks (1=null, 0=present), O(1) memory |
+
+Missingness correlation detects structurally correlated missing data — for example, when `income` is null, `credit_score` is often null too. This is useful for identifying data leakage, pipeline bugs, or columns that share an upstream data source.
 ## Manifest
 
 The `manifest` command generates a structured JSON manifest describing every column in a query result with type-specific statistics.
@@ -796,7 +799,8 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
       "spearman": 0.03,
       "mutualInformation": 0.15,
       "theilUAB": 0.01,
-      "theilUBA": 0.02
+      "theilUBA": 0.02,
+      "missingnessCorrelation": null
     }
   ]
 }

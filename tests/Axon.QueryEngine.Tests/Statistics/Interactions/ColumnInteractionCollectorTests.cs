@@ -28,6 +28,7 @@ public sealed class ColumnInteractionCollectorTests
         Assert.NotNull(result.MutualInformation);
         Assert.NotNull(result.TheilUAB);
         Assert.NotNull(result.TheilUBA);
+        Assert.Null(result.MissingnessCorrelation); // No nulls → zero-variance mask → NaN → null
         Assert.Null(result.CramerV);
         Assert.Null(result.AnovaFStatistic);
     }
@@ -52,6 +53,7 @@ public sealed class ColumnInteractionCollectorTests
         Assert.NotNull(results[0].MutualInformation);
         Assert.NotNull(results[0].TheilUAB);
         Assert.NotNull(results[0].TheilUBA);
+        Assert.Null(results[0].MissingnessCorrelation); // No nulls → zero-variance mask → NaN → null
         Assert.Null(results[0].Pearson);
         Assert.Null(results[0].Spearman);
         Assert.Null(results[0].AnovaFStatistic);
@@ -77,27 +79,44 @@ public sealed class ColumnInteractionCollectorTests
         Assert.NotNull(results[0].MutualInformation);
         Assert.NotNull(results[0].TheilUAB);
         Assert.NotNull(results[0].TheilUBA);
+        Assert.Null(results[0].MissingnessCorrelation); // No nulls → zero-variance mask → NaN → null
         Assert.Null(results[0].Pearson);
         Assert.Null(results[0].Spearman);
         Assert.Null(results[0].CramerV);
     }
 
     [Fact]
-    public void GetInteractions_ImageColumnExcluded()
+    public void GetInteractions_ImageColumnIncludedForMissingness()
     {
         ColumnInteractionCollector collector = new();
 
         for (int i = 0; i < 50; i++)
         {
-            Row row = CreateRow(
-                ("label", DataValue.FromString("cat")),
-                ("image", DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF })));
-            collector.AddRow(row);
+            if (i % 3 == 0)
+            {
+                // Both null at same time → correlated missingness
+                collector.AddRow(CreateRow(
+                    ("label", DataValue.Null(DataKind.String)),
+                    ("image", DataValue.Null(DataKind.Image))));
+            }
+            else
+            {
+                collector.AddRow(CreateRow(
+                    ("label", DataValue.FromString("cat")),
+                    ("image", DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF }))));
+            }
         }
 
         IReadOnlyList<ColumnInteractionResult> results = collector.GetInteractions();
 
-        Assert.Empty(results);
+        Assert.Single(results);
+        ColumnInteractionResult result = results[0];
+        Assert.NotNull(result.MissingnessCorrelation);
+        Assert.Null(result.Pearson);
+        Assert.Null(result.Spearman);
+        Assert.Null(result.CramerV);
+        Assert.Null(result.AnovaFStatistic);
+        Assert.Null(result.MutualInformation);
     }
 
     [Fact]
@@ -123,7 +142,7 @@ public sealed class ColumnInteractionCollectorTests
     }
 
     [Fact]
-    public void GetInteractions_NoEligibleColumns_ReturnsEmpty()
+    public void GetInteractions_SingleColumnOnly_ReturnsEmpty()
     {
         ColumnInteractionCollector collector = new();
 
@@ -140,7 +159,7 @@ public sealed class ColumnInteractionCollectorTests
     }
 
     [Fact]
-    public void GetInteractions_SingleEligibleColumn_ReturnsEmpty()
+    public void GetInteractions_SingleColumn_ReturnsEmpty()
     {
         ColumnInteractionCollector collector = new();
 
@@ -153,6 +172,59 @@ public sealed class ColumnInteractionCollectorTests
         IReadOnlyList<ColumnInteractionResult> results = collector.GetInteractions();
 
         Assert.Empty(results);
+    }
+
+    [Fact]
+    public void GetInteractions_IneligiblePairOnly_ProducesMissingnessOnly()
+    {
+        ColumnInteractionCollector collector = new();
+
+        for (int i = 0; i < 50; i++)
+        {
+            if (i % 4 == 0)
+            {
+                collector.AddRow(CreateRow(
+                    ("image", DataValue.Null(DataKind.Image)),
+                    ("vector", DataValue.Null(DataKind.Vector))));
+            }
+            else
+            {
+                collector.AddRow(CreateRow(
+                    ("image", DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF })),
+                    ("vector", DataValue.FromVector(new float[] { 1.0f, 2.0f }))));
+            }
+        }
+
+        IReadOnlyList<ColumnInteractionResult> results = collector.GetInteractions();
+
+        Assert.Single(results);
+        ColumnInteractionResult result = results[0];
+        Assert.NotNull(result.MissingnessCorrelation);
+        Assert.Null(result.Pearson);
+        Assert.Null(result.Spearman);
+        Assert.Null(result.CramerV);
+        Assert.Null(result.AnovaFStatistic);
+        Assert.Null(result.MutualInformation);
+    }
+
+    [Fact]
+    public void GetInteractions_MixedEligibility_ExpandedPairCount()
+    {
+        ColumnInteractionCollector collector = new();
+
+        for (int i = 0; i < 50; i++)
+        {
+            Row row = CreateRow(
+                ("score", DataValue.FromScalar(i)),
+                ("label", DataValue.FromString("cat")),
+                ("image", DataValue.FromImage(new byte[] { 0xFF })));
+            collector.AddRow(row);
+        }
+
+        IReadOnlyList<ColumnInteractionResult> results = collector.GetInteractions();
+
+        // C(3,2) = 3 pairs: score×label (mixed), score×image (missingness-only), label×image (missingness-only)
+        Assert.Equal(3, results.Count);
     }
 
     private static Row CreateRow(params (string Name, DataValue Value)[] columns)

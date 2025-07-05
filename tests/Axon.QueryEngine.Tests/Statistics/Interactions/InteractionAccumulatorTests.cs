@@ -516,3 +516,140 @@ public sealed class TheilUTests
         Assert.True(result.TheilUBA > 0.5, $"Expected high TheilUBA but got {result.TheilUBA}");
     }
 }
+
+public sealed class MissingnessCorrelationAccumulatorTests
+{
+    [Fact]
+    public void GetValue_BothColumnsAlwaysNull_ReturnsNaN()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+
+        for (int i = 0; i < 50; i++)
+        {
+            accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.String));
+        }
+
+        double result = accumulator.GetValue();
+
+        Assert.True(double.IsNaN(result));
+    }
+
+    [Fact]
+    public void GetValue_BothColumnsNeverNull_ReturnsNaN()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+
+        for (int i = 0; i < 50; i++)
+        {
+            accumulator.Add(DataValue.FromScalar(i), DataValue.FromString("text"));
+        }
+
+        double result = accumulator.GetValue();
+
+        Assert.True(double.IsNaN(result));
+    }
+
+    [Fact]
+    public void GetValue_PerfectPositiveCorrelation_ReturnsOne()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+
+        // Both null at same rows, both present at same rows
+        for (int i = 0; i < 100; i++)
+        {
+            if (i % 2 == 0)
+            {
+                accumulator.Add(DataValue.FromScalar(i), DataValue.FromString("text"));
+            }
+            else
+            {
+                accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.String));
+            }
+        }
+
+        double result = accumulator.GetValue();
+
+        Assert.Equal(1.0, result, precision: 10);
+    }
+
+    [Fact]
+    public void GetValue_PerfectNegativeCorrelation_ReturnsNegativeOne()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+
+        // When A is null, B is present; when A is present, B is null
+        for (int i = 0; i < 100; i++)
+        {
+            if (i % 2 == 0)
+            {
+                accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.FromString("text"));
+            }
+            else
+            {
+                accumulator.Add(DataValue.FromScalar(i), DataValue.Null(DataKind.String));
+            }
+        }
+
+        double result = accumulator.GetValue();
+
+        Assert.Equal(-1.0, result, precision: 10);
+    }
+
+    [Fact]
+    public void GetValue_IndependentMissingness_ReturnsNearZero()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+        Random random = new(42);
+
+        for (int i = 0; i < 5000; i++)
+        {
+            DataValue valueA = random.NextDouble() < 0.3
+                ? DataValue.Null(DataKind.Scalar)
+                : DataValue.FromScalar(i);
+            DataValue valueB = random.NextDouble() < 0.3
+                ? DataValue.Null(DataKind.String)
+                : DataValue.FromString("text");
+
+            accumulator.Add(valueA, valueB);
+        }
+
+        double result = accumulator.GetValue();
+
+        Assert.True(Math.Abs(result) < 0.1, $"Expected near zero but got {result}");
+    }
+
+    [Fact]
+    public void GetValue_SingleRow_ReturnsNaN()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(1.0f), DataValue.FromString("text"));
+
+        double result = accumulator.GetValue();
+
+        Assert.True(double.IsNaN(result));
+    }
+
+    [Fact]
+    public void GetValue_MixedDataKinds_WorksCorrectly()
+    {
+        MissingnessCorrelationAccumulator accumulator = new();
+
+        // Scalar × Image — previously ineligible pair, now participates via missingness
+        for (int i = 0; i < 100; i++)
+        {
+            if (i % 2 == 0)
+            {
+                accumulator.Add(DataValue.FromScalar(i), DataValue.FromImage(new byte[] { 0xFF }));
+            }
+            else
+            {
+                accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.Image));
+            }
+        }
+
+        double result = accumulator.GetValue();
+
+        Assert.Equal(1.0, result, precision: 10);
+    }
+}

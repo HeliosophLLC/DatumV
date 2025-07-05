@@ -32,4 +32,7 @@ public sealed class ColumnInteraction
 
     /// <summary>Gets Theil's U(B|A): how much column A reduces uncertainty about column B. Range [0, 1].</summary>
     public double? TheilUBA { get; init; }
+
+    /// <summary>Gets the Pearson correlation between null masks of the two columns. Range [-1, 1].</summary>
+    public double? MissingnessCorrelation { get; init; }
 }
