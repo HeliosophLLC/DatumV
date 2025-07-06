@@ -69,6 +69,12 @@ public sealed class ParquetTableProvider : ITableProvider
             columnKinds[fieldIndex] = MapClrTypeToDataKind(projectedFields[fieldIndex].ClrType);
         }
 
+        Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int fieldIndex = 0; fieldIndex < columnNames.Length; fieldIndex++)
+        {
+            nameIndex[columnNames[fieldIndex]] = fieldIndex;
+        }
+
         // Iterate all row groups
         for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
         {
@@ -98,7 +104,7 @@ public sealed class ParquetTableProvider : ITableProvider
                         rowIndex);
                 }
 
-                yield return new Row(columnNames, values);
+                yield return new Row(columnNames, values, nameIndex);
             }
         }
     }

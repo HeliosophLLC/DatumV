@@ -50,6 +50,12 @@ public sealed class ZipTableProvider : ITableProvider
 
         string[] names = columnNames.ToArray();
 
+        Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < names.Length; index++)
+        {
+            nameIndex[names[index]] = index;
+        }
+
         // We must read the ZIP synchronously because ZipArchive is not thread-safe
         // and entries are only valid while the archive is open. We read all entries
         // eagerly but defer the byte content via lazy evaluation.
@@ -66,11 +72,12 @@ public sealed class ZipTableProvider : ITableProvider
                 continue;
             }
 
-            List<DataValue> values = new();
+            DataValue[] values = new DataValue[names.Length];
+            int valueIndex = 0;
 
             if (includeFileName)
             {
-                values.Add(DataValue.FromString(entry.FullName));
+                values[valueIndex++] = DataValue.FromString(entry.FullName);
             }
 
             if (includeFileBytes)
@@ -80,10 +87,10 @@ public sealed class ZipTableProvider : ITableProvider
                 // The query planner uses ColumnCost.Expensive to avoid reading
                 // this column unnecessarily during join build phases.
                 byte[] bytes = ReadEntryBytes(entry);
-                values.Add(DataValue.FromUInt8Array(bytes));
+                values[valueIndex++] = DataValue.FromUInt8Array(bytes);
             }
 
-            yield return new Row(names, values.ToArray());
+            yield return new Row(names, values, nameIndex);
         }
     }
 

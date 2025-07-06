@@ -56,6 +56,7 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
         }
 
         string[] names = ["Value"];
+        Dictionary<string, int> nameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["Value"] = 0 };
 
         // Use an integer counter to avoid floating-point drift accumulation.
         // Each value is computed as start + i * step, keeping precision stable.
@@ -70,7 +71,7 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new Row(names, [DataValue.FromScalar(current)]);
+                yield return new Row(names, [DataValue.FromScalar(current)], nameIndex);
             }
         }
         else
@@ -84,7 +85,7 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new Row(names, [DataValue.FromScalar(current)]);
+                yield return new Row(names, [DataValue.FromScalar(current)], nameIndex);
             }
         }
 

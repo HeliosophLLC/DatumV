@@ -111,6 +111,12 @@ public sealed class JsonTableProvider : ITableProvider
                 names[index] = projectedColumns[index].Name;
             }
 
+            Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < names.Length; index++)
+            {
+                nameIndex[names[index]] = index;
+            }
+
             foreach (JsonElement element in array.EnumerateArray())
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -134,7 +140,7 @@ public sealed class JsonTableProvider : ITableProvider
                     }
                 }
 
-                yield return new Row(names, values);
+                yield return new Row(names, values, nameIndex);
             }
         }
     }

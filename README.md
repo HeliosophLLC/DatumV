@@ -1157,49 +1157,49 @@ dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filt
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| Tokenize simple SELECT | 5.280 μs | 0.0164 μs | 0.0146 μs | 1.88 KB |
-| Tokenize with WHERE | 13.764 μs | 0.0600 μs | 0.0532 μs | 5.98 KB |
-| Tokenize with JOIN | 31.074 μs | 0.1549 μs | 0.1373 μs | 11.12 KB |
-| Tokenize complex query | 56.693 μs | 0.0935 μs | 0.0829 μs | 25.55 KB |
-| Parse simple SELECT | 26.008 μs | 0.2234 μs | 0.2090 μs | 21.42 KB |
-| Parse with WHERE | 54.128 μs | 0.5283 μs | 0.4941 μs | 45.16 KB |
-| Parse with JOIN | 99.853 μs | 0.7927 μs | 0.6620 μs | 65.81 KB |
-| Parse complex query | 183.822 μs | 0.6159 μs | 0.5143 μs | 131.53 KB |
-| Parse subquery | 88.581 μs | 0.5704 μs | 0.5335 μs | 70.72 KB |
+| Tokenize simple SELECT | 7.486 μs | 0.1639 μs | 0.4832 μs | 1.88 KB |
+| Tokenize with WHERE | 18.489 μs | 0.6935 μs | 2.0448 μs | 5.98 KB |
+| Tokenize with JOIN | 42.298 μs | 1.4398 μs | 4.2453 μs | 11.12 KB |
+| Tokenize complex query | 75.612 μs | 2.7923 μs | 8.2331 μs | 25.55 KB |
+| Parse simple SELECT | 34.580 μs | 1.3158 μs | 3.8797 μs | 21.42 KB |
+| Parse with WHERE | 74.946 μs | 2.7239 μs | 8.0314 μs | 45.16 KB |
+| Parse with JOIN | 130.052 μs | 5.7613 μs | 16.9875 μs | 65.81 KB |
+| Parse complex query | 257.326 μs | 11.4180 μs | 33.6663 μs | 131.53 KB |
+| Parse subquery | 122.970 μs | 4.8358 μs | 14.2586 μs | 70.72 KB |
 
-Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input. A complex query with multiple JOINs, WHERE, ORDER BY, and LIMIT parses in under 200 μs.
+Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input. Allocated memory is unchanged — parsing has no per-row hot path.
 
 #### Providers
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV 1K rows | 1.290 ms | 0.0136 ms | 0.0120 ms | 1,563.57 KB |
-| CSV 10K rows | 8.231 ms | 0.0324 ms | 0.0303 ms | 14,957.79 KB |
-| CSV 1K with projection | 1.082 ms | 0.0113 ms | 0.0106 ms | 1,157.65 KB |
-| JSON 1K rows | 1.745 ms | 0.0069 ms | 0.0061 ms | 928.58 KB |
-| JSON 10K rows | 13.121 ms | 0.0310 ms | 0.0290 ms | 9,029.17 KB |
+| CSV 1K rows | 1.731 ms | 0.0316 ms | 0.0296 ms | 1,563.47 KB |
+| CSV 10K rows | 10.765 ms | 0.2036 ms | 0.2179 ms | 14,957.77 KB |
+| CSV 1K with projection | 1.410 ms | 0.0224 ms | 0.0199 ms | 1,157.61 KB |
+| JSON 1K rows | 2.032 ms | 0.0386 ms | 0.0489 ms | 928.53 KB |
+| JSON 10K rows | 15.573 ms | 0.3110 ms | 0.7511 ms | 9,029.08 KB |
 
-CSV reads at ~1.2M rows/sec. JSON is ~1.8× slower due to System.Text.Json streaming overhead but allocates ~40% less memory per row. Projection pushdown on CSV saves ~26% of allocated memory by skipping unreferenced columns.
+All five providers now share a pre-built column name index across rows, eliminating per-row Dictionary allocations at the source. Projection pushdown on CSV saves ~26% of allocated memory by skipping unreferenced columns.
 
 #### Execution
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| SELECT * FROM data (10K) | 9.118 ms | 0.1783 ms | 0.1752 ms | 14.62 MB |
-| SELECT with WHERE filter (10K) | 8.403 ms | 0.1637 ms | 0.1681 ms | 12.79 MB |
-| SELECT with projection (10K) | 6.922 ms | 0.0708 ms | 0.0663 ms | 11.2 MB |
-| INNER JOIN (10K × 1K) | 9.710 ms | 0.0982 ms | 0.0919 ms | 13.27 MB |
-| ORDER BY + LIMIT (10K) | 32.581 ms | 0.6376 ms | 0.9543 ms | 16.61 MB |
+| SELECT * FROM data (10K) | 9.356 ms | 0.0847 ms | 0.0792 ms | 10.19 MB |
+| SELECT with WHERE filter (10K) | 10.101 ms | 0.1996 ms | 0.2376 ms | 10.73 MB |
+| SELECT with projection (10K) | 8.033 ms | 0.0924 ms | 0.0820 ms | 9.14 MB |
+| INNER JOIN (10K × 1K) | 11.244 ms | 0.2238 ms | 0.2394 ms | 11.01 MB |
+| ORDER BY + LIMIT (10K) | 30.643 ms | 0.6039 ms | 1.2337 ms | 13.66 MB |
 
-Full scan of 10K rows completes in ~9 ms. Projection and filtering share pre-built column schemas, eliminating per-row Dictionary and name-array allocations — projection allocates only 11.2 MB (down from 15.6 MB). Hash join allocates 13.27 MB thanks to shared alias and join schemas that eliminate per-row name-array and Dictionary rebuilds across `AliasOperator` and `JoinOperator`. ORDER BY + LIMIT is the most expensive due to full materialization for sorting, but uses a bounded priority queue when LIMIT is present.
+Full scan of 10K rows allocates 10.19 MB — shared provider schemas and operator schemas eliminated per-row Dictionary and name-array allocations end-to-end. Projection allocates 9.14 MB and joins 11.01 MB. Function argument arrays are pooled via `ArrayPool`, and LIKE patterns use cached compiled regex. ORDER BY + LIMIT uses a bounded priority queue when LIMIT is present.
 
 #### Statistics
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| Collect stats 1K rows | 3.085 ms | 0.0076 ms | 0.0067 ms | 2.36 MB |
-| Collect stats 10K rows | 54.639 ms | 0.9096 ms | 0.9341 ms | 20.79 MB |
-| Merge two 5K collectors | 61.863 ms | 1.1964 ms | 1.2286 ms | 24.94 MB |
+| Collect stats 1K rows | 3.804 ms | 0.1295 ms | 0.3778 ms | 2.36 MB |
+| Collect stats 10K rows | 66.274 ms | 1.6704 ms | 4.9252 ms | 20.79 MB |
+| Merge two 5K collectors | 73.816 ms | 1.8217 ms | 5.3714 ms | 24.94 MB |
 
 Statistics collection runs all accumulators (numeric, string, vector, image, cardinality, entropy, histogram, quantile, top-K) in a single pass. Merge cost is comparable to a fresh 10K collection because both collectors' reservoir samples and HyperLogLog registers must be combined.
 
@@ -1207,9 +1207,9 @@ Statistics collection runs all accumulators (numeric, string, vector, image, car
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV write 1K rows | 1.848 ms | 0.0225 ms | 0.0188 ms | 124.39 KB |
-| CSV write 10K rows | 11.665 ms | 0.2292 ms | 0.2452 ms | 1,145.53 KB |
-| CSV write 10K rows with sharding (1000/shard) | 20.484 ms | 0.3906 ms | 0.4342 ms | 1,256.04 KB |
+| CSV write 1K rows | 1.833 ms | 0.0331 ms | 0.0276 ms | 124.37 KB |
+| CSV write 10K rows | 11.589 ms | 0.2297 ms | 0.3900 ms | 1,145.5 KB |
+| CSV write 10K rows with sharding (1000/shard) | 20.674 ms | 0.4062 ms | 0.6204 ms | 1,255.99 KB |
 
 CSV writes with minimal allocation overhead (~115 bytes/row). Sharding adds overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
 

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Axon.QueryEngine.Functions;
@@ -15,6 +16,12 @@ namespace Axon.QueryEngine.Execution;
 public sealed class ExpressionEvaluator
 {
     private readonly FunctionRegistry _functions;
+
+    /// <summary>
+    /// Compiled regex cache for LIKE patterns. Avoids recompiling
+    /// the same SQL LIKE pattern on every row comparison.
+    /// </summary>
+    private readonly Dictionary<string, Regex> _likeRegexCache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Creates an evaluator that can resolve function calls.
@@ -212,20 +219,30 @@ public sealed class ExpressionEvaluator
                 $"Unknown function: '{function.FunctionName}'.");
         }
 
-        DataValue[] arguments = new DataValue[function.Arguments.Count];
-        for (int index = 0; index < function.Arguments.Count; index++)
+        int argumentCount = function.Arguments.Count;
+        DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(argumentCount);
+        try
         {
-            arguments[index] = Evaluate(function.Arguments[index], row);
+            for (int index = 0; index < argumentCount; index++)
+            {
+                arguments[index] = Evaluate(function.Arguments[index], row);
+            }
+
+            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
+
+            // Dispose consumed ImageHandle arguments whose bitmaps are no longer needed.
+            // The result carries its own ImageHandle (if any), so we only dispose handles
+            // that are not the same instance as the result's handle.
+            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result);
+
+            return result;
         }
-
-        DataValue result = scalarFunction.Execute(arguments);
-
-        // Dispose consumed ImageHandle arguments whose bitmaps are no longer needed.
-        // The result carries its own ImageHandle (if any), so we only dispose handles
-        // that are not the same instance as the result's handle.
-        DisposeConsumedImageHandles(arguments, result);
-
-        return result;
+        finally
+        {
+            // Clear references so the pool doesn't root DataValue objects.
+            arguments.AsSpan(0, argumentCount).Clear();
+            ArrayPool<DataValue>.Shared.Return(arguments);
+        }
     }
 
     /// <summary>
@@ -233,7 +250,7 @@ public sealed class ExpressionEvaluator
     /// no longer referenced by the result. This releases native <see cref="SkiaSharp.SKBitmap"/>
     /// memory from intermediate pipeline stages.
     /// </summary>
-    private static void DisposeConsumedImageHandles(DataValue[] arguments, DataValue result)
+    private static void DisposeConsumedImageHandles(ReadOnlySpan<DataValue> arguments, DataValue result)
     {
         for (int index = 0; index < arguments.Length; index++)
         {
@@ -407,7 +424,7 @@ public sealed class ExpressionEvaluator
 
     // ──────────────────── LIKE pattern matching ────────────────────
 
-    private static DataValue EvaluateLike(DataValue left, DataValue right)
+    private DataValue EvaluateLike(DataValue left, DataValue right)
     {
         if (left.Kind != DataKind.String || right.Kind != DataKind.String)
         {
@@ -417,12 +434,17 @@ public sealed class ExpressionEvaluator
         string input = left.AsString();
         string pattern = right.AsString();
 
-        // Convert SQL LIKE pattern to regex: % -> .*, _ -> ., escape regex metacharacters.
-        string regexPattern = "^" + Regex.Escape(pattern)
-            .Replace("%", ".*", StringComparison.Ordinal)
-            .Replace("_", ".", StringComparison.Ordinal) + "$";
+        if (!_likeRegexCache.TryGetValue(pattern, out Regex? regex))
+        {
+            string regexPattern = "^" + Regex.Escape(pattern)
+                .Replace("%", ".*", StringComparison.Ordinal)
+                .Replace("_", ".", StringComparison.Ordinal) + "$";
 
-        bool matches = Regex.IsMatch(input, regexPattern, RegexOptions.IgnoreCase);
+            regex = new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            _likeRegexCache[pattern] = regex;
+        }
+
+        bool matches = regex.IsMatch(input);
         return DataValue.FromScalar(matches ? 1f : 0f);
     }
 }

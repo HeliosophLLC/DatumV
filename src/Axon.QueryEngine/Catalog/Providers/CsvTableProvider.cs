@@ -140,6 +140,13 @@ public sealed class CsvTableProvider : ITableProvider
             }
         }
 
+        // Build name index once for the projected schema.
+        Dictionary<string, int> nameIndex = new(projectedNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < projectedNames.Length; index++)
+        {
+            nameIndex[projectedNames[index]] = index;
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             string? logicalLine = await ReadLogicalLineAsync(reader, cancellationToken);
@@ -159,7 +166,7 @@ public sealed class CsvTableProvider : ITableProvider
                 values[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
             }
 
-            yield return new Row(projectedNames, values);
+            yield return new Row(projectedNames, values, nameIndex);
         }
     }
 

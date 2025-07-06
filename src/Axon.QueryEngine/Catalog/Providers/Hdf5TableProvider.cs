@@ -72,11 +72,17 @@ public sealed class Hdf5TableProvider : ITableProvider
             }
         }
 
-        // Build column names array once.
+        // Build column names array and name index once.
         string[] columnNames = new string[columnDataList.Count];
         for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
         {
             columnNames[columnIndex] = columnDataList[columnIndex].Name;
+        }
+
+        Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int columnIndex = 0; columnIndex < columnNames.Length; columnIndex++)
+        {
+            nameIndex[columnNames[columnIndex]] = columnIndex;
         }
 
         // Yield rows by zipping columns.
@@ -90,7 +96,7 @@ public sealed class Hdf5TableProvider : ITableProvider
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
-            yield return new Row(columnNames, values);
+            yield return new Row(columnNames, values, nameIndex);
         }
 
         await Task.CompletedTask;

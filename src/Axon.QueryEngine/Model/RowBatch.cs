@@ -52,20 +52,39 @@ public sealed class RowBatch
     public int ColumnCount => _columns.Length;
 
     /// <summary>
+    /// Cached column names and index, built lazily on the first <see cref="GetRow"/> call
+    /// and shared across all materialised rows.
+    /// </summary>
+    private string[]? _cachedNames;
+    private Dictionary<string, int>? _cachedNameIndex;
+
+    /// <summary>
     /// Materialises a single row by gathering values from each column at the given index.
     /// </summary>
     public Row GetRow(int rowIndex)
     {
-        string[] names = new string[_columns.Length];
-        DataValue[] values = new DataValue[_columns.Length];
+        if (_cachedNames is null)
+        {
+            _cachedNames = new string[_columns.Length];
+            for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
+            {
+                _cachedNames[columnIndex] = Schema.Columns[columnIndex].Name;
+            }
 
+            _cachedNameIndex = new Dictionary<string, int>(_cachedNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int columnIndex = 0; columnIndex < _cachedNames.Length; columnIndex++)
+            {
+                _cachedNameIndex[_cachedNames[columnIndex]] = columnIndex;
+            }
+        }
+
+        DataValue[] values = new DataValue[_columns.Length];
         for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
         {
-            names[columnIndex] = Schema.Columns[columnIndex].Name;
             values[columnIndex] = _columns[columnIndex][rowIndex];
         }
 
-        return new Row(names, values);
+        return new Row(_cachedNames, values, _cachedNameIndex!);
     }
 
     /// <summary>

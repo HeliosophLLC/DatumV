@@ -64,10 +64,11 @@ public sealed class UnnestFunction : ISchemaAwareTableFunction
             {
                 float[] values = input.AsVector();
                 string[] names = ["value"];
+                Dictionary<string, int> nameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["value"] = 0 };
                 foreach (float item in values)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    yield return new Row(names, [DataValue.FromScalar(item)]);
+                    yield return new Row(names, [DataValue.FromScalar(item)], nameIndex);
                 }
                 break;
             }
@@ -76,10 +77,11 @@ public sealed class UnnestFunction : ISchemaAwareTableFunction
             {
                 byte[] bytes = input.AsUInt8Array();
                 string[] names = ["value"];
+                Dictionary<string, int> nameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["value"] = 0 };
                 foreach (byte item in bytes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    yield return new Row(names, [DataValue.FromUInt8(item)]);
+                    yield return new Row(names, [DataValue.FromUInt8(item)], nameIndex);
                 }
                 break;
             }
