@@ -24,6 +24,10 @@
 - **All tests must pass.** Never leave the test suite in a broken state. Run all tests after every change and fix any regressions before proceeding.
 - **Tests are first-class code.** Apply the same naming, documentation, and style rules to test code.
 
+## Benchmarks
+
+- **Update README after every benchmark run.** After running benchmarks (`dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks`), read the updated result files from `BenchmarkDotNet.Artifacts/results/*-report-github.md` and update the **Benchmarks → Results** section in `README.md` with the new numbers. Include Mean, Error, StdDev, and Allocated columns for each suite (Parsing, Providers, Execution, Statistics, Output). Update the environment header block and the analysis commentary beneath each table if the numbers have changed materially.
+
 ## Project context
 
 - .NET 10, C# 14. Target framework `net10.0`.

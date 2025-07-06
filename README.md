@@ -1147,6 +1147,72 @@ Run a specific suite:
 dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*Parsing*"
 ```
 
+### Results
+
+> BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.8037)
+> Intel Core i9-10900X CPU 3.70GHz, 1 CPU, 20 logical and 10 physical cores
+> .NET SDK 10.0.103, .NET 10.0.3 (10.0.326.7603), X64 RyuJIT AVX-512F+CD+BW+DQ+VL
+
+#### Parsing
+
+| Method | Mean | Error | StdDev | Allocated |
+|--------|-----:|------:|-------:|----------:|
+| Tokenize simple SELECT | 5.318 μs | 0.0223 μs | 0.0187 μs | 1.88 KB |
+| Tokenize with WHERE | 14.125 μs | 0.1009 μs | 0.0944 μs | 5.98 KB |
+| Tokenize with JOIN | 30.500 μs | 0.4885 μs | 0.3814 μs | 11.12 KB |
+| Tokenize complex query | 55.844 μs | 0.9989 μs | 1.0258 μs | 25.55 KB |
+| Parse simple SELECT | 26.556 μs | 0.2782 μs | 0.2602 μs | 21.42 KB |
+| Parse with WHERE | 55.331 μs | 0.7663 μs | 0.7168 μs | 45.16 KB |
+| Parse with JOIN | 99.823 μs | 0.4817 μs | 0.4270 μs | 65.81 KB |
+| Parse complex query | 189.046 μs | 0.9609 μs | 0.8518 μs | 131.53 KB |
+| Parse subquery | 88.784 μs | 1.3591 μs | 1.2713 μs | 70.72 KB |
+
+Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input. A complex query with multiple JOINs, WHERE, ORDER BY, and LIMIT parses in under 200 μs.
+
+#### Providers
+
+| Method | Mean | Error | StdDev | Allocated |
+|--------|-----:|------:|-------:|----------:|
+| CSV 1K rows | 1.339 ms | 0.0257 ms | 0.0437 ms | 1,563.51 KB |
+| CSV 10K rows | 8.496 ms | 0.0907 ms | 0.0848 ms | 14,957.77 KB |
+| CSV 1K with projection | 1.091 ms | 0.0091 ms | 0.0076 ms | 1,157.65 KB |
+| JSON 1K rows | 1.820 ms | 0.0324 ms | 0.0410 ms | 928.57 KB |
+| JSON 10K rows | 15.589 ms | 0.6780 ms | 1.9990 ms | 9,029.17 KB |
+
+CSV reads at ~1.2M rows/sec. JSON is ~1.8× slower due to System.Text.Json streaming overhead but allocates ~40% less memory per row. Projection pushdown on CSV saves ~26% of allocated memory by skipping unreferenced columns.
+
+#### Execution
+
+| Method | Mean | Error | StdDev | Allocated |
+|--------|-----:|------:|-------:|----------:|
+| SELECT * FROM data (10K) | 9.040 ms | 0.1303 ms | 0.1219 ms | 14.62 MB |
+| SELECT with WHERE filter (10K) | 12.477 ms | 0.5736 ms | 1.6912 ms | 18.57 MB |
+| SELECT with projection (10K) | 11.278 ms | 0.0704 ms | 0.0624 ms | 19.82 MB |
+| INNER JOIN (10K × 1K) | 19.714 ms | 0.1685 ms | 0.1493 ms | 32.26 MB |
+| ORDER BY + LIMIT (10K) | 40.235 ms | 0.8034 ms | 1.0160 ms | 24.62 MB |
+
+Full scan of 10K rows completes in ~9 ms. Hash join with a 1K-row build side adds ~10 ms. ORDER BY + LIMIT is the most expensive due to full materialization for sorting, but uses a bounded priority queue when LIMIT is present.
+
+#### Statistics
+
+| Method | Mean | Error | StdDev | Allocated |
+|--------|-----:|------:|-------:|----------:|
+| Collect stats 1K rows | 3.266 ms | 0.0599 ms | 0.1568 ms | 2.36 MB |
+| Collect stats 10K rows | 56.321 ms | 1.0727 ms | 1.3948 ms | 20.79 MB |
+| Merge two 5K collectors | 61.968 ms | 1.2370 ms | 1.9620 ms | 24.94 MB |
+
+Statistics collection runs all accumulators (numeric, string, vector, image, cardinality, entropy, histogram, quantile, top-K) in a single pass. Merge cost is comparable to a fresh 10K collection because both collectors' reservoir samples and HyperLogLog registers must be combined.
+
+#### Output
+
+| Method | Mean | Error | StdDev | Allocated |
+|--------|-----:|------:|-------:|----------:|
+| CSV write 1K rows | 1.555 ms | 0.0308 ms | 0.0523 ms | 124.41 KB |
+| CSV write 10K rows | 9.339 ms | 0.1645 ms | 0.1689 ms | 1,145.55 KB |
+| CSV write 10K rows with sharding (1000/shard) | 16.621 ms | 0.2893 ms | 0.3095 ms | 1,256.02 KB |
+
+CSV writes at ~1.1M rows/sec with minimal allocation overhead (~115 bytes/row). Sharding adds ~78% overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
+
 ## Project Structure
 
 ```
