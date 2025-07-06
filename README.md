@@ -605,13 +605,30 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `pixel_count` | `pixel_count(img)` | Total pixel count (width × height, header-only). |
 | `dimensions` | `dimensions(img, format)` | Dimension vector in specified format: `'HWC'`, `'CHW'`, `'WH'`, or `'WHC'`. |
 
+### Image — Analysis (5)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `image_brightness_mean` | `image_brightness_mean(img)` | Mean brightness (BT.601 luminance) across all pixels → Scalar 0–255. |
+| `image_brightness_std` | `image_brightness_std(img)` | Standard deviation of brightness across all pixels → Scalar. |
+| `image_brightness_histogram` | `image_brightness_histogram(img)` | 256-bin brightness histogram → Vector. Each element is the pixel count for that luminance bin. |
+| `detect_blur` | `detect_blur(img)` | Laplacian variance blur detector → Scalar. Higher values = sharper image. |
+| `compression_artifact_score` | `compression_artifact_score(img)` | JPEG blockiness score → Scalar 0–1. Measures 8×8 block boundary discontinuities. |
+
+### Image — Pixel Statistics (2)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Scalar. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. |
+| `image_pixel_std` | `image_pixel_std(img[, channels])` | Standard deviation of pixel values. Same signature as `image_pixel_mean`. |
+
 ### Image — Decode (1)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `decode_image` | `decode_image(img)` | Decode to [H, W, 4] RGBA float tensor (values 0–255). |
 
-### Image — Transforms (6)
+### Image — Transforms (13)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -621,6 +638,19 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `rotate` | `rotate(img, degrees[, fmt])` | Rotate by arbitrary angle. Canvas expands for non-90° rotations. |
 | `noise` | `noise(img, type, val[, fmt])` | Add noise. Type: `'gaussian'` (val=stddev) or `'salt_pepper'` (val=ratio). |
 | `blur` | `blur(img, radius[, fmt])` | Gaussian blur with the given sigma radius. |
+| `brighten` | `brighten(img, intensity[, fmt])` | Increase brightness by adding intensity to RGB channels. |
+| `darken` | `darken(img, intensity[, fmt])` | Decrease brightness by subtracting intensity from RGB channels. |
+| `sobel` | `sobel(img[, fmt])` | Sobel edge detection → grayscale edge magnitude image. |
+| `resize_and_crop` | `resize_and_crop(img, w, h, gravity[, fmt])` | Resize to fill then crop to exact dimensions. Gravity: `'center'`, `'top'`, `'bottom'`, `'left'`, `'right'`. |
+| `affine_transform` | `affine_transform(img, angle, sx, sy, shx, shy[, fmt])` | Affine transformation with rotation (degrees), scale, and shear parameters. |
+| `elastic_deform` | `elastic_deform(img, alpha, sigma[, fmt])` | Elastic deformation (Simard et al.). Alpha = displacement intensity, sigma = smoothing. |
+| `perspective_warp` | `perspective_warp(img, intensity[, fmt])` or `perspective_warp(img, tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y[, fmt])` | Perspective distortion. Intensity mode: random warp. Explicit mode: normalized corner coordinates. |
+
+### Image — Hashing (1)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `perceptual_hash` | `perceptual_hash(img)` | Difference hash (dHash) → 64-element Vector of 0/1 bits. Use with `hamming_distance()` for similarity. |
 
 > All transform functions accept an optional trailing `fmt` argument (`'jpeg'`, `'png'`, `'webp'`) to control output encoding. Default preserves the original format.
 

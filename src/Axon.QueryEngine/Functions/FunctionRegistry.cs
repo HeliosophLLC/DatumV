@@ -223,6 +223,17 @@ public sealed class FunctionRegistry
         // Image — Decode
         registry.RegisterScalar(new Image.DecodeImageFunction());
 
+        // Image — Analysis
+        registry.RegisterScalar(new Image.ImageBrightnessMeanFunction());
+        registry.RegisterScalar(new Image.ImageBrightnessStandardDeviationFunction());
+        registry.RegisterScalar(new Image.ImageBrightnessHistogramFunction());
+        registry.RegisterScalar(new Image.DetectBlurFunction());
+        registry.RegisterScalar(new Image.CompressionArtifactScoreFunction());
+
+        // Image — Pixel Statistics
+        registry.RegisterScalar(new Image.ImagePixelMeanFunction());
+        registry.RegisterScalar(new Image.ImagePixelStandardDeviationFunction());
+
         // Image — Transforms
         registry.RegisterScalar(new Image.ResizeImageFunction());
         registry.RegisterScalar(new Image.CropImageFunction());
@@ -230,6 +241,16 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Image.RotateImageFunction());
         registry.RegisterScalar(new Image.NoiseImageFunction());
         registry.RegisterScalar(new Image.BlurImageFunction());
+        registry.RegisterScalar(new Image.BrightenImageFunction());
+        registry.RegisterScalar(new Image.DarkenImageFunction());
+        registry.RegisterScalar(new Image.SobelImageFunction());
+        registry.RegisterScalar(new Image.ResizeAndCropImageFunction());
+        registry.RegisterScalar(new Image.AffineTransformFunction());
+        registry.RegisterScalar(new Image.ElasticDeformFunction());
+        registry.RegisterScalar(new Image.PerspectiveWarpFunction());
+
+        // Image — Hashing
+        registry.RegisterScalar(new Image.PerceptualHashFunction());
 
         // Table-valued
         registry.RegisterTableValued(new TableValued.UnnestFunction());
