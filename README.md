@@ -87,6 +87,7 @@ axon query "
 | `stats` | Execute a query and print per-column statistics. |
 | `explain` | Show the query execution plan without running it. |
 | `manifest` | Generate a JSON manifest with per-column feature statistics. |
+| `schema` | Show the column schema of a query's FROM/JOIN sources without executing. |
 
 ### Flags
 
@@ -996,6 +997,132 @@ InstrumentedOperator.PopulateMetrics(explainPlan, instrumented);
 Console.WriteLine(explainPlan.Render());
 ```
 
+## Schema Introspection
+
+The `schema` command resolves column metadata from all table sources in a query's FROM and JOIN clauses without executing the query. This is designed for editor integration (Monaco, VS Code) where column names, types, and source tables are needed for autocomplete.
+
+### CLI usage
+
+```bash
+# Single table
+axon schema "SELECT * FROM data" --source csv:data=measurements.csv
+```
+
+```
+Column                         Type         Nullable   Source
+----------------------------------------------------------------------
+name                           String       YES        data
+age                            Scalar       YES        data
+score                          Scalar       YES        data
+
+(3 column(s) from 1 source(s))
+```
+
+```bash
+# JOIN — columns from both sides, with LEFT JOIN marking the right side nullable
+axon schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
+  --source "zip:images=./train2017.zip" \
+  --source "json:captions=./captions.json"
+```
+
+```
+Column                         Type         Nullable   Source
+----------------------------------------------------------------------
+file_name                      String       NO         img
+file_bytes                     UInt8Array   NO         img
+image_id                       Scalar       YES        cap
+caption                        String       YES        cap
+
+(4 column(s) from 2 source(s))
+```
+
+```bash
+# Table-valued function
+axon schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
+```
+
+```
+Column                         Type         Nullable   Source
+----------------------------------------------------------------------
+Value                          Scalar       NO         r
+
+(1 column(s) from 1 source(s))
+```
+
+Supported table sources:
+- Named tables (resolved via catalog/provider `GetSchemaAsync`)
+- Aliased tables (`FROM table AS alias`)
+- JOINs (INNER, LEFT, RIGHT, FULL OUTER, CROSS — outer joins mark the outer side nullable)
+- Subqueries (`FROM (SELECT ...) AS sub` — recursively infers output column types)
+- Table-valued functions (`RANGE`, `UNNEST` — via `ISchemaAwareTableFunction`)
+
+### Programmatic API
+
+```csharp
+// 1. Parse the query.
+SelectStatement statement = SqlParser.Parse(
+    "SELECT * FROM images AS img JOIN captions AS cap ON img.id = cap.image_id");
+
+// 2. Resolve the combined schema of all FROM/JOIN sources.
+QuerySchemaResolver resolver = new(catalog, FunctionRegistry.CreateDefault());
+ResolvedQuerySchema schema = await resolver.ResolveAsync(statement, cancellationToken);
+
+// 3. Use for autocomplete.
+foreach (ResolvedColumn column in schema.Columns)
+{
+    // column.ColumnName         → "file_name"
+    // column.Kind               → DataKind.String
+    // column.Nullable           → false
+    // column.SourceTableOrAlias → "img"
+}
+
+// Qualified lookup (alias.column):
+ResolvedColumn? col = schema.FindColumn("img.file_name");
+
+// Unqualified lookup:
+ResolvedColumn? col2 = schema.FindColumn("file_name");
+
+// All columns from a specific table/alias:
+IReadOnlyList<ResolvedColumn> imgColumns = schema.FindColumns("img");
+
+// All contributing table names/aliases:
+IEnumerable<string> tables = schema.TableNames;  // ["img", "cap"]
+```
+
+#### Single-table convenience
+
+For simple scenarios where you just need one table's schema:
+
+```csharp
+Schema schema = await catalog.GetSchemaAsync("tableName", cancellationToken);
+
+foreach (ColumnInfo column in schema.Columns)
+{
+    // column.Name     → "score"
+    // column.Kind     → DataKind.Scalar
+    // column.Nullable → true
+}
+```
+
+#### Schema-aware table-valued functions
+
+Custom table-valued functions can implement `ISchemaAwareTableFunction` to expose their output schema for introspection without execution:
+
+```csharp
+public class MyTableFunction : ISchemaAwareTableFunction
+{
+    public string Name => "my_func";
+
+    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        return new Schema([new ColumnInfo("result", DataKind.Scalar, nullable: false)]);
+    }
+
+    public async IAsyncEnumerable<Row> ExecuteAsync(
+        DataValue[] arguments, CancellationToken cancellationToken) { /* ... */ }
+}
+```
+
 ## Benchmarks
 
 Run benchmarks with:
@@ -1033,7 +1160,7 @@ Axon.QueryEngine/
       Functions/                  # Scalar and table-valued functions
       Statistics/                 # Column statistics with pluggable accumulators
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
-    Axon.QueryEngine.Cli/         # CLI tool (query, explore, stats commands)
+    Axon.QueryEngine.Cli/         # CLI tool (query, explore, stats, schema commands)
   tests/
     Axon.QueryEngine.Tests/       # 600+ unit tests
   benchmarks/

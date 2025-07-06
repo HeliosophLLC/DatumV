@@ -29,7 +29,8 @@ try
         "stats" => await RunStatsAsync(statement, catalog),
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', or 'manifest'.")
+        "schema" => await RunSchemaAsync(statement, catalog),
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', or 'schema'.")
     };
 }
 catch (ArgumentException ex)
@@ -358,6 +359,27 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
         Console.WriteLine(json);
     }
 
+    return 0;
+}
+
+static async Task<int> RunSchemaAsync(SelectStatement statement, TableCatalog catalog)
+{
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+    QuerySchemaResolver resolver = new(catalog, functionRegistry);
+    ResolvedQuerySchema schema = await resolver.ResolveAsync(statement, CancellationToken.None);
+
+    // Print header.
+    Console.WriteLine($"{"Column",-30} {"Type",-12} {"Nullable",-10} {"Source"}");
+    Console.WriteLine(new string('-', 70));
+
+    // Print each column.
+    foreach (ResolvedColumn column in schema.Columns)
+    {
+        Console.WriteLine(
+            $"{column.ColumnName,-30} {column.Kind,-12} {(column.Nullable ? "YES" : "NO"),-10} {column.SourceTableOrAlias ?? ""}");
+    }
+
+    Console.WriteLine($"\n({schema.Columns.Count} column(s) from {schema.TableNames.Count()} source(s))");
     return 0;
 }
 

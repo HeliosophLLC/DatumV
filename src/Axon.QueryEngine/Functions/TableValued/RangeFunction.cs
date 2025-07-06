@@ -12,10 +12,19 @@ namespace Axon.QueryEngine.Functions.TableValued;
 /// This is a virtual table source that requires no catalog registration.
 /// Usage: <c>FROM RANGE(0, 360)</c> or <c>FROM RANGE(0, 1, 0.1) AS r</c>.
 /// </remarks>
-public sealed class RangeFunction : ITableValuedFunction
+public sealed class RangeFunction : ISchemaAwareTableFunction
 {
+    private static readonly Schema OutputSchema = new(
+        [new ColumnInfo("Value", DataKind.Scalar, nullable: false)]);
+
     /// <inheritdoc />
     public string Name => "range";
+
+    /// <inheritdoc />
+    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        return OutputSchema;
+    }
 
     /// <inheritdoc />
     public async IAsyncEnumerable<Row> ExecuteAsync(

@@ -1,3 +1,5 @@
+using Axon.QueryEngine.Model;
+
 namespace Axon.QueryEngine.Catalog;
 
 /// <summary>
@@ -76,5 +78,22 @@ public sealed class TableCatalog
     public bool TryResolve(string tableName, out TableDescriptor? descriptor)
     {
         return _descriptors.TryGetValue(tableName, out descriptor);
+    }
+
+    /// <summary>
+    /// Resolves a table name and returns its schema by creating the appropriate
+    /// provider and calling <see cref="ITableProvider.GetSchemaAsync"/>.
+    /// </summary>
+    /// <param name="tableName">Logical table name from the SQL query.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The schema of the named table.</returns>
+    /// <exception cref="KeyNotFoundException">
+    /// Thrown when the table name or its provider is not registered.
+    /// </exception>
+    public async Task<Schema> GetSchemaAsync(string tableName, CancellationToken cancellationToken)
+    {
+        TableDescriptor descriptor = Resolve(tableName);
+        ITableProvider provider = CreateProvider(descriptor);
+        return await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
     }
 }

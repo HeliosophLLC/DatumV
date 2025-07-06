@@ -1,0 +1,287 @@
+using Axon.QueryEngine.Execution;
+using Axon.QueryEngine.Functions;
+using Axon.QueryEngine.Model;
+using Axon.QueryEngine.Parsing.Ast;
+
+namespace Axon.QueryEngine.Catalog;
+
+/// <summary>
+/// Resolves the combined column schema of all table sources referenced in a
+/// parsed <see cref="SelectStatement"/>. Handles FROM, JOINs, subqueries,
+/// and table-valued functions to produce a <see cref="ResolvedQuerySchema"/>
+/// suitable for editor autocomplete and query validation.
+/// </summary>
+public sealed class QuerySchemaResolver
+{
+    private readonly TableCatalog _catalog;
+    private readonly FunctionRegistry _functionRegistry;
+
+    /// <summary>
+    /// Creates a resolver backed by the given catalog and function registry.
+    /// </summary>
+    /// <param name="catalog">The catalog used to resolve table names to schemas.</param>
+    /// <param name="functionRegistry">The registry used to resolve table-valued function schemas.</param>
+    public QuerySchemaResolver(TableCatalog catalog, FunctionRegistry functionRegistry)
+    {
+        _catalog = catalog;
+        _functionRegistry = functionRegistry;
+    }
+
+    /// <summary>
+    /// Resolves the combined schema of all table sources in the given statement,
+    /// merging FROM and JOIN sources with alias-aware column naming.
+    /// </summary>
+    /// <param name="statement">The parsed SELECT statement to analyze.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resolved schema containing columns from all referenced sources.</returns>
+    public async Task<ResolvedQuerySchema> ResolveAsync(
+        SelectStatement statement,
+        CancellationToken cancellationToken)
+    {
+        List<ResolvedColumn> allColumns = new();
+
+        // Resolve the primary FROM source.
+        IReadOnlyList<ResolvedColumn> fromColumns =
+            await ResolveSourceAsync(statement.From.Source, cancellationToken).ConfigureAwait(false);
+        allColumns.AddRange(fromColumns);
+
+        // Resolve each JOINed source.
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                IReadOnlyList<ResolvedColumn> joinColumns =
+                    await ResolveSourceAsync(join.Source, cancellationToken).ConfigureAwait(false);
+
+                // LEFT/RIGHT/FULL OUTER joins may produce nulls for the outer side.
+                if (join.Type is JoinType.Left or JoinType.Right or JoinType.FullOuter)
+                {
+                    joinColumns = MarkNullable(joinColumns);
+                }
+
+                allColumns.AddRange(joinColumns);
+            }
+        }
+
+        return new ResolvedQuerySchema(allColumns);
+    }
+
+    /// <summary>
+    /// Dispatches to the appropriate resolution method based on the table source type.
+    /// </summary>
+    private async Task<IReadOnlyList<ResolvedColumn>> ResolveSourceAsync(
+        TableSource source,
+        CancellationToken cancellationToken)
+    {
+        return source switch
+        {
+            TableReference tableReference => await ResolveTableReferenceAsync(
+                tableReference, cancellationToken).ConfigureAwait(false),
+
+            SubquerySource subquery => await ResolveSubqueryAsync(
+                subquery, cancellationToken).ConfigureAwait(false),
+
+            FunctionSource functionSource => ResolveFunctionSource(functionSource),
+
+            _ => throw new InvalidOperationException(
+                $"Unsupported table source type: {source.GetType().Name}."),
+        };
+    }
+
+    /// <summary>
+    /// Resolves a named table reference by fetching its schema from the catalog.
+    /// Applies the alias (or table name) as the source identifier.
+    /// </summary>
+    private async Task<IReadOnlyList<ResolvedColumn>> ResolveTableReferenceAsync(
+        TableReference tableReference,
+        CancellationToken cancellationToken)
+    {
+        Schema schema = await _catalog.GetSchemaAsync(
+            tableReference.Name, cancellationToken).ConfigureAwait(false);
+
+        string sourceIdentifier = tableReference.Alias ?? tableReference.Name;
+        return ToResolvedColumns(schema, sourceIdentifier);
+    }
+
+    /// <summary>
+    /// Resolves a subquery by recursively resolving its inner statement and then
+    /// determining the output columns from the SELECT clause.
+    /// </summary>
+    private async Task<IReadOnlyList<ResolvedColumn>> ResolveSubqueryAsync(
+        SubquerySource subquery,
+        CancellationToken cancellationToken)
+    {
+        // Recursively resolve the inner query's source schema to determine
+        // what columns the inner SELECT expressions can reference.
+        ResolvedQuerySchema innerSourceSchema = await ResolveAsync(
+            subquery.Query, cancellationToken).ConfigureAwait(false);
+
+        // Build a Schema from the inner resolved columns so ExpressionTypeResolver
+        // can look up column types.
+        Schema innerSchema = ToSchema(innerSourceSchema);
+
+        // Now determine what the SELECT clause projects out.
+        List<ResolvedColumn> outputColumns = new();
+
+        foreach (SelectColumn selectColumn in subquery.Query.Columns)
+        {
+            switch (selectColumn)
+            {
+                case SelectAllColumns:
+                    // SELECT * passes through all inner source columns.
+                    foreach (ResolvedColumn inner in innerSourceSchema.Columns)
+                    {
+                        outputColumns.Add(inner with { SourceTableOrAlias = subquery.Alias });
+                    }
+                    break;
+
+                case SelectTableColumns tableColumns:
+                    // SELECT t.* passes through columns from the specified table.
+                    foreach (ResolvedColumn inner in innerSourceSchema.FindColumns(tableColumns.TableName))
+                    {
+                        outputColumns.Add(inner with { SourceTableOrAlias = subquery.Alias });
+                    }
+                    break;
+
+                default:
+                    // Named expression — infer type and determine output name.
+                    string? outputName = selectColumn.Alias
+                        ?? GetExpressionColumnName(selectColumn.Expression);
+
+                    if (outputName is null)
+                    {
+                        continue;
+                    }
+
+                    DataKind? kind = ExpressionTypeResolver.ResolveType(
+                        selectColumn.Expression, innerSchema, _functionRegistry);
+
+                    outputColumns.Add(new ResolvedColumn(
+                        outputName,
+                        kind ?? DataKind.String,
+                        Nullable: true,
+                        subquery.Alias));
+                    break;
+            }
+        }
+
+        return outputColumns;
+    }
+
+    /// <summary>
+    /// Resolves a table-valued function source. If the function implements
+    /// <see cref="ISchemaAwareTableFunction"/>, returns its output schema;
+    /// otherwise returns an empty column list.
+    /// </summary>
+    private IReadOnlyList<ResolvedColumn> ResolveFunctionSource(FunctionSource functionSource)
+    {
+        ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.FunctionName);
+        if (function is null)
+        {
+            return [];
+        }
+
+        if (function is not ISchemaAwareTableFunction schemaAware)
+        {
+            return [];
+        }
+
+        // Resolve argument kinds from literal expressions where possible.
+        DataKind[] argumentKinds = new DataKind[functionSource.Arguments.Count];
+        for (int index = 0; index < functionSource.Arguments.Count; index++)
+        {
+            // Use an empty schema — function source arguments are typically
+            // literals, not column references.
+            Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Scalar, nullable: false)]);
+            DataKind? kind = ExpressionTypeResolver.ResolveType(
+                functionSource.Arguments[index], emptySchema, _functionRegistry);
+            argumentKinds[index] = kind ?? DataKind.Scalar;
+        }
+
+        Schema outputSchema = schemaAware.GetOutputSchema(argumentKinds);
+        string sourceIdentifier = functionSource.Alias ?? functionSource.FunctionName;
+        return ToResolvedColumns(outputSchema, sourceIdentifier);
+    }
+
+    /// <summary>
+    /// Converts a <see cref="Schema"/> to a list of <see cref="ResolvedColumn"/>
+    /// entries with the given source identifier.
+    /// </summary>
+    private static IReadOnlyList<ResolvedColumn> ToResolvedColumns(Schema schema, string sourceIdentifier)
+    {
+        ResolvedColumn[] columns = new ResolvedColumn[schema.Columns.Count];
+
+        for (int index = 0; index < schema.Columns.Count; index++)
+        {
+            ColumnInfo column = schema.Columns[index];
+            columns[index] = new ResolvedColumn(
+                column.Name,
+                column.Kind,
+                column.Nullable,
+                sourceIdentifier);
+        }
+
+        return columns;
+    }
+
+    /// <summary>
+    /// Builds a flat <see cref="Schema"/> from a <see cref="ResolvedQuerySchema"/>,
+    /// using both qualified and unqualified column names so that
+    /// <see cref="ExpressionTypeResolver"/> can resolve either form.
+    /// </summary>
+    private static Schema ToSchema(ResolvedQuerySchema resolvedSchema)
+    {
+        List<ColumnInfo> columns = new();
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ResolvedColumn resolved in resolvedSchema.Columns)
+        {
+            // Add qualified name (alias.column).
+            if (resolved.SourceTableOrAlias is not null)
+            {
+                string qualifiedName = $"{resolved.SourceTableOrAlias}.{resolved.ColumnName}";
+                if (seen.Add(qualifiedName))
+                {
+                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable));
+                }
+            }
+
+            // Add unqualified name (first occurrence wins).
+            if (seen.Add(resolved.ColumnName))
+            {
+                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable));
+            }
+        }
+
+        return new Schema(columns);
+    }
+
+    /// <summary>
+    /// Extracts a column name from an expression when it is a simple column reference.
+    /// Returns <c>null</c> for complex expressions that have no natural name.
+    /// </summary>
+    private static string? GetExpressionColumnName(Expression expression)
+    {
+        return expression switch
+        {
+            ColumnReference columnRef => columnRef.ColumnName,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Returns a copy of the column list with all columns marked nullable,
+    /// reflecting that outer joins may produce NULL values for unmatched rows.
+    /// </summary>
+    private static IReadOnlyList<ResolvedColumn> MarkNullable(IReadOnlyList<ResolvedColumn> columns)
+    {
+        ResolvedColumn[] result = new ResolvedColumn[columns.Count];
+
+        for (int index = 0; index < columns.Count; index++)
+        {
+            result[index] = columns[index] with { Nullable = true };
+        }
+
+        return result;
+    }
+}

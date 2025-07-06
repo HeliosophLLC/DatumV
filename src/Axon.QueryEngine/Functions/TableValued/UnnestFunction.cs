@@ -10,10 +10,37 @@ namespace Axon.QueryEngine.Functions.TableValued;
 /// When unnesting a JsonValue array of objects (e.g. from zip()), each object
 /// property becomes a named column.
 /// </summary>
-public sealed class UnnestFunction : ITableValuedFunction
+public sealed class UnnestFunction : ISchemaAwareTableFunction
 {
     /// <inheritdoc />
     public string Name => "unnest";
+
+    /// <inheritdoc />
+    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length != 1)
+        {
+            return new Schema([new ColumnInfo("value", DataKind.Scalar, nullable: true)]);
+        }
+
+        DataKind inputKind = argumentKinds[0];
+
+        return inputKind switch
+        {
+            // Vector elements are floats.
+            DataKind.Vector => new Schema(
+                [new ColumnInfo("value", DataKind.Scalar, nullable: false)]),
+
+            // UInt8Array elements are bytes.
+            DataKind.UInt8Array => new Schema(
+                [new ColumnInfo("value", DataKind.UInt8, nullable: false)]),
+
+            // JSON arrays may expand to objects with unknown columns;
+            // fall back to a single "value" column of String kind.
+            _ => new Schema(
+                [new ColumnInfo("value", DataKind.String, nullable: true)]),
+        };
+    }
 
     /// <inheritdoc />
     public async IAsyncEnumerable<Row> ExecuteAsync(
