@@ -335,6 +335,12 @@ public sealed class ExpressionEvaluator
         return DataValue.FromScalar(result ? 1f : 0f);
     }
 
+    /// <summary>
+    /// Cached <see cref="DataValue"/> wrappers for CAST target type strings, keyed by
+    /// the type name (e.g. "Scalar", "UInt8"). Avoids allocating a new DataValue per row.
+    /// </summary>
+    private readonly Dictionary<string, DataValue> _castTargetCache = new(StringComparer.OrdinalIgnoreCase);
+
     private DataValue EvaluateCast(CastExpression cast, Row row)
     {
         DataValue value = Evaluate(cast.Expression, row);
@@ -345,7 +351,24 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("Cast function not registered.");
         }
 
-        return castFunction.Execute([value, DataValue.FromString(cast.TargetType)]);
+        if (!_castTargetCache.TryGetValue(cast.TargetType, out DataValue? targetTypeValue))
+        {
+            targetTypeValue = DataValue.FromString(cast.TargetType);
+            _castTargetCache[cast.TargetType] = targetTypeValue;
+        }
+
+        DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(2);
+        try
+        {
+            arguments[0] = value;
+            arguments[1] = targetTypeValue;
+            return castFunction.Execute(arguments.AsSpan(0, 2));
+        }
+        finally
+        {
+            arguments.AsSpan(0, 2).Clear();
+            ArrayPool<DataValue>.Shared.Return(arguments);
+        }
     }
 
     // ──────────────────── Arithmetic helpers ────────────────────

@@ -216,6 +216,12 @@ public sealed class CsvTableProvider : ITableProvider
     }
 
     /// <summary>
+    /// Thread-local reusable field buffer to avoid a <see cref="List{T}"/> allocation per CSV row.
+    /// </summary>
+    [ThreadStatic]
+    private static List<string>? _fieldBuffer;
+
+    /// <summary>
     /// Parses a CSV line into fields following RFC 4180 rules:
     /// - Fields may be quoted with double quotes
     /// - Quoted fields may contain delimiters, newlines, and escaped quotes ("")
@@ -223,7 +229,8 @@ public sealed class CsvTableProvider : ITableProvider
     /// </summary>
     private static string[] ParseCsvLine(string line, char delimiter)
     {
-        List<string> fields = new();
+        List<string> fields = (_fieldBuffer ??= new(16));
+        fields.Clear();
         int position = 0;
 
         while (position <= line.Length)
@@ -302,6 +309,13 @@ public sealed class CsvTableProvider : ITableProvider
     }
 
     /// <summary>
+    /// Thread-local reusable <see cref="System.Text.StringBuilder"/> for assembling
+    /// logical CSV lines that span multiple physical lines (embedded newlines in quoted fields).
+    /// </summary>
+    [ThreadStatic]
+    private static System.Text.StringBuilder? _lineBuilder;
+
+    /// <summary>
     /// Reads a logical CSV line that may span multiple physical lines when
     /// quoted fields contain embedded newlines (RFC 4180).
     /// </summary>
@@ -322,7 +336,9 @@ public sealed class CsvTableProvider : ITableProvider
             return firstLine;
         }
 
-        System.Text.StringBuilder builder = new(firstLine);
+        System.Text.StringBuilder builder = (_lineBuilder ??= new(1024));
+        builder.Clear();
+        builder.Append(firstLine);
         while (quoteCount % 2 != 0)
         {
             string? continuation = await reader.ReadLineAsync(cancellationToken);

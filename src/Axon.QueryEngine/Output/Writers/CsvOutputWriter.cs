@@ -110,9 +110,30 @@ public sealed class CsvOutputWriter : IOutputWriter
             DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
             DataKind.DateTime => value.AsDateTime().ToString("O"),
             DataKind.JsonValue => value.AsJsonValue(),
-            DataKind.Vector => "[" + string.Join(",", value.AsVector().Select(v => v.ToString("G"))) + "]",
+            DataKind.Vector => FormatVector(value.AsVector()),
             _ => value.ToString() ?? ""
         };
+    }
+
+    /// <summary>
+    /// Formats a float vector as a bracketed comma-separated list without LINQ.
+    /// </summary>
+    private static string FormatVector(float[] vector)
+    {
+        System.Text.StringBuilder builder = new();
+        builder.Append('[');
+        for (int index = 0; index < vector.Length; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append(vector[index].ToString("G"));
+        }
+
+        builder.Append(']');
+        return builder.ToString();
     }
 
     private static string EscapeField(string field)

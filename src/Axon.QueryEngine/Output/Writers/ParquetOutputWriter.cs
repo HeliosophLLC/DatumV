@@ -98,6 +98,25 @@ public sealed class ParquetOutputWriter : IOutputWriter
         string imagesDir = Path.Combine(parquetDir, "images");
         bool imagesDirCreated = false;
 
+        // Build shared schema arrays once for all replacements.
+        string[]? sharedNames = null;
+        Dictionary<string, int>? sharedNameIndex = null;
+        if (_rows.Count > 0)
+        {
+            Row firstRow = _rows[0];
+            sharedNames = new string[firstRow.FieldCount];
+            for (int i = 0; i < firstRow.FieldCount; i++)
+            {
+                sharedNames[i] = firstRow.ColumnNames[i];
+            }
+
+            sharedNameIndex = new Dictionary<string, int>(sharedNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < sharedNames.Length; i++)
+            {
+                sharedNameIndex[sharedNames[i]] = i;
+            }
+        }
+
         for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
         {
             ColumnInfo column = schema.Columns[columnIndex];
@@ -120,7 +139,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
                 if (value.IsNull)
                 {
                     // Replace with a null-path marker.
-                    row = ReplaceColumnValue(row, column.Name, DataValue.FromString(""));
+                    row = ReplaceColumnValue(row, column.Name, DataValue.FromString(""), sharedNames!, sharedNameIndex!);
                     _rows[rowIndex] = row;
                     continue;
                 }
@@ -138,24 +157,31 @@ public sealed class ParquetOutputWriter : IOutputWriter
 
                 // Replace the binary value with the relative path string.
                 string relativePath = $"images/{fileName}";
-                row = ReplaceColumnValue(row, column.Name, DataValue.FromString(relativePath));
+                row = ReplaceColumnValue(row, column.Name, DataValue.FromString(relativePath), sharedNames!, sharedNameIndex!);
                 _rows[rowIndex] = row;
             }
         }
     }
 
-    private static Row ReplaceColumnValue(Row row, string columnName, DataValue newValue)
+    /// <summary>
+    /// Replaces a single column value in a row, reusing the shared schema arrays
+    /// to avoid per-call name and name-index allocations.
+    /// </summary>
+    private static Row ReplaceColumnValue(
+        Row row,
+        string columnName,
+        DataValue newValue,
+        string[] sharedNames,
+        Dictionary<string, int> sharedNameIndex)
     {
-        string[] names = new string[row.FieldCount];
         DataValue[] values = new DataValue[row.FieldCount];
 
         for (int i = 0; i < row.FieldCount; i++)
         {
-            names[i] = row.ColumnNames[i];
             values[i] = row.ColumnNames[i] == columnName ? newValue : row[i];
         }
 
-        return new Row(names, values);
+        return new Row(sharedNames, values, sharedNameIndex);
     }
 
     private static string DetectFileExtension(byte[] bytes)
