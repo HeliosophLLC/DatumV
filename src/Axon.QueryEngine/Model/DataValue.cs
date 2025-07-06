@@ -32,11 +32,27 @@ public sealed class DataValue : IEquatable<DataValue>
     /// <summary>Whether this value represents a typed null.</summary>
     public bool IsNull => _isNull;
 
+    // ───────────────────────── Cached common instances ─────────────────────────
+
+    /// <summary>Cached scalar 0 — returned by all boolean-false results to avoid per-evaluation allocation.</summary>
+    private static readonly DataValue ScalarZero = new(DataKind.Scalar, 0f, shape: null, isNull: false);
+
+    /// <summary>Cached scalar 1 — returned by all boolean-true results to avoid per-evaluation allocation.</summary>
+    private static readonly DataValue ScalarOne = new(DataKind.Scalar, 1f, shape: null, isNull: false);
+
+    /// <summary>Cached null scalar — the most common null kind in expression evaluation.</summary>
+    private static readonly DataValue NullScalar = new(DataKind.Scalar, payload: null, shape: null, isNull: true);
+
     // ───────────────────────── Factory methods ─────────────────────────
 
     /// <summary>Creates a scalar value from a 32-bit float.</summary>
-    public static DataValue FromScalar(float value) =>
-        new(DataKind.Scalar, value, shape: null, isNull: false);
+    public static DataValue FromScalar(float value)
+    {
+        // Reuse cached instances for the two most common boolean-result values.
+        if (value == 0f) return ScalarZero;
+        if (value == 1f) return ScalarOne;
+        return new(DataKind.Scalar, value, shape: null, isNull: false);
+    }
 
     /// <summary>Creates a value from an unsigned 8-bit integer.</summary>
     public static DataValue FromUInt8(byte value) =>
@@ -115,8 +131,11 @@ public sealed class DataValue : IEquatable<DataValue>
         new(DataKind.JsonValue, value, shape: null, isNull: false);
 
     /// <summary>Creates a typed null value.</summary>
-    public static DataValue Null(DataKind kind) =>
-        new(kind, payload: null, shape: null, isNull: true);
+    public static DataValue Null(DataKind kind)
+    {
+        if (kind == DataKind.Scalar) return NullScalar;
+        return new(kind, payload: null, shape: null, isNull: true);
+    }
 
     // ───────────────────────── Accessor methods ─────────────────────────
 

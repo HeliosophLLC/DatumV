@@ -158,10 +158,22 @@ public abstract record Expression;
 /// </summary>
 public sealed record ColumnReference(string? TableName, string ColumnName) : Expression
 {
+    /// <summary>Pre-computed "TableName.ColumnName" string, built once and cached to avoid per-row interpolation.</summary>
+    private string? _qualifiedName;
+
     /// <summary>Creates an unqualified column reference.</summary>
     public ColumnReference(string columnName) : this(null, columnName)
     {
     }
+
+    /// <summary>
+    /// Gets the fully qualified name (TableName.ColumnName) for table-qualified references.
+    /// Computed once on first access and cached for the lifetime of this AST node.
+    /// Returns <see langword="null"/> for unqualified references.
+    /// </summary>
+    internal string? QualifiedName => TableName is not null
+        ? (_qualifiedName ??= string.Concat(TableName, ".", ColumnName))
+        : null;
 }
 
 /// <summary>

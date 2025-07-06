@@ -102,10 +102,9 @@ public sealed class ExpressionEvaluator
     {
         // For qualified references (table.column), try the full qualified name first,
         // then the unqualified column name.
-        if (column.TableName is not null)
+        if (column.QualifiedName is not null)
         {
-            string qualifiedName = $"{column.TableName}.{column.ColumnName}";
-            if (row.TryGetValue(qualifiedName, out DataValue? qualifiedValue))
+            if (row.TryGetValue(column.QualifiedName, out DataValue? qualifiedValue))
             {
                 return qualifiedValue!;
             }
