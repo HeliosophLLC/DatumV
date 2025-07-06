@@ -5,9 +5,11 @@ using Axon.QueryEngine.Parsing.Ast;
 namespace Axon.QueryEngine.Execution.Operators;
 
 /// <summary>
-/// Hash join operator supporting INNER, LEFT, RIGHT, FULL OUTER, and CROSS joins.
-/// Materializes the build side into a hash table keyed by the join column, then
-/// streams the probe side and looks up matches.
+/// Join operator supporting INNER, LEFT, RIGHT, FULL OUTER, and CROSS joins.
+/// Uses expression-based hash join for any ON condition containing equality
+/// conjuncts (including function calls and compound keys), with an optional
+/// residual filter for non-equi parts. Falls back to nested-loop only when
+/// no equalities can be extracted.
 /// </summary>
 public sealed class JoinOperator : IQueryOperator
 {
@@ -59,14 +61,14 @@ public sealed class JoinOperator : IQueryOperator
             yield break;
         }
 
-        // For equi-joins, try to extract join key columns from the ON condition.
-        // If the ON condition is a simple equality (left.col = right.col), use hash join.
-        // Otherwise fall back to nested-loop with condition evaluation.
-        (string? leftKey, string? rightKey) = TryExtractEquiJoinKeys(_onCondition);
+        // Extract equi-join keys from the ON condition. Supports arbitrary
+        // expressions (function calls, CAST, etc.) and compound AND keys.
+        // Non-equality conjuncts become a residual filter applied after hash match.
+        JoinKeyExtractionResult? extraction = JoinKeyExtractor.TryExtract(_onCondition);
 
-        if (leftKey is not null && rightKey is not null)
+        if (extraction is not null)
         {
-            await foreach (Row row in ExecuteHashJoinAsync(context, leftKey, rightKey).ConfigureAwait(false))
+            await foreach (Row row in ExecuteHashJoinAsync(context, extraction).ConfigureAwait(false))
             {
                 yield return row;
             }
@@ -81,10 +83,20 @@ public sealed class JoinOperator : IQueryOperator
     }
 
     private async IAsyncEnumerable<Row> ExecuteHashJoinAsync(
-        ExecutionContext context, string leftKey, string rightKey)
+        ExecutionContext context, JoinKeyExtractionResult extraction)
     {
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry);
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
+        bool useSingleKey = keyPairs.Count == 1;
+
         // Build phase: materialize right side into hash table.
-        Dictionary<DataValue, List<(int Index, Row Row)>> hashTable = new();
+        // For single-key joins, use DataValue directly as the key to avoid
+        // the overhead of CompositeKey allocation.
+        Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable =
+            useSingleKey ? new() : null;
+        Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable =
+            useSingleKey ? null : new();
+
         List<Row> rightRows = new();
 
         await foreach (Row rightRow in _right.ExecuteAsync(context).ConfigureAwait(false))
@@ -92,18 +104,39 @@ public sealed class JoinOperator : IQueryOperator
             int rightIndex = rightRows.Count;
             rightRows.Add(rightRow);
 
-            if (!rightRow.TryGetValue(rightKey, out DataValue? keyValue) || keyValue!.IsNull)
+            if (useSingleKey)
             {
-                continue; // NULL keys never match.
-            }
+                DataValue keyValue = evaluator.Evaluate(keyPairs[0].Right, rightRow);
+                if (keyValue.IsNull)
+                {
+                    continue;
+                }
 
-            if (!hashTable.TryGetValue(keyValue, out List<(int, Row)>? bucket))
+                if (!singleKeyTable!.TryGetValue(keyValue, out List<(int, Row)>? bucket))
+                {
+                    bucket = new List<(int, Row)>();
+                    singleKeyTable[keyValue] = bucket;
+                }
+
+                bucket.Add((rightIndex, rightRow));
+            }
+            else
             {
-                bucket = new List<(int, Row)>();
-                hashTable[keyValue] = bucket;
-            }
+                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, rightRow, rightSide: true);
+                if (HasNull(parts))
+                {
+                    continue;
+                }
 
-            bucket.Add((rightIndex, rightRow));
+                CompositeKey compositeKey = new(parts);
+                if (!compositeKeyTable!.TryGetValue(compositeKey, out List<(int, Row)>? bucket))
+                {
+                    bucket = new List<(int, Row)>();
+                    compositeKeyTable[compositeKey] = bucket;
+                }
+
+                bucket.Add((rightIndex, rightRow));
+            }
         }
 
         // Track which right rows have been matched (for RIGHT/FULL OUTER).
@@ -114,21 +147,46 @@ public sealed class JoinOperator : IQueryOperator
         await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
             bool hasMatch = false;
+            List<(int Index, Row Row)>? matches = null;
 
-            if (leftRow.TryGetValue(leftKey, out DataValue? leftKeyValue) && !leftKeyValue!.IsNull)
+            if (useSingleKey)
             {
-                if (hashTable.TryGetValue(leftKeyValue, out List<(int Index, Row Row)>? matches))
+                DataValue leftKeyValue = evaluator.Evaluate(keyPairs[0].Left, leftRow);
+                if (!leftKeyValue.IsNull)
                 {
-                    foreach ((int rightIndex, Row rightRow) in matches)
-                    {
-                        hasMatch = true;
-                        if (rightMatched is not null)
-                        {
-                            rightMatched[rightIndex] = true;
-                        }
+                    singleKeyTable!.TryGetValue(leftKeyValue, out matches);
+                }
+            }
+            else
+            {
+                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, leftRow, rightSide: false);
+                if (!HasNull(parts))
+                {
+                    CompositeKey compositeKey = new(parts);
+                    compositeKeyTable!.TryGetValue(compositeKey, out matches);
+                }
+            }
 
-                        yield return CombineRows(leftRow, rightRow);
+            if (matches is not null)
+            {
+                foreach ((int rightIndex, Row rightRow) in matches)
+                {
+                    Row combinedRow = CombineRows(leftRow, rightRow);
+
+                    // Apply residual filter for non-equi conjuncts.
+                    if (extraction.Residual is not null
+                        && !evaluator.EvaluateAsBoolean(extraction.Residual, combinedRow))
+                    {
+                        continue;
                     }
+
+                    hasMatch = true;
+                    if (rightMatched is not null)
+                    {
+                        rightMatched[rightIndex] = true;
+                    }
+
+                    yield return combinedRow;
                 }
             }
 
@@ -274,6 +332,42 @@ public sealed class JoinOperator : IQueryOperator
     }
 
     /// <summary>
+    /// Evaluates the key expressions for a single row, selecting either the left
+    /// or right expression from each key pair.
+    /// </summary>
+    private static DataValue[] EvaluateKeyParts(
+        ExpressionEvaluator evaluator,
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
+        Row row,
+        bool rightSide)
+    {
+        DataValue[] parts = new DataValue[keyPairs.Count];
+        for (int index = 0; index < keyPairs.Count; index++)
+        {
+            Expression expression = rightSide ? keyPairs[index].Right : keyPairs[index].Left;
+            parts[index] = evaluator.Evaluate(expression, row);
+        }
+
+        return parts;
+    }
+
+    /// <summary>
+    /// Returns true if any element in the array is null. NULL keys never match in SQL semantics.
+    /// </summary>
+    private static bool HasNull(DataValue[] parts)
+    {
+        for (int index = 0; index < parts.Length; index++)
+        {
+            if (parts[index].IsNull)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Combines two rows into one, using all columns from both sides.
     /// </summary>
     internal static Row CombineRows(Row left, Row right)
@@ -311,29 +405,5 @@ public sealed class JoinOperator : IQueryOperator
         }
 
         return new Row(names, values);
-    }
-
-    /// <summary>
-    /// Tries to extract column names from a simple equi-join condition (a.col = b.col).
-    /// Returns null keys if the condition is not a simple equality on column references.
-    /// </summary>
-    private static (string? leftKey, string? rightKey) TryExtractEquiJoinKeys(Expression? condition)
-    {
-        if (condition is BinaryExpression binary
-            && binary.Operator == BinaryOperator.Equal
-            && binary.Left is ColumnReference leftCol
-            && binary.Right is ColumnReference rightCol)
-        {
-            string leftName = leftCol.TableName is not null
-                ? $"{leftCol.TableName}.{leftCol.ColumnName}"
-                : leftCol.ColumnName;
-            string rightName = rightCol.TableName is not null
-                ? $"{rightCol.TableName}.{rightCol.ColumnName}"
-                : rightCol.ColumnName;
-
-            return (leftName, rightName);
-        }
-
-        return (null, null);
     }
 }

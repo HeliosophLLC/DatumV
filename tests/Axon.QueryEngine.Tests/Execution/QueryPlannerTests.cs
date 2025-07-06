@@ -355,4 +355,289 @@ public class QueryPlannerTests
             File.Delete(csvPath);
         }
     }
+
+    // ─────────────── Predicate pushdown tests ───────────────
+
+    [Fact]
+    public void Plan_PredicatePushdown_SingleTableWhereGoesBeforeJoin()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "orders", "orders.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "items", "items.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM orders AS o JOIN items AS i ON o.id = i.order_id WHERE i.price > 100
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("orders", "o")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("items", "i"),
+                new BinaryExpression(
+                    new ColumnReference("o", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("i", "order_id")))],
+            Where: new BinaryExpression(
+                new ColumnReference("i", "price"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(100)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // The WHERE predicate on "i" should be pushed below the join as a Filter on the right side.
+        // Plan: JoinOperator (no top-level filter since it was pushed down)
+        Assert.IsType<JoinOperator>(plan);
+        JoinOperator join = (JoinOperator)plan;
+
+        // Right side should have a Filter wrapping the Alias/Scan for "items".
+        IQueryOperator rightSide = join.Right;
+        Assert.IsType<FilterOperator>(rightSide);
+    }
+
+    [Fact]
+    public void Plan_PredicatePushdown_MultiTablePredicateStaysAboveJoin()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "a_table", "a.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "b_table", "b.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM a_table AS a JOIN b_table AS b ON a.id = b.id WHERE a.x > b.y
+        // This predicate references both "a" and "b", so it cannot be pushed below the join.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("a_table", "a")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("b_table", "b"),
+                new BinaryExpression(
+                    new ColumnReference("a", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("b", "id")))],
+            Where: new BinaryExpression(
+                new ColumnReference("a", "x"),
+                BinaryOperator.GreaterThan,
+                new ColumnReference("b", "y")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Multi-table predicate stays above the join.
+        Assert.IsType<FilterOperator>(plan);
+        FilterOperator filter = (FilterOperator)plan;
+        Assert.IsType<JoinOperator>(filter.Source);
+    }
+
+    [Fact]
+    public void Plan_PredicatePushdown_AndDecomposition_PushesEachHalf()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "left_data", "l.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "right_data", "r.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM left_data AS l JOIN right_data AS r ON l.id = r.id
+        // WHERE l.status = 'active' AND r.score > 50
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("left_data", "l")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("right_data", "r"),
+                new BinaryExpression(
+                    new ColumnReference("l", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("r", "id")))],
+            Where: new BinaryExpression(
+                new BinaryExpression(
+                    new ColumnReference("l", "status"),
+                    BinaryOperator.Equal,
+                    new LiteralExpression("active")),
+                BinaryOperator.And,
+                new BinaryExpression(
+                    new ColumnReference("r", "score"),
+                    BinaryOperator.GreaterThan,
+                    new LiteralExpression(50))));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Both predicates pushed down — no top-level filter.
+        Assert.IsType<JoinOperator>(plan);
+        JoinOperator join = (JoinOperator)plan;
+
+        // Left side: Filter(l.status = 'active') -> Alias -> Scan
+        Assert.IsType<FilterOperator>(join.Left);
+
+        // Right side: Filter(r.score > 50) -> Alias -> Scan
+        Assert.IsType<FilterOperator>(join.Right);
+    }
+
+    [Fact]
+    public void Plan_PredicatePushdown_LeftJoin_DoesNotPush()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "main", "m.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "detail", "d.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM main AS m LEFT JOIN detail AS d ON m.id = d.main_id WHERE d.value > 10
+        // LEFT JOIN prevents predicate pushdown.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("main", "m")),
+            Joins: [new JoinClause(
+                JoinType.Left,
+                new TableReference("detail", "d"),
+                new BinaryExpression(
+                    new ColumnReference("m", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("d", "main_id")))],
+            Where: new BinaryExpression(
+                new ColumnReference("d", "value"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(10)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Predicate should stay above the join.
+        Assert.IsType<FilterOperator>(plan);
+        FilterOperator filter = (FilterOperator)plan;
+        Assert.IsType<JoinOperator>(filter.Source);
+    }
+
+    // ─────────────── Projection pushdown tests ───────────────
+
+    [Fact]
+    public void Plan_ProjectionPushdown_OnlyRequestedColumnsPassedToScan()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("products", "products.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT name FROM products
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("name"))],
+            From: new FromClause(new TableReference("products")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Plan: Project -> Scan (no alias since no alias specified)
+        Assert.IsType<ProjectOperator>(plan);
+        ProjectOperator project = (ProjectOperator)plan;
+        Assert.IsType<ScanOperator>(project.Source);
+        ScanOperator scan = (ScanOperator)project.Source;
+
+        Assert.NotNull(scan.RequiredColumns);
+        Assert.Contains("name", scan.RequiredColumns);
+    }
+
+    [Fact]
+    public void Plan_ProjectionPushdown_SelectStar_RequestsAllColumns()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "data.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM data
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<ScanOperator>(plan);
+        ScanOperator scan = (ScanOperator)plan;
+
+        // SELECT * means all columns — RequiredColumns should be null.
+        Assert.Null(scan.RequiredColumns);
+    }
+
+    [Fact]
+    public void Plan_ProjectionPushdown_IncludesWhereColumns()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("employees", "emp.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT name FROM employees WHERE age > 30
+        // Must include both "name" (SELECT) and "age" (WHERE).
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("name"))],
+            From: new FromClause(new TableReference("employees")),
+            Where: new BinaryExpression(
+                new ColumnReference("age"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(30)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Walk down to find the ScanOperator.
+        ScanOperator? scan = FindOperator<ScanOperator>(plan);
+        Assert.NotNull(scan);
+        Assert.NotNull(scan!.RequiredColumns);
+        Assert.Contains("name", scan.RequiredColumns);
+        Assert.Contains("age", scan.RequiredColumns);
+    }
+
+    [Fact]
+    public void Plan_ProjectionPushdown_IncludesJoinOnColumns()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "users", "u.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "orders", "o.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT u.name FROM users AS u JOIN orders AS o ON u.id = o.user_id
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("u", "name"))],
+            From: new FromClause(new TableReference("users", "u")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("orders", "o"),
+                new BinaryExpression(
+                    new ColumnReference("u", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("o", "user_id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Find the ScanOperator for "users" — should include "name" and "id".
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+
+        ScanOperator? usersScan = FindOperator<ScanOperator>(join.Left);
+        Assert.NotNull(usersScan);
+        Assert.NotNull(usersScan!.RequiredColumns);
+        Assert.Contains("name", usersScan.RequiredColumns);
+        Assert.Contains("id", usersScan.RequiredColumns);
+    }
+
+    /// <summary>
+    /// Walks the operator tree depth-first to find the first operator of type T.
+    /// </summary>
+    private static T? FindOperator<T>(IQueryOperator op) where T : class, IQueryOperator
+    {
+        if (op is T target)
+        {
+            return target;
+        }
+
+        return op switch
+        {
+            FilterOperator filter => FindOperator<T>(filter.Source),
+            ProjectOperator project => FindOperator<T>(project.Source),
+            JoinOperator join => FindOperator<T>(join.Left) ?? FindOperator<T>(join.Right),
+            OrderByOperator orderBy => FindOperator<T>(orderBy.Source),
+            LimitOperator limit => FindOperator<T>(limit.Source),
+            AliasOperator alias => FindOperator<T>(alias.Source),
+            SubqueryOperator subquery => FindOperator<T>(subquery.InnerOperator),
+            _ => null,
+        };
+    }
 }

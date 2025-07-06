@@ -743,4 +743,130 @@ public class ExplainTests
         Assert.Equal("FULL OUTER Join", node.OperatorName);
         Assert.Contains(node.Warnings, w => w.Contains("materializes both sides"));
     }
+
+    // ──────────────── Explainer strategy accuracy tests ────────────────
+
+    [Fact]
+    public void Explain_FunctionBasedJoin_ReportsHashStrategy()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("archive", "z.csv");
+        catalog.Register(new TableDescriptor("csv", "images", "i.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // ON GET_FILENAME(archive.file_name) = images.file_name
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("archive")),
+            Joins: [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("images"),
+                    new BinaryExpression(
+                        new FunctionCallExpression("GET_FILENAME", [new ColumnReference("archive", "file_name")]),
+                        BinaryOperator.Equal,
+                        new ColumnReference("images", "file_name")))
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Equal("INNER Join", node.OperatorName);
+        Assert.Contains("hash", node.Details);
+        Assert.DoesNotContain("nested-loop", node.Details);
+    }
+
+    [Fact]
+    public void Explain_MixedEquiAndNonEquiCondition_ReportsHashPlusFilter()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("left_tbl", "l.csv");
+        catalog.Register(new TableDescriptor("csv", "right_tbl", "r.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // ON left_tbl.id = right_tbl.id AND left_tbl.val > right_tbl.threshold
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("left_tbl")),
+            Joins: [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("right_tbl"),
+                    new BinaryExpression(
+                        new BinaryExpression(
+                            new ColumnReference("left_tbl", "id"),
+                            BinaryOperator.Equal,
+                            new ColumnReference("right_tbl", "id")),
+                        BinaryOperator.And,
+                        new BinaryExpression(
+                            new ColumnReference("left_tbl", "val"),
+                            BinaryOperator.GreaterThan,
+                            new ColumnReference("right_tbl", "threshold"))))
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Equal("INNER Join", node.OperatorName);
+        Assert.Contains("hash+filter", node.Details);
+    }
+
+    [Fact]
+    public void Explain_NonEquiJoinOnly_ReportsNestedLoopWithWarning()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("sensor", "s.csv");
+        catalog.Register(new TableDescriptor("csv", "threshold", "t.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // ON sensor.reading > threshold.max_value (no equi-join)
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("sensor")),
+            Joins: [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("threshold"),
+                    new BinaryExpression(
+                        new ColumnReference("sensor", "reading"),
+                        BinaryOperator.GreaterThan,
+                        new ColumnReference("threshold", "max_value")))
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Equal("INNER Join", node.OperatorName);
+        Assert.Contains("nested-loop", node.Details);
+        Assert.Contains(node.Warnings, w => w.Contains("O(n*m)"));
+    }
+
+    [Fact]
+    public void Explain_CastBasedJoin_ReportsHashStrategy()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("source_a", "a.csv");
+        catalog.Register(new TableDescriptor("csv", "source_b", "b.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // ON CAST(source_a.id AS INT) = source_b.id
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("source_a")),
+            Joins: [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("source_b"),
+                    new BinaryExpression(
+                        new CastExpression(new ColumnReference("source_a", "id"), "INT"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("source_b", "id")))
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Contains("hash", node.Details);
+        Assert.DoesNotContain("nested-loop", node.Details);
+    }
 }

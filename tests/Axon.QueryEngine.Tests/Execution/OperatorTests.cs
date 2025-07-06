@@ -520,6 +520,170 @@ public class OperatorTests
         Assert.Equal(1f, rows[0]["id"].AsScalar());
     }
 
+    // ─────────────── Expression-based hash join tests ───────────────
+
+    [Fact]
+    public async Task HashJoin_FunctionExpression_MatchesCorrectly()
+    {
+        // Simulates GET_FILENAME(z.file_name) = i.file_name
+        // Left side has full paths, right side has just filenames.
+        MockOperator left = new(
+            MakeRow(("l.file_name", DataValue.FromString("images/cat.jpg")), ("l.data", DataValue.FromScalar(1f))),
+            MakeRow(("l.file_name", DataValue.FromString("images/dog.png")), ("l.data", DataValue.FromScalar(2f))),
+            MakeRow(("l.file_name", DataValue.FromString("images/bird.jpg")), ("l.data", DataValue.FromScalar(3f))));
+
+        MockOperator right = new(
+            MakeRow(("r.file_name", DataValue.FromString("cat.jpg")), ("r.score", DataValue.FromScalar(95f))),
+            MakeRow(("r.file_name", DataValue.FromString("bird.jpg")), ("r.score", DataValue.FromScalar(80f))));
+
+        // ON GET_FILENAME(l.file_name) = r.file_name
+        JoinOperator join = new(left, right, JoinType.Inner,
+            new BinaryExpression(
+                new FunctionCallExpression("GET_FILENAME", [new ColumnReference("l", "file_name")]),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "file_name")));
+
+        List<Row> rows = await CollectAsync(join);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => r["l.data"].AsScalar() == 1f && r["r.score"].AsScalar() == 95f);
+        Assert.Contains(rows, r => r["l.data"].AsScalar() == 3f && r["r.score"].AsScalar() == 80f);
+    }
+
+    [Fact]
+    public async Task HashJoin_CompoundKeys_MatchesOnBothKeys()
+    {
+        MockOperator left = new(
+            MakeRow(("l.a", DataValue.FromScalar(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromScalar(10f))),
+            MakeRow(("l.a", DataValue.FromScalar(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromScalar(20f))),
+            MakeRow(("l.a", DataValue.FromScalar(2f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromScalar(30f))));
+
+        MockOperator right = new(
+            MakeRow(("r.a", DataValue.FromScalar(1f)), ("r.b", DataValue.FromString("x")), ("r.info", DataValue.FromString("match1"))),
+            MakeRow(("r.a", DataValue.FromScalar(2f)), ("r.b", DataValue.FromString("y")), ("r.info", DataValue.FromString("no_match"))));
+
+        // ON l.a = r.a AND l.b = r.b
+        JoinOperator join = new(left, right, JoinType.Inner,
+            new BinaryExpression(
+                new BinaryExpression(
+                    new ColumnReference("l", "a"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("r", "a")),
+                BinaryOperator.And,
+                new BinaryExpression(
+                    new ColumnReference("l", "b"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("r", "b"))));
+
+        List<Row> rows = await CollectAsync(join);
+
+        Assert.Single(rows);
+        Assert.Equal(10f, rows[0]["l.val"].AsScalar());
+        Assert.Equal("match1", rows[0]["r.info"].AsString());
+    }
+
+    [Fact]
+    public async Task HashJoin_ResidualFilter_AppliedAfterHashMatch()
+    {
+        MockOperator left = new(
+            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.val", DataValue.FromScalar(100f))),
+            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.val", DataValue.FromScalar(200f))));
+
+        MockOperator right = new(
+            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.threshold", DataValue.FromScalar(150f))),
+            MakeRow(("r.id", DataValue.FromScalar(2f)), ("r.threshold", DataValue.FromScalar(150f))));
+
+        // ON l.id = r.id AND l.val > r.threshold
+        // The equality is extracted as hash key; the > becomes residual.
+        JoinOperator join = new(left, right, JoinType.Inner,
+            new BinaryExpression(
+                new BinaryExpression(
+                    new ColumnReference("l", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("r", "id")),
+                BinaryOperator.And,
+                new BinaryExpression(
+                    new ColumnReference("l", "val"),
+                    BinaryOperator.GreaterThan,
+                    new ColumnReference("r", "threshold"))));
+
+        List<Row> rows = await CollectAsync(join);
+
+        // Only l.id=2 (val=200) passes the residual l.val > r.threshold (150).
+        Assert.Single(rows);
+        Assert.Equal(2f, rows[0]["l.id"].AsScalar());
+    }
+
+    [Fact]
+    public async Task HashJoin_NullExpressionKey_NeverMatches()
+    {
+        MockOperator left = new(
+            MakeRow(("l.path", DataValue.Null(DataKind.String))));
+
+        MockOperator right = new(
+            MakeRow(("r.name", DataValue.Null(DataKind.String))));
+
+        // ON GET_FILENAME(l.path) = r.name — both null
+        JoinOperator join = new(left, right, JoinType.Inner,
+            new BinaryExpression(
+                new FunctionCallExpression("GET_FILENAME", [new ColumnReference("l", "path")]),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "name")));
+
+        List<Row> rows = await CollectAsync(join);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task HashJoin_DuplicateKeys_ProducesAllCombinations()
+    {
+        MockOperator left = new(
+            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.tag", DataValue.FromString("A"))),
+            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.tag", DataValue.FromString("B"))));
+
+        MockOperator right = new(
+            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.info", DataValue.FromString("X"))),
+            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.info", DataValue.FromString("Y"))));
+
+        JoinOperator join = new(left, right, JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("l", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "id")));
+
+        List<Row> rows = await CollectAsync(join);
+
+        // 2 left × 2 right = 4 combinations
+        Assert.Equal(4, rows.Count);
+    }
+
+    [Fact]
+    public async Task LeftJoin_ExpressionKey_IncludesUnmatchedRows()
+    {
+        MockOperator left = new(
+            MakeRow(("l.path", DataValue.FromString("a/file1.txt")), ("l.size", DataValue.FromScalar(100f))),
+            MakeRow(("l.path", DataValue.FromString("b/file2.txt")), ("l.size", DataValue.FromScalar(200f))));
+
+        MockOperator right = new(
+            MakeRow(("r.name", DataValue.FromString("file1.txt")), ("r.label", DataValue.FromString("doc"))));
+
+        // ON GET_FILENAME(l.path) = r.name
+        JoinOperator join = new(left, right, JoinType.Left,
+            new BinaryExpression(
+                new FunctionCallExpression("GET_FILENAME", [new ColumnReference("l", "path")]),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "name")));
+
+        List<Row> rows = await CollectAsync(join);
+
+        Assert.Equal(2, rows.Count);
+        // Matched row
+        Assert.Equal("doc", rows[0]["r.label"].AsString());
+        // Unmatched row — right side is null
+        Assert.True(rows[1]["r.label"].IsNull);
+    }
+
     // ─────────────── SubqueryOperator tests ───────────────
 
     [Fact]

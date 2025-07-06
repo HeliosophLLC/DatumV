@@ -114,7 +114,24 @@ public static class QueryExplainer
             ? $", on: {FormatExpression(join.OnCondition)}"
             : "";
 
-        string strategy = join.Type == JoinType.Cross ? "nested-loop" : "hash";
+        // Determine the actual join strategy using JoinKeyExtractor.
+        string strategy;
+        if (join.Type == JoinType.Cross)
+        {
+            strategy = "nested-loop";
+        }
+        else
+        {
+            JoinKeyExtractionResult? extraction = JoinKeyExtractor.TryExtract(join.OnCondition);
+            if (extraction is not null)
+            {
+                strategy = extraction.Residual is not null ? "hash+filter" : "hash";
+            }
+            else
+            {
+                strategy = "nested-loop";
+            }
+        }
 
         ExplainPlanNode leftChild = BuildNode(join.Left);
         leftChild.ChildLabel = "probe";
@@ -139,6 +156,13 @@ public static class QueryExplainer
         if (join.Type == JoinType.FullOuter)
         {
             node.Warnings.Add("FULL OUTER JOIN materializes both sides in memory.");
+        }
+
+        // Warn about nested-loop join performance.
+        if (strategy == "nested-loop" && join.Type != JoinType.Cross)
+        {
+            node.Warnings.Add(
+                "Nested-loop join has O(n*m) complexity. Consider rewriting the ON condition as an equi-join.");
         }
 
         return node;

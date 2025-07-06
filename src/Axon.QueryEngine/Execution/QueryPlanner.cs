@@ -8,9 +8,9 @@ namespace Axon.QueryEngine.Execution;
 
 /// <summary>
 /// Transforms a parsed <see cref="SelectStatement"/> AST into an executable
-/// operator tree (<see cref="IQueryOperator"/>). Performs projection pushdown
-/// by analyzing column references to determine the minimal column set each
-/// scan operator must produce.
+/// operator tree (<see cref="IQueryOperator"/>). Applies predicate pushdown
+/// to filter rows early and projection pushdown to skip unreferenced columns
+/// at the source.
 /// </summary>
 public sealed class QueryPlanner
 {
@@ -35,23 +35,62 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public IQueryOperator Plan(SelectStatement statement)
     {
-        // 1. Build the source operator (FROM clause).
-        IQueryOperator source = PlanSource(statement.From.Source);
+        // Compute the set of all referenced columns for projection pushdown.
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
+            CollectAllReferencedColumns(statement);
 
-        // 2. Apply JOINs.
+        // 1. Build the source operator (FROM clause) with projection pushdown.
+        IQueryOperator source = PlanSource(statement.From.Source, allReferencedColumns);
+
+        // Track which table aliases are available on the current (left) side.
+        HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase);
+        CollectSourceAliases(statement.From.Source, leftAliases);
+
+        // 2. Apply JOINs with predicate pushdown.
+        List<Expression>? pendingPredicates = null;
+
+        if (statement.Where is not null)
+        {
+            pendingPredicates = new List<Expression>();
+            FlattenAnd(statement.Where, pendingPredicates);
+        }
+
         if (statement.Joins is not null)
         {
             foreach (JoinClause join in statement.Joins)
             {
-                IQueryOperator rightSide = PlanSource(join.Source);
+                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns);
+
+                HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
+                CollectSourceAliases(join.Source, rightAliases);
+
+                // Predicate pushdown: push single-table WHERE predicates below the join.
+                if (pendingPredicates is not null && join.Type == JoinType.Inner)
+                {
+                    rightSide = PushPredicatesBelow(rightSide, rightAliases, pendingPredicates);
+                    source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
+                }
+
                 source = new JoinOperator(source, rightSide, join.Type, join.OnCondition);
+
+                // After the join, both sides' aliases are available on the left.
+                foreach (string alias in rightAliases)
+                {
+                    leftAliases.Add(alias);
+                }
             }
         }
-
-        // 3. Apply WHERE filter.
-        if (statement.Where is not null)
+        else if (pendingPredicates is not null)
         {
-            source = new FilterOperator(source, statement.Where);
+            // No joins — push applicable predicates directly to the source.
+            source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
+        }
+
+        // 3. Apply remaining WHERE predicates that could not be pushed down.
+        if (pendingPredicates is not null && pendingPredicates.Count > 0)
+        {
+            Expression remaining = CombineWithAnd(pendingPredicates);
+            source = new FilterOperator(source, remaining);
         }
 
         // 4. Apply SELECT projection.
@@ -76,11 +115,200 @@ public sealed class QueryPlanner
         return source;
     }
 
-    private IQueryOperator PlanSource(TableSource source)
+    /// <summary>
+    /// Pushes predicates that reference only the given set of aliases below the
+    /// current operator as filter nodes. Pushed predicates are removed from the list.
+    /// </summary>
+    private static IQueryOperator PushPredicatesBelow(
+        IQueryOperator operatorNode,
+        HashSet<string> availableAliases,
+        List<Expression> predicates)
+    {
+        IQueryOperator result = operatorNode;
+
+        for (int index = predicates.Count - 1; index >= 0; index--)
+        {
+            Expression predicate = predicates[index];
+            HashSet<string> predicateAliases = ColumnReferenceCollector.CollectTableAliases(predicate);
+
+            // Push if all referenced aliases are available on this side,
+            // or if the predicate has no table-qualified references (global).
+            if (predicateAliases.Count == 0 || predicateAliases.IsSubsetOf(availableAliases))
+            {
+                result = new FilterOperator(result, predicate);
+                predicates.RemoveAt(index);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Collects all column references from every clause of the statement
+    /// for projection pushdown.
+    /// </summary>
+    private static HashSet<(string? TableName, string ColumnName)> CollectAllReferencedColumns(
+        SelectStatement statement)
+    {
+        HashSet<(string? TableName, string ColumnName)> references = new();
+
+        // If SELECT * or SELECT table.*, we need all columns — return empty
+        // to signal "no restriction" downstream.
+        foreach (SelectColumn column in statement.Columns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                return references; // Empty set means "all columns needed".
+            }
+        }
+
+        // SELECT columns.
+        foreach (SelectColumn column in statement.Columns)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(column.Expression))
+            {
+                references.Add((tableName, columnName));
+            }
+        }
+
+        // WHERE predicate.
+        if (statement.Where is not null)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(statement.Where))
+            {
+                references.Add((tableName, columnName));
+            }
+        }
+
+        // JOIN ON conditions.
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                if (join.OnCondition is not null)
+                {
+                    foreach ((string? tableName, string columnName) in
+                        ColumnReferenceCollector.Collect(join.OnCondition))
+                    {
+                        references.Add((tableName, columnName));
+                    }
+                }
+            }
+        }
+
+        // ORDER BY expressions.
+        if (statement.OrderBy is not null)
+        {
+            foreach (OrderByItem item in statement.OrderBy.Items)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(item.Expression))
+                {
+                    references.Add((tableName, columnName));
+                }
+            }
+        }
+
+        return references;
+    }
+
+    /// <summary>
+    /// Computes the set of required column names for a specific table alias
+    /// from the globally referenced columns. Returns null when all columns
+    /// are needed (SELECT * or no column analysis available).
+    /// </summary>
+    private static IReadOnlySet<string>? ComputeRequiredColumns(
+        string? alias,
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns)
+    {
+        // Empty set means SELECT * — all columns needed.
+        if (allReferencedColumns.Count == 0)
+        {
+            return null;
+        }
+
+        HashSet<string> required = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string? tableName, string columnName) in allReferencedColumns)
+        {
+            if (tableName is null)
+            {
+                // Unqualified reference — could be from any table; include it.
+                required.Add(columnName);
+            }
+            else if (alias is not null
+                && string.Equals(tableName, alias, StringComparison.OrdinalIgnoreCase))
+            {
+                required.Add(columnName);
+            }
+        }
+
+        // If no columns matched this alias, it's possible the query references
+        // columns without qualification. Return null (all columns) to be safe.
+        return required.Count > 0 ? required : null;
+    }
+
+    /// <summary>
+    /// Collects the table aliases introduced by a table source into the given set.
+    /// </summary>
+    private static void CollectSourceAliases(TableSource source, HashSet<string> aliases)
+    {
+        switch (source)
+        {
+            case TableReference tableRef:
+                aliases.Add(tableRef.Alias ?? tableRef.Name);
+                break;
+            case SubquerySource subquery:
+                aliases.Add(subquery.Alias);
+                break;
+            case FunctionSource functionSource:
+                if (functionSource.Alias is not null)
+                {
+                    aliases.Add(functionSource.Alias);
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Recursively flattens AND-connected expressions into a list of conjuncts.
+    /// </summary>
+    private static void FlattenAnd(Expression expression, List<Expression> conjuncts)
+    {
+        if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
+        {
+            FlattenAnd(binary.Left, conjuncts);
+            FlattenAnd(binary.Right, conjuncts);
+        }
+        else
+        {
+            conjuncts.Add(expression);
+        }
+    }
+
+    /// <summary>
+    /// Combines a list of expressions with AND into a single expression.
+    /// </summary>
+    private static Expression CombineWithAnd(List<Expression> expressions)
+    {
+        Expression result = expressions[0];
+        for (int index = 1; index < expressions.Count; index++)
+        {
+            result = new BinaryExpression(result, BinaryOperator.And, expressions[index]);
+        }
+
+        return result;
+    }
+
+    private IQueryOperator PlanSource(
+        TableSource source,
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns)
     {
         return source switch
         {
-            TableReference tableRef => PlanTableReference(tableRef),
+            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns),
             SubquerySource subquery => PlanSubquery(subquery),
             FunctionSource functionSource => PlanFunctionSource(functionSource),
             _ => throw new InvalidOperationException(
@@ -88,12 +316,18 @@ public sealed class QueryPlanner
         };
     }
 
-    private IQueryOperator PlanTableReference(TableReference tableRef)
+    private IQueryOperator PlanTableReference(
+        TableReference tableRef,
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns)
     {
         TableDescriptor descriptor = _catalog.Resolve(tableRef.Name);
 
-        // No projection pushdown yet in V1 -- pass null to get all columns.
-        IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns: null);
+        // Projection pushdown: compute required columns for this table's alias.
+        string effectiveAlias = tableRef.Alias ?? tableRef.Name;
+        IReadOnlySet<string>? requiredColumns =
+            ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
+
+        IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns);
 
         // If the table has an alias, wrap column names.
         if (tableRef.Alias is not null)
