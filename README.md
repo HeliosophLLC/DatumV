@@ -235,6 +235,28 @@ SELECT * FROM data INTO CSV 'output.csv' SHARD ON sample_count 10000
 SELECT * FROM data INTO PARQUET 'output.parquet' SHARD ON byte_size 104857600
 ```
 
+#### Stream-based output (programmatic)
+
+All three output writers accept a `Stream` instead of a file path, enabling purely in-memory pipelines:
+
+```csharp
+using MemoryStream stream = new();
+await using CsvOutputWriter writer = new(stream);
+await writer.InitializeAsync(plan.Schema);
+
+await foreach (Row row in plan.ExecuteAsync(context))
+{
+    await writer.WriteRowAsync(row);
+}
+
+OutputSummary summary = await writer.FinalizeAsync();
+
+// Stream now contains the CSV data.
+stream.Position = 0;
+```
+
+Works with all formats — `CsvOutputWriter(stream)`, `ParquetOutputWriter(stream)`, `Hdf5OutputWriter(stream)`. The caller owns the stream; the writer leaves it open on dispose. In stream mode, `ParquetOutputWriter` embeds binary columns as `byte[]` directly instead of externalizing to an `images/` folder.
+
 ### ORDER BY / LIMIT / OFFSET
 
 ```sql

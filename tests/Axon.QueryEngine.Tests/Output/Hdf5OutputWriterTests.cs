@@ -159,4 +159,56 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
         }
         return new Row(names, values);
     }
+
+    [Fact]
+    public async Task FinalizeAsync_Stream_ScalarColumn_WritesFloatDataset()
+    {
+        using MemoryStream stream = new();
+        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, false)]);
+
+        await using Hdf5OutputWriter writer = new(stream);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(1.5f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(2.5f))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+        Assert.True(summary.BytesWritten > 0);
+        Assert.Empty(summary.FilesCreated);
+
+        stream.Position = 0;
+        using NativeFile file = H5File.Open(stream, leaveOpen: true);
+        float[] data = file.Dataset("value").Read<float[]>();
+        Assert.Equal([1.5f, 2.5f], data);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_Stream_MultipleColumns_WritesAllDatasets()
+    {
+        using MemoryStream stream = new();
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("name", DataKind.String, false)
+        ]);
+
+        await using Hdf5OutputWriter writer = new(stream);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromScalar(1.0f)),
+            ("name", DataValue.FromString("Alice"))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromScalar(2.0f)),
+            ("name", DataValue.FromString("Bob"))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+        Assert.Empty(summary.FilesCreated);
+
+        stream.Position = 0;
+        using NativeFile file = H5File.Open(stream, leaveOpen: true);
+        float[] ids = file.Dataset("id").Read<float[]>();
+        string[] names = file.Dataset("name").Read<string[]>();
+        Assert.Equal([1.0f, 2.0f], ids);
+        Assert.Equal(["Alice", "Bob"], names);
+    }
 }

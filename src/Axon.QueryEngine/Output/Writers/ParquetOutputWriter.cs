@@ -13,14 +13,16 @@ using Parquet.Schema;
 /// </summary>
 public sealed class ParquetOutputWriter : IOutputWriter
 {
-    private readonly string _filePath;
+    private readonly string? _filePath;
+    private readonly Stream? _outputStream;
     private Schema? _schema;
     private readonly List<Row> _rows = new();
     private readonly List<string> _externalizedFiles = new();
     private long _rowsWritten;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ParquetOutputWriter"/> class.
+    /// Initializes a new instance of the <see cref="ParquetOutputWriter"/> class that writes to a file.
+    /// Binary columns are externalized to an <c>images/</c> folder next to the Parquet file.
     /// </summary>
     /// <param name="filePath">The output Parquet file path.</param>
     public ParquetOutputWriter(string filePath)
@@ -28,14 +30,30 @@ public sealed class ParquetOutputWriter : IOutputWriter
         _filePath = filePath;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ParquetOutputWriter"/> class that writes to a stream.
+    /// Binary columns (<see cref="DataKind.UInt8Array"/>, <see cref="DataKind.Image"/>) are embedded
+    /// directly as <c>byte[]</c> in the Parquet data instead of being externalized to disk.
+    /// The caller retains ownership of the stream and is responsible for disposing it.
+    /// </summary>
+    /// <param name="outputStream">The stream to write Parquet data to.</param>
+    public ParquetOutputWriter(Stream outputStream)
+    {
+        _outputStream = outputStream;
+    }
+
     /// <inheritdoc />
     public Task InitializeAsync(Schema schema, CancellationToken cancellationToken = default)
     {
         _schema = schema;
-        string? directory = Path.GetDirectoryName(_filePath);
-        if (!string.IsNullOrEmpty(directory))
+
+        if (_filePath is not null)
         {
-            Directory.CreateDirectory(directory);
+            string? directory = Path.GetDirectoryName(_filePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
         }
 
         return Task.CompletedTask;
@@ -62,28 +80,49 @@ public sealed class ParquetOutputWriter : IOutputWriter
             throw new InvalidOperationException("Writer not initialized. Call InitializeAsync first.");
         }
 
-        // Externalize binary columns to images/ folder before building Parquet.
-        ExternalizeBinaryColumns(_schema);
+        bool isStreamMode = _outputStream is not null;
 
-        ParquetSchema parquetSchema = BuildParquetSchema(_schema);
-
-        using FileStream stream = File.Create(_filePath);
-        using ParquetWriter writer = await ParquetWriter.CreateAsync(parquetSchema, stream);
-        writer.CompressionMethod = CompressionMethod.Snappy;
-
-        using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
-
-        for (int columnIndex = 0; columnIndex < _schema.Columns.Count; columnIndex++)
+        // Externalize binary columns to images/ folder only in file mode.
+        if (!isStreamMode)
         {
-            ColumnInfo column = _schema.Columns[columnIndex];
-            DataColumn dataColumn = BuildDataColumn(parquetSchema.DataFields[columnIndex], column);
-            await rowGroup.WriteColumnAsync(dataColumn);
+            ExternalizeBinaryColumns(_schema);
         }
 
-        long bytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath).Length : 0;
+        ParquetSchema parquetSchema = BuildParquetSchema(_schema, isStreamMode);
 
-        List<string> allFiles = [_filePath, .. _externalizedFiles];
-        return new OutputSummary(_rowsWritten, bytesWritten, allFiles);
+        Stream targetStream = isStreamMode ? _outputStream! : File.Create(_filePath!);
+        try
+        {
+            using ParquetWriter writer = await ParquetWriter.CreateAsync(parquetSchema, targetStream);
+            writer.CompressionMethod = CompressionMethod.Snappy;
+
+            using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
+
+            for (int columnIndex = 0; columnIndex < _schema.Columns.Count; columnIndex++)
+            {
+                ColumnInfo column = _schema.Columns[columnIndex];
+                DataColumn dataColumn = BuildDataColumn(parquetSchema.DataFields[columnIndex], column, isStreamMode);
+                await rowGroup.WriteColumnAsync(dataColumn);
+            }
+        }
+        finally
+        {
+            // Only dispose the stream if we created it (file mode).
+            if (!isStreamMode)
+            {
+                await targetStream.DisposeAsync();
+            }
+        }
+
+        if (isStreamMode)
+        {
+            long bytesWritten = _outputStream!.CanSeek ? _outputStream.Position : 0;
+            return new OutputSummary(_rowsWritten, bytesWritten, []);
+        }
+
+        long fileBytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath!).Length : 0;
+        List<string> allFiles = [_filePath!, .. _externalizedFiles];
+        return new OutputSummary(_rowsWritten, fileBytesWritten, allFiles);
     }
 
     /// <inheritdoc />
@@ -94,7 +133,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
 
     private void ExternalizeBinaryColumns(Schema schema)
     {
-        string parquetDir = Path.GetDirectoryName(_filePath) ?? ".";
+        string parquetDir = Path.GetDirectoryName(_filePath!) ?? ".";
         string imagesDir = Path.Combine(parquetDir, "images");
         bool imagesDirCreated = false;
 
@@ -206,7 +245,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
         return ".bin";
     }
 
-    private static ParquetSchema BuildParquetSchema(Schema schema)
+    private static ParquetSchema BuildParquetSchema(Schema schema, bool embedBinary)
     {
         DataField[] fields = new DataField[schema.Columns.Count];
 
@@ -217,6 +256,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
             {
                 DataKind.Scalar => new DataField<float>(column.Name),
                 DataKind.UInt8 => new DataField<int>(column.Name),
+                DataKind.UInt8Array or DataKind.Image when embedBinary => new DataField<byte[]>(column.Name),
                 DataKind.UInt8Array or DataKind.Image => new DataField<string>(column.Name),
                 DataKind.String => new DataField<string>(column.Name),
                 DataKind.JsonValue => new DataField<string>(column.Name),
@@ -229,15 +269,17 @@ public sealed class ParquetOutputWriter : IOutputWriter
         return new ParquetSchema(fields);
     }
 
-    private DataColumn BuildDataColumn(DataField field, ColumnInfo column)
+    private DataColumn BuildDataColumn(DataField field, ColumnInfo column, bool embedBinary)
     {
         int rowCount = _rows.Count;
 
         // After externalization, binary columns have been replaced with string paths.
+        // In stream mode, binary columns are embedded directly.
         return column.Kind switch
         {
             DataKind.Scalar => BuildFloatColumn(field, column.Name, rowCount),
             DataKind.UInt8 => BuildIntColumn(field, column.Name, rowCount),
+            DataKind.UInt8Array or DataKind.Image when embedBinary => BuildBinaryColumn(field, column, rowCount),
             DataKind.UInt8Array or DataKind.Image => BuildExternalizedPathColumn(field, column.Name, rowCount),
             DataKind.String => BuildStringColumn(field, column),
             DataKind.JsonValue => BuildJsonColumn(field, column.Name, rowCount),
@@ -279,6 +321,31 @@ public sealed class ParquetOutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = value.IsNull ? "" : value.AsString();
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    /// <summary>
+    /// Builds a binary column that embeds raw byte arrays directly in the Parquet data.
+    /// Used in stream mode where externalization to disk is not possible.
+    /// </summary>
+    private DataColumn BuildBinaryColumn(DataField field, ColumnInfo column, int rowCount)
+    {
+        byte[][] data = new byte[rowCount][];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][column.Name];
+            if (value.IsNull)
+            {
+                data[i] = [];
+            }
+            else
+            {
+                data[i] = column.Kind == DataKind.Image
+                    ? value.AsImage()
+                    : value.AsUInt8Array();
+            }
         }
 
         return new DataColumn(field, data);

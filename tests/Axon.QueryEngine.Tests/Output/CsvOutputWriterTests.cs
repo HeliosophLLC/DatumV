@@ -165,6 +165,53 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         Assert.True(summary.BytesWritten > 0);
     }
 
+    [Fact]
+    public async Task WriteRowAsync_Stream_WritesValidCsv()
+    {
+        using MemoryStream stream = new();
+        Schema schema = new([
+            new ColumnInfo("name", DataKind.String, false),
+            new ColumnInfo("age", DataKind.Scalar, false)
+        ]);
+
+        await using CsvOutputWriter writer = new(stream);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Alice")), ("age", DataValue.FromScalar(30.0f))));
+        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Bob")), ("age", DataValue.FromScalar(25.0f))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+        Assert.True(summary.BytesWritten > 0);
+        Assert.Empty(summary.FilesCreated);
+
+        stream.Position = 0;
+        string content = new StreamReader(stream).ReadToEnd();
+        Assert.StartsWith("name,age", content);
+        Assert.Contains("Alice,30", content);
+        Assert.Contains("Bob,25", content);
+    }
+
+    [Fact]
+    public async Task WriteRowAsync_Stream_DoesNotDisposeCallerStream()
+    {
+        MemoryStream stream = new();
+        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+
+        await using (CsvOutputWriter writer = new(stream))
+        {
+            await writer.InitializeAsync(schema);
+            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromScalar(1.0f))));
+            await writer.FinalizeAsync();
+        }
+
+        // Stream should still be usable after writer disposal.
+        Assert.True(stream.CanRead);
+        stream.Position = 0;
+        string content = new StreamReader(stream).ReadToEnd();
+        Assert.Contains("1", content);
+        stream.Dispose();
+    }
+
     private static Row CreateRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = new string[columns.Length];

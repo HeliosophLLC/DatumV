@@ -7,13 +7,14 @@ using Axon.QueryEngine.Model;
 /// </summary>
 public sealed class CsvOutputWriter : IOutputWriter
 {
-    private readonly string _filePath;
+    private readonly string? _filePath;
+    private readonly Stream? _outputStream;
     private StreamWriter? _writer;
     private Schema? _schema;
     private long _rowsWritten;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="CsvOutputWriter"/> class.
+    /// Initializes a new instance of the <see cref="CsvOutputWriter"/> class that writes to a file.
     /// </summary>
     /// <param name="filePath">The output CSV file path.</param>
     public CsvOutputWriter(string filePath)
@@ -21,17 +22,35 @@ public sealed class CsvOutputWriter : IOutputWriter
         _filePath = filePath;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CsvOutputWriter"/> class that writes to a stream.
+    /// The caller retains ownership of the stream and is responsible for disposing it.
+    /// </summary>
+    /// <param name="outputStream">The stream to write CSV data to.</param>
+    public CsvOutputWriter(Stream outputStream)
+    {
+        _outputStream = outputStream;
+    }
+
     /// <inheritdoc />
     public async Task InitializeAsync(Schema schema, CancellationToken cancellationToken = default)
     {
         _schema = schema;
-        string? directory = Path.GetDirectoryName(_filePath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
 
-        _writer = new StreamWriter(_filePath, append: false, encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        if (_outputStream is not null)
+        {
+            _writer = new StreamWriter(_outputStream, encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 1024, leaveOpen: true);
+        }
+        else
+        {
+            string? directory = Path.GetDirectoryName(_filePath!);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            _writer = new StreamWriter(_filePath!, append: false, encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        }
 
         // Write header
         for (int i = 0; i < schema.Columns.Count; i++)
@@ -81,8 +100,14 @@ public sealed class CsvOutputWriter : IOutputWriter
             _writer = null;
         }
 
-        long bytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath).Length : 0;
-        return new OutputSummary(_rowsWritten, bytesWritten, [_filePath]);
+        if (_outputStream is not null)
+        {
+            long bytesWritten = _outputStream.CanSeek ? _outputStream.Position : 0;
+            return new OutputSummary(_rowsWritten, bytesWritten, []);
+        }
+
+        long fileBytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath!).Length : 0;
+        return new OutputSummary(_rowsWritten, fileBytesWritten, [_filePath!]);
     }
 
     /// <inheritdoc />

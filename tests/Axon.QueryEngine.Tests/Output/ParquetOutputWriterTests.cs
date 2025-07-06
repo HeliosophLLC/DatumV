@@ -246,4 +246,72 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         }
         return new Row(names, values);
     }
+
+    [Fact]
+    public async Task FinalizeAsync_Stream_ScalarAndString_WritesValidParquet()
+    {
+        using MemoryStream stream = new();
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("name", DataKind.String, false)
+        ]);
+
+        await using ParquetOutputWriter writer = new(stream);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromScalar(1.0f)),
+            ("name", DataValue.FromString("Alice"))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromScalar(2.0f)),
+            ("name", DataValue.FromString("Bob"))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+        Assert.True(summary.BytesWritten > 0);
+        Assert.Empty(summary.FilesCreated);
+
+        stream.Position = 0;
+        using ParquetReader reader = await ParquetReader.CreateAsync(stream);
+        Assert.Equal(2, reader.Schema.DataFields.Length);
+
+        using Parquet.ParquetRowGroupReader rowGroup = reader.OpenRowGroupReader(0);
+        Parquet.Data.DataColumn idColumn = await rowGroup.ReadColumnAsync(reader.Schema.DataFields[0]);
+        Parquet.Data.DataColumn nameColumn = await rowGroup.ReadColumnAsync(reader.Schema.DataFields[1]);
+
+        float[] ids = (float[])idColumn.Data;
+        string[] names = (string[])nameColumn.Data;
+        Assert.Equal([1.0f, 2.0f], ids);
+        Assert.Equal(["Alice", "Bob"], names);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_Stream_BinaryColumn_EmbedsBytesDirectly()
+    {
+        byte[] rawBytes = [0x01, 0x02, 0x03, 0x04, 0x05];
+        using MemoryStream stream = new();
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("data", DataKind.UInt8Array, false)
+        ]);
+
+        await using ParquetOutputWriter writer = new(stream);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromScalar(1.0f)),
+            ("data", DataValue.FromUInt8Array(rawBytes))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(1, summary.RowsWritten);
+        Assert.Empty(summary.FilesCreated);
+
+        stream.Position = 0;
+        using ParquetReader reader = await ParquetReader.CreateAsync(stream);
+
+        using Parquet.ParquetRowGroupReader rowGroup = reader.OpenRowGroupReader(0);
+        Parquet.Data.DataColumn dataColumn = await rowGroup.ReadColumnAsync(reader.Schema.DataFields[1]);
+
+        byte[][] binaryData = (byte[][])dataColumn.Data;
+        Assert.Single(binaryData);
+        Assert.Equal(rawBytes, binaryData[0]);
+    }
 }

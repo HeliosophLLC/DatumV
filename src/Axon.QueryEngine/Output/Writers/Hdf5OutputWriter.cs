@@ -9,13 +9,14 @@ using PureHDF;
 /// </summary>
 public sealed class Hdf5OutputWriter : IOutputWriter
 {
-    private readonly string _filePath;
+    private readonly string? _filePath;
+    private readonly Stream? _outputStream;
     private Schema? _schema;
     private readonly List<Row> _rows = new();
     private long _rowsWritten;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="Hdf5OutputWriter"/> class.
+    /// Initializes a new instance of the <see cref="Hdf5OutputWriter"/> class that writes to a file.
     /// </summary>
     /// <param name="filePath">The output HDF5 file path.</param>
     public Hdf5OutputWriter(string filePath)
@@ -23,14 +24,28 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         _filePath = filePath;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Hdf5OutputWriter"/> class that writes to a stream.
+    /// The caller retains ownership of the stream and is responsible for disposing it.
+    /// </summary>
+    /// <param name="outputStream">The stream to write HDF5 data to.</param>
+    public Hdf5OutputWriter(Stream outputStream)
+    {
+        _outputStream = outputStream;
+    }
+
     /// <inheritdoc />
     public Task InitializeAsync(Schema schema, CancellationToken cancellationToken = default)
     {
         _schema = schema;
-        string? directory = Path.GetDirectoryName(_filePath);
-        if (!string.IsNullOrEmpty(directory))
+
+        if (_filePath is not null)
         {
-            Directory.CreateDirectory(directory);
+            string? directory = Path.GetDirectoryName(_filePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
         }
 
         return Task.CompletedTask;
@@ -65,10 +80,17 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             file[column.Name] = dataset;
         }
 
-        file.Write(_filePath);
+        if (_outputStream is not null)
+        {
+            file.Write(_outputStream);
+            long bytesWritten = _outputStream.CanSeek ? _outputStream.Position : 0;
+            return Task.FromResult(new OutputSummary(_rowsWritten, bytesWritten, []));
+        }
 
-        long bytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath).Length : 0;
-        return Task.FromResult(new OutputSummary(_rowsWritten, bytesWritten, [_filePath]));
+        file.Write(_filePath!);
+
+        long fileBytesWritten = File.Exists(_filePath) ? new FileInfo(_filePath!).Length : 0;
+        return Task.FromResult(new OutputSummary(_rowsWritten, fileBytesWritten, [_filePath!]));
     }
 
     /// <inheritdoc />
