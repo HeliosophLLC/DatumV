@@ -72,7 +72,7 @@ axon query "
 axon query "
   SELECT id, normalize(value) AS norm_value, category
   FROM data
-  INTO CSV 'output/result.csv' SHARD ON sample_count 10000
+  INTO 'output/result.csv' SHARD ON sample_count 10000
 " --source "csv:data=./large_dataset.csv"
 ```
 
@@ -217,22 +217,22 @@ Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`
 
 ### INTO
 
-Write query results to a file:
+Write query results to a file. The output format is inferred from the file extension (`.csv`, `.parquet`, `.h5`/`.hdf5`):
 
 ```sql
-SELECT * FROM data INTO CSV 'output.csv'
-SELECT * FROM data INTO PARQUET 'output.parquet'
-SELECT * FROM data INTO HDF5 'output.h5'
+SELECT * FROM data INTO 'output.csv'
+SELECT * FROM data INTO 'output.parquet'
+SELECT * FROM data INTO 'output.h5'
 ```
 
 With sharding:
 
 ```sql
 -- New shard every 10,000 rows: output_shard_00000.csv, output_shard_00001.csv, ...
-SELECT * FROM data INTO CSV 'output.csv' SHARD ON sample_count 10000
+SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000
 
 -- New shard every 100MB
-SELECT * FROM data INTO PARQUET 'output.parquet' SHARD ON byte_size 104857600
+SELECT * FROM data INTO 'output.parquet' SHARD ON byte_size 104857600
 ```
 
 #### Stream-based output (programmatic)
