@@ -624,6 +624,19 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 
 > All transform functions accept an optional trailing `fmt` argument (`'jpeg'`, `'png'`, `'webp'`) to control output encoding. Default preserves the original format.
 
+#### Fused image pipelines
+
+When image transforms are nested — e.g. `resize(grayscale(crop(img, ...)), 224, 224)` — the engine automatically fuses the decode/encode cycle. Without fusion each function would decode the image from bytes, apply its transform, and re-encode to bytes, only for the next function to decode those bytes again. With fusion, only the first function in the chain decodes and only the final consumer encodes, eliminating N−1 redundant decode/encode cycles.
+
+This is implemented via `ImageHandle`, a smart wrapper that carries either encoded bytes, a decoded `SKBitmap`, or both. Key properties:
+
+- **Lazy decode** — `ImageHandle` created from encoded bytes defers decoding until a transform actually needs the bitmap.
+- **Lazy encode** — `ImageHandle` created from a bitmap defers encoding until the bytes are needed (output writer, statistics, etc.).
+- **Format propagation** — Each handle tracks the requested output format. Functions without a format argument inherit the input's format; functions with an explicit format argument override it. This matches the non-fused output byte-for-byte.
+- **Deterministic disposal** — The expression evaluator disposes intermediate `ImageHandle` bitmaps as soon as they are consumed, releasing native SkiaSharp memory promptly rather than waiting for GC finalization.
+
+Non-image consumers (`AsImage()` callers such as output writers, statistics accumulators, header-only metadata functions, and `CAST`) are transparent to the optimization — they receive encoded bytes on demand via lazy encoding.
+
 ## Data Providers
 
 ### CSV

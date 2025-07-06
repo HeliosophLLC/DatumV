@@ -56,18 +56,18 @@ public sealed class NoiseImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageHandle inputHandle = input.GetImageHandle();
         string noiseType = arguments[1].AsString().ToUpperInvariant();
         float value = arguments[2].AsScalar();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(imageBytes, formatOverride);
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        using SKBitmap original = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("noise() failed to decode the image data.");
+        SKBitmap original = inputHandle.GetBitmap("noise");
 
-        // Work in RGBA8888 for consistent pixel access
-        using SKBitmap rgba = original.ColorType == SKColorType.Rgba8888
+        // Work in RGBA8888 for consistent pixel access — always copy
+        // because noise modifies pixels in place and we must not mutate the input handle's bitmap.
+        SKBitmap rgba = original.ColorType == SKColorType.Rgba8888
             ? original.Copy()
             : original.Copy(SKColorType.Rgba8888);
 
@@ -85,12 +85,12 @@ public sealed class NoiseImageFunction : IScalarFunction
                 break;
 
             default:
+                rgba.Dispose();
                 throw new ArgumentException(
                     $"noise() unknown noise type '{noiseType}'. Supported: gaussian, salt_pepper.");
         }
 
-        byte[] result = ImageEncoder.Encode(rgba, outputFormat);
-        return DataValue.FromImage(result);
+        return DataValue.FromImageHandle(new ImageHandle(rgba, outputFormat));
     }
 
     private static void ApplyGaussianNoise(nint pixelPtr, int totalPixels, float standardDeviation)

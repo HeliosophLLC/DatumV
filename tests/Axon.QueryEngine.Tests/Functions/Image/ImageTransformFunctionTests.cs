@@ -372,4 +372,162 @@ public sealed class ImageTransformFunctionTests
         ]);
         Assert.True(result.IsNull);
     }
+
+    // ───────────────── Fused Pipeline (nested calls) ─────────────────
+
+    [Fact]
+    public void FusedPipeline_ResizeGrayscale_AvoidsRedundantDecode()
+    {
+        byte[] png = MakeTestPng(100, 80, SKColors.Blue);
+
+        // Simulate: resize(grayscale(img), 50, 40)
+        // grayscale returns an ImageHandle-backed DataValue (no encode yet)
+        DataValue grayscaleResult = _grayscale.Execute([DataValue.FromImage(png)]);
+
+        // The result should be ImageHandle-backed (not raw bytes)
+        Assert.NotNull(grayscaleResult.TryGetOwnedImageHandle());
+
+        // resize consumes the handle — reuses the bitmap, no second decode
+        DataValue resizeResult = _resize.Execute([
+            grayscaleResult,
+            DataValue.FromScalar(50),
+            DataValue.FromScalar(40)
+        ]);
+
+        (int width, int height) = DecodeDimensions(resizeResult);
+        Assert.Equal(50, width);
+        Assert.Equal(40, height);
+    }
+
+    [Fact]
+    public void FusedPipeline_CropRotate_ProducesCorrectDimensions()
+    {
+        byte[] png = MakeTestPng(100, 100);
+
+        // Simulate: rotate(crop(img, 10, 10, 50, 50), 90)
+        DataValue cropResult = _crop.Execute([
+            DataValue.FromImage(png),
+            DataValue.FromScalar(10), DataValue.FromScalar(10),
+            DataValue.FromScalar(50), DataValue.FromScalar(50)
+        ]);
+
+        DataValue rotateResult = _rotate.Execute([
+            cropResult,
+            DataValue.FromScalar(90)
+        ]);
+
+        (int width, int height) = DecodeDimensions(rotateResult);
+        Assert.Equal(50, width);
+        Assert.Equal(50, height);
+    }
+
+    [Fact]
+    public void FusedPipeline_GrayscaleBlur_PreservesFormat()
+    {
+        byte[] png = MakeTestPng(20, 20);
+
+        // grayscale(img, 'png') then blur — format should propagate as PNG
+        DataValue grayscaleResult = _grayscale.Execute([
+            DataValue.FromImage(png),
+            DataValue.FromString("png")
+        ]);
+
+        DataValue blurResult = _blur.Execute([
+            grayscaleResult,
+            DataValue.FromScalar(2)
+        ]);
+
+        byte[] resultBytes = blurResult.AsImage();
+        // PNG starts with 0x89 0x50
+        Assert.True(resultBytes.Length >= 2);
+        Assert.Equal(0x89, resultBytes[0]);
+        Assert.Equal(0x50, resultBytes[1]);
+    }
+
+    [Fact]
+    public void FusedPipeline_FormatOverride_OuterFunctionWins()
+    {
+        byte[] png = MakeTestPng(20, 20);
+
+        // grayscale(img, 'png') then resize(..., 'jpeg') — outer JPEG should win
+        DataValue grayscaleResult = _grayscale.Execute([
+            DataValue.FromImage(png),
+            DataValue.FromString("png")
+        ]);
+
+        DataValue resizeResult = _resize.Execute([
+            grayscaleResult,
+            DataValue.FromScalar(10), DataValue.FromScalar(10),
+            DataValue.FromString("jpeg")
+        ]);
+
+        byte[] resultBytes = resizeResult.AsImage();
+        // JPEG starts with 0xFF 0xD8
+        Assert.True(resultBytes.Length >= 2);
+        Assert.Equal(0xFF, resultBytes[0]);
+        Assert.Equal(0xD8, resultBytes[1]);
+    }
+
+    [Fact]
+    public void FusedPipeline_ThreeDeep_GrayscaleCropResize()
+    {
+        byte[] png = MakeTestPng(100, 80, SKColors.Red);
+
+        // Simulate: resize(crop(grayscale(img), 0, 0, 50, 40), 25, 20)
+        DataValue step1 = _grayscale.Execute([DataValue.FromImage(png)]);
+        DataValue step2 = _crop.Execute([
+            step1,
+            DataValue.FromScalar(0), DataValue.FromScalar(0),
+            DataValue.FromScalar(50), DataValue.FromScalar(40)
+        ]);
+        DataValue step3 = _resize.Execute([
+            step2,
+            DataValue.FromScalar(25), DataValue.FromScalar(20)
+        ]);
+
+        (int width, int height) = DecodeDimensions(step3);
+        Assert.Equal(25, width);
+        Assert.Equal(20, height);
+    }
+
+    [Fact]
+    public void FusedPipeline_DecodeImage_ConsumesHandle()
+    {
+        byte[] png = MakeTestPng(8, 6, SKColors.Green);
+        DecodeImageFunction decode = new();
+
+        // Simulate: decode_image(grayscale(img))
+        DataValue grayscaleResult = _grayscale.Execute([DataValue.FromImage(png)]);
+        DataValue tensor = decode.Execute([grayscaleResult]);
+
+        Assert.Equal(DataKind.Tensor, tensor.Kind);
+        float[] data = tensor.AsTensor(out int[] shape);
+        Assert.Equal(3, shape.Length);
+        Assert.Equal(6, shape[0]);  // height
+        Assert.Equal(8, shape[1]);  // width
+        Assert.Equal(4, shape[2]);  // RGBA channels
+    }
+
+    [Fact]
+    public void FusedPipeline_DisposedHandle_IntermediateCleanup()
+    {
+        byte[] png = MakeTestPng(20, 20);
+
+        DataValue grayscaleResult = _grayscale.Execute([DataValue.FromImage(png)]);
+        ImageHandle? intermediateHandle = grayscaleResult.TryGetOwnedImageHandle();
+        Assert.NotNull(intermediateHandle);
+
+        // Simulate what ExpressionEvaluator does: consume then dispose intermediate
+        DataValue resizeResult = _resize.Execute([
+            grayscaleResult,
+            DataValue.FromScalar(10), DataValue.FromScalar(10)
+        ]);
+
+        intermediateHandle.Dispose();
+
+        // The result should still be usable — it has its own handle
+        (int width, int height) = DecodeDimensions(resizeResult);
+        Assert.Equal(10, width);
+        Assert.Equal(10, height);
+    }
 }

@@ -49,26 +49,20 @@ public sealed class ResizeImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageHandle inputHandle = input.GetImageHandle();
         int targetWidth = (int)arguments[1].AsScalar();
         int targetHeight = (int)arguments[2].AsScalar();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(imageBytes, formatOverride);
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        using SKBitmap original = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("resize() failed to decode the image data.");
+        SKBitmap original = inputHandle.GetBitmap("resize");
 
-        using SKBitmap resized = original.Resize(
-            new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default);
-
-        if (resized is null)
-        {
-            throw new InvalidOperationException(
+        SKBitmap resized = original.Resize(
+            new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default)
+            ?? throw new InvalidOperationException(
                 $"resize() failed to resize the image to {targetWidth}×{targetHeight}.");
-        }
 
-        byte[] result = ImageEncoder.Encode(resized, outputFormat);
-        return DataValue.FromImage(result);
+        return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat));
     }
 }

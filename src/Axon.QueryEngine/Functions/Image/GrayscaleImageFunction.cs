@@ -52,15 +52,14 @@ public sealed class GrayscaleImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageHandle inputHandle = input.GetImageHandle();
 
         string? formatOverride = arguments.Length == 2 ? arguments[1].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(imageBytes, formatOverride);
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        using SKBitmap original = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("grayscale() failed to decode the image data.");
+        SKBitmap original = inputHandle.GetBitmap("grayscale");
 
-        using SKBitmap grayscaled = new(original.Width, original.Height);
+        SKBitmap grayscaled = new(original.Width, original.Height);
         using SKCanvas canvas = new(grayscaled);
 
         float[] matrix =
@@ -76,7 +75,6 @@ public sealed class GrayscaleImageFunction : IScalarFunction
 
         canvas.DrawBitmap(original, 0, 0, paint);
 
-        byte[] result = ImageEncoder.Encode(grayscaled, outputFormat);
-        return DataValue.FromImage(result);
+        return DataValue.FromImageHandle(new ImageHandle(grayscaled, outputFormat));
     }
 }

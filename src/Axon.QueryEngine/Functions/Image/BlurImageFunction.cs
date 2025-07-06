@@ -48,23 +48,21 @@ public sealed class BlurImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageHandle inputHandle = input.GetImageHandle();
         float radius = arguments[1].AsScalar();
 
         string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(imageBytes, formatOverride);
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        using SKBitmap original = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("blur() failed to decode the image data.");
+        SKBitmap original = inputHandle.GetBitmap("blur");
 
-        using SKBitmap blurred = new(original.Width, original.Height);
+        SKBitmap blurred = new(original.Width, original.Height);
         using SKCanvas canvas = new(blurred);
         using SKImageFilter blurFilter = SKImageFilter.CreateBlur(radius, radius);
         using SKPaint paint = new() { ImageFilter = blurFilter };
 
         canvas.DrawBitmap(original, 0, 0, paint);
 
-        byte[] result = ImageEncoder.Encode(blurred, outputFormat);
-        return DataValue.FromImage(result);
+        return DataValue.FromImageHandle(new ImageHandle(blurred, outputFormat));
     }
 }

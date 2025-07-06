@@ -48,14 +48,13 @@ public sealed class RotateImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageHandle inputHandle = input.GetImageHandle();
         float degrees = arguments[1].AsScalar();
 
         string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(imageBytes, formatOverride);
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        using SKBitmap original = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("rotate() failed to decode the image data.");
+        SKBitmap original = inputHandle.GetBitmap("rotate");
 
         // Compute expanded canvas size to avoid clipping
         double radians = degrees * System.Math.PI / 180.0;
@@ -65,7 +64,7 @@ public sealed class RotateImageFunction : IScalarFunction
         int newWidth = (int)System.Math.Round(original.Width * cosAngle + original.Height * sinAngle);
         int newHeight = (int)System.Math.Round(original.Width * sinAngle + original.Height * cosAngle);
 
-        using SKBitmap rotated = new(newWidth, newHeight);
+        SKBitmap rotated = new(newWidth, newHeight);
         using SKCanvas canvas = new(rotated);
 
         canvas.Clear(SKColors.Transparent);
@@ -74,7 +73,6 @@ public sealed class RotateImageFunction : IScalarFunction
         canvas.Translate(-original.Width / 2f, -original.Height / 2f);
         canvas.DrawBitmap(original, 0, 0);
 
-        byte[] result = ImageEncoder.Encode(rotated, outputFormat);
-        return DataValue.FromImage(result);
+        return DataValue.FromImageHandle(new ImageHandle(rotated, outputFormat));
     }
 }

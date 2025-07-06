@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Axon.QueryEngine.Functions;
+using Axon.QueryEngine.Functions.Image;
 using Axon.QueryEngine.Model;
 using Axon.QueryEngine.Parsing.Ast;
 
@@ -217,7 +218,47 @@ public sealed class ExpressionEvaluator
             arguments[index] = Evaluate(function.Arguments[index], row);
         }
 
-        return scalarFunction.Execute(arguments);
+        DataValue result = scalarFunction.Execute(arguments);
+
+        // Dispose consumed ImageHandle arguments whose bitmaps are no longer needed.
+        // The result carries its own ImageHandle (if any), so we only dispose handles
+        // that are not the same instance as the result's handle.
+        DisposeConsumedImageHandles(arguments, result);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Disposes <see cref="ImageHandle"/> payloads in evaluated arguments that are
+    /// no longer referenced by the result. This releases native <see cref="SkiaSharp.SKBitmap"/>
+    /// memory from intermediate pipeline stages.
+    /// </summary>
+    private static void DisposeConsumedImageHandles(DataValue[] arguments, DataValue result)
+    {
+        for (int index = 0; index < arguments.Length; index++)
+        {
+            DataValue argument = arguments[index];
+
+            if (argument.Kind != DataKind.Image || argument.IsNull)
+            {
+                continue;
+            }
+
+            if (argument.TryGetOwnedImageHandle() is not ImageHandle argumentHandle)
+            {
+                continue;
+            }
+
+            // If the result reuses the same handle, don't dispose — it's still alive.
+            if (result.Kind == DataKind.Image
+                && !result.IsNull
+                && ReferenceEquals(argumentHandle, result.TryGetOwnedImageHandle()))
+            {
+                continue;
+            }
+
+            argumentHandle.Dispose();
+        }
     }
 
     private DataValue EvaluateIn(InExpression inExpr, Row row)

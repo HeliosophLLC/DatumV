@@ -1,3 +1,5 @@
+using Axon.QueryEngine.Functions.Image;
+
 namespace Axon.QueryEngine.Model;
 
 /// <summary>
@@ -92,6 +94,14 @@ public sealed class DataValue : IEquatable<DataValue>
     public static DataValue FromImage(byte[] value) =>
         new(DataKind.Image, value, shape: null, isNull: false);
 
+    /// <summary>
+    /// Creates a value from an <see cref="ImageHandle"/>.
+    /// The handle carries a decoded bitmap and/or encoded bytes, enabling
+    /// fused image pipelines that avoid redundant decode/encode cycles.
+    /// </summary>
+    internal static DataValue FromImageHandle(ImageHandle handle) =>
+        new(DataKind.Image, handle, shape: null, isNull: false);
+
     /// <summary>Creates a value from a calendar date.</summary>
     public static DataValue FromDate(DateOnly value) =>
         new(DataKind.Date, value, shape: null, isNull: false);
@@ -169,12 +179,51 @@ public sealed class DataValue : IEquatable<DataValue>
         return (float[])_payload!;
     }
 
-    /// <summary>Returns the encoded image byte array payload.</summary>
+    /// <summary>
+    /// Returns the encoded image byte array payload.
+    /// When the payload is an <see cref="ImageHandle"/> (from a fused pipeline),
+    /// the bytes are lazily encoded on first access.
+    /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public byte[] AsImage()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
+
+        if (_payload is ImageHandle handle)
+        {
+            return handle.GetEncodedBytes();
+        }
+
         return (byte[])_payload!;
+    }
+
+    /// <summary>
+    /// Returns the <see cref="ImageHandle"/> for this image value.
+    /// If the payload is raw bytes, wraps them in a new handle (no bitmap decode yet).
+    /// If the payload is already an <see cref="ImageHandle"/>, returns it directly.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    internal ImageHandle GetImageHandle()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Image);
+
+        if (_payload is ImageHandle handle)
+        {
+            return handle;
+        }
+
+        byte[] bytes = (byte[])_payload!;
+        return new ImageHandle(bytes, ImageEncoder.ResolveFormat(bytes, formatOverride: null));
+    }
+
+    /// <summary>
+    /// Returns the <see cref="ImageHandle"/> payload if this value already owns one,
+    /// or <c>null</c> if the payload is raw bytes. Used by the evaluator to check
+    /// for disposable intermediate handles without allocating a new wrapper.
+    /// </summary>
+    internal ImageHandle? TryGetOwnedImageHandle()
+    {
+        return _payload as ImageHandle;
     }
 
     /// <summary>Returns the calendar date payload.</summary>
@@ -290,7 +339,7 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Tensor => _shape!.AsSpan().SequenceEqual(other._shape!)
                 && ((float[])_payload!).AsSpan().SequenceEqual((float[])other._payload!),
             DataKind.UInt8Array => ((byte[])_payload!).AsSpan().SequenceEqual((byte[])other._payload!),
-            DataKind.Image => ((byte[])_payload!).AsSpan().SequenceEqual((byte[])other._payload!),
+            DataKind.Image => AsImage().AsSpan().SequenceEqual(other.AsImage()),
             DataKind.Date => (DateOnly)_payload! == (DateOnly)other._payload!,
             DataKind.DateTime => (DateTime)_payload! == (DateTime)other._payload!,
             _ => false,
@@ -312,7 +361,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Vector => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Matrix => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Tensor => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
-            DataKind.UInt8Array or DataKind.Image => CombineByteArrayHash(_kind, (byte[])_payload!),
+            DataKind.UInt8Array => CombineByteArrayHash(_kind, (byte[])_payload!),
+            DataKind.Image => CombineByteArrayHash(_kind, AsImage()),
             _ => HashCode.Combine(_kind),
         };
     }

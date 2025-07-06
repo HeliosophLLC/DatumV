@@ -40,10 +40,8 @@ public sealed class DecodeImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Tensor);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
-
-        using SKBitmap bitmap = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("decode_image() failed to decode the image data.");
+        ImageHandle inputHandle = input.GetImageHandle();
+        SKBitmap bitmap = inputHandle.GetBitmap("decode_image");
 
         // Ensure RGBA8888 layout for consistent pixel access
         using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888

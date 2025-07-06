@@ -49,18 +49,16 @@ public sealed class CropImageFunction : IScalarFunction
             return DataValue.Null(DataKind.Image);
         }
 
-        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageHandle inputHandle = input.GetImageHandle();
         int x = (int)arguments[1].AsScalar();
         int y = (int)arguments[2].AsScalar();
         int cropWidth = (int)arguments[3].AsScalar();
         int cropHeight = (int)arguments[4].AsScalar();
 
         string? formatOverride = arguments.Length == 6 ? arguments[5].AsString() : null;
-        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(imageBytes, formatOverride);
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
-        using SKBitmap original = SKBitmap.Decode(imageBytes)
-            ?? throw new InvalidOperationException("crop() failed to decode the image data.");
-
+        SKBitmap original = inputHandle.GetBitmap("crop");
         SKRectI cropRect = new(x, y, x + cropWidth, y + cropHeight);
 
         SKBitmap cropped = new();
@@ -72,10 +70,6 @@ public sealed class CropImageFunction : IScalarFunction
                 $"crop() failed to extract region ({x}, {y}, {cropWidth}×{cropHeight}).");
         }
 
-        using (cropped)
-        {
-            byte[] result = ImageEncoder.Encode(cropped, outputFormat);
-            return DataValue.FromImage(result);
-        }
+        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat));
     }
 }

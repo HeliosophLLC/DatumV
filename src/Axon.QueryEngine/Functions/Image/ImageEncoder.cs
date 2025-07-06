@@ -34,6 +34,24 @@ internal static class ImageEncoder
     }
 
     /// <summary>
+    /// Resolves the output format from an <see cref="ImageHandle"/> and an optional
+    /// user-supplied format override. When no override is given, the handle's existing
+    /// format is preserved — avoiding a header re-parse.
+    /// </summary>
+    /// <param name="handle">The source image handle whose format is used as a fallback.</param>
+    /// <param name="formatOverride">Optional user-supplied format string.</param>
+    /// <returns>The resolved SkiaSharp encoding format.</returns>
+    public static SKEncodedImageFormat ResolveFormat(ImageHandle handle, string? formatOverride)
+    {
+        if (formatOverride is not null)
+        {
+            return ParseFormatString(formatOverride);
+        }
+
+        return handle.Format;
+    }
+
+    /// <summary>
     /// Encodes a bitmap to a byte array in the specified format.
     /// </summary>
     public static byte[] Encode(SKBitmap bitmap, SKEncodedImageFormat format, int quality = 90)
