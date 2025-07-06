@@ -110,6 +110,7 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             DataKind.String or DataKind.JsonValue => BuildStringDataset(column),
             DataKind.Vector => BuildVectorDataset(column.Name, rowCount),
             DataKind.Matrix => BuildMatrixDataset(column.Name, rowCount),
+            DataKind.UInt8Array or DataKind.Image => BuildBinaryDataset(column),
             DataKind.Date or DataKind.DateTime => BuildDateStringDataset(column),
             _ => BuildStringDataset(column)
         };
@@ -156,6 +157,32 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             else
             {
                 data[i] = value.AsString();
+            }
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Builds a variable-length byte array dataset for binary columns (UInt8Array, Image).
+    /// </summary>
+    private byte[][] BuildBinaryDataset(ColumnInfo column)
+    {
+        byte[][] data = new byte[_rows.Count][];
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            DataValue value = _rows[i][column.Name];
+            if (value.IsNull)
+            {
+                data[i] = [];
+            }
+            else if (column.Kind == DataKind.Image)
+            {
+                data[i] = value.AsImage();
+            }
+            else
+            {
+                data[i] = value.AsUInt8Array();
             }
         }
 

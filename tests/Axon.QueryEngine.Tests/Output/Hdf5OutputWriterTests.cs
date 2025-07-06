@@ -211,4 +211,46 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
         Assert.Equal([1.0f, 2.0f], ids);
         Assert.Equal(["Alice", "Bob"], names);
     }
+
+    [Fact]
+    public async Task FinalizeAsync_UInt8ArrayColumn_WritesBinaryDataset()
+    {
+        string path = Path.Combine(_tempDir, "binary.h5");
+        Schema schema = new([new ColumnInfo("data", DataKind.UInt8Array, false)]);
+
+        await using Hdf5OutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(("data", DataValue.FromUInt8Array([1, 2, 3]))));
+        await writer.WriteRowAsync(CreateRow(("data", DataValue.FromUInt8Array([4, 5]))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+
+        using NativeFile file = H5File.OpenRead(path);
+        byte[][] data = file.Dataset("data").Read<byte[][]>();
+        Assert.Equal([1, 2, 3], data[0]);
+        Assert.Equal([4, 5], data[1]);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_ImageColumn_WritesBinaryDataset()
+    {
+        string path = Path.Combine(_tempDir, "images.h5");
+        Schema schema = new([new ColumnInfo("img", DataKind.Image, false)]);
+        byte[] fakeImage1 = [0xFF, 0xD8, 0xFF, 0xE0, 0x10, 0x20];
+        byte[] fakeImage2 = [0x89, 0x50, 0x4E, 0x47, 0x30, 0x40];
+
+        await using Hdf5OutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(("img", DataValue.FromImage(fakeImage1))));
+        await writer.WriteRowAsync(CreateRow(("img", DataValue.FromImage(fakeImage2))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+
+        using NativeFile file = H5File.OpenRead(path);
+        byte[][] data = file.Dataset("img").Read<byte[][]>();
+        Assert.Equal(fakeImage1, data[0]);
+        Assert.Equal(fakeImage2, data[1]);
+    }
 }
