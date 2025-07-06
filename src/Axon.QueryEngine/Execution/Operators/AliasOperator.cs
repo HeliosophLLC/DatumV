@@ -32,22 +32,77 @@ public sealed class AliasOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
+        AliasSchema? schema = null;
+
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            // Expose both aliased (alias.col) and unaliased (col) names.
-            string[] names = new string[row.FieldCount * 2];
-            DataValue[] values = new DataValue[row.FieldCount * 2];
+            schema ??= AliasSchema.Build(_alias, row);
+            yield return schema.Apply(row);
+        }
+    }
 
-            for (int index = 0; index < row.FieldCount; index++)
+    /// <summary>
+    /// Pre-computed doubled column schema for alias expansion. Built once from
+    /// the first source row and reused for all subsequent rows, allocating only
+    /// a <see cref="DataValue"/> array per row.
+    /// </summary>
+    private sealed class AliasSchema
+    {
+        private readonly string[] _names;
+        private readonly Dictionary<string, int> _nameIndex;
+        private readonly int _sourceFieldCount;
+
+        private AliasSchema(
+            string[] names,
+            Dictionary<string, int> nameIndex,
+            int sourceFieldCount)
+        {
+            _names = names;
+            _nameIndex = nameIndex;
+            _sourceFieldCount = sourceFieldCount;
+        }
+
+        /// <summary>
+        /// Builds the alias schema from the alias prefix and the first source row.
+        /// </summary>
+        internal static AliasSchema Build(string alias, Row firstRow)
+        {
+            int fieldCount = firstRow.FieldCount;
+            string[] names = new string[fieldCount * 2];
+
+            for (int index = 0; index < fieldCount; index++)
             {
-                string originalName = row.ColumnNames[index];
-                names[index] = $"{_alias}.{originalName}";
-                values[index] = row[index];
-                names[row.FieldCount + index] = originalName;
-                values[row.FieldCount + index] = row[index];
+                string originalName = firstRow.ColumnNames[index];
+                names[index] = $"{alias}.{originalName}";
+                names[fieldCount + index] = originalName;
             }
 
-            yield return new Row(names, values);
+            Dictionary<string, int> nameIndex =
+                new(names.Length, StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < names.Length; index++)
+            {
+                nameIndex[names[index]] = index;
+            }
+
+            return new AliasSchema(names, nameIndex, fieldCount);
+        }
+
+        /// <summary>
+        /// Applies the alias schema to a source row. Only a <see cref="DataValue"/>
+        /// array is allocated per call.
+        /// </summary>
+        internal Row Apply(Row sourceRow)
+        {
+            DataValue[] values = new DataValue[_names.Length];
+
+            for (int index = 0; index < _sourceFieldCount; index++)
+            {
+                DataValue value = sourceRow[index];
+                values[index] = value;
+                values[_sourceFieldCount + index] = value;
+            }
+
+            return new Row(_names, values, _nameIndex);
         }
     }
 }

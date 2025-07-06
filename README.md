@@ -1185,13 +1185,13 @@ CSV reads at ~1.2M rows/sec. JSON is ~1.8× slower due to System.Text.Json strea
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| SELECT * FROM data (10K) | 8.796 ms | 0.0548 ms | 0.0458 ms | 14.62 MB |
-| SELECT with WHERE filter (10K) | 8.523 ms | 0.1671 ms | 0.1788 ms | 12.79 MB |
-| SELECT with projection (10K) | 6.821 ms | 0.0371 ms | 0.0329 ms | 11.2 MB |
-| INNER JOIN (10K × 1K) | 12.794 ms | 0.0928 ms | 0.0775 ms | 19.5 MB |
-| ORDER BY + LIMIT (10K) | 26.170 ms | 0.4069 ms | 0.4179 ms | 16.61 MB |
+| SELECT * FROM data (10K) | 9.118 ms | 0.1783 ms | 0.1752 ms | 14.62 MB |
+| SELECT with WHERE filter (10K) | 8.403 ms | 0.1637 ms | 0.1681 ms | 12.79 MB |
+| SELECT with projection (10K) | 6.922 ms | 0.0708 ms | 0.0663 ms | 11.2 MB |
+| INNER JOIN (10K × 1K) | 9.710 ms | 0.0982 ms | 0.0919 ms | 13.27 MB |
+| ORDER BY + LIMIT (10K) | 32.581 ms | 0.6376 ms | 0.9543 ms | 16.61 MB |
 
-Full scan of 10K rows completes in ~9 ms. Projection and filtering share pre-built column schemas, eliminating per-row Dictionary and name-array allocations — projection allocates only 11.2 MB (down from 15.6 MB). Hash join with a 1K-row build side adds ~4 ms. ORDER BY + LIMIT is the most expensive due to full materialization for sorting, but uses a bounded priority queue when LIMIT is present.
+Full scan of 10K rows completes in ~9 ms. Projection and filtering share pre-built column schemas, eliminating per-row Dictionary and name-array allocations — projection allocates only 11.2 MB (down from 15.6 MB). Hash join allocates 13.27 MB thanks to shared alias and join schemas that eliminate per-row name-array and Dictionary rebuilds across `AliasOperator` and `JoinOperator`. ORDER BY + LIMIT is the most expensive due to full materialization for sorting, but uses a bounded priority queue when LIMIT is present.
 
 #### Statistics
 
@@ -1207,11 +1207,11 @@ Statistics collection runs all accumulators (numeric, string, vector, image, car
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV write 1K rows | 1.447 ms | 0.0164 ms | 0.0128 ms | 124.52 KB |
-| CSV write 10K rows | 9.027 ms | 0.1730 ms | 0.1351 ms | 1,145.67 KB |
-| CSV write 10K rows with sharding (1000/shard) | 16.629 ms | 0.3325 ms | 0.6485 ms | 1,256.12 KB |
+| CSV write 1K rows | 1.848 ms | 0.0225 ms | 0.0188 ms | 124.39 KB |
+| CSV write 10K rows | 11.665 ms | 0.2292 ms | 0.2452 ms | 1,145.53 KB |
+| CSV write 10K rows with sharding (1000/shard) | 20.484 ms | 0.3906 ms | 0.4342 ms | 1,256.04 KB |
 
-CSV writes at ~1.1M rows/sec with minimal allocation overhead (~115 bytes/row). Sharding adds ~77% overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
+CSV writes with minimal allocation overhead (~115 bytes/row). Sharding adds overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
 
 ## Project Structure
 

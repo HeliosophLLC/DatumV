@@ -32,19 +32,11 @@ public sealed class SubqueryOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
+        // The inner operator already produces correctly-named rows.
+        // Pass them through without copying.
         await foreach (Row row in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
-            // Prefix column names with the alias for qualified access.
-            string[] names = new string[row.FieldCount];
-            DataValue[] values = new DataValue[row.FieldCount];
-
-            for (int index = 0; index < row.FieldCount; index++)
-            {
-                names[index] = row.ColumnNames[index];
-                values[index] = row[index];
-            }
-
-            yield return new Row(names, values);
+            yield return row;
         }
     }
 }
