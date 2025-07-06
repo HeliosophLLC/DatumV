@@ -1185,13 +1185,13 @@ CSV reads at ~1.2M rows/sec. JSON is ~1.8× slower due to System.Text.Json strea
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| SELECT * FROM data (10K) | 8.741 ms | 0.1467 ms | 0.1372 ms | 14.62 MB |
-| SELECT with WHERE filter (10K) | 9.590 ms | 0.1164 ms | 0.1089 ms | 15.07 MB |
-| SELECT with projection (10K) | 8.362 ms | 0.1240 ms | 0.1160 ms | 15.63 MB |
-| INNER JOIN (10K × 1K) | 13.582 ms | 0.1292 ms | 0.1209 ms | 20.98 MB |
-| ORDER BY + LIMIT (10K) | 41.970 ms | 0.8283 ms | 1.1612 ms | 21.12 MB |
+| SELECT * FROM data (10K) | 8.924 ms | 0.1785 ms | 0.1833 ms | 14.62 MB |
+| SELECT with WHERE filter (10K) | 9.694 ms | 0.1900 ms | 0.1586 ms | 15.07 MB |
+| SELECT with projection (10K) | 8.359 ms | 0.1340 ms | 0.1119 ms | 15.63 MB |
+| INNER JOIN (10K × 1K) | 13.867 ms | 0.2690 ms | 0.3402 ms | 19.95 MB |
+| ORDER BY + LIMIT (10K) | 43.281 ms | 0.8598 ms | 1.6972 ms | 20.22 MB |
 
-Full scan of 10K rows completes in ~9 ms. Hash join with a 1K-row build side adds ~5 ms. ORDER BY + LIMIT is the most expensive due to full materialization for sorting, but uses a bounded priority queue when LIMIT is present.
+Full scan of 10K rows completes in ~9 ms. Hash join with a 1K-row build side adds ~5 ms and allocates ~20 MB (combined rows share a pre-built column schema to avoid per-row Dictionary and name-array allocations). ORDER BY + LIMIT is the most expensive due to full materialization for sorting, but uses a bounded priority queue when LIMIT is present.
 
 #### Statistics
 

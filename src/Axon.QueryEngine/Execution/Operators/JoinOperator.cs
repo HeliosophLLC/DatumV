@@ -144,6 +144,11 @@ public sealed class JoinOperator : IQueryOperator
         BitArray? rightMatched = needRightUnmatched ? new BitArray(rightRows.Count) : null;
 
         // Probe phase: stream left side.
+        // Schema is built lazily from the first left-right pair so that zero-match
+        // joins never attempt to build it.
+        CombinedRowSchema? schema = null;
+        Row? cachedNullRight = null;
+
         await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
             bool hasMatch = false;
@@ -171,7 +176,8 @@ public sealed class JoinOperator : IQueryOperator
             {
                 foreach ((int rightIndex, Row rightRow) in matches)
                 {
-                    Row combinedRow = CombineRows(leftRow, rightRow);
+                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    Row combinedRow = schema.Combine(leftRow, rightRow);
 
                     // Apply residual filter for non-equi conjuncts.
                     if (extraction.Residual is not null
@@ -194,7 +200,9 @@ public sealed class JoinOperator : IQueryOperator
             {
                 if (rightRows.Count > 0)
                 {
-                    yield return CombineRows(leftRow, CreateNullRow(rightRows[0]));
+                    cachedNullRight ??= CreateNullRow(rightRows[0]);
+                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
+                    yield return schema.Combine(leftRow, cachedNullRight);
                 }
                 else
                 {
@@ -207,6 +215,7 @@ public sealed class JoinOperator : IQueryOperator
         if (rightMatched is not null)
         {
             Row? nullLeft = null;
+            CombinedRowSchema? rightUnmatchedSchema = null;
 
             for (int index = 0; index < rightRows.Count; index++)
             {
@@ -216,7 +225,9 @@ public sealed class JoinOperator : IQueryOperator
 
                     if (nullLeft is not null)
                     {
-                        yield return CombineRows(CreateNullRow(nullLeft), rightRows[index]);
+                        Row nullLeftRow = CreateNullRow(nullLeft);
+                        rightUnmatchedSchema ??= CombinedRowSchema.Build(nullLeftRow, rightRows[index]);
+                        yield return rightUnmatchedSchema.Combine(nullLeftRow, rightRows[index]);
                     }
                     else
                     {
@@ -242,13 +253,17 @@ public sealed class JoinOperator : IQueryOperator
             ? new BitArray(rightRows.Count)
             : null;
 
+        CombinedRowSchema? schema = null;
+        Row? cachedNullRight = null;
+
         await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
             bool hasMatch = false;
 
             for (int index = 0; index < rightRows.Count; index++)
             {
-                Row combinedRow = CombineRows(leftRow, rightRows[index]);
+                schema ??= CombinedRowSchema.Build(leftRow, rightRows[index]);
+                Row combinedRow = schema.Combine(leftRow, rightRows[index]);
 
                 if (_onCondition is null || evaluator.EvaluateAsBoolean(_onCondition, combinedRow))
                 {
@@ -264,13 +279,11 @@ public sealed class JoinOperator : IQueryOperator
 
             if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
             {
-                Row? nullRight = rightRows.Count > 0
-                    ? CreateNullRow(rightRows[0])
-                    : null;
-
-                if (nullRight is not null)
+                if (rightRows.Count > 0)
                 {
-                    yield return CombineRows(leftRow, nullRight);
+                    cachedNullRight ??= CreateNullRow(rightRows[0]);
+                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
+                    yield return schema.Combine(leftRow, cachedNullRight);
                 }
                 else
                 {
@@ -283,6 +296,7 @@ public sealed class JoinOperator : IQueryOperator
         if (rightMatched is not null)
         {
             Row? nullLeft = null;
+            CombinedRowSchema? rightUnmatchedSchema = null;
 
             for (int index = 0; index < rightRows.Count; index++)
             {
@@ -292,7 +306,9 @@ public sealed class JoinOperator : IQueryOperator
 
                     if (nullLeft is not null)
                     {
-                        yield return CombineRows(CreateNullRow(nullLeft), rightRows[index]);
+                        Row nullLeftRow = CreateNullRow(nullLeft);
+                        rightUnmatchedSchema ??= CombinedRowSchema.Build(nullLeftRow, rightRows[index]);
+                        yield return rightUnmatchedSchema.Combine(nullLeftRow, rightRows[index]);
                     }
                     else
                     {
@@ -312,11 +328,14 @@ public sealed class JoinOperator : IQueryOperator
             rightRows.Add(rightRow);
         }
 
+        CombinedRowSchema? schema = null;
+
         await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
             foreach (Row rightRow in rightRows)
             {
-                yield return CombineRows(leftRow, rightRow);
+                schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                yield return schema.Combine(leftRow, rightRow);
             }
         }
     }
@@ -405,5 +424,72 @@ public sealed class JoinOperator : IQueryOperator
         }
 
         return new Row(names, values);
+    }
+
+    /// <summary>
+    /// Pre-computed schema for combined rows in a join. Holds the shared column name
+    /// array and name-index dictionary so that each combined row allocates only a
+    /// <see cref="DataValue"/> array instead of rebuilding the full schema.
+    /// </summary>
+    internal sealed class CombinedRowSchema
+    {
+        private readonly string[] _names;
+        private readonly Dictionary<string, int> _nameIndex;
+        private readonly int _leftFieldCount;
+
+        private CombinedRowSchema(string[] names, Dictionary<string, int> nameIndex, int leftFieldCount)
+        {
+            _names = names;
+            _nameIndex = nameIndex;
+            _leftFieldCount = leftFieldCount;
+        }
+
+        /// <summary>
+        /// Builds a schema from the first left and right rows encountered in a join.
+        /// </summary>
+        internal static CombinedRowSchema Build(Row left, Row right)
+        {
+            int totalFields = left.FieldCount + right.FieldCount;
+            string[] names = new string[totalFields];
+
+            for (int index = 0; index < left.FieldCount; index++)
+            {
+                names[index] = left.ColumnNames[index];
+            }
+
+            for (int index = 0; index < right.FieldCount; index++)
+            {
+                names[left.FieldCount + index] = right.ColumnNames[index];
+            }
+
+            Dictionary<string, int> nameIndex = new(totalFields, StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < totalFields; index++)
+            {
+                nameIndex[names[index]] = index;
+            }
+
+            return new CombinedRowSchema(names, nameIndex, left.FieldCount);
+        }
+
+        /// <summary>
+        /// Combines two rows using the shared schema. Only a <see cref="DataValue"/> array
+        /// is allocated per call.
+        /// </summary>
+        internal Row Combine(Row left, Row right)
+        {
+            DataValue[] values = new DataValue[_names.Length];
+
+            for (int index = 0; index < _leftFieldCount; index++)
+            {
+                values[index] = left[index];
+            }
+
+            for (int index = 0; index < _names.Length - _leftFieldCount; index++)
+            {
+                values[_leftFieldCount + index] = right[index];
+            }
+
+            return new Row(_names, values, _nameIndex);
+        }
     }
 }

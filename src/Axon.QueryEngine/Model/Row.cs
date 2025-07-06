@@ -36,6 +36,22 @@ public sealed class Row
         }
     }
 
+    /// <summary>
+    /// Creates a row that shares a pre-built column name array and name-index dictionary
+    /// with other rows of the same schema. This avoids re-allocating the names array and
+    /// rebuilding the dictionary for every row in hot paths such as joins.
+    /// </summary>
+    /// <remarks>
+    /// Callers must guarantee that <paramref name="names"/> and <paramref name="nameIndex"/>
+    /// are never mutated after construction. <see cref="Row"/> is immutable, so sharing is safe.
+    /// </remarks>
+    internal Row(string[] names, DataValue[] values, Dictionary<string, int> nameIndex)
+    {
+        _names = names;
+        _values = values;
+        _nameIndex = nameIndex;
+    }
+
     /// <summary>The number of fields in this row.</summary>
     public int FieldCount => _values.Length;
 
