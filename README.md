@@ -645,10 +645,11 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Scalar. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. |
 | `image_pixel_std` | `image_pixel_std(img[, channels])` | Standard deviation of pixel values. Same signature as `image_pixel_mean`. |
 
-### Image — Decode (1)
+### Image — Loading & Decode (2)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `load_image` | `load_image(bytes)` | Load encoded bytes (UInt8Array from ZIP/binary column) as an Image for use with transform and analysis functions. No decode — wraps the bytes as an opaque Image value for the fused pipeline. |
 | `decode_image` | `decode_image(img)` | Decode to [H, W, 4] RGBA float tensor (values 0–255). |
 
 ### Image — Transforms (13)

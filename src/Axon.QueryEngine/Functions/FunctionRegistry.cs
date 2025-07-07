@@ -220,7 +220,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Image.ImagePixelCountFunction());
         registry.RegisterScalar(new Image.ImageDimensionsFunction());
 
-        // Image — Decode
+        // Image — Loading & Decode
+        registry.RegisterScalar(new Image.LoadImageFunction());
         registry.RegisterScalar(new Image.DecodeImageFunction());
 
         // Image — Analysis
