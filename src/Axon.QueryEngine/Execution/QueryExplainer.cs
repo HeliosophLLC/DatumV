@@ -34,6 +34,7 @@ public static class QueryExplainer
             LimitOperator limit => BuildLimitNode(limit),
             AliasOperator alias => BuildAliasNode(alias),
             SubqueryOperator subquery => BuildSubqueryNode(subquery),
+            LateMaterializationOperator lateMat => BuildLateMaterializationNode(lateMat),
             _ => new ExplainPlanNode
             {
                 OperatorName = op.GetType().Name,
@@ -220,6 +221,21 @@ public static class QueryExplainer
             OperatorName = "Subquery",
             Details = $"alias: {subquery.Alias}",
             Children = { BuildNode(subquery.InnerOperator) },
+        };
+    }
+
+    private static ExplainPlanNode BuildLateMaterializationNode(LateMaterializationOperator lateMat)
+    {
+        string columns = string.Join(", ", lateMat.DeferredColumns);
+        string source = lateMat.Alias is not null
+            ? $"{lateMat.Alias} ({lateMat.Descriptor.Provider})"
+            : lateMat.Descriptor.Name;
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "Late Materialize",
+            Details = $"source: {source}, key: {lateMat.KeyColumn}, fetch: [{columns}]",
+            Children = { BuildNode(lateMat.Child) },
         };
     }
 

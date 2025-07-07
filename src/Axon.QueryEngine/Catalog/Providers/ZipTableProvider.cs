@@ -7,8 +7,10 @@ namespace Axon.QueryEngine.Catalog.Providers;
 /// <summary>
 /// Reads ZIP archives, yielding one row per entry with <c>file_name</c> (eager)
 /// and <c>file_bytes</c> (lazy — defers decompression until accessed).
+/// Implements <see cref="IKeyedTableProvider"/> for efficient random access by
+/// <c>file_name</c>, enabling late materialization of expensive <c>file_bytes</c>.
 /// </summary>
-public sealed class ZipTableProvider : ITableProvider
+public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
 {
     private static readonly Schema ZipSchema = new(new ColumnInfo[]
     {
@@ -106,7 +108,8 @@ public sealed class ZipTableProvider : ITableProvider
             ColumnCosts: new Dictionary<string, ColumnCost>
             {
                 ["file_bytes"] = ColumnCost.Expensive
-            }));
+            },
+            KeyColumn: "file_name"));
     }
 
     /// <summary>
@@ -118,5 +121,86 @@ public sealed class ZipTableProvider : ITableProvider
         using MemoryStream memoryStream = new();
         stream.CopyTo(memoryStream);
         return memoryStream.ToArray();
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+        TableDescriptor descriptor,
+        string keyColumn,
+        IReadOnlySet<DataValue> keyValues,
+        IReadOnlySet<string>? requiredColumns,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (!string.Equals(keyColumn, "file_name", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"ZIP provider only supports keyed access by 'file_name', not '{keyColumn}'.",
+                nameof(keyColumn));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.CompletedTask.ConfigureAwait(false);
+
+        bool includeFileName = requiredColumns is null ||
+            requiredColumns.Contains("file_name");
+        bool includeFileBytes = requiredColumns is null ||
+            requiredColumns.Contains("file_bytes");
+
+        List<string> columnNames = new();
+        if (includeFileName)
+        {
+            columnNames.Add("file_name");
+        }
+        if (includeFileBytes)
+        {
+            columnNames.Add("file_bytes");
+        }
+
+        string[] names = columnNames.ToArray();
+        Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < names.Length; index++)
+        {
+            nameIndex[names[index]] = index;
+        }
+
+        // Collect the string keys for O(1) lookup against ZipArchive entries.
+        HashSet<string> entryNames = new(StringComparer.Ordinal);
+        foreach (DataValue keyValue in keyValues)
+        {
+            if (!keyValue.IsNull && keyValue.Kind == DataKind.String)
+            {
+                entryNames.Add(keyValue.AsString());
+            }
+        }
+
+        using FileStream fileStream = File.OpenRead(descriptor.FilePath);
+        using ZipArchive archive = new(fileStream, ZipArchiveMode.Read);
+
+        foreach (string entryName in entryNames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            ZipArchiveEntry? entry = archive.GetEntry(entryName);
+            if (entry is null)
+            {
+                continue;
+            }
+
+            DataValue[] values = new DataValue[names.Length];
+            int valueIndex = 0;
+
+            if (includeFileName)
+            {
+                values[valueIndex++] = DataValue.FromString(entry.FullName);
+            }
+
+            if (includeFileBytes)
+            {
+                byte[] bytes = ReadEntryBytes(entry);
+                values[valueIndex++] = DataValue.FromUInt8Array(bytes);
+            }
+
+            yield return new Row(names, values, nameIndex);
+        }
     }
 }

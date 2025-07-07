@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Axon.QueryEngine.Catalog;
 using Axon.QueryEngine.Execution;
 using Axon.QueryEngine.Execution.Operators;
@@ -697,5 +698,256 @@ public class OperatorTests
 
         Assert.Single(rows);
         Assert.Equal(42f, rows[0]["x"].AsScalar());
+    }
+
+    // ─────────────── LateMaterializationOperator tests ───────────────
+
+    /// <summary>
+    /// Enriches child rows with deferred columns fetched from a keyed provider.
+    /// </summary>
+    [Fact]
+    public async Task LateMaterialization_EnrichesRowsWithDeferredColumns()
+    {
+        MockOperator source = new(
+            MakeRow(("file_name", DataValue.FromString("a.txt")), ("size", DataValue.FromScalar(10f))),
+            MakeRow(("file_name", DataValue.FromString("b.txt")), ("size", DataValue.FromScalar(20f))));
+
+        TableDescriptor descriptor = new("mock", "files", "dummy.zip",
+            new Dictionary<string, string>());
+
+        MockKeyedProvider keyedProvider = new(new Dictionary<string, Row>
+        {
+            ["a.txt"] = MakeRow(("file_name", DataValue.FromString("a.txt")), ("file_bytes", DataValue.FromUInt8Array(new byte[] { 1, 2, 3 }))),
+            ["b.txt"] = MakeRow(("file_name", DataValue.FromString("b.txt")), ("file_bytes", DataValue.FromUInt8Array(new byte[] { 4, 5 }))),
+        });
+
+        HashSet<string> deferred = new(StringComparer.OrdinalIgnoreCase) { "file_bytes" };
+        LateMaterializationOperator op = new(source, descriptor, "file_name", deferred, alias: null);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("mock", () => keyedProvider);
+        catalog.Register(descriptor);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> rows = await CollectAsync(op, context);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(new byte[] { 1, 2, 3 }, rows[0]["file_bytes"].AsUInt8Array());
+        Assert.Equal(new byte[] { 4, 5 }, rows[1]["file_bytes"].AsUInt8Array());
+        // Original columns preserved.
+        Assert.Equal(10f, rows[0]["size"].AsScalar());
+    }
+
+    /// <summary>
+    /// When an alias is specified, both unqualified and qualified column names are present.
+    /// </summary>
+    [Fact]
+    public async Task LateMaterialization_WithAlias_AddsQualifiedColumns()
+    {
+        MockOperator source = new(
+            MakeRow(("file_name", DataValue.FromString("a.txt"))));
+
+        TableDescriptor descriptor = new("mock", "files", "dummy.zip",
+            new Dictionary<string, string>());
+
+        MockKeyedProvider keyedProvider = new(new Dictionary<string, Row>
+        {
+            ["a.txt"] = MakeRow(("file_name", DataValue.FromString("a.txt")), ("file_bytes", DataValue.FromUInt8Array(new byte[] { 9 }))),
+        });
+
+        HashSet<string> deferred = new(StringComparer.OrdinalIgnoreCase) { "file_bytes" };
+        LateMaterializationOperator op = new(source, descriptor, "file_name", deferred, alias: "z");
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("mock", () => keyedProvider);
+        catalog.Register(descriptor);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> rows = await CollectAsync(op, context);
+
+        Assert.Single(rows);
+        Assert.Equal(new byte[] { 9 }, rows[0]["file_bytes"].AsUInt8Array());
+        Assert.Equal(new byte[] { 9 }, rows[0]["z.file_bytes"].AsUInt8Array());
+    }
+
+    /// <summary>
+    /// Empty child produces no output and does not call the keyed provider.
+    /// </summary>
+    [Fact]
+    public async Task LateMaterialization_EmptyChild_ReturnsEmpty()
+    {
+        MockOperator source = new();
+
+        TableDescriptor descriptor = new("mock", "files", "dummy.zip",
+            new Dictionary<string, string>());
+
+        MockKeyedProvider keyedProvider = new(new Dictionary<string, Row>());
+        HashSet<string> deferred = new(StringComparer.OrdinalIgnoreCase) { "file_bytes" };
+        LateMaterializationOperator op = new(source, descriptor, "file_name", deferred, alias: null);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("mock", () => keyedProvider);
+        catalog.Register(descriptor);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> rows = await CollectAsync(op, context);
+
+        Assert.Empty(rows);
+        Assert.False(keyedProvider.WasCalled);
+    }
+
+    /// <summary>
+    /// Rows whose key has no match in the keyed provider get null for deferred columns.
+    /// </summary>
+    [Fact]
+    public async Task LateMaterialization_UnmatchedKeys_FillsNull()
+    {
+        MockOperator source = new(
+            MakeRow(("file_name", DataValue.FromString("missing.txt")), ("x", DataValue.FromScalar(1f))));
+
+        TableDescriptor descriptor = new("mock", "files", "dummy.zip",
+            new Dictionary<string, string>());
+
+        MockKeyedProvider keyedProvider = new(new Dictionary<string, Row>());
+        HashSet<string> deferred = new(StringComparer.OrdinalIgnoreCase) { "file_bytes" };
+        LateMaterializationOperator op = new(source, descriptor, "file_name", deferred, alias: null);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("mock", () => keyedProvider);
+        catalog.Register(descriptor);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> rows = await CollectAsync(op, context);
+
+        Assert.Single(rows);
+        Assert.True(rows[0]["file_bytes"].IsNull);
+        Assert.Equal(1f, rows[0]["x"].AsScalar());
+    }
+
+    /// <summary>
+    /// After a JOIN, both tables may have a column with the same unqualified name
+    /// (e.g. <c>file_name</c>). The operator must use the alias-qualified key
+    /// (<c>z.file_name</c>) to look up the correct value from child rows.
+    /// Reproduces a bug where unqualified lookup picked up the wrong table's
+    /// <c>file_name</c>, causing <see cref="IKeyedTableProvider.FetchByKeysAsync"/>
+    /// to miss all entries and return null bytes.
+    /// </summary>
+    [Fact]
+    public async Task LateMaterialization_AmbiguousKeyAfterJoin_UsesQualifiedLookup()
+    {
+        // Simulate post-JOIN rows where both tables contribute a "file_name" column.
+        // The ZIP's file_name is "dir/a.txt", but the images table's file_name is
+        // "a.txt" (just the filename portion). The unqualified "file_name" in the
+        // row's name index resolves to the images table's value because it appears
+        // later in the combined row.
+        MockOperator source = new(
+            MakeRow(
+                ("z.file_name", DataValue.FromString("dir/a.txt")),
+                ("file_name", DataValue.FromString("a.txt")),
+                ("i.file_name", DataValue.FromString("a.txt")),
+                ("caption", DataValue.FromString("a bicycle"))));
+
+        TableDescriptor descriptor = new("mock", "archive", "dummy.zip",
+            new Dictionary<string, string>());
+
+        // The keyed provider stores entries by their full path (as the ZIP does).
+        MockKeyedProvider keyedProvider = new(new Dictionary<string, Row>
+        {
+            ["dir/a.txt"] = MakeRow(
+                ("file_name", DataValue.FromString("dir/a.txt")),
+                ("file_bytes", DataValue.FromUInt8Array(new byte[] { 0xFF, 0xD8 }))),
+        });
+
+        HashSet<string> deferred = new(StringComparer.OrdinalIgnoreCase) { "file_bytes" };
+        LateMaterializationOperator op = new(source, descriptor, "file_name", deferred, alias: "z");
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("mock", () => keyedProvider);
+        catalog.Register(descriptor);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> rows = await CollectAsync(op, context);
+
+        Assert.Single(rows);
+        // Must fetch the actual bytes, not null.
+        Assert.False(rows[0]["file_bytes"].IsNull, "file_bytes should not be null — the operator must use the alias-qualified key to find the ZIP entry.");
+        Assert.Equal(new byte[] { 0xFF, 0xD8 }, rows[0]["file_bytes"].AsUInt8Array());
+    }
+}
+
+/// <summary>
+/// A mock <see cref="IKeyedTableProvider"/> for unit testing
+/// <see cref="LateMaterializationOperator"/>.
+/// </summary>
+internal sealed class MockKeyedProvider : IKeyedTableProvider
+{
+    private readonly Dictionary<string, Row> _rowsByKey;
+
+    /// <summary>Whether <see cref="FetchByKeysAsync"/> was called.</summary>
+    public bool WasCalled { get; private set; }
+
+    public MockKeyedProvider(Dictionary<string, Row> rowsByKey)
+    {
+        _rowsByKey = rowsByKey;
+    }
+
+    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IAsyncEnumerable<Row> OpenAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+        TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<ProviderCapabilities>(null!);
+    }
+
+    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+        TableDescriptor descriptor,
+        string keyColumn,
+        IReadOnlySet<DataValue> keyValues,
+        IReadOnlySet<string>? requiredColumns,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        WasCalled = true;
+
+        foreach (DataValue keyValue in keyValues)
+        {
+            string key = keyValue.AsString();
+            if (_rowsByKey.TryGetValue(key, out Row? row))
+            {
+                yield return row;
+            }
+        }
+
+        await Task.CompletedTask;
     }
 }

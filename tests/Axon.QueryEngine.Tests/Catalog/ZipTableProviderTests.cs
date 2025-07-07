@@ -180,6 +180,107 @@ public sealed class ZipTableProviderTests : IDisposable
         Assert.Equal(ColumnCost.Expensive, capabilities.ColumnCosts["file_bytes"]);
     }
 
+    /// <summary>
+    /// Verifies that the provider declares <c>file_name</c> as its key column
+    /// for keyed access.
+    /// </summary>
+    [Fact]
+    public async Task GetCapabilities_DeclaresKeyColumn()
+    {
+        ZipTableProvider provider = new();
+        ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(
+            Descriptor(), CancellationToken.None);
+
+        Assert.Equal("file_name", capabilities.KeyColumn);
+    }
+
+    // ───────────────────── Keyed fetch ─────────────────────
+
+    /// <summary>
+    /// Fetching known entry names returns the correct rows with decompressed bytes.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_ReturnsMatchingEntries()
+    {
+        ZipTableProvider provider = new();
+        HashSet<DataValue> keys = new()
+        {
+            DataValue.FromString("hello.txt"),
+            DataValue.FromString("data/nested.bin"),
+        };
+
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(), "file_name", keys, null, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+
+        Row? helloRow = rows.FirstOrDefault(r => r["file_name"].AsString() == "hello.txt");
+        Assert.NotNull(helloRow);
+        byte[] helloBytes = helloRow["file_bytes"].AsUInt8Array();
+        Assert.Equal("Hello, World!", System.Text.Encoding.UTF8.GetString(helloBytes));
+
+        Row? nestedRow = rows.FirstOrDefault(r => r["file_name"].AsString() == "data/nested.bin");
+        Assert.NotNull(nestedRow);
+        Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, nestedRow["file_bytes"].AsUInt8Array());
+    }
+
+    /// <summary>
+    /// Fetching non-existent entry names returns no rows.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_NonExistentKeys_ReturnsEmpty()
+    {
+        ZipTableProvider provider = new();
+        HashSet<DataValue> keys = new()
+        {
+            DataValue.FromString("does_not_exist.txt"),
+        };
+
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(), "file_name", keys, null, CancellationToken.None));
+
+        Assert.Empty(rows);
+    }
+
+    /// <summary>
+    /// Keyed fetch respects projection pushdown — fetches only requested columns.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_ProjectionPushdown()
+    {
+        ZipTableProvider provider = new();
+        HashSet<DataValue> keys = new()
+        {
+            DataValue.FromString("hello.txt"),
+        };
+        HashSet<string> requiredColumns = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "file_name",
+            "file_bytes",
+        };
+
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(), "file_name", keys, requiredColumns, CancellationToken.None));
+
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+    }
+
+    /// <summary>
+    /// Keyed fetch with empty key set returns no rows.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_EmptyKeySet_ReturnsEmpty()
+    {
+        ZipTableProvider provider = new();
+        HashSet<DataValue> keys = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(), "file_name", keys, null, CancellationToken.None));
+
+        Assert.Empty(rows);
+    }
+
     // ───────────────────── Cancellation ─────────────────────
 
     [Fact]

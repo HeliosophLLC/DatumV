@@ -637,7 +637,258 @@ public class QueryPlannerTests
             LimitOperator limit => FindOperator<T>(limit.Source),
             AliasOperator alias => FindOperator<T>(alias.Source),
             SubqueryOperator subquery => FindOperator<T>(subquery.InnerOperator),
+            LateMaterializationOperator late => FindOperator<T>(late.Child),
             _ => null,
         };
+    }
+
+    // ─────────────── PlanAsync late materialization tests ───────────────
+
+    private static TableCatalog CreateCatalogWithKeyedProvider(
+        string tableName,
+        string filePath,
+        string providerName,
+        ITableProvider provider)
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider(providerName, () => provider);
+        catalog.Register(new TableDescriptor(providerName, tableName, filePath,
+            new Dictionary<string, string>()));
+        return catalog;
+    }
+
+    /// <summary>
+    /// When a keyed provider has expensive output-only columns, PlanAsync wraps
+    /// the plan with a <see cref="LateMaterializationOperator"/>.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_ExpensiveOutputColumn_InsertsLateMaterialization()
+    {
+        StubKeyedProvider provider = new(
+            keyColumn: "id",
+            expensiveColumns: new[] { "payload" });
+
+        TableCatalog catalog = CreateCatalogWithKeyedProvider(
+            "data", "data.zip", "stub", provider);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT id, payload FROM data WHERE id = 1
+        // "payload" is expensive and only in SELECT → should be deferred.
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("id")),
+                new SelectColumn(new ColumnReference("payload")),
+            ],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("id"),
+                BinaryOperator.Equal,
+                new LiteralExpression(1)));
+
+        IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+
+        LateMaterializationOperator? lateOp = FindOperator<LateMaterializationOperator>(plan);
+        Assert.NotNull(lateOp);
+        Assert.Equal("id", lateOp.KeyColumn);
+        Assert.Contains("payload", lateOp.DeferredColumns);
+    }
+
+    /// <summary>
+    /// When the expensive column is used in WHERE, it cannot be deferred, so
+    /// PlanAsync does not insert a <see cref="LateMaterializationOperator"/>.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_ExpensiveColumnInWhere_NoLateMaterialization()
+    {
+        StubKeyedProvider provider = new(
+            keyColumn: "id",
+            expensiveColumns: new[] { "payload" });
+
+        TableCatalog catalog = CreateCatalogWithKeyedProvider(
+            "data", "data.zip", "stub", provider);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT id FROM data WHERE payload != ''
+        // "payload" is used in WHERE → cannot defer.
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("id"))],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("payload"),
+                BinaryOperator.NotEqual,
+                new LiteralExpression("")));
+
+        IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+
+        LateMaterializationOperator? lateOp = FindOperator<LateMaterializationOperator>(plan);
+        Assert.Null(lateOp);
+    }
+
+    /// <summary>
+    /// SELECT * requires all columns and cannot determine output-only, so
+    /// PlanAsync does not insert late materialization.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_SelectStar_NoLateMaterialization()
+    {
+        StubKeyedProvider provider = new(
+            keyColumn: "id",
+            expensiveColumns: new[] { "payload" });
+
+        TableCatalog catalog = CreateCatalogWithKeyedProvider(
+            "data", "data.zip", "stub", provider);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM data
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")));
+
+        IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+
+        LateMaterializationOperator? lateOp = FindOperator<LateMaterializationOperator>(plan);
+        Assert.Null(lateOp);
+    }
+
+    /// <summary>
+    /// When the expensive column is used in a JOIN ON condition, it cannot be deferred.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_ExpensiveColumnInJoinOn_NoLateMaterialization()
+    {
+        StubKeyedProvider provider = new(
+            keyColumn: "id",
+            expensiveColumns: new[] { "payload" });
+
+        TableCatalog catalog = CreateCatalogWithKeyedProvider(
+            "data", "data.zip", "stub", provider);
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "other", "other.csv",
+            new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT d.id FROM data d JOIN other o ON d.payload = o.val
+        // "payload" used in JOIN ON → cannot defer.
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("d", "id"))],
+            From: new FromClause(new TableReference("data", "d")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("other", "o"),
+                    new BinaryExpression(
+                        new ColumnReference("d", "payload"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("o", "val"))),
+            ]);
+
+        IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+
+        LateMaterializationOperator? lateOp = FindOperator<LateMaterializationOperator>(plan);
+        Assert.Null(lateOp);
+    }
+
+    /// <summary>
+    /// With a table alias, the deferred columns use the alias for column lookup.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_WithAlias_SetsAliasOnLateMaterialization()
+    {
+        StubKeyedProvider provider = new(
+            keyColumn: "id",
+            expensiveColumns: new[] { "payload" });
+
+        TableCatalog catalog = CreateCatalogWithKeyedProvider(
+            "data", "data.zip", "stub", provider);
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT d.id, d.payload FROM data d WHERE d.id = 1
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("d", "id")),
+                new SelectColumn(new ColumnReference("d", "payload")),
+            ],
+            From: new FromClause(new TableReference("data", "d")),
+            Where: new BinaryExpression(
+                new ColumnReference("d", "id"),
+                BinaryOperator.Equal,
+                new LiteralExpression(1)));
+
+        IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+
+        LateMaterializationOperator? lateOp = FindOperator<LateMaterializationOperator>(plan);
+        Assert.NotNull(lateOp);
+        Assert.Equal("d", lateOp.Alias);
+    }
+}
+
+/// <summary>
+/// A stub <see cref="IKeyedTableProvider"/> for planner tests that declares
+/// expensive columns and a key column without needing real data.
+/// </summary>
+internal sealed class StubKeyedProvider : IKeyedTableProvider
+{
+    private readonly string _keyColumn;
+    private readonly string[] _expensiveColumns;
+
+    public StubKeyedProvider(string keyColumn, string[] expensiveColumns)
+    {
+        _keyColumn = keyColumn;
+        _expensiveColumns = expensiveColumns;
+    }
+
+    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        List<ColumnInfo> columns = new()
+        {
+            new ColumnInfo(_keyColumn, DataKind.String, nullable: false),
+        };
+
+        foreach (string expensive in _expensiveColumns)
+        {
+            columns.Add(new ColumnInfo(expensive, DataKind.UInt8Array, nullable: true));
+        }
+
+        return Task.FromResult(new Schema(columns));
+    }
+
+    public IAsyncEnumerable<Row> OpenAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        CancellationToken cancellationToken)
+    {
+        return AsyncEnumerable.Empty<Row>();
+    }
+
+    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+        TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        Dictionary<string, ColumnCost> costs = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string expensive in _expensiveColumns)
+        {
+            costs[expensive] = ColumnCost.Expensive;
+        }
+
+        return Task.FromResult(new ProviderCapabilities(
+            EstimatedRowCount: null,
+            EstimatedRowSizeBytes: null,
+            SupportsSeek: false,
+            ColumnCosts: costs,
+            KeyColumn: _keyColumn));
+    }
+
+    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+        TableDescriptor descriptor,
+        string keyColumn,
+        IReadOnlySet<DataValue> keyValues,
+        IReadOnlySet<string>? requiredColumns,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await Task.CompletedTask;
+        yield break;
     }
 }

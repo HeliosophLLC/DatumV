@@ -35,12 +35,46 @@ public sealed class QueryPlanner
     /// <returns>The root operator of the execution plan.</returns>
     public IQueryOperator Plan(SelectStatement statement)
     {
+        return PlanCore(statement, deferredColumns: null);
+    }
+
+    /// <summary>
+    /// Plans the given statement with cost-based late materialization of expensive columns.
+    /// When a source has expensive columns (e.g. <c>file_bytes</c> in ZIP) that are only
+    /// referenced in SELECT (not in JOIN ON or WHERE), those columns are excluded from the
+    /// scan and fetched only for surviving rows via <see cref="IKeyedTableProvider"/>.
+    /// </summary>
+    /// <param name="statement">The parsed SELECT statement.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The root operator of the execution plan.</returns>
+    public async Task<IQueryOperator> PlanAsync(
+        SelectStatement statement,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, DeferredTableColumns>? deferredColumns =
+            await AnalyzeDeferredColumnsAsync(statement, cancellationToken)
+                .ConfigureAwait(false);
+
+        IQueryOperator plan = PlanCore(statement, deferredColumns);
+
+        return plan;
+    }
+
+    /// <summary>
+    /// Core planning logic shared by <see cref="Plan"/> and <see cref="PlanAsync"/>.
+    /// When <paramref name="deferredColumns"/> is provided, expensive columns are excluded
+    /// from scans and a <see cref="LateMaterializationOperator"/> is injected before projection.
+    /// </summary>
+    private IQueryOperator PlanCore(
+        SelectStatement statement,
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns)
+    {
         // Compute the set of all referenced columns for projection pushdown.
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
             CollectAllReferencedColumns(statement);
 
         // 1. Build the source operator (FROM clause) with projection pushdown.
-        IQueryOperator source = PlanSource(statement.From.Source, allReferencedColumns);
+        IQueryOperator source = PlanSource(statement.From.Source, allReferencedColumns, deferredColumns);
 
         // Track which table aliases are available on the current (left) side.
         HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +93,7 @@ public sealed class QueryPlanner
         {
             foreach (JoinClause join in statement.Joins)
             {
-                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns);
+                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns);
 
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
@@ -91,6 +125,20 @@ public sealed class QueryPlanner
         {
             Expression remaining = CombineWithAnd(pendingPredicates);
             source = new FilterOperator(source, remaining);
+        }
+
+        // 3b. Late materialization: fetch expensive output-only columns for surviving rows.
+        if (deferredColumns is not null)
+        {
+            foreach (KeyValuePair<string, DeferredTableColumns> entry in deferredColumns)
+            {
+                source = new LateMaterializationOperator(
+                    source,
+                    entry.Value.Descriptor,
+                    entry.Value.KeyColumn,
+                    entry.Value.ColumnNames,
+                    entry.Key);
+            }
         }
 
         // 4. Apply SELECT projection.
@@ -304,11 +352,12 @@ public sealed class QueryPlanner
 
     private IQueryOperator PlanSource(
         TableSource source,
-        HashSet<(string? TableName, string ColumnName)> allReferencedColumns)
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns)
     {
         return source switch
         {
-            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns),
+            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, deferredColumns),
             SubquerySource subquery => PlanSubquery(subquery),
             FunctionSource functionSource => PlanFunctionSource(functionSource),
             _ => throw new InvalidOperationException(
@@ -318,7 +367,8 @@ public sealed class QueryPlanner
 
     private IQueryOperator PlanTableReference(
         TableReference tableRef,
-        HashSet<(string? TableName, string ColumnName)> allReferencedColumns)
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns)
     {
         TableDescriptor descriptor = _catalog.Resolve(tableRef.Name);
 
@@ -326,6 +376,23 @@ public sealed class QueryPlanner
         string effectiveAlias = tableRef.Alias ?? tableRef.Name;
         IReadOnlySet<string>? requiredColumns =
             ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
+
+        // Late materialization: exclude deferred columns from the scan so the
+        // provider does not materialize expensive data for every row.
+        if (deferredColumns is not null &&
+            deferredColumns.TryGetValue(effectiveAlias, out DeferredTableColumns? deferred))
+        {
+            if (requiredColumns is not null)
+            {
+                HashSet<string> filtered = new(requiredColumns, StringComparer.OrdinalIgnoreCase);
+                foreach (string column in deferred.ColumnNames)
+                {
+                    filtered.Remove(column);
+                }
+
+                requiredColumns = filtered;
+            }
+        }
 
         IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns);
 
@@ -363,4 +430,198 @@ public sealed class QueryPlanner
 
         return sourceOperator;
     }
+
+    /// <summary>
+    /// Analyzes all table sources to find expensive columns that are referenced only
+    /// in the SELECT projection (not in WHERE, JOIN ON, or ORDER BY). These columns
+    /// can be deferred and fetched via <see cref="IKeyedTableProvider"/> after joins and
+    /// filters have eliminated non-matching rows.
+    /// </summary>
+    private async Task<Dictionary<string, DeferredTableColumns>?> AnalyzeDeferredColumnsAsync(
+        SelectStatement statement,
+        CancellationToken cancellationToken)
+    {
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
+            CollectAllReferencedColumns(statement);
+
+        // SELECT * prevents determining which columns are output-only.
+        if (allReferencedColumns.Count == 0)
+        {
+            return null;
+        }
+
+        HashSet<(string? TableName, string ColumnName)> pipelineColumns =
+            CollectPipelineColumns(statement);
+
+        Dictionary<string, DeferredTableColumns>? result = null;
+
+        // Analyze FROM source.
+        AnalyzeTableSource(
+            statement.From.Source, allReferencedColumns, pipelineColumns,
+            cancellationToken, ref result);
+
+        // Analyze JOIN sources.
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                AnalyzeTableSource(
+                    join.Source, allReferencedColumns, pipelineColumns,
+                    cancellationToken, ref result);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Checks a single table source for deferrable expensive columns and adds
+    /// entries to the result dictionary if applicable.
+    /// </summary>
+    private void AnalyzeTableSource(
+        TableSource source,
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
+        HashSet<(string? TableName, string ColumnName)> pipelineColumns,
+        CancellationToken cancellationToken,
+        ref Dictionary<string, DeferredTableColumns>? result)
+    {
+        if (source is not TableReference tableRef)
+        {
+            return;
+        }
+
+        if (!_catalog.TryResolve(tableRef.Name, out TableDescriptor? descriptor) || descriptor is null)
+        {
+            return;
+        }
+
+        ITableProvider provider = _catalog.CreateProvider(descriptor);
+        if (provider is not IKeyedTableProvider)
+        {
+            return;
+        }
+
+        // GetCapabilitiesAsync returns Task.FromResult for most providers
+        // (ZIP, JSON, CSV, HDF5). Parquet opens a file but is fast.
+        ProviderCapabilities capabilities =
+            provider.GetCapabilitiesAsync(descriptor, cancellationToken)
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
+
+        if (capabilities.KeyColumn is null || capabilities.ColumnCosts.Count == 0)
+        {
+            return;
+        }
+
+        string effectiveAlias = tableRef.Alias ?? tableRef.Name;
+
+        // Find expensive columns referenced only in SELECT/output (not in pipeline).
+        IReadOnlySet<string>? allRequired =
+            ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
+        IReadOnlySet<string>? pipelineRequired =
+            ComputeRequiredColumns(effectiveAlias, pipelineColumns);
+
+        if (allRequired is null)
+        {
+            return;
+        }
+
+        HashSet<string> deferrable = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string columnName in allRequired)
+        {
+            if (capabilities.ColumnCosts.TryGetValue(columnName, out ColumnCost cost) &&
+                cost == ColumnCost.Expensive)
+            {
+                // Column is expensive. Check it's not needed by pipeline operators.
+                bool neededInPipeline = pipelineRequired is not null &&
+                    pipelineRequired.Contains(columnName);
+
+                if (!neededInPipeline)
+                {
+                    deferrable.Add(columnName);
+                }
+            }
+        }
+
+        if (deferrable.Count == 0)
+        {
+            return;
+        }
+
+        // Verify the key column is available in pipeline rows (needed for lookup).
+        bool keyInPipeline = pipelineRequired is not null &&
+            pipelineRequired.Contains(capabilities.KeyColumn);
+        bool keyInAll = allRequired.Contains(capabilities.KeyColumn);
+
+        if (!keyInPipeline && !keyInAll)
+        {
+            return;
+        }
+
+        result ??= new Dictionary<string, DeferredTableColumns>(StringComparer.OrdinalIgnoreCase);
+        result[effectiveAlias] = new DeferredTableColumns(
+            descriptor, capabilities.KeyColumn, deferrable);
+    }
+
+    /// <summary>
+    /// Collects column references from WHERE, JOIN ON, and ORDER BY — the places
+    /// where column values are needed by intermediate pipeline operators (filter,
+    /// join, sort). Columns referenced only in SELECT are output-only.
+    /// </summary>
+    private static HashSet<(string? TableName, string ColumnName)> CollectPipelineColumns(
+        SelectStatement statement)
+    {
+        HashSet<(string? TableName, string ColumnName)> references = new();
+
+        if (statement.Where is not null)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(statement.Where))
+            {
+                references.Add((tableName, columnName));
+            }
+        }
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                if (join.OnCondition is not null)
+                {
+                    foreach ((string? tableName, string columnName) in
+                        ColumnReferenceCollector.Collect(join.OnCondition))
+                    {
+                        references.Add((tableName, columnName));
+                    }
+                }
+            }
+        }
+
+        if (statement.OrderBy is not null)
+        {
+            foreach (OrderByItem item in statement.OrderBy.Items)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(item.Expression))
+                {
+                    references.Add((tableName, columnName));
+                }
+            }
+        }
+
+        return references;
+    }
 }
+
+/// <summary>
+/// Describes the expensive columns deferred for late materialization on a specific table.
+/// </summary>
+/// <param name="Descriptor">Table descriptor for creating the keyed provider.</param>
+/// <param name="KeyColumn">Unqualified column name used for keyed lookup.</param>
+/// <param name="ColumnNames">Unqualified names of the expensive columns to fetch later.</param>
+internal sealed record DeferredTableColumns(
+    TableDescriptor Descriptor,
+    string KeyColumn,
+    IReadOnlySet<string> ColumnNames);

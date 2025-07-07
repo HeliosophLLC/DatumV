@@ -144,7 +144,7 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = planner.Plan(statement);
+    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
@@ -206,7 +206,7 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = planner.Plan(statement);
+    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
@@ -241,7 +241,7 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = planner.Plan(statement);
+    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
@@ -281,7 +281,7 @@ static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog c
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = planner.Plan(statement);
+    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     // Build the static explain plan from the original operator tree.
     ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
@@ -312,7 +312,7 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = planner.Plan(statement);
+    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
