@@ -748,8 +748,10 @@ public class OperatorTests
     [Fact]
     public async Task LateMaterialization_WithAlias_AddsQualifiedColumns()
     {
+        // Source rows simulate post-JOIN output where AliasOperator has qualified
+        // the column names with the table alias.
         MockOperator source = new(
-            MakeRow(("file_name", DataValue.FromString("a.txt"))));
+            MakeRow(("z.file_name", DataValue.FromString("a.txt"))));
 
         TableDescriptor descriptor = new("mock", "files", "dummy.zip",
             new Dictionary<string, string>());

@@ -296,4 +296,94 @@ public sealed class ZipTableProviderTests : IDisposable
                 provider.OpenAsync(Descriptor(), null, cancellationTokenSource.Token));
         });
     }
+
+    // ───────────────────── Keyed fetch — many entries ─────────────────────
+
+    /// <summary>
+    /// Fetching many keys from a larger archive returns all expected entries
+    /// with correct data, exercising the file-order scan path.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_ManyEntries_ReturnsAllInFileOrder()
+    {
+        const int entryCount = 20;
+        string largePath = CreateMultiEntryZip(entryCount);
+
+        ZipTableProvider provider = new();
+        TableDescriptor descriptor = new("zip", "large", largePath, new Dictionary<string, string>());
+
+        HashSet<DataValue> keys = new();
+        for (int index = 0; index < entryCount; index++)
+        {
+            keys.Add(DataValue.FromString($"entry_{index}.bin"));
+        }
+
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(descriptor, "file_name", keys, null, CancellationToken.None));
+
+        Assert.Equal(entryCount, rows.Count);
+
+        // Verify every expected file_name is present.
+        HashSet<string> returnedNames = new(rows.Select(r => r["file_name"].AsString()));
+        for (int index = 0; index < entryCount; index++)
+        {
+            Assert.Contains($"entry_{index}.bin", returnedNames);
+        }
+
+        // Spot-check one entry's content.
+        Row? entry5 = rows.FirstOrDefault(r => r["file_name"].AsString() == "entry_5.bin");
+        Assert.NotNull(entry5);
+        byte[] bytes = entry5["file_bytes"].AsUInt8Array();
+        Assert.Equal(5, bytes[0]);
+    }
+
+    /// <summary>
+    /// Keyed fetch respects cancellation.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_RespectsCancellation()
+    {
+        const int entryCount = 20;
+        string largePath = CreateMultiEntryZip(entryCount);
+
+        ZipTableProvider provider = new();
+        TableDescriptor descriptor = new("zip", "large", largePath, new Dictionary<string, string>());
+
+        CancellationTokenSource cancellationTokenSource = new();
+        await cancellationTokenSource.CancelAsync();
+
+        HashSet<DataValue> keys = new();
+        for (int index = 0; index < entryCount; index++)
+        {
+            keys.Add(DataValue.FromString($"entry_{index}.bin"));
+        }
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await ReadAllAsync(
+                provider.FetchByKeysAsync(
+                    descriptor, "file_name", keys, null, cancellationTokenSource.Token));
+        });
+    }
+
+    /// <summary>
+    /// Creates a test ZIP with the specified number of entries, each containing
+    /// a single byte equal to its index (mod 256).
+    /// </summary>
+    private string CreateMultiEntryZip(int entryCount)
+    {
+        string path = Path.Combine(_tempDirectory, $"multi_{entryCount}.zip");
+
+        using FileStream stream = File.Create(path);
+        using ZipArchive archive = new(stream, ZipArchiveMode.Create);
+
+        for (int index = 0; index < entryCount; index++)
+        {
+            ZipArchiveEntry entry = archive.CreateEntry($"entry_{index}.bin");
+            using Stream entryStream = entry.Open();
+            entryStream.WriteByte((byte)(index % 256));
+        }
+
+        return path;
+    }
 }
