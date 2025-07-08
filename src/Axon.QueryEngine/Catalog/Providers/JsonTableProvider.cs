@@ -39,23 +39,15 @@ public sealed class JsonTableProvider : ITableProvider
 
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    DataKind detectedKind = InferKind(property.Value);
+                    DataKind detectedKind = JsonTypeInference.InferKind(property.Value);
 
                     if (!columnKinds.TryGetValue(property.Name, out DataKind existingKind))
                     {
                         columnKinds[property.Name] = detectedKind;
                     }
-                    else if (existingKind != detectedKind)
+                    else
                     {
-                        // If types conflict, widen to String (unless one is already JsonValue)
-                        if (existingKind == DataKind.JsonValue || detectedKind == DataKind.JsonValue)
-                        {
-                            columnKinds[property.Name] = DataKind.JsonValue;
-                        }
-                        else
-                        {
-                            columnKinds[property.Name] = DataKind.String;
-                        }
+                        columnKinds[property.Name] = JsonTypeInference.WidenKind(existingKind, detectedKind);
                     }
                 }
 
@@ -132,7 +124,7 @@ public sealed class JsonTableProvider : ITableProvider
                     ColumnInfo column = projectedColumns[columnIndex];
                     if (element.TryGetProperty(column.Name, out JsonElement propertyValue))
                     {
-                        values[columnIndex] = ConvertElement(propertyValue, column.Kind);
+                        values[columnIndex] = JsonTypeInference.ConvertElement(propertyValue, column.Kind);
                     }
                     else
                     {
@@ -215,44 +207,4 @@ public sealed class JsonTableProvider : ITableProvider
         return current;
     }
 
-    /// <summary>
-    /// Infers the <see cref="DataKind"/> for a JSON element value.
-    /// </summary>
-    private static DataKind InferKind(JsonElement element)
-    {
-        return element.ValueKind switch
-        {
-            JsonValueKind.Number => DataKind.Scalar,
-            JsonValueKind.String => DataKind.String,
-            JsonValueKind.True or JsonValueKind.False => DataKind.Scalar,
-            JsonValueKind.Null or JsonValueKind.Undefined => DataKind.String,
-            JsonValueKind.Array or JsonValueKind.Object => DataKind.JsonValue,
-            _ => DataKind.String
-        };
-    }
-
-    /// <summary>
-    /// Converts a JSON element to a <see cref="DataValue"/> based on the target column kind.
-    /// </summary>
-    private static DataValue ConvertElement(JsonElement element, DataKind targetKind)
-    {
-        if (element.ValueKind == JsonValueKind.Null || element.ValueKind == JsonValueKind.Undefined)
-        {
-            return DataValue.Null(targetKind);
-        }
-
-        return targetKind switch
-        {
-            DataKind.Scalar => element.ValueKind switch
-            {
-                JsonValueKind.Number => DataValue.FromScalar((float)element.GetDouble()),
-                JsonValueKind.True => DataValue.FromScalar(1f),
-                JsonValueKind.False => DataValue.FromScalar(0f),
-                _ => DataValue.Null(DataKind.Scalar)
-            },
-            DataKind.String => DataValue.FromString(element.GetString() ?? element.GetRawText()),
-            DataKind.JsonValue => DataValue.FromJsonValue(element.GetRawText()),
-            _ => DataValue.FromString(element.GetRawText())
-        };
-    }
 }

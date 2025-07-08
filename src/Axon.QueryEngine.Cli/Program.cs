@@ -51,6 +51,7 @@ static TableCatalog BuildCatalog(CliOptions options)
     // Register all built-in providers
     catalog.RegisterProvider("csv", () => new CsvTableProvider());
     catalog.RegisterProvider("json", () => new JsonTableProvider());
+    catalog.RegisterProvider("jsonl", () => new JsonlTableProvider());
     catalog.RegisterProvider("zip", () => new ZipTableProvider());
     catalog.RegisterProvider("hdf5", () => new Hdf5TableProvider());
     catalog.RegisterProvider("parquet", () => new ParquetTableProvider());
