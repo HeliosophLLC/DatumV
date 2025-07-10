@@ -219,6 +219,32 @@ public sealed class StatisticsCollectorTests
         Assert.NotNull(imageResult.AspectRatioHistogram);
     }
 
+    [Theory]
+    [InlineData(DataKind.Image)]
+    [InlineData(DataKind.UInt8Array)]
+    [InlineData(DataKind.Vector)]
+    [InlineData(DataKind.Matrix)]
+    [InlineData(DataKind.Tensor)]
+    public void AddRow_BinaryOrArrayKind_OmitsTopK(DataKind kind)
+    {
+        StatisticsCollector collector = new();
+
+        DataValue value = kind switch
+        {
+            DataKind.Image => DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF, 0xC0 }),
+            DataKind.UInt8Array => DataValue.FromUInt8Array(new byte[] { 1, 2, 3 }),
+            DataKind.Vector => DataValue.FromVector(new float[] { 1.0f, 2.0f }),
+            DataKind.Matrix => DataValue.FromMatrix(new float[] { 1.0f, 2.0f }, 1, 2),
+            DataKind.Tensor => DataValue.FromTensor(new float[] { 1.0f }, new int[] { 1 }),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+
+        collector.AddRow(CreateRow(("data", value)));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Assert.DoesNotContain("top_k", stats["data"].Results.Keys);
+    }
+
     private static Row CreateRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = new string[columns.Length];
