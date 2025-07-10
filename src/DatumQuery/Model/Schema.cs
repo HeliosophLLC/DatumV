@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// An immutable ordered collection of <see cref="ColumnInfo"/> entries that describes

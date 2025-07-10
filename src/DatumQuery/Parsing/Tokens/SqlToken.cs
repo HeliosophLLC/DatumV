@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Parsing.Tokens;
+namespace DatumQuery.Parsing.Tokens;
 
 /// <summary>
 /// Every distinct token type recognized by the SQL tokenizer.

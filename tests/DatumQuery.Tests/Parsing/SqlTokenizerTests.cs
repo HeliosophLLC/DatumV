@@ -1,8 +1,8 @@
-using Axon.QueryEngine.Parsing.Tokens;
+using DatumQuery.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 
-namespace Axon.QueryEngine.Tests.Parsing;
+namespace DatumQuery.Tests.Parsing;
 
 public class SqlTokenizerTests
 {

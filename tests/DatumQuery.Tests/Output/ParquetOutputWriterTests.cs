@@ -1,8 +1,8 @@
-namespace Axon.QueryEngine.Tests.Output;
+namespace DatumQuery.Tests.Output;
 
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Output;
-using Axon.QueryEngine.Output.Writers;
+using DatumQuery.Model;
+using DatumQuery.Output;
+using DatumQuery.Output.Writers;
 using Parquet;
 using Parquet.Schema;
 
@@ -122,8 +122,8 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         await writer.FinalizeAsync();
 
         // Read back with ParquetTableProvider
-        Axon.QueryEngine.Catalog.Providers.ParquetTableProvider provider = new();
-        Axon.QueryEngine.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
+        DatumQuery.Catalog.Providers.ParquetTableProvider provider = new();
+        DatumQuery.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
 
         List<Row> rows = new();
         await foreach (Row row in provider.OpenAsync(descriptor, null, CancellationToken.None))

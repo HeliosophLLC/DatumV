@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Execution.Operators;
+namespace DatumQuery.Execution.Operators;
 
 /// <summary>
 /// Takes a limited number of rows from a child operator, optionally

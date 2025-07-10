@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>
 /// Extracts a slice from a vector: vec_slice(vector, start, length).

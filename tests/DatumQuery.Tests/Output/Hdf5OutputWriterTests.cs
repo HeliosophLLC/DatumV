@@ -1,8 +1,8 @@
-namespace Axon.QueryEngine.Tests.Output;
+namespace DatumQuery.Tests.Output;
 
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Output;
-using Axon.QueryEngine.Output.Writers;
+using DatumQuery.Model;
+using DatumQuery.Output;
+using DatumQuery.Output.Writers;
 using PureHDF;
 using PureHDF.VOL.Native;
 

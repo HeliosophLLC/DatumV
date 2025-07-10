@@ -8,11 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Axon.QueryEngine.Tests" />
+    <InternalsVisibleTo Include="DatumQuery.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Axon.QueryEngine\Axon.QueryEngine.csproj" />
+    <ProjectReference Include="..\DatumQuery\DatumQuery.csproj" />
   </ItemGroup>
 
 </Project>

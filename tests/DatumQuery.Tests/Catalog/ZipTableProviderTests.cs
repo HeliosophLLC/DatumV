@@ -1,9 +1,9 @@
 using System.IO.Compression;
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Catalog;
+namespace DatumQuery.Tests.Catalog;
 
 public sealed class ZipTableProviderTests : IDisposable
 {
@@ -12,7 +12,7 @@ public sealed class ZipTableProviderTests : IDisposable
 
     public ZipTableProviderTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "AxonTests_" + Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Combine(Path.GetTempPath(), "DatumTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
         _zipPath = Path.Combine(_tempDirectory, "test.zip");
 

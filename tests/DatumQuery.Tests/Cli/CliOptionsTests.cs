@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Tests.Cli;
+namespace DatumQuery.Tests.Cli;
 
-using Axon.QueryEngine.Cli;
+using DatumQuery.Cli;
 
 public sealed class CliOptionsTests
 {

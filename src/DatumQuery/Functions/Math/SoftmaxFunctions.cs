@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>
 /// Softmax function: softmax(vector) normalizes a vector into a probability distribution.

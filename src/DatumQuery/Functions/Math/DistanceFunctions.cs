@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>
 /// Computes the cosine similarity between two vectors: cosine_similarity(a, b).

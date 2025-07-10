@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Execution;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Execution;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Tests.Execution;
+namespace DatumQuery.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="JoinKeyExtractor"/>, verifying extraction of

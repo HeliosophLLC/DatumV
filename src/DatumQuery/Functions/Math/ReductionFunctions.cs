@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Model;
-using static Axon.QueryEngine.Functions.Math.ReductionFunctionHelpers;
+using DatumQuery.Model;
+using static DatumQuery.Functions.Math.ReductionFunctionHelpers;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>Reduces a Vector/Matrix/Tensor to a Scalar sum of all elements.</summary>
 public sealed class VecSumFunction : IScalarFunction

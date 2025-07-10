@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Converts a Date or DateTime value to its Unix epoch representation as a Scalar.

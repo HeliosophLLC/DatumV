@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog.Providers;
+namespace DatumQuery.Catalog.Providers;
 
 /// <summary>
 /// Shared type inference and conversion logic for JSON-based providers.

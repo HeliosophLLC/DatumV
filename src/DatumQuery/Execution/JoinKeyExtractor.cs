@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Result of attempting to extract equi-join keys from an ON condition.

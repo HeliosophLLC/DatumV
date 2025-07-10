@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Functions;
+using DatumQuery.Catalog;
+using DatumQuery.Functions;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Shared context passed through the operator tree during query execution.

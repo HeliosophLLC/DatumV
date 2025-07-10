@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Manifest;
+namespace DatumQuery.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

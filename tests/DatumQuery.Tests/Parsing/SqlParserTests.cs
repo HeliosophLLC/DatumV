@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Parsing;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Parsing;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Tests.Parsing;
+namespace DatumQuery.Tests.Parsing;
 
 public class SqlParserTests
 {

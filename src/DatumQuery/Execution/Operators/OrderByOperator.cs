@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution.Operators;
+namespace DatumQuery.Execution.Operators;
 
 /// <summary>
 /// Sorts the output of a child operator by one or more expressions.

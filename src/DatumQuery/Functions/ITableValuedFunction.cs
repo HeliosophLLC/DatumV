@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions;
+namespace DatumQuery.Functions;
 
 /// <summary>
 /// Interface for table-valued functions that produce a stream of rows

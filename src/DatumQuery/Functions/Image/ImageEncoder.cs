@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Functions.Image;
+namespace DatumQuery.Functions.Image;
 
 using SkiaSharp;
 

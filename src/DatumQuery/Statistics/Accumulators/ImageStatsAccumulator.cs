@@ -1,7 +1,7 @@
-namespace Axon.QueryEngine.Statistics.Accumulators;
+namespace DatumQuery.Statistics.Accumulators;
 
-using Axon.QueryEngine.Functions.Image;
-using Axon.QueryEngine.Model;
+using DatumQuery.Functions.Image;
+using DatumQuery.Model;
 
 /// <summary>
 /// Accumulates image dimension and channel statistics by parsing JPEG, PNG, and WebP headers.

@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Cli;
+namespace DatumQuery.Cli;
 
 /// <summary>
 /// Parsed CLI arguments.
@@ -35,7 +35,7 @@ internal sealed class CliOptions
 
         if (args.Length < 2)
         {
-            throw new ArgumentException("Usage: axon <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>]");
+            throw new ArgumentException("Usage: dq <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>]");
         }
 
         options.Command = args[0].ToLowerInvariant();

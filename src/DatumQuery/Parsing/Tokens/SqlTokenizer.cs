@@ -3,7 +3,7 @@ using Superpower.Model;
 using Superpower.Parsers;
 using Superpower.Tokenizers;
 
-namespace Axon.QueryEngine.Parsing.Tokens;
+namespace DatumQuery.Parsing.Tokens;
 
 /// <summary>
 /// Tokenizes SQL input text into a sequence of <see cref="SqlToken"/> values.

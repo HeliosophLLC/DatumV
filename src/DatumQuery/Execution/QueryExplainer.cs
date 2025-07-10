@@ -1,8 +1,8 @@
 using System.Text;
-using Axon.QueryEngine.Execution.Operators;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Execution.Operators;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Produces a static <see cref="ExplainPlanNode"/> tree from an operator tree,

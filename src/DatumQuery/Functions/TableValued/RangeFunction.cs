@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.TableValued;
+namespace DatumQuery.Functions.TableValued;
 
 /// <summary>
 /// Generates a sequence of rows with a single <c>Value</c> column,

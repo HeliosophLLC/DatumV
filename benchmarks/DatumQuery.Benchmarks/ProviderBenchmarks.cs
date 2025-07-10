@@ -1,9 +1,9 @@
 using BenchmarkDotNet.Attributes;
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Benchmarks for reading data through providers at different dataset sizes.
@@ -20,7 +20,7 @@ public class ProviderBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "axon_bench_providers");
+        _tempDirectory = Path.Combine(Path.GetTempPath(), "datum_bench_providers");
         Directory.CreateDirectory(_tempDirectory);
 
         _csvPath1K = SyntheticDataGenerator.GenerateCsv(_tempDirectory, 1_000);

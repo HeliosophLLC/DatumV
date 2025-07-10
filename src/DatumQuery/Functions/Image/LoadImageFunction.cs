@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Functions.Image;
+namespace DatumQuery.Functions.Image;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Loads encoded image bytes (UInt8Array) as an Image value for use with image transform

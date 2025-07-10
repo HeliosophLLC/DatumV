@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog;
+namespace DatumQuery.Catalog;
 
 /// <summary>
 /// Describes a single column resolved from a query's table sources,

@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Represents one node in an EXPLAIN plan tree, carrying both static

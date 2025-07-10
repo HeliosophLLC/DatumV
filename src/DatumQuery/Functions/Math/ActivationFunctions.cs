@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>Element-wise sigmoid activation: σ(x) = 1 / (1 + e^(-x)).</summary>
 public sealed class SigmoidFunction : UnaryMathFunction

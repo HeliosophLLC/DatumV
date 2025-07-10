@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Returns whether a path exists in a JSON string.

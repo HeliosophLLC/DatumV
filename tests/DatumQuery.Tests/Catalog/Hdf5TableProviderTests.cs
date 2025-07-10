@@ -1,9 +1,9 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Model;
 using PureHDF;
 
-namespace Axon.QueryEngine.Tests.Catalog;
+namespace DatumQuery.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="Hdf5TableProvider"/> using HDF5 fixture files
@@ -15,7 +15,7 @@ public sealed class Hdf5TableProviderTests : IDisposable
 
     public Hdf5TableProviderTests()
     {
-        _fixtureDirectory = Path.Combine(Path.GetTempPath(), "axon_hdf5_tests_" + Guid.NewGuid().ToString("N")[..8]);
+        _fixtureDirectory = Path.Combine(Path.GetTempPath(), "datum_hdf5_tests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_fixtureDirectory);
     }
 

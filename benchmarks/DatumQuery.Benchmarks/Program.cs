@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Running;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Entry point for BenchmarkDotNet runner.

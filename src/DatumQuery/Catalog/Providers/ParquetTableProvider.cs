@@ -1,10 +1,10 @@
 using System.Runtime.CompilerServices;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
 
-namespace Axon.QueryEngine.Catalog.Providers;
+namespace DatumQuery.Catalog.Providers;
 
 /// <summary>
 /// Reads Apache Parquet files via the Parquet.Net low-level columnar API.

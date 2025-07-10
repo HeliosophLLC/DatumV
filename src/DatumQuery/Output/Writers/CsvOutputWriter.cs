@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Output.Writers;
+namespace DatumQuery.Output.Writers;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Writes query results to CSV files in RFC 4180 format.

@@ -1,8 +1,8 @@
 using System.Collections;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution.Operators;
+namespace DatumQuery.Execution.Operators;
 
 /// <summary>
 /// Join operator supporting INNER, LEFT, RIGHT, FULL OUTER, and CROSS joins.

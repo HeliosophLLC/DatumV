@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Accumulators;
+namespace DatumQuery.Statistics.Accumulators;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Accumulates top-K most frequent values using a bounded frequency map.

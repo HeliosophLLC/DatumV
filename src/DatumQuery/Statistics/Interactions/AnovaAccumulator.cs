@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Interactions;
+namespace DatumQuery.Statistics.Interactions;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Computes the one-way ANOVA F-statistic for testing whether the means of a numeric

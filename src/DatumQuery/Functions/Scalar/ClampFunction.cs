@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Clamps a value to a [min, max] range. Works on scalar, vector, matrix, and tensor.

@@ -1,8 +1,8 @@
-namespace Axon.QueryEngine.Tests.Output;
+namespace DatumQuery.Tests.Output;
 
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Output;
-using Axon.QueryEngine.Output.Writers;
+using DatumQuery.Model;
+using DatumQuery.Output;
+using DatumQuery.Output.Writers;
 
 public sealed class ShardingOutputWriterTests : IAsyncLifetime
 {
@@ -153,8 +153,8 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
         OutputSummary summary = await writer.FinalizeAsync();
 
         // Read first shard and verify it has 3 rows
-        Axon.QueryEngine.Catalog.Providers.CsvTableProvider provider = new();
-        Axon.QueryEngine.Catalog.TableDescriptor descriptor = new("csv", "test", summary.FilesCreated[0], new Dictionary<string, string>());
+        DatumQuery.Catalog.Providers.CsvTableProvider provider = new();
+        DatumQuery.Catalog.TableDescriptor descriptor = new("csv", "test", summary.FilesCreated[0], new Dictionary<string, string>());
 
         List<Row> rows = new();
         await foreach (Row row in provider.OpenAsync(descriptor, null, CancellationToken.None))

@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Interactions;
+namespace DatumQuery.Statistics.Interactions;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Manages pairwise interaction accumulators for all eligible column pairs in a result set.

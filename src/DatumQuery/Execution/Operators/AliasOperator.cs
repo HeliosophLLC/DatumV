@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Execution.Operators;
+namespace DatumQuery.Execution.Operators;
 
 /// <summary>
 /// Prefixes all column names in the incoming rows with a table alias,

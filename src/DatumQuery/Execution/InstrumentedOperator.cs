@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// A decorator that wraps any <see cref="IQueryOperator"/> and collects

@@ -1,8 +1,8 @@
-namespace Axon.QueryEngine.Manifest;
+namespace DatumQuery.Manifest;
 
 using System.Text.Json.Serialization;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics.Accumulators;
+using DatumQuery.Model;
+using DatumQuery.Statistics.Accumulators;
 
 /// <summary>
 /// A frequency entry pairing a value string with its occurrence count.

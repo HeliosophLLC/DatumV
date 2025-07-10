@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Functions.Image;
+namespace DatumQuery.Functions.Image;
 
 /// <summary>
 /// Parses JPEG, PNG, and WebP image headers to extract dimensions and channel count

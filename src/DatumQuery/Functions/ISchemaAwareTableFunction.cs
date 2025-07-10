@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions;
+namespace DatumQuery.Functions;
 
 /// <summary>
 /// Extended interface for table-valued functions that can describe their

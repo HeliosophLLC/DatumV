@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Model;
+namespace DatumQuery.Tests.Model;
 
 public class DataKindTests
 {

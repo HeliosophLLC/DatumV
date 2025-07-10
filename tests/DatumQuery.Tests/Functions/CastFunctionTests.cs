@@ -1,8 +1,8 @@
 using System.Globalization;
-using Axon.QueryEngine.Functions.Scalar;
-using Axon.QueryEngine.Model;
+using DatumQuery.Functions.Scalar;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Functions;
+namespace DatumQuery.Tests.Functions;
 
 public class CastFunctionTests
 {

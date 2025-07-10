@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Execution.Operators;
+namespace DatumQuery.Execution.Operators;
 
 /// <summary>
 /// Reads rows from a table provider, applying projection pushdown

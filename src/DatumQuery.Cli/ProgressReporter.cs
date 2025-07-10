@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Cli;
+namespace DatumQuery.Cli;
 
 using System.Diagnostics;
 

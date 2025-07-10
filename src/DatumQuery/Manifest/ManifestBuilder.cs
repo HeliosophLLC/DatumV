@@ -1,9 +1,9 @@
-namespace Axon.QueryEngine.Manifest;
+namespace DatumQuery.Manifest;
 
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics;
-using Axon.QueryEngine.Statistics.Accumulators;
-using Axon.QueryEngine.Statistics.Interactions;
+using DatumQuery.Model;
+using DatumQuery.Statistics;
+using DatumQuery.Statistics.Accumulators;
+using DatumQuery.Statistics.Interactions;
 
 /// <summary>
 /// Builds a <see cref="QueryResultsManifest"/> from collected column statistics,

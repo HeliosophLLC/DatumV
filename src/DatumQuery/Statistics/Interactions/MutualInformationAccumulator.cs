@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Interactions;
+namespace DatumQuery.Statistics.Interactions;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Computes mutual information I(X;Y) = Σ P(x,y) log₂(P(x,y) / (P(x)P(y)))

@@ -1,7 +1,7 @@
 using System.Globalization;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Extracts a named component from a Date or DateTime value as a Scalar.

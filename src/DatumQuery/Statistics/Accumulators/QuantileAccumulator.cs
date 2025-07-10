@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Accumulators;
+namespace DatumQuery.Statistics.Accumulators;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Computes approximate percentiles (P1, P5, P25, P50, P75, P95, P99) for numeric columns

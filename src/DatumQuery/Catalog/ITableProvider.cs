@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog;
+namespace DatumQuery.Catalog;
 
 /// <summary>
 /// Interface for data source providers that stream rows from a backing store

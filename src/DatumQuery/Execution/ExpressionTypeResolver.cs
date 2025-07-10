@@ -1,8 +1,8 @@
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Functions;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Infers the output <see cref="DataKind"/> of an AST <see cref="Expression"/>

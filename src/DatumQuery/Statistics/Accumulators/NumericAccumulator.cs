@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Accumulators;
+namespace DatumQuery.Statistics.Accumulators;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Accumulates min, max, mean, and variance for numeric columns using Welford's online algorithm.

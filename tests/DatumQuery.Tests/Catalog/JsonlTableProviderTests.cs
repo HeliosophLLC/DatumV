@@ -1,8 +1,8 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Catalog;
+namespace DatumQuery.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="JsonlTableProvider"/> covering schema inference,

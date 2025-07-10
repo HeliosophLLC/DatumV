@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Accumulators;
+namespace DatumQuery.Statistics.Accumulators;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 using CardinalityEstimation;
 
 /// <summary>

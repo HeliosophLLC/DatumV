@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// Discriminator for the type of value stored in a <see cref="DataValue"/>.

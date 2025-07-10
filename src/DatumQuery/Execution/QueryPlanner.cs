@@ -1,10 +1,10 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Execution.Operators;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Catalog;
+using DatumQuery.Execution.Operators;
+using DatumQuery.Functions;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Transforms a parsed <see cref="SelectStatement"/> AST into an executable

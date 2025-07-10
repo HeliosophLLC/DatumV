@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Catalog;
+namespace DatumQuery.Catalog;
 
 /// <summary>
 /// Describes a named table that can be opened by a provider.

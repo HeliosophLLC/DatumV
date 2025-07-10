@@ -1,9 +1,9 @@
 using BenchmarkDotNet.Attributes;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Output;
-using Axon.QueryEngine.Output.Writers;
+using DatumQuery.Model;
+using DatumQuery.Output;
+using DatumQuery.Output.Writers;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Benchmarks for output writer throughput.
@@ -29,7 +29,7 @@ public class OutputBenchmarks
             new("category", DataKind.String, false),
             new("score", DataKind.Scalar, false)
         });
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "axon_bench_output");
+        _tempDirectory = Path.Combine(Path.GetTempPath(), "datum_bench_output");
         Directory.CreateDirectory(_tempDirectory);
     }
 

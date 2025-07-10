@@ -1,7 +1,7 @@
 using System.IO;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Returns the file extension (including the dot) from a path string.

@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Accumulators;
+namespace DatumQuery.Statistics.Accumulators;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Computes Shannon entropy H = -Σ p_i log₂(p_i) from the value distribution.

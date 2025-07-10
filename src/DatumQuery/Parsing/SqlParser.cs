@@ -1,5 +1,5 @@
-using Axon.QueryEngine.Parsing.Ast;
-using Axon.QueryEngine.Parsing.Tokens;
+using DatumQuery.Parsing.Ast;
+using DatumQuery.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 using Superpower.Parsers;
@@ -7,7 +7,7 @@ using SP = Superpower.Parse;
 
 #pragma warning disable CS8604, CS8620 // Superpower combinators lack consistent nullable reference type annotations
 
-namespace Axon.QueryEngine.Parsing;
+namespace DatumQuery.Parsing;
 
 /// <summary>
 /// Parses tokenized SQL into an AST rooted at <see cref="SelectStatement"/>.

@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Returns the number of elements in a JSON array.

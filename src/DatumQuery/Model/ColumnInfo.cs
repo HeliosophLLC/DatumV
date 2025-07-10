@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// Describes a single column within a <see cref="Schema"/>: its name, data kind, and nullability.

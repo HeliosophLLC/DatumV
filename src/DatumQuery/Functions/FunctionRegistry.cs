@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Functions;
+namespace DatumQuery.Functions;
 
 /// <summary>
 /// Registry for looking up scalar and table-valued functions by name.

@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Functions.Math;
-using Axon.QueryEngine.Model;
+using DatumQuery.Functions.Math;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Functions.Math;
+namespace DatumQuery.Tests.Functions.Math;
 
 public class SoftmaxFunctionTests
 {

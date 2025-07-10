@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions;
+namespace DatumQuery.Functions;
 
 /// <summary>
 /// Interface for scalar SQL functions that take one or more <see cref="DataValue"/>

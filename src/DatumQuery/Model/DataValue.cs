@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Functions.Image;
+using DatumQuery.Functions.Image;
 
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// An immutable, discriminated union value that carries typed data through the query pipeline.

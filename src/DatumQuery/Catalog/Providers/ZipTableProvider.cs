@@ -1,9 +1,9 @@
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog.Providers;
+namespace DatumQuery.Catalog.Providers;
 
 /// <summary>
 /// Reads ZIP archives, yielding one row per entry with <c>file_name</c> (eager)

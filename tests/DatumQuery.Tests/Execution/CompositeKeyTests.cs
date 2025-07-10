@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Execution;
-using Axon.QueryEngine.Model;
+using DatumQuery.Execution;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Execution;
+namespace DatumQuery.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="CompositeKey"/>, verifying value-equality semantics

@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Manifest;
+namespace DatumQuery.Manifest;
 
 /// <summary>
 /// Describes the statistical relationship between two columns in the result set.

@@ -1,9 +1,9 @@
-namespace Axon.QueryEngine.Tests.Manifest;
+namespace DatumQuery.Tests.Manifest;
 
-using Axon.QueryEngine.Manifest;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics;
-using Axon.QueryEngine.Statistics.Accumulators;
+using DatumQuery.Manifest;
+using DatumQuery.Model;
+using DatumQuery.Statistics;
+using DatumQuery.Statistics.Accumulators;
 
 public sealed class ManifestBuilderTests
 {

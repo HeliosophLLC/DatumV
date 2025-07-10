@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>Element-wise ceiling: ceil(x) rounds up to nearest integer.</summary>
 public sealed class CeilFunction : UnaryMathFunction

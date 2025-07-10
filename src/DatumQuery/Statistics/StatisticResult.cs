@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Statistics;
+namespace DatumQuery.Statistics;
 
 /// <summary>
 /// Represents the result of a statistic accumulation with a name and typed value.

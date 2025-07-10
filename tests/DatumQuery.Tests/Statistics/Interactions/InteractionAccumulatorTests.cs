@@ -1,7 +1,7 @@
-namespace Axon.QueryEngine.Tests.Statistics.Interactions;
+namespace DatumQuery.Tests.Statistics.Interactions;
 
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics.Interactions;
+using DatumQuery.Model;
+using DatumQuery.Statistics.Interactions;
 
 public sealed class PearsonAccumulatorTests
 {

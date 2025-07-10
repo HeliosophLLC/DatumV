@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog;
+namespace DatumQuery.Catalog;
 
 /// <summary>
 /// Optional extension of <see cref="ITableProvider"/> for providers that support

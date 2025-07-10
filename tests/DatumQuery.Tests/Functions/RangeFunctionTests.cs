@@ -1,7 +1,7 @@
-using Axon.QueryEngine.Functions.TableValued;
-using Axon.QueryEngine.Model;
+using DatumQuery.Functions.TableValued;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Tests.Functions;
+namespace DatumQuery.Tests.Functions;
 
 /// <summary>
 /// Unit tests for the <see cref="RangeFunction"/> table-valued function.

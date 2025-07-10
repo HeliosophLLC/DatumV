@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// A columnar batch of rows sharing a common <see cref="Model.Schema"/>.

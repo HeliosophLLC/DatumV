@@ -17,8 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Axon.QueryEngine\Axon.QueryEngine.csproj" />
-    <ProjectReference Include="..\..\src\Axon.QueryEngine.Cli\Axon.QueryEngine.Cli.csproj" />
+    <ProjectReference Include="..\..\src\DatumQuery\DatumQuery.csproj" />
+    <ProjectReference Include="..\..\src\DatumQuery.Cli\DatumQuery.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

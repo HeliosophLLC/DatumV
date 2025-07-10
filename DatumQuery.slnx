@@ -1,12 +1,12 @@
 <Solution>
   <Folder Name="/benchmarks/">
-    <Project Path="benchmarks/Axon.QueryEngine.Benchmarks/Axon.QueryEngine.Benchmarks.csproj" />
+    <Project Path="benchmarks/DatumQuery.Benchmarks/DatumQuery.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/Axon.QueryEngine.Cli/Axon.QueryEngine.Cli.csproj" />
-    <Project Path="src/Axon.QueryEngine/Axon.QueryEngine.csproj" />
+    <Project Path="src/DatumQuery.Cli/DatumQuery.Cli.csproj" />
+    <Project Path="src/DatumQuery/DatumQuery.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Axon.QueryEngine.Tests/Axon.QueryEngine.Tests.csproj" />
+    <Project Path="tests/DatumQuery.Tests/DatumQuery.Tests.csproj" />
   </Folder>
 </Solution>

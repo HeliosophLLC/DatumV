@@ -1,9 +1,9 @@
 using BenchmarkDotNet.Attributes;
-using Axon.QueryEngine.Parsing;
-using Axon.QueryEngine.Parsing.Tokens;
+using DatumQuery.Parsing;
+using DatumQuery.Parsing.Tokens;
 using Superpower;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Benchmarks for SQL tokenization and parsing at various complexity levels.

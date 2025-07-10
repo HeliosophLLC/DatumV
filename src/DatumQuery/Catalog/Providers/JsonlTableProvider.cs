@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog.Providers;
+namespace DatumQuery.Catalog.Providers;
 
 /// <summary>
 /// Reads newline-delimited JSON (JSONL/NDJSON) files where each line is a

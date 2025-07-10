@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// A single row of named <see cref="DataValue"/> entries.

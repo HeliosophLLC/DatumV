@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Output;
+namespace DatumQuery.Output;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Wraps an output writer factory to automatically create new shards

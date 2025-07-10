@@ -1,13 +1,13 @@
 using System.Runtime.CompilerServices;
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Execution;
-using Axon.QueryEngine.Execution.Operators;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
-using ExecutionContext = Axon.QueryEngine.Execution.ExecutionContext;
+using DatumQuery.Catalog;
+using DatumQuery.Execution;
+using DatumQuery.Execution.Operators;
+using DatumQuery.Functions;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
+using ExecutionContext = DatumQuery.Execution.ExecutionContext;
 
-namespace Axon.QueryEngine.Tests.Execution;
+namespace DatumQuery.Tests.Execution;
 
 /// <summary>
 /// A simple in-memory operator that yields pre-defined rows.

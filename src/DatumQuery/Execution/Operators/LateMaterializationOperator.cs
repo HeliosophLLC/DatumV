@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Execution.Operators;
+namespace DatumQuery.Execution.Operators;
 
 /// <summary>
 /// Defers fetching expensive columns (e.g. <c>file_bytes</c> from ZIP) until after

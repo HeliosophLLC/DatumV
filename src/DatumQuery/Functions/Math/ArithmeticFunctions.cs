@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>Element-wise absolute value: abs(x) = |x|.</summary>
 public sealed class AbsFunction : UnaryMathFunction

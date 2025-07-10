@@ -1,6 +1,6 @@
 using Superpower.Model;
 
-namespace Axon.QueryEngine.Parsing;
+namespace DatumQuery.Parsing;
 
 /// <summary>
 /// Thrown when the SQL parser encounters input it cannot interpret.

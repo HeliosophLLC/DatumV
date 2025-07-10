@@ -1,10 +1,10 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Functions;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Tests.Catalog;
+namespace DatumQuery.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="QuerySchemaResolver"/> covering FROM, JOIN,

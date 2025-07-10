@@ -1,19 +1,19 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Cli;
-using Axon.QueryEngine.Execution;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Output;
-using Axon.QueryEngine.Manifest;
-using Axon.QueryEngine.Output.Writers;
-using Axon.QueryEngine.Parsing;
-using Axon.QueryEngine.Parsing.Ast;
-using Axon.QueryEngine.Statistics;
-using Axon.QueryEngine.Statistics.Interactions;
-using ExecutionContext = Axon.QueryEngine.Execution.ExecutionContext;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Cli;
+using DatumQuery.Execution;
+using DatumQuery.Functions;
+using DatumQuery.Model;
+using DatumQuery.Output;
+using DatumQuery.Manifest;
+using DatumQuery.Output.Writers;
+using DatumQuery.Parsing;
+using DatumQuery.Parsing.Ast;
+using DatumQuery.Statistics;
+using DatumQuery.Statistics.Interactions;
+using ExecutionContext = DatumQuery.Execution.ExecutionContext;
 
 try
 {
@@ -388,10 +388,10 @@ static IOutputWriter CreateOutputWriter(IntoClause into)
 {
     if (into.Shard is not null)
     {
-        Axon.QueryEngine.Output.ShardMode mode = into.Shard.Mode switch
+        DatumQuery.Output.ShardMode mode = into.Shard.Mode switch
         {
-            Axon.QueryEngine.Parsing.Ast.ShardMode.SampleCount => Axon.QueryEngine.Output.ShardMode.SampleCount,
-            Axon.QueryEngine.Parsing.Ast.ShardMode.ByteSize => Axon.QueryEngine.Output.ShardMode.ByteSize,
+            DatumQuery.Parsing.Ast.ShardMode.SampleCount => DatumQuery.Output.ShardMode.SampleCount,
+            DatumQuery.Parsing.Ast.ShardMode.ByteSize => DatumQuery.Output.ShardMode.ByteSize,
             _ => throw new ArgumentException($"Unknown shard mode: {into.Shard.Mode}")
         };
 

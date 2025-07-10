@@ -1,11 +1,11 @@
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Model;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Model;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
 
-namespace Axon.QueryEngine.Tests.Catalog;
+namespace DatumQuery.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="ParquetTableProvider"/> using Parquet fixture files
@@ -17,7 +17,7 @@ public sealed class ParquetTableProviderTests : IDisposable
 
     public ParquetTableProviderTests()
     {
-        _fixtureDirectory = Path.Combine(Path.GetTempPath(), "axon_parquet_tests_" + Guid.NewGuid().ToString("N")[..8]);
+        _fixtureDirectory = Path.Combine(Path.GetTempPath(), "datum_parquet_tests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_fixtureDirectory);
     }
 

@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Functions.Image;
+namespace DatumQuery.Functions.Image;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Returns image dimensions as a vector, with layout controlled by a format string.

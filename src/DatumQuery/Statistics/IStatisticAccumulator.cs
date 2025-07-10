@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics;
+namespace DatumQuery.Statistics;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Interface for pluggable statistic accumulators that process data values incrementally.

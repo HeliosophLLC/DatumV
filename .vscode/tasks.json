@@ -7,7 +7,7 @@
 			"command": "dotnet",
 			"args": [
 				"pack",
-				"src/Axon.QueryEngine/Axon.QueryEngine.csproj",
+				"src/DatumQuery/DatumQuery.csproj",
 				"-c",
 				"Release",
 				"-o",

@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Catalog;
+namespace DatumQuery.Catalog;
 
 /// <summary>
 /// Cost classification for reading a column, used by the query planner

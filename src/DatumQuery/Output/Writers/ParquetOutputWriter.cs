@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Output.Writers;
+namespace DatumQuery.Output.Writers;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;

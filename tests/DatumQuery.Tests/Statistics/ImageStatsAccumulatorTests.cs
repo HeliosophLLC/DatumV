@@ -1,9 +1,9 @@
-namespace Axon.QueryEngine.Tests.Statistics;
+namespace DatumQuery.Tests.Statistics;
 
-using Axon.QueryEngine.Functions.Image;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics;
-using Axon.QueryEngine.Statistics.Accumulators;
+using DatumQuery.Functions.Image;
+using DatumQuery.Model;
+using DatumQuery.Statistics;
+using DatumQuery.Statistics.Accumulators;
 
 public sealed class ImageStatsAccumulatorTests
 {

@@ -1,6 +1,6 @@
-namespace Axon.QueryEngine.Statistics.Interactions;
+namespace DatumQuery.Statistics.Interactions;
 
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
 /// <summary>
 /// Computes Cramér's V statistic for association between two categorical columns.

@@ -1,7 +1,7 @@
 using System.Globalization;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Generates synthetic datasets of configurable size for benchmarking.

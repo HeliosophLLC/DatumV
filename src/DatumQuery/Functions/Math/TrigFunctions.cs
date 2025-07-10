@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Math;
+namespace DatumQuery.Functions.Math;
 
 /// <summary>Element-wise sine: sin(x) in radians.</summary>
 public sealed class SinFunction : UnaryMathFunction

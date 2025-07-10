@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 using PureHDF;
 using PureHDF.VOL.Native;
 
-namespace Axon.QueryEngine.Catalog.Providers;
+namespace DatumQuery.Catalog.Providers;
 
 /// <summary>
 /// Reads HDF5 files via PureHDF (pure managed, cross-platform).

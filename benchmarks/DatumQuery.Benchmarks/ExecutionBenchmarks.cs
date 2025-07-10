@@ -1,16 +1,16 @@
 using BenchmarkDotNet.Attributes;
-using Axon.QueryEngine.Catalog;
-using Axon.QueryEngine.Catalog.Providers;
-using Axon.QueryEngine.Execution;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Functions.Scalar;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Catalog;
+using DatumQuery.Catalog.Providers;
+using DatumQuery.Execution;
+using DatumQuery.Functions;
+using DatumQuery.Functions.Scalar;
+using DatumQuery.Model;
+using DatumQuery.Parsing;
+using DatumQuery.Parsing.Ast;
 
-using ExecutionContext = Axon.QueryEngine.Execution.ExecutionContext;
+using ExecutionContext = DatumQuery.Execution.ExecutionContext;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Benchmarks for full query execution including scan, filter, project, and join.
@@ -25,7 +25,7 @@ public class ExecutionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "axon_bench_execution");
+        _tempDirectory = Path.Combine(Path.GetTempPath(), "datum_bench_execution");
         Directory.CreateDirectory(_tempDirectory);
 
         _csvPath = SyntheticDataGenerator.GenerateCsv(_tempDirectory, 10_000);

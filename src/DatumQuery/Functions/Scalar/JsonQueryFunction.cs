@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.Scalar;
+namespace DatumQuery.Functions.Scalar;
 
 /// <summary>
 /// Extracts a JSON fragment (array or object) from a JSON string at a given dot-separated path.

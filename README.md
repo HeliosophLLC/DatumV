@@ -1,10 +1,10 @@
-# Axon.QueryEngine
+# DatumQuery
 
 A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, ZIP, HDF5, and Parquet files into ML-ready output formats with optional sharding.
 
 ## Overview
 
-Axon.QueryEngine provides a SQL-based ETL pipeline designed for machine learning dataset preparation. It parses a subset of SQL (SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT), executes queries against file-based data sources, and writes results to HDF5, Parquet, or CSV output with configurable sharding.
+DatumQuery provides a SQL-based ETL pipeline designed for machine learning dataset preparation. It parses a subset of SQL (SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT), executes queries against file-based data sources, and writes results to HDF5, Parquet, or CSV output with configurable sharding.
 
 Key features:
 - **SQL interface** — familiar syntax for data selection, filtering, joining, and projection
@@ -20,20 +20,20 @@ Key features:
 ### As a .NET library
 
 ```bash
-dotnet add package Axon.QueryEngine
+dotnet add package DatumQuery
 ```
 
 ### As a CLI tool
 
 ```bash
-dotnet tool install --global Axon.QueryEngine.Cli
+dotnet tool install --global DatumQuery.Cli
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/your-org/Axon.QueryEngine.git
-cd Axon.QueryEngine
+git clone https://github.com/your-org/DatumQuery.git
+cd DatumQuery
 dotnet build
 dotnet test
 ```
@@ -41,9 +41,9 @@ dotnet test
 #### Publish a self-contained single-file binary
 
 ```bash
-dotnet publish src/Axon.QueryEngine.Cli -c Release -r win-x64
-dotnet publish src/Axon.QueryEngine.Cli -c Release -r linux-x64
-dotnet publish src/Axon.QueryEngine.Cli -c Release -r osx-arm64
+dotnet publish src/DatumQuery.Cli -c Release -r win-x64
+dotnet publish src/DatumQuery.Cli -c Release -r linux-x64
+dotnet publish src/DatumQuery.Cli -c Release -r osx-arm64
 ```
 
 ## Quick Start
@@ -51,13 +51,13 @@ dotnet publish src/Axon.QueryEngine.Cli -c Release -r osx-arm64
 ### 1. Query a CSV file
 
 ```bash
-axon explore "SELECT name, score FROM data WHERE score > 90" --source "csv:data=./iris.csv"
+dq explore "SELECT name, score FROM data WHERE score > 90" --source "csv:data=./iris.csv"
 ```
 
 ### 2. Join ZIP + JSON (COCO-like pipeline)
 
 ```bash
-axon query "
+dq query "
   SELECT img.file_name, cap.caption
   FROM images AS img
   INNER JOIN captions AS cap ON img.id = cap.image_id
@@ -69,7 +69,7 @@ axon query "
 ### 3. ETL with sharded output
 
 ```bash
-axon query "
+dq query "
   SELECT id, normalize(value) AS norm_value, category
   FROM data
   INTO 'output/result.csv' SHARD ON sample_count 10000
@@ -850,10 +850,10 @@ The `manifest` command generates a structured JSON manifest describing every col
 
 ```bash
 # Print to stdout
-axon manifest "SELECT * FROM data" --source csv:data=measurements.csv
+dq manifest "SELECT * FROM data" --source csv:data=measurements.csv
 
 # Write to file
-axon manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
+dq manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
 ```
 
 ### Feature types
@@ -969,7 +969,7 @@ The `explain` command shows the query execution plan as a tree. Two modes are su
 Shows the operator tree structure, join strategies, filter predicates, and warnings — without executing the query:
 
 ```bash
-axon explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
+dq explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
 ```
 
 ```
@@ -986,7 +986,7 @@ Limit (limit: 100)
 Add `--analyze` to actually execute the query and report runtime metrics — row counts, filter selectivity, self time, and total time per operator:
 
 ```bash
-axon explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
+dq explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
 ```
 
 ```
@@ -1028,7 +1028,7 @@ The `schema` command resolves column metadata from all table sources in a query'
 
 ```bash
 # Single table
-axon schema "SELECT * FROM data" --source csv:data=measurements.csv
+dq schema "SELECT * FROM data" --source csv:data=measurements.csv
 ```
 
 ```
@@ -1043,7 +1043,7 @@ score                          Scalar       YES        data
 
 ```bash
 # JOIN — columns from both sides, with LEFT JOIN marking the right side nullable
-axon schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
+dq schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
   --source "zip:images=./train2017.zip" \
   --source "json:captions=./captions.json"
 ```
@@ -1061,7 +1061,7 @@ caption                        String       YES        cap
 
 ```bash
 # Table-valued function
-axon schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
+dq schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
 ```
 
 ```
@@ -1151,7 +1151,7 @@ public class MyTableFunction : ISchemaAwareTableFunction
 Run benchmarks with:
 
 ```bash
-dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*"
+dotnet run -c Release --project benchmarks/DatumQuery.Benchmarks -- --filter "*"
 ```
 
 Available benchmark suites:
@@ -1167,7 +1167,7 @@ Available benchmark suites:
 Run a specific suite:
 
 ```bash
-dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*Parsing*"
+dotnet run -c Release --project benchmarks/DatumQuery.Benchmarks -- --filter "*Parsing*"
 ```
 
 ### Results
@@ -1239,9 +1239,9 @@ CSV writes with minimal allocation overhead (~115 bytes/row). Vector columns use
 ## Project Structure
 
 ```
-Axon.QueryEngine/
+DatumQuery/
   src/
-    Axon.QueryEngine/             # Core library
+    DatumQuery/             # Core library
       Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo
       Parsing/                    # SQL tokenizer and parser (Superpower)
       Catalog/                    # Table catalog, providers (CSV, JSON, ZIP, HDF5, Parquet)
@@ -1249,11 +1249,11 @@ Axon.QueryEngine/
       Functions/                  # Scalar and table-valued functions
       Statistics/                 # Column statistics with pluggable accumulators
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
-    Axon.QueryEngine.Cli/         # CLI tool (query, explore, stats, schema commands)
+    DatumQuery.Cli/         # CLI tool (query, explore, stats, schema commands)
   tests/
-    Axon.QueryEngine.Tests/       # 1,600+ unit tests
+    DatumQuery.Tests/       # 1,600+ unit tests
   benchmarks/
-    Axon.QueryEngine.Benchmarks/  # BenchmarkDotNet performance tests
+    DatumQuery.Benchmarks/  # BenchmarkDotNet performance tests
 ```
 
 ## Building & Testing
@@ -1266,7 +1266,7 @@ dotnet build
 dotnet test
 
 # Run benchmarks
-dotnet run -c Release --project benchmarks/Axon.QueryEngine.Benchmarks -- --filter "*"
+dotnet run -c Release --project benchmarks/DatumQuery.Benchmarks -- --filter "*"
 ```
 
 ## Roadmap

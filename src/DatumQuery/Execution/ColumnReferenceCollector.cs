@@ -1,6 +1,6 @@
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Recursively walks an expression tree and collects all

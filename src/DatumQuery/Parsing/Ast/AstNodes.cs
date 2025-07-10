@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Parsing.Ast;
+namespace DatumQuery.Parsing.Ast;
 
 /// <summary>
 /// A complete SELECT statement, the top-level AST node for the query language.

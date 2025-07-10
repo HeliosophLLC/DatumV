@@ -1,12 +1,12 @@
 using System.Buffers;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Functions.Image;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Functions;
+using DatumQuery.Functions.Image;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Execution;
+namespace DatumQuery.Execution;
 
 /// <summary>
 /// Evaluates AST <see cref="Expression"/> nodes against a <see cref="Row"/>.

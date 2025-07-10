@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Model;
+namespace DatumQuery.Model;
 
 /// <summary>
 /// Wraps a deferred computation that produces a <see cref="DataValue"/>.

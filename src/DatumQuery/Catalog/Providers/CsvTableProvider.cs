@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Catalog.Providers;
+namespace DatumQuery.Catalog.Providers;
 
 /// <summary>
 /// Reads CSV files conforming to RFC 4180. Supports configurable delimiter,

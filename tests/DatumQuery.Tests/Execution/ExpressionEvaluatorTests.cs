@@ -1,9 +1,9 @@
-using Axon.QueryEngine.Execution;
-using Axon.QueryEngine.Functions;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Parsing.Ast;
+using DatumQuery.Execution;
+using DatumQuery.Functions;
+using DatumQuery.Model;
+using DatumQuery.Parsing.Ast;
 
-namespace Axon.QueryEngine.Tests.Execution;
+namespace DatumQuery.Tests.Execution;
 
 public class ExpressionEvaluatorTests
 {

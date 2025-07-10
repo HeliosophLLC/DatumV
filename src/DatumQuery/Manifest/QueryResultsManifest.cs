@@ -1,4 +1,4 @@
-namespace Axon.QueryEngine.Manifest;
+namespace DatumQuery.Manifest;
 
 /// <summary>
 /// Top-level manifest describing a query result set, containing one <see cref="FeatureManifest"/>

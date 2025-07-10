@@ -1,8 +1,8 @@
 using BenchmarkDotNet.Attributes;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics;
+using DatumQuery.Model;
+using DatumQuery.Statistics;
 
-namespace Axon.QueryEngine.Benchmarks;
+namespace DatumQuery.Benchmarks;
 
 /// <summary>
 /// Benchmarks for statistics collection overhead.

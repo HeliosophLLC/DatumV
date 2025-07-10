@@ -1,8 +1,8 @@
-namespace Axon.QueryEngine.Statistics;
+namespace DatumQuery.Statistics;
 
 using System.Collections.Concurrent;
-using Axon.QueryEngine.Model;
-using Axon.QueryEngine.Statistics.Accumulators;
+using DatumQuery.Model;
+using DatumQuery.Statistics.Accumulators;
 
 /// <summary>
 /// Manages per-column statistic accumulators and collects statistics from rows.

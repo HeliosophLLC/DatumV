@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using Axon.QueryEngine.Model;
+using DatumQuery.Model;
 
-namespace Axon.QueryEngine.Functions.TableValued;
+namespace DatumQuery.Functions.TableValued;
 
 /// <summary>
 /// Takes an array-valued column (Vector, UInt8Array, or JsonValue array) and
