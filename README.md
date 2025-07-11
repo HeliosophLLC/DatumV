@@ -98,6 +98,7 @@ dq query "
 | `--limit <n>` | Row limit for explore mode (default: 10). |
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 | `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |
+| `--checkpoint` | Enable checkpoint-based resume for sharded writes. Requires `SHARD ON`. |
 
 At least one of `--catalog` or `--source` is required. Both can be mixed; `--source` entries override same-named catalog entries.
 
@@ -256,6 +257,60 @@ stream.Position = 0;
 ```
 
 Works with all formats — `CsvOutputWriter(stream)`, `ParquetOutputWriter(stream)`, `Hdf5OutputWriter(stream)`. The caller owns the stream; the writer leaves it open on dispose. In stream mode, `ParquetOutputWriter` embeds binary columns as `byte[]` directly instead of externalizing to an `images/` folder.
+
+#### Checkpointing (resumable writes)
+
+Add `--checkpoint` to resume a sharded write from the last completed shard after a crash or interruption:
+
+```bash
+# First run — crashes after writing shards 0–4
+dq query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
+  --source csv:data=large.csv --checkpoint
+
+# Re-run the same command — resumes from shard 5
+dq query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
+  --source csv:data=large.csv --checkpoint
+```
+
+How it works:
+
+1. After each shard is finalized, a `{shard_path}.checkpoint` marker file is written containing the row count, byte count, and source fingerprints.
+2. On restart with `--checkpoint`, existing markers are scanned and validated against current source files (size + modification time).
+3. If sources match, the pipeline fast-forwards by skipping already-written rows, then continues writing from the next shard index.
+4. If the process crashed mid-shard, the incomplete file (which has no marker) is automatically deleted before writing the replacement.
+5. After successful completion, all `.checkpoint` marker files are cleaned up.
+
+**Requirements:**
+
+- `SHARD ON` must be specified. Without it, `--checkpoint` prints a warning and is ignored.
+- The query must produce rows in a **deterministic, stable order** between runs. Queries with `ORDER BY RANDOM()` or non-deterministic source ordering will produce incorrect results on resume. Ensuring deterministic ordering is the user's responsibility.
+- Source data files must not change between runs. If file size or modification time differs, the resume is aborted with an error.
+
+#### Programmatic checkpoint API
+
+```csharp
+CheckpointManager checkpointManager = new(outputPath);
+IReadOnlyList<SourceFingerprint> fingerprints = SourceFingerprintCollector.Collect(catalog);
+
+// Scan for existing checkpoints and compute resume state
+IReadOnlyList<CheckpointMarker> checkpoints = await checkpointManager.ScanExistingCheckpointsAsync();
+ResumeState resume = CheckpointManager.ComputeResumeState(checkpoints);
+
+// Delete orphaned partial shard from a previous crash
+checkpointManager.DeleteOrphanedShard(resume.NextShardIndex);
+
+// Create a checkpoint-aware sharding writer
+await using ShardingOutputWriter writer = new(
+    path => new CsvOutputWriter(path),
+    strategy,
+    outputPath,
+    checkpointManager,
+    fingerprints,
+    startShardIndex: resume.NextShardIndex);
+
+// Wrap the plan with SkipOperator to fast-forward past completed rows
+IQueryOperator resumedPlan = new SkipOperator(plan, resume.RowsToSkip);
+```
 
 ### ORDER BY / LIMIT / OFFSET
 
@@ -1285,7 +1340,6 @@ The following features are architecturally accounted for but deferred from V1:
 - **Index / bloom filter acceleration**: Skip non-matching partitions
 - **Remote data sources**: HTTP/S3/Azure Blob providers
 - **Schema caching**: Skip re-inference on repeated queries
-- **Checkpointing**: Resume failed ETL runs from the last completed shard
 - **Data validation**: CHECK constraints / VALIDATE clause for data quality gates
 
 ## License

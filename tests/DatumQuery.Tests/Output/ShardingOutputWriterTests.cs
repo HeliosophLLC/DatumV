@@ -2,6 +2,7 @@ namespace DatumQuery.Tests.Output;
 
 using DatumQuery.Model;
 using DatumQuery.Output;
+using DatumQuery.Output.Checkpoint;
 using DatumQuery.Output.Writers;
 
 public sealed class ShardingOutputWriterTests : IAsyncLifetime
@@ -218,5 +219,130 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             values[i] = columns[i].Value;
         }
         return new Row(names, values);
+    }
+
+    [Fact]
+    public async Task Checkpoint_MarkersCreatedAfterEachShard()
+    {
+        string basePath = Path.Combine(_tempDir, "chk.csv");
+        ShardStrategy strategy = new(ShardMode.SampleCount, 5);
+        CheckpointManager checkpointManager = new(basePath);
+        List<SourceFingerprint> fingerprints = [];
+
+        await using ShardingOutputWriter writer = new(
+            path => new CsvOutputWriter(path),
+            strategy,
+            basePath,
+            checkpointManager,
+            fingerprints);
+
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+        await writer.InitializeAsync(schema);
+
+        for (int i = 0; i < 12; i++)
+        {
+            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+        }
+
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        // 12 rows at threshold 5: shards 0 (5 rows), 1 (5 rows), 2 (2 rows) = 3 shards
+        Assert.Equal(3, summary.FilesCreated.Count);
+
+        // Each shard should have a checkpoint marker
+        foreach (string file in summary.FilesCreated)
+        {
+            Assert.True(File.Exists($"{file}.checkpoint"), $"Checkpoint marker should exist for {file}");
+        }
+    }
+
+    [Fact]
+    public async Task Checkpoint_ResumeFromShard_WritesCorrectFiles()
+    {
+        string basePath = Path.Combine(_tempDir, "resume.csv");
+        ShardStrategy strategy = new(ShardMode.SampleCount, 5);
+        CheckpointManager checkpointManager = new(basePath);
+        List<SourceFingerprint> fingerprints = [];
+
+        // Write first 2 shards (10 rows)
+        {
+            await using ShardingOutputWriter writer = new(
+                path => new CsvOutputWriter(path),
+                strategy,
+                basePath,
+                checkpointManager,
+                fingerprints);
+
+            Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+            await writer.InitializeAsync(schema);
+
+            for (int i = 0; i < 10; i++)
+            {
+                await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+            }
+
+            await writer.FinalizeAsync();
+        }
+
+        // Resume from shard 2 (startShardIndex = 2)
+        {
+            await using ShardingOutputWriter writer = new(
+                path => new CsvOutputWriter(path),
+                strategy,
+                basePath,
+                checkpointManager,
+                fingerprints,
+                startShardIndex: 2);
+
+            Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+            await writer.InitializeAsync(schema);
+
+            for (int i = 10; i < 15; i++)
+            {
+                await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+            }
+
+            await writer.FinalizeAsync();
+        }
+
+        // Verify shard 2 exists with correct naming
+        string shard2Path = Path.Combine(_tempDir, "resume_shard_00002.csv");
+        Assert.True(File.Exists(shard2Path));
+        Assert.True(File.Exists($"{shard2Path}.checkpoint"));
+    }
+
+    [Fact]
+    public async Task Checkpoint_Cleanup_RemovesAllMarkerFiles()
+    {
+        string basePath = Path.Combine(_tempDir, "clean.csv");
+        ShardStrategy strategy = new(ShardMode.SampleCount, 5);
+        CheckpointManager checkpointManager = new(basePath);
+        List<SourceFingerprint> fingerprints = [];
+
+        await using ShardingOutputWriter writer = new(
+            path => new CsvOutputWriter(path),
+            strategy,
+            basePath,
+            checkpointManager,
+            fingerprints);
+
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+        await writer.InitializeAsync(schema);
+
+        for (int i = 0; i < 12; i++)
+        {
+            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+        }
+
+        await writer.FinalizeAsync();
+
+        // Verify checkpoint files exist
+        Assert.NotEmpty(Directory.GetFiles(_tempDir, "*.checkpoint"));
+
+        // Cleanup
+        writer.CleanupCheckpoints();
+
+        // All checkpoint files should be gone
+        Assert.Empty(Directory.GetFiles(_tempDir, "*.checkpoint"));
     }
 }

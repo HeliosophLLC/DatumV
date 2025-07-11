@@ -26,6 +26,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the output file path for the manifest command.</summary>
     public string? OutputPath { get; set; }
 
+    /// <summary>Gets or sets whether to enable checkpoint-based resume for sharded writes.</summary>
+    public bool Checkpoint { get; set; }
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -35,7 +38,7 @@ internal sealed class CliOptions
 
         if (args.Length < 2)
         {
-            throw new ArgumentException("Usage: dq <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>]");
+            throw new ArgumentException("Usage: dq <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint]");
         }
 
         options.Command = args[0].ToLowerInvariant();
@@ -75,6 +78,10 @@ internal sealed class CliOptions
 
                 case "--analyze":
                     options.Analyze = true;
+                    break;
+
+                case "--checkpoint":
+                    options.Checkpoint = true;
                     break;
 
                 case "--output":

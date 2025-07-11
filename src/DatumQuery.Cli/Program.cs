@@ -7,6 +7,7 @@ using DatumQuery.Execution;
 using DatumQuery.Functions;
 using DatumQuery.Model;
 using DatumQuery.Output;
+using DatumQuery.Output.Checkpoint;
 using DatumQuery.Manifest;
 using DatumQuery.Output.Writers;
 using DatumQuery.Parsing;
@@ -24,7 +25,7 @@ try
 
     return options.Command switch
     {
-        "query" => await RunQueryAsync(statement, catalog),
+        "query" => await RunQueryAsync(statement, catalog, options),
         "explore" => await RunExploreAsync(statement, catalog, options.Limit),
         "stats" => await RunStatsAsync(statement, catalog),
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
@@ -141,7 +142,7 @@ static TableDescriptor ParseSourceDefinition(string source)
     return new TableDescriptor(provider, name, filePath, options);
 }
 
-static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog catalog)
+static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog catalog, CliOptions options)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
@@ -154,9 +155,58 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
 
     ProgressReporter progress = new();
 
+    // Checkpoint setup
+    bool checkpointEnabled = options.Checkpoint && statement.Into?.Shard is not null;
+    CheckpointManager? checkpointManager = null;
+    IReadOnlyList<SourceFingerprint>? sourceFingerprints = null;
+    int startShardIndex = 0;
+
+    if (options.Checkpoint && statement.Into?.Shard is null)
+    {
+        Console.Error.WriteLine("Warning: --checkpoint requires SHARD ON; checkpointing disabled.");
+    }
+
+    if (checkpointEnabled && statement.Into is not null)
+    {
+        checkpointManager = new CheckpointManager(statement.Into.Path);
+        sourceFingerprints = SourceFingerprintCollector.Collect(catalog);
+
+        IReadOnlyList<CheckpointMarker> existingCheckpoints =
+            await checkpointManager.ScanExistingCheckpointsAsync();
+
+        if (existingCheckpoints.Count > 0)
+        {
+            // Validate source fingerprints against the first checkpoint's fingerprints
+            string? mismatch = SourceFingerprintCollector.Validate(
+                existingCheckpoints[0].SourceFingerprints, sourceFingerprints);
+
+            if (mismatch is not null)
+            {
+                Console.Error.WriteLine($"Error: Source data has changed since last run. {mismatch}");
+                Console.Error.WriteLine("Delete existing checkpoint files to start fresh.");
+                return 1;
+            }
+
+            ResumeState resumeState = CheckpointManager.ComputeResumeState(existingCheckpoints);
+            startShardIndex = resumeState.NextShardIndex;
+
+            // Delete orphaned shard file at the resume point (partial write from crash)
+            checkpointManager.DeleteOrphanedShard(resumeState.NextShardIndex);
+
+            if (resumeState.RowsToSkip > 0)
+            {
+                Console.WriteLine(
+                    $"Resuming from shard {resumeState.NextShardIndex} (skipping {resumeState.RowsToSkip:N0} rows)");
+                plan = new SkipOperator(plan, resumeState.RowsToSkip);
+            }
+        }
+    }
+
     if (statement.Into is not null)
     {
-        IOutputWriter outputWriter = CreateOutputWriter(statement.Into);
+        IOutputWriter outputWriter = checkpointEnabled
+            ? CreateCheckpointedOutputWriter(statement.Into, checkpointManager!, sourceFingerprints!, startShardIndex)
+            : CreateOutputWriter(statement.Into);
         await using IOutputWriter writer = outputWriter;
 
         // Infer schema from first row, write all rows
@@ -181,6 +231,13 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
         }
 
         OutputSummary summary = await writer.FinalizeAsync();
+
+        // Clean up checkpoint files after successful completion
+        if (checkpointEnabled && writer is ShardingOutputWriter shardingWriter)
+        {
+            shardingWriter.CleanupCheckpoints();
+        }
+
         progress.WriteSummary();
         Console.WriteLine($"Output: {summary.FilesCreated.Count} file(s), {summary.BytesWritten:N0} bytes");
 
@@ -404,6 +461,30 @@ static IOutputWriter CreateOutputWriter(IntoClause into)
     }
 
     return CreateBaseWriter(into.Format, into.Path);
+}
+
+static IOutputWriter CreateCheckpointedOutputWriter(
+    IntoClause into,
+    CheckpointManager checkpointManager,
+    IReadOnlyList<SourceFingerprint> sourceFingerprints,
+    int startShardIndex)
+{
+    DatumQuery.Output.ShardMode mode = into.Shard!.Mode switch
+    {
+        DatumQuery.Parsing.Ast.ShardMode.SampleCount => DatumQuery.Output.ShardMode.SampleCount,
+        DatumQuery.Parsing.Ast.ShardMode.ByteSize => DatumQuery.Output.ShardMode.ByteSize,
+        _ => throw new ArgumentException($"Unknown shard mode: {into.Shard.Mode}")
+    };
+
+    ShardStrategy strategy = new(mode, into.Shard.Value);
+
+    return new ShardingOutputWriter(
+        path => CreateBaseWriter(into.Format, path),
+        strategy,
+        into.Path,
+        checkpointManager,
+        sourceFingerprints,
+        startShardIndex);
 }
 
 static IOutputWriter CreateBaseWriter(OutputFormat format, string path)
