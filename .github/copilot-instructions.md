@@ -12,6 +12,7 @@
 
 - **XML documentation** on all public and internal classes, methods, and properties. No exceptions.
 - **Comments explain *why*, never *what*.** If a comment restates what the code already says, delete it. Comments exist to capture intent, constraints, trade-offs, or non-obvious reasoning.
+- Check the markdown files (README.md, /docs/*.md) for any relevant documentation updates when making changes to features, benchmarks, or design. When in doubt if the docs need updating, always ask.
 
 ## Design
 
