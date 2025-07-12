@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Interactions;
+namespace DatumIngest.Statistics.Interactions;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Computes Pearson correlation between the null masks of two columns using an online

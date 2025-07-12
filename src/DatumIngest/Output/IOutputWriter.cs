@@ -1,6 +1,6 @@
-namespace DatumQuery.Output;
+namespace DatumIngest.Output;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Interface for writing query results to an output format.

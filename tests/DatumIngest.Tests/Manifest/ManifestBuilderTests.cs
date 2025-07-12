@@ -1,9 +1,9 @@
-namespace DatumQuery.Tests.Manifest;
+namespace DatumIngest.Tests.Manifest;
 
-using DatumQuery.Manifest;
-using DatumQuery.Model;
-using DatumQuery.Statistics;
-using DatumQuery.Statistics.Accumulators;
+using DatumIngest.Manifest;
+using DatumIngest.Model;
+using DatumIngest.Statistics;
+using DatumIngest.Statistics.Accumulators;
 
 public sealed class ManifestBuilderTests
 {

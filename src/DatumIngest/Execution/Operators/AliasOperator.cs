@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Prefixes all column names in the incoming rows with a table alias,

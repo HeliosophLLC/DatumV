@@ -1,7 +1,7 @@
-using DatumQuery.Execution;
-using DatumQuery.Model;
+using DatumIngest.Execution;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Execution;
+namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="CompositeKey"/>, verifying value-equality semantics

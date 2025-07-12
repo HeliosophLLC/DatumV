@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Catalog;
+namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Optional extension of <see cref="ITableProvider"/> for providers that support

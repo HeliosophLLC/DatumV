@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>
 /// Abstract base class for unary element-wise math functions that operate on

@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Returns the length of a string or collection.

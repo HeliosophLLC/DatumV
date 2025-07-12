@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Interactions;
+namespace DatumIngest.Statistics.Interactions;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Computes mutual information I(X;Y) = Σ P(x,y) log₂(P(x,y) / (P(x)P(y)))

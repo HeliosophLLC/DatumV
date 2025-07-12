@@ -1,4 +1,4 @@
-namespace DatumQuery.Parsing.Ast;
+namespace DatumIngest.Parsing.Ast;
 
 /// <summary>
 /// A complete SELECT statement, the top-level AST node for the query language.

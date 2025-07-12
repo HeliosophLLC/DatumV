@@ -1,7 +1,7 @@
 using System.Text.Json;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Extracts a scalar value from a JSON string at a given dot-separated path.

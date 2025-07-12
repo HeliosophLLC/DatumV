@@ -1,8 +1,8 @@
 using System.Collections;
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Join operator supporting INNER, LEFT, RIGHT, FULL OUTER, and CROSS joins.

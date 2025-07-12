@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Normalizes a value to the 0-1 range.

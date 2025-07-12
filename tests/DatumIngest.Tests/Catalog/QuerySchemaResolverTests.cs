@@ -1,10 +1,10 @@
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Tests.Catalog;
+namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="QuerySchemaResolver"/> covering FROM, JOIN,

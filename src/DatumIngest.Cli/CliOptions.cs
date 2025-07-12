@@ -1,4 +1,4 @@
-namespace DatumQuery.Cli;
+namespace DatumIngest.Cli;
 
 /// <summary>
 /// Parsed CLI arguments.

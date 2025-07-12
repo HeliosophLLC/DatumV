@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Catalog;
+namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Registry of named tables and their associated providers.

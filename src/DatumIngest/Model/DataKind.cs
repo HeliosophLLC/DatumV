@@ -1,4 +1,4 @@
-namespace DatumQuery.Model;
+namespace DatumIngest.Model;
 
 /// <summary>
 /// Discriminator for the type of value stored in a <see cref="DataValue"/>.

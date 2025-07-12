@@ -1,7 +1,7 @@
-using DatumQuery.Functions.Scalar;
-using DatumQuery.Model;
+using DatumIngest.Functions.Scalar;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Functions;
+namespace DatumIngest.Tests.Functions;
 
 /// <summary>
 /// Tests for <see cref="ToEpochFunction"/>.

@@ -1,7 +1,7 @@
-using DatumQuery.Functions.TableValued;
-using DatumQuery.Model;
+using DatumIngest.Functions.TableValued;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Functions;
+namespace DatumIngest.Tests.Functions;
 
 /// <summary>
 /// Unit tests for the <see cref="RangeFunction"/> table-valued function.

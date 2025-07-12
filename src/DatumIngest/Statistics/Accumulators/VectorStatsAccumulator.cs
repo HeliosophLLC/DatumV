@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Accumulators;
+namespace DatumIngest.Statistics.Accumulators;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Accumulates aggregate element-wise statistics for vector, matrix, and tensor columns.

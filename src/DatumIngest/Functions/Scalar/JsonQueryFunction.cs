@@ -1,7 +1,7 @@
 using System.Text.Json;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Extracts a JSON fragment (array or object) from a JSON string at a given dot-separated path.

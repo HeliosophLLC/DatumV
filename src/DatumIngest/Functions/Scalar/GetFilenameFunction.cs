@@ -1,7 +1,7 @@
 using System.IO;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Returns the file name and extension from a path string.

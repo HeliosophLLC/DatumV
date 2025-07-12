@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>
 /// Returns the first non-null argument: coalesce(a, b, ...).

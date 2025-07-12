@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Accumulators;
+namespace DatumIngest.Statistics.Accumulators;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Accumulates size statistics for binary (UInt8Array) columns using Welford's algorithm.

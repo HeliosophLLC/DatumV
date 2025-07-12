@@ -1,4 +1,4 @@
-namespace DatumQuery.Manifest;
+namespace DatumIngest.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

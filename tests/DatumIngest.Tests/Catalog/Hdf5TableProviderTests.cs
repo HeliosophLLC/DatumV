@@ -1,9 +1,9 @@
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Model;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Model;
 using PureHDF;
 
-namespace DatumQuery.Tests.Catalog;
+namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="Hdf5TableProvider"/> using HDF5 fixture files

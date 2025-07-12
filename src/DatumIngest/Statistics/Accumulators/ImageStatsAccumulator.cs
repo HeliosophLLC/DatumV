@@ -1,7 +1,7 @@
-namespace DatumQuery.Statistics.Accumulators;
+namespace DatumIngest.Statistics.Accumulators;
 
-using DatumQuery.Functions.Image;
-using DatumQuery.Model;
+using DatumIngest.Functions.Image;
+using DatumIngest.Model;
 
 /// <summary>
 /// Accumulates image dimension and channel statistics by parsing JPEG, PNG, and WebP headers.

@@ -1,8 +1,8 @@
 using System.Text;
-using DatumQuery.Execution.Operators;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Execution.Operators;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Produces a static <see cref="ExplainPlanNode"/> tree from an operator tree,

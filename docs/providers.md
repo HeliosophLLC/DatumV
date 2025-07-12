@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
 
-DatumQuery reads from six file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file.
+DatumIngest reads from six file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file.
 
 ## CSV
 

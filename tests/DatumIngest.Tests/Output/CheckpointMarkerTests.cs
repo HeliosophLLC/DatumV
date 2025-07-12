@@ -1,6 +1,6 @@
-namespace DatumQuery.Tests.Output;
+namespace DatumIngest.Tests.Output;
 
-using DatumQuery.Output.Checkpoint;
+using DatumIngest.Output.Checkpoint;
 
 /// <summary>
 /// Tests for <see cref="CheckpointMarker"/>, <see cref="SourceFingerprint"/>,

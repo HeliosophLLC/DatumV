@@ -1,16 +1,16 @@
 using BenchmarkDotNet.Attributes;
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Execution;
-using DatumQuery.Functions;
-using DatumQuery.Functions.Scalar;
-using DatumQuery.Model;
-using DatumQuery.Parsing;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
+using DatumIngest.Functions.Scalar;
+using DatumIngest.Model;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 
-using ExecutionContext = DatumQuery.Execution.ExecutionContext;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
-namespace DatumQuery.Benchmarks;
+namespace DatumIngest.Benchmarks;
 
 /// <summary>
 /// Benchmarks for full query execution including scan, filter, project, and join.

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -8,11 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="DatumQuery.Tests" />
+    <InternalsVisibleTo Include="DatumIngest.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DatumQuery\DatumQuery.csproj" />
+    <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
   </ItemGroup>
 
 </Project>

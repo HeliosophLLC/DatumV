@@ -1,6 +1,6 @@
-namespace DatumQuery.Functions.Image;
+namespace DatumIngest.Functions.Image;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Loads encoded image bytes (UInt8Array) as an Image value for use with image transform

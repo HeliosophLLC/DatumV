@@ -1,7 +1,7 @@
-using DatumQuery.Catalog;
-using DatumQuery.Functions;
+using DatumIngest.Catalog;
+using DatumIngest.Functions;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Shared context passed through the operator tree during query execution.

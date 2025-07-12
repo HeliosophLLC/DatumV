@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Architecture](architecture.md)
 
-DatumQuery exposes a C# API for embedding query execution, schema resolution, manifest generation, and checkpointing into .NET applications.
+DatumIngest exposes a C# API for embedding query execution, schema resolution, manifest generation, and checkpointing into .NET applications.
 
 ## Manifest
 

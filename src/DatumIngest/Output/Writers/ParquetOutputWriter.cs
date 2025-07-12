@@ -1,6 +1,6 @@
-namespace DatumQuery.Output.Writers;
+namespace DatumIngest.Output.Writers;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;

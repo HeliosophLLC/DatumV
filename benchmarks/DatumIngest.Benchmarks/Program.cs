@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Running;
 
-namespace DatumQuery.Benchmarks;
+namespace DatumIngest.Benchmarks;
 
 /// <summary>
 /// Entry point for BenchmarkDotNet runner.

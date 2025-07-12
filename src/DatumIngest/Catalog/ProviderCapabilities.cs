@@ -1,4 +1,4 @@
-namespace DatumQuery.Catalog;
+namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Cost classification for reading a column, used by the query planner

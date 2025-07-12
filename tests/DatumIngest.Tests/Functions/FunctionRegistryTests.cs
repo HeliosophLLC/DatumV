@@ -1,9 +1,9 @@
-using DatumQuery.Functions;
-using DatumQuery.Functions.Scalar;
-using DatumQuery.Functions.TableValued;
-using DatumQuery.Model;
+using DatumIngest.Functions;
+using DatumIngest.Functions.Scalar;
+using DatumIngest.Functions.TableValued;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Functions;
+namespace DatumIngest.Tests.Functions;
 
 public class FunctionRegistryTests
 {

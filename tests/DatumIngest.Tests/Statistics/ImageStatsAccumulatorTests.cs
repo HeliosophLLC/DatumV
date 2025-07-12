@@ -1,9 +1,9 @@
-namespace DatumQuery.Tests.Statistics;
+namespace DatumIngest.Tests.Statistics;
 
-using DatumQuery.Functions.Image;
-using DatumQuery.Model;
-using DatumQuery.Statistics;
-using DatumQuery.Statistics.Accumulators;
+using DatumIngest.Functions.Image;
+using DatumIngest.Model;
+using DatumIngest.Statistics;
+using DatumIngest.Statistics.Accumulators;
 
 public sealed class ImageStatsAccumulatorTests
 {

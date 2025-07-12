@@ -1,7 +1,7 @@
-namespace DatumQuery.Output;
+namespace DatumIngest.Output;
 
-using DatumQuery.Model;
-using DatumQuery.Output.Checkpoint;
+using DatumIngest.Model;
+using DatumIngest.Output.Checkpoint;
 
 /// <summary>
 /// Wraps an output writer factory to automatically create new shards

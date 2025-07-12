@@ -1,4 +1,4 @@
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>Element-wise square root: sqrt(x) = √x.</summary>
 public sealed class SqrtFunction : UnaryMathFunction

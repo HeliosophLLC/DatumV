@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>
 /// Computes the cosine similarity between two vectors: cosine_similarity(a, b).

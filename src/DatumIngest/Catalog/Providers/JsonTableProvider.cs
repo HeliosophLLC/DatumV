@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Catalog.Providers;
+namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads JSON files containing arrays of objects. Supports root-level arrays

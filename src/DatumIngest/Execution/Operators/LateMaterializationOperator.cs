@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
-using DatumQuery.Catalog;
-using DatumQuery.Model;
+using DatumIngest.Catalog;
+using DatumIngest.Model;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Defers fetching expensive columns (e.g. <c>file_bytes</c> from ZIP) until after

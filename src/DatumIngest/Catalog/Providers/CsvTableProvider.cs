@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Catalog.Providers;
+namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads CSV files conforming to RFC 4180. Supports configurable delimiter,

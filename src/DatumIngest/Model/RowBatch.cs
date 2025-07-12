@@ -1,4 +1,4 @@
-namespace DatumQuery.Model;
+namespace DatumIngest.Model;
 
 /// <summary>
 /// A columnar batch of rows sharing a common <see cref="Model.Schema"/>.

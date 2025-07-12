@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Accumulators;
+namespace DatumIngest.Statistics.Accumulators;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Computes Shannon entropy H = -Σ p_i log₂(p_i) from the value distribution.

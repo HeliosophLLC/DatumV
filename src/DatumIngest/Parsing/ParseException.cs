@@ -1,6 +1,6 @@
 using Superpower.Model;
 
-namespace DatumQuery.Parsing;
+namespace DatumIngest.Parsing;
 
 /// <summary>
 /// Thrown when the SQL parser encounters input it cannot interpret.

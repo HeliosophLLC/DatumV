@@ -1,7 +1,7 @@
-using DatumQuery.Catalog;
-using DatumQuery.Model;
+using DatumIngest.Catalog;
+using DatumIngest.Model;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Reads rows from a table provider, applying projection pushdown

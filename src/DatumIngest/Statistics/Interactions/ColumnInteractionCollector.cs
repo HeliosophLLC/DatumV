@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Interactions;
+namespace DatumIngest.Statistics.Interactions;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Manages pairwise interaction accumulators for all eligible column pairs in a result set.

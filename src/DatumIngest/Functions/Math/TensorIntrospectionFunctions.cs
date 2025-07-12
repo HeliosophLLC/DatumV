@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>
 /// Returns the rank (number of dimensions) of a vector, matrix, or tensor.

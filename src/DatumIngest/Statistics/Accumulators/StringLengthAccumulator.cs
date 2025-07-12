@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Accumulators;
+namespace DatumIngest.Statistics.Accumulators;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Accumulates min and max string length for string-typed columns.

@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Extracts a named component from a Date or DateTime value as a Scalar.

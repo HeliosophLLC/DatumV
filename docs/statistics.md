@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
 
-DatumQuery collects per-column statistics in a single pass and generates structured JSON manifests describing dataset features for ML pipeline integration.
+DatumIngest collects per-column statistics in a single pass and generates structured JSON manifests describing dataset features for ML pipeline integration.
 
 ## Statistics
 

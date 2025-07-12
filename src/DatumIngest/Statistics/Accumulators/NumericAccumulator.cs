@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Accumulators;
+namespace DatumIngest.Statistics.Accumulators;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Accumulates min, max, mean, and variance for numeric columns using Welford's online algorithm.

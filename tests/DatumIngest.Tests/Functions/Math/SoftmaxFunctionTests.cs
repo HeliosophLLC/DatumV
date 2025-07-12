@@ -1,7 +1,7 @@
-using DatumQuery.Functions.Math;
-using DatumQuery.Model;
+using DatumIngest.Functions.Math;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Functions.Math;
+namespace DatumIngest.Tests.Functions.Math;
 
 public class SoftmaxFunctionTests
 {

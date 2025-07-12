@@ -1,9 +1,9 @@
-using DatumQuery.Execution;
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Tests.Execution;
+namespace DatumIngest.Tests.Execution;
 
 public class ExpressionEvaluatorTests
 {

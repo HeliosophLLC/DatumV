@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Takes a limited number of rows from a child operator, optionally

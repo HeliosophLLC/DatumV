@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.TableValued;
+namespace DatumIngest.Functions.TableValued;
 
 /// <summary>
 /// Generates a sequence of rows with a single <c>Value</c> column,

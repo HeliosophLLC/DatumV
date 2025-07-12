@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Catalog;
+namespace DatumIngest.Catalog;
 
 /// <summary>
 /// Interface for data source providers that stream rows from a backing store

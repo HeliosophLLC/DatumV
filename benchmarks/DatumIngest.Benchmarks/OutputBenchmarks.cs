@@ -1,9 +1,9 @@
 using BenchmarkDotNet.Attributes;
-using DatumQuery.Model;
-using DatumQuery.Output;
-using DatumQuery.Output.Writers;
+using DatumIngest.Model;
+using DatumIngest.Output;
+using DatumIngest.Output.Writers;
 
-namespace DatumQuery.Benchmarks;
+namespace DatumIngest.Benchmarks;
 
 /// <summary>
 /// Benchmarks for output writer throughput.

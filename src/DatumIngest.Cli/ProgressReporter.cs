@@ -1,4 +1,4 @@
-namespace DatumQuery.Cli;
+namespace DatumIngest.Cli;
 
 using System.Diagnostics;
 

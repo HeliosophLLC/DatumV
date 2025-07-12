@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Programmatic API](api.md)
 
-DatumQuery executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
+DatumIngest executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
 
 ## Streaming pipeline
 
@@ -44,9 +44,9 @@ Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:
 ## Project structure
 
 ```
-DatumQuery/
+DatumIngest/
   src/
-    DatumQuery/             # Core library
+    DatumIngest/             # Core library
       Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo
       Parsing/                    # SQL tokenizer and parser (Superpower)
       Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet)
@@ -54,9 +54,9 @@ DatumQuery/
       Functions/                  # Scalar and table-valued functions
       Statistics/                 # Column statistics with pluggable accumulators
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
-    DatumQuery.Cli/         # CLI tool (query, explore, stats, schema commands)
+    DatumIngest.Cli/         # CLI tool (query, explore, stats, schema commands)
   tests/
-    DatumQuery.Tests/       # 1,600+ unit tests
+    DatumIngest.Tests/       # 1,600+ unit tests
   benchmarks/
-    DatumQuery.Benchmarks/  # BenchmarkDotNet performance tests
+    DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
 ```

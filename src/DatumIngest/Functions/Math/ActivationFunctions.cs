@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>Element-wise sigmoid activation: σ(x) = 1 / (1 + e^(-x)).</summary>
 public sealed class SigmoidFunction : UnaryMathFunction

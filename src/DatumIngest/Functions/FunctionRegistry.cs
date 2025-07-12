@@ -1,4 +1,4 @@
-namespace DatumQuery.Functions;
+namespace DatumIngest.Functions;
 
 /// <summary>
 /// Registry for looking up scalar and table-valued functions by name.

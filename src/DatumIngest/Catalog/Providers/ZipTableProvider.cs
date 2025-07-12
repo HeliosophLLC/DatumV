@@ -1,9 +1,9 @@
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Catalog.Providers;
+namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads ZIP archives, yielding one row per entry with <c>file_name</c> (eager)

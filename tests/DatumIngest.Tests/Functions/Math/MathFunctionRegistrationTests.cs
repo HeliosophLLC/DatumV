@@ -1,6 +1,6 @@
-using DatumQuery.Functions;
+using DatumIngest.Functions;
 
-namespace DatumQuery.Tests.Functions.Math;
+namespace DatumIngest.Tests.Functions.Math;
 
 /// <summary>
 /// Verifies that all 88 math functions are properly registered in the default FunctionRegistry.

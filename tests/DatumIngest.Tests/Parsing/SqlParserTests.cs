@@ -1,7 +1,7 @@
-using DatumQuery.Parsing;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Tests.Parsing;
+namespace DatumIngest.Tests.Parsing;
 
 public class SqlParserTests
 {

@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>Element-wise ceiling: ceil(x) rounds up to nearest integer.</summary>
 public sealed class CeilFunction : UnaryMathFunction

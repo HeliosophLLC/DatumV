@@ -1,6 +1,6 @@
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Recursively walks an expression tree and collects all

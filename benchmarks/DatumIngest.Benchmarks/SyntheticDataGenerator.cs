@@ -1,7 +1,7 @@
 using System.Globalization;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Benchmarks;
+namespace DatumIngest.Benchmarks;
 
 /// <summary>
 /// Generates synthetic datasets of configurable size for benchmarking.

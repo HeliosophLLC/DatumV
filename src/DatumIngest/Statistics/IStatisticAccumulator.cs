@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics;
+namespace DatumIngest.Statistics;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Interface for pluggable statistic accumulators that process data values incrementally.

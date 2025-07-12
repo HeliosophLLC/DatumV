@@ -1,9 +1,9 @@
 using System.IO.Compression;
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Model;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Catalog;
+namespace DatumIngest.Tests.Catalog;
 
 public sealed class ZipTableProviderTests : IDisposable
 {

@@ -1,4 +1,4 @@
-namespace DatumQuery.Model;
+namespace DatumIngest.Model;
 
 /// <summary>
 /// Implements the implicit numeric widening rules for the query engine type system.

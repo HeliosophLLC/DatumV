@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Represents one node in an EXPLAIN plan tree, carrying both static

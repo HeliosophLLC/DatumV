@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
@@ -17,8 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DatumQuery\DatumQuery.csproj" />
-    <ProjectReference Include="..\..\src\DatumQuery.Cli\DatumQuery.Cli.csproj" />
+    <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\..\src\DatumIngest.Cli\DatumIngest.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,6 @@
-namespace DatumQuery.Statistics.Interactions;
+namespace DatumIngest.Statistics.Interactions;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Computes Spearman rank correlation between two numeric columns.

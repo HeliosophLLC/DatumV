@@ -1,8 +1,8 @@
-namespace DatumQuery.Tests.Statistics;
+namespace DatumIngest.Tests.Statistics;
 
-using DatumQuery.Model;
-using DatumQuery.Statistics;
-using DatumQuery.Statistics.Accumulators;
+using DatumIngest.Model;
+using DatumIngest.Statistics;
+using DatumIngest.Statistics.Accumulators;
 
 public sealed class CardinalityAccumulatorTests
 {

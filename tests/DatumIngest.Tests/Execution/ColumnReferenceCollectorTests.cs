@@ -1,7 +1,7 @@
-using DatumQuery.Execution;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Execution;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Tests.Execution;
+namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="ColumnReferenceCollector"/>, verifying that

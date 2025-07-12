@@ -1,7 +1,7 @@
 using System.Text.Json;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Scalar;
+namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Returns the number of elements in a JSON array.

@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using DatumQuery.Model;
+using DatumIngest.Model;
 using PureHDF;
 using PureHDF.VOL.Native;
 
-namespace DatumQuery.Catalog.Providers;
+namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads HDF5 files via PureHDF (pure managed, cross-platform).

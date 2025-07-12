@@ -1,8 +1,8 @@
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Infers the output <see cref="DataKind"/> of an AST <see cref="Expression"/>

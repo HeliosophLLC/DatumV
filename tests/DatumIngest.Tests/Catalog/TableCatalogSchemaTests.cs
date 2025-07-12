@@ -1,8 +1,8 @@
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Model;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Catalog;
+namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
 /// Tests for the <see cref="TableCatalog.GetSchemaAsync"/> convenience method.

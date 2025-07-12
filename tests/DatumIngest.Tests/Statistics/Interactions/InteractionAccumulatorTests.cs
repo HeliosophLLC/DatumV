@@ -1,7 +1,7 @@
-namespace DatumQuery.Tests.Statistics.Interactions;
+namespace DatumIngest.Tests.Statistics.Interactions;
 
-using DatumQuery.Model;
-using DatumQuery.Statistics.Interactions;
+using DatumIngest.Model;
+using DatumIngest.Statistics.Interactions;
 
 public sealed class PearsonAccumulatorTests
 {

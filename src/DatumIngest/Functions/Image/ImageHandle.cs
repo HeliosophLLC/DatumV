@@ -1,4 +1,4 @@
-namespace DatumQuery.Functions.Image;
+namespace DatumIngest.Functions.Image;
 
 using SkiaSharp;
 

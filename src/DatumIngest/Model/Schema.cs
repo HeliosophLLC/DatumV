@@ -1,4 +1,4 @@
-namespace DatumQuery.Model;
+namespace DatumIngest.Model;
 
 /// <summary>
 /// An immutable ordered collection of <see cref="ColumnInfo"/> entries that describes

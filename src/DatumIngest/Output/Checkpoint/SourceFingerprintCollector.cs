@@ -1,6 +1,6 @@
-using DatumQuery.Catalog;
+using DatumIngest.Catalog;
 
-namespace DatumQuery.Output.Checkpoint;
+namespace DatumIngest.Output.Checkpoint;
 
 /// <summary>
 /// Collects file-level identity snapshots from registered data sources,

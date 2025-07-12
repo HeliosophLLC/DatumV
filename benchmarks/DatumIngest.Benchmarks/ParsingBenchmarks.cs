@@ -1,9 +1,9 @@
 using BenchmarkDotNet.Attributes;
-using DatumQuery.Parsing;
-using DatumQuery.Parsing.Tokens;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Tokens;
 using Superpower;
 
-namespace DatumQuery.Benchmarks;
+namespace DatumIngest.Benchmarks;
 
 /// <summary>
 /// Benchmarks for SQL tokenization and parsing at various complexity levels.

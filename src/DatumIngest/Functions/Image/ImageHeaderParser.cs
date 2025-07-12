@@ -1,4 +1,4 @@
-namespace DatumQuery.Functions.Image;
+namespace DatumIngest.Functions.Image;
 
 /// <summary>
 /// Parses JPEG, PNG, and WebP image headers to extract dimensions and channel count

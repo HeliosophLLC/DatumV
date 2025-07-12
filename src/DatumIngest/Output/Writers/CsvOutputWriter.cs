@@ -1,6 +1,6 @@
-namespace DatumQuery.Output.Writers;
+namespace DatumIngest.Output.Writers;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Writes query results to CSV files in RFC 4180 format.

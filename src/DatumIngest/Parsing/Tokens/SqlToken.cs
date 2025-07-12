@@ -1,4 +1,4 @@
-namespace DatumQuery.Parsing.Tokens;
+namespace DatumIngest.Parsing.Tokens;
 
 /// <summary>
 /// Every distinct token type recognized by the SQL tokenizer.

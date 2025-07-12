@@ -1,4 +1,4 @@
-namespace DatumQuery.Manifest;
+namespace DatumIngest.Manifest;
 
 /// <summary>
 /// Top-level manifest describing a query result set, containing one <see cref="FeatureManifest"/>

@@ -1,10 +1,10 @@
-using DatumQuery.Catalog;
-using DatumQuery.Execution.Operators;
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Catalog;
+using DatumIngest.Execution.Operators;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Transforms a parsed <see cref="SelectStatement"/> AST into an executable

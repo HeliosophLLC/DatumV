@@ -1,4 +1,4 @@
-namespace DatumQuery.Statistics;
+namespace DatumIngest.Statistics;
 
 /// <summary>
 /// Represents the result of a statistic accumulation with a name and typed value.

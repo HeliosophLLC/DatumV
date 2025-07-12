@@ -1,6 +1,6 @@
-namespace DatumQuery.Tests.Functions.Image;
+namespace DatumIngest.Tests.Functions.Image;
 
-using DatumQuery.Functions.Image;
+using DatumIngest.Functions.Image;
 
 using SkiaSharp;
 

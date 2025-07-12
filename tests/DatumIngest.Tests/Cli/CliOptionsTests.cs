@@ -1,6 +1,6 @@
-namespace DatumQuery.Tests.Cli;
+namespace DatumIngest.Tests.Cli;
 
-using DatumQuery.Cli;
+using DatumIngest.Cli;
 
 public sealed class CliOptionsTests
 {

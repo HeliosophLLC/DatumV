@@ -1,13 +1,13 @@
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Execution;
-using DatumQuery.Execution.Operators;
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
-using ExecutionContext = DatumQuery.Execution.ExecutionContext;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Execution;
+using DatumIngest.Execution.Operators;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
-namespace DatumQuery.Tests.Execution;
+namespace DatumIngest.Tests.Execution;
 
 public class ExplainTests
 {

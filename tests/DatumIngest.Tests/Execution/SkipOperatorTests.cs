@@ -1,10 +1,10 @@
-using DatumQuery.Catalog;
-using DatumQuery.Execution;
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using ExecutionContext = DatumQuery.Execution.ExecutionContext;
+using DatumIngest.Catalog;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
-namespace DatumQuery.Tests.Execution;
+namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Tests for <see cref="SkipOperator"/>.

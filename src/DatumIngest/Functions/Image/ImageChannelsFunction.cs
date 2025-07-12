@@ -1,6 +1,6 @@
-namespace DatumQuery.Functions.Image;
+namespace DatumIngest.Functions.Image;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Returns the number of color channels in an image by parsing the image header.

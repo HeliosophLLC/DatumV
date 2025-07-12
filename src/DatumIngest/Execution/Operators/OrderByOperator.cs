@@ -1,7 +1,7 @@
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Sorts the output of a child operator by one or more expressions.

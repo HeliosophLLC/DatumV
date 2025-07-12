@@ -1,4 +1,4 @@
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>Element-wise absolute value: abs(x) = |x|.</summary>
 public sealed class AbsFunction : UnaryMathFunction

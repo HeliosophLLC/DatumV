@@ -1,9 +1,9 @@
-namespace DatumQuery.Manifest;
+namespace DatumIngest.Manifest;
 
-using DatumQuery.Model;
-using DatumQuery.Statistics;
-using DatumQuery.Statistics.Accumulators;
-using DatumQuery.Statistics.Interactions;
+using DatumIngest.Model;
+using DatumIngest.Statistics;
+using DatumIngest.Statistics.Accumulators;
+using DatumIngest.Statistics.Interactions;
 
 /// <summary>
 /// Builds a <see cref="QueryResultsManifest"/> from collected column statistics,

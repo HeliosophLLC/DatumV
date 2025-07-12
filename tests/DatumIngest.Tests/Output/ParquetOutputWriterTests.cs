@@ -1,8 +1,8 @@
-namespace DatumQuery.Tests.Output;
+namespace DatumIngest.Tests.Output;
 
-using DatumQuery.Model;
-using DatumQuery.Output;
-using DatumQuery.Output.Writers;
+using DatumIngest.Model;
+using DatumIngest.Output;
+using DatumIngest.Output.Writers;
 using Parquet;
 using Parquet.Schema;
 
@@ -122,8 +122,8 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         await writer.FinalizeAsync();
 
         // Read back with ParquetTableProvider
-        DatumQuery.Catalog.Providers.ParquetTableProvider provider = new();
-        DatumQuery.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
+        DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
+        DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
 
         List<Row> rows = new();
         await foreach (Row row in provider.OpenAsync(descriptor, null, CancellationToken.None))

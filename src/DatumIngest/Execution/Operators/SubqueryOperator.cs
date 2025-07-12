@@ -1,7 +1,7 @@
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Wraps an inner <see cref="SelectStatement"/>'s operator tree, applying

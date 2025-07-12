@@ -1,8 +1,8 @@
 using BenchmarkDotNet.Attributes;
-using DatumQuery.Model;
-using DatumQuery.Statistics;
+using DatumIngest.Model;
+using DatumIngest.Statistics;
 
-namespace DatumQuery.Benchmarks;
+namespace DatumIngest.Benchmarks;
 
 /// <summary>
 /// Benchmarks for statistics collection overhead.

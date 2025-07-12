@@ -1,8 +1,8 @@
-namespace DatumQuery.Tests.Output;
+namespace DatumIngest.Tests.Output;
 
-using DatumQuery.Model;
-using DatumQuery.Output;
-using DatumQuery.Output.Writers;
+using DatumIngest.Model;
+using DatumIngest.Output;
+using DatumIngest.Output.Writers;
 using PureHDF;
 using PureHDF.VOL.Native;
 

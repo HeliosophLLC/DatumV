@@ -1,10 +1,10 @@
 using System.Runtime.CompilerServices;
-using DatumQuery.Model;
+using DatumIngest.Model;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
 
-namespace DatumQuery.Catalog.Providers;
+namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads Apache Parquet files via the Parquet.Net low-level columnar API.

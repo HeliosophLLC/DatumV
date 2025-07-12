@@ -1,4 +1,4 @@
-namespace DatumQuery.Output.Checkpoint;
+namespace DatumIngest.Output.Checkpoint;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

@@ -1,6 +1,6 @@
-using DatumQuery.Cli;
+using DatumIngest.Cli;
 
-namespace DatumQuery.Tests.Cli;
+namespace DatumIngest.Tests.Cli;
 
 /// <summary>
 /// Tests for the <c>--checkpoint</c> CLI flag.

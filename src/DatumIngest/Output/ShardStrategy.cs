@@ -1,4 +1,4 @@
-namespace DatumQuery.Output;
+namespace DatumIngest.Output;
 
 /// <summary>
 /// Defines the sharding strategy for splitting output into multiple files.

@@ -1,7 +1,7 @@
-using DatumQuery.Model;
-using static DatumQuery.Functions.Math.ReductionFunctionHelpers;
+using DatumIngest.Model;
+using static DatumIngest.Functions.Math.ReductionFunctionHelpers;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>Reduces a Vector/Matrix/Tensor to a Scalar sum of all elements.</summary>
 public sealed class VecSumFunction : IScalarFunction

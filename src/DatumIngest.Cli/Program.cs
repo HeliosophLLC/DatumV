@@ -1,20 +1,20 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Cli;
-using DatumQuery.Execution;
-using DatumQuery.Functions;
-using DatumQuery.Model;
-using DatumQuery.Output;
-using DatumQuery.Output.Checkpoint;
-using DatumQuery.Manifest;
-using DatumQuery.Output.Writers;
-using DatumQuery.Parsing;
-using DatumQuery.Parsing.Ast;
-using DatumQuery.Statistics;
-using DatumQuery.Statistics.Interactions;
-using ExecutionContext = DatumQuery.Execution.ExecutionContext;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Cli;
+using DatumIngest.Execution;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+using DatumIngest.Output;
+using DatumIngest.Output.Checkpoint;
+using DatumIngest.Manifest;
+using DatumIngest.Output.Writers;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
+using DatumIngest.Statistics;
+using DatumIngest.Statistics.Interactions;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 try
 {
@@ -445,10 +445,10 @@ static IOutputWriter CreateOutputWriter(IntoClause into)
 {
     if (into.Shard is not null)
     {
-        DatumQuery.Output.ShardMode mode = into.Shard.Mode switch
+        DatumIngest.Output.ShardMode mode = into.Shard.Mode switch
         {
-            DatumQuery.Parsing.Ast.ShardMode.SampleCount => DatumQuery.Output.ShardMode.SampleCount,
-            DatumQuery.Parsing.Ast.ShardMode.ByteSize => DatumQuery.Output.ShardMode.ByteSize,
+            DatumIngest.Parsing.Ast.ShardMode.SampleCount => DatumIngest.Output.ShardMode.SampleCount,
+            DatumIngest.Parsing.Ast.ShardMode.ByteSize => DatumIngest.Output.ShardMode.ByteSize,
             _ => throw new ArgumentException($"Unknown shard mode: {into.Shard.Mode}")
         };
 
@@ -469,10 +469,10 @@ static IOutputWriter CreateCheckpointedOutputWriter(
     IReadOnlyList<SourceFingerprint> sourceFingerprints,
     int startShardIndex)
 {
-    DatumQuery.Output.ShardMode mode = into.Shard!.Mode switch
+    DatumIngest.Output.ShardMode mode = into.Shard!.Mode switch
     {
-        DatumQuery.Parsing.Ast.ShardMode.SampleCount => DatumQuery.Output.ShardMode.SampleCount,
-        DatumQuery.Parsing.Ast.ShardMode.ByteSize => DatumQuery.Output.ShardMode.ByteSize,
+        DatumIngest.Parsing.Ast.ShardMode.SampleCount => DatumIngest.Output.ShardMode.SampleCount,
+        DatumIngest.Parsing.Ast.ShardMode.ByteSize => DatumIngest.Output.ShardMode.ByteSize,
         _ => throw new ArgumentException($"Unknown shard mode: {into.Shard.Mode}")
     };
 

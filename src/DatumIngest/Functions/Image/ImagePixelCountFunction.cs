@@ -1,6 +1,6 @@
-namespace DatumQuery.Functions.Image;
+namespace DatumIngest.Functions.Image;
 
-using DatumQuery.Model;
+using DatumIngest.Model;
 
 /// <summary>
 /// Returns the total number of pixels (width × height) by parsing the image header.

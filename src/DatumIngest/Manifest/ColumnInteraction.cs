@@ -1,4 +1,4 @@
-namespace DatumQuery.Manifest;
+namespace DatumIngest.Manifest;
 
 /// <summary>
 /// Describes the statistical relationship between two columns in the result set.

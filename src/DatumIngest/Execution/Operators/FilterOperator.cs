@@ -1,7 +1,7 @@
-using DatumQuery.Model;
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution.Operators;
+namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Filters rows from a child operator by evaluating a WHERE expression.

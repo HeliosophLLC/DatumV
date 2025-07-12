@@ -1,4 +1,4 @@
-# DatumQuery
+# DatumIngest
 
 A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, JSONL, ZIP, HDF5, and Parquet files into ML-ready output formats with optional sharding.
 
@@ -8,7 +8,7 @@ Preparing datasets for machine learning means writing custom scripts to parse fi
 
 ## What It Does
 
-DatumQuery replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
+DatumIngest replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
 
 ## Mental Model
 
@@ -56,7 +56,7 @@ DatumQuery replaces those scripts with SQL. Point it at all your sources simulta
 
 ## Why Not DuckDB / Pandas?
 
-DuckDB and Pandas are excellent general-purpose tools. DatumQuery is purpose-built for the ML dataset preparation gap they don't cover:
+DuckDB and Pandas are excellent general-purpose tools. DatumIngest is purpose-built for the ML dataset preparation gap they don't cover:
 
 - **Image transforms in SQL** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more, with automatic decode/encode fusion across chained transforms. DuckDB and Pandas have no image pipeline.
 - **ZIP archives as tables** — `FROM images` where `images` is a ZIP file. Each entry becomes a row with lazy decompression. No extract step.
@@ -64,7 +64,7 @@ DuckDB and Pandas are excellent general-purpose tools. DatumQuery is purpose-bui
 - **Dataset manifests** — one command generates a JSON manifest with per-column statistics, histograms, quantiles, and pairwise column interactions (Pearson, Spearman, Cramér's V, ANOVA F, Mutual Information).
 - **Sharded output with checkpointing** — write to sharded CSV/Parquet/HDF5 and resume from the last completed shard after a crash.
 
-If you need GROUP BY, window functions, or billion-row analytics, use DuckDB. If you need to join a ZIP of images with a JSON annotation file, resize everything to 224×224, and write sharded HDF5 — that's DatumQuery.
+If you need GROUP BY, window functions, or billion-row analytics, use DuckDB. If you need to join a ZIP of images with a JSON annotation file, resize everything to 224×224, and write sharded HDF5 — that's DatumIngest.
 
 ## Quick Start
 
@@ -192,20 +192,20 @@ parquet:labels=./labels.parquet
 ### As a .NET library
 
 ```bash
-dotnet add package DatumQuery
+dotnet add package DatumIngest
 ```
 
 ### As a CLI tool
 
 ```bash
-dotnet tool install --global DatumQuery.Cli
+dotnet tool install --global DatumIngest.Cli
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/your-org/DatumQuery.git
-cd DatumQuery
+git clone https://github.com/your-org/DatumIngest.git
+cd DatumIngest
 dotnet build
 dotnet test
 ```
@@ -213,9 +213,9 @@ dotnet test
 #### Publish a self-contained single-file binary
 
 ```bash
-dotnet publish src/DatumQuery.Cli -c Release -r win-x64
-dotnet publish src/DatumQuery.Cli -c Release -r linux-x64
-dotnet publish src/DatumQuery.Cli -c Release -r osx-arm64
+dotnet publish src/DatumIngest.Cli -c Release -r win-x64
+dotnet publish src/DatumIngest.Cli -c Release -r linux-x64
+dotnet publish src/DatumIngest.Cli -c Release -r osx-arm64
 ```
 
 ## Benchmarks
@@ -223,7 +223,7 @@ dotnet publish src/DatumQuery.Cli -c Release -r osx-arm64
 Run benchmarks with:
 
 ```bash
-dotnet run -c Release --project benchmarks/DatumQuery.Benchmarks -- --filter "*"
+dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*"
 ```
 
 Available benchmark suites:
@@ -239,7 +239,7 @@ Available benchmark suites:
 Run a specific suite:
 
 ```bash
-dotnet run -c Release --project benchmarks/DatumQuery.Benchmarks -- --filter "*Parsing*"
+dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*Parsing*"
 ```
 
 ### Results
@@ -320,7 +320,7 @@ dotnet build
 dotnet test
 
 # Run benchmarks
-dotnet run -c Release --project benchmarks/DatumQuery.Benchmarks -- --filter "*"
+dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*"
 ```
 
 ## License

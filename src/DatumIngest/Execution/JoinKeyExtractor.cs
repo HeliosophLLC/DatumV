@@ -1,6 +1,6 @@
-using DatumQuery.Parsing.Ast;
+using DatumIngest.Parsing.Ast;
 
-namespace DatumQuery.Execution;
+namespace DatumIngest.Execution;
 
 /// <summary>
 /// Result of attempting to extract equi-join keys from an ON condition.

@@ -1,8 +1,8 @@
-namespace DatumQuery.Statistics;
+namespace DatumIngest.Statistics;
 
 using System.Collections.Concurrent;
-using DatumQuery.Model;
-using DatumQuery.Statistics.Accumulators;
+using DatumIngest.Model;
+using DatumIngest.Statistics.Accumulators;
 
 /// <summary>
 /// Manages per-column statistic accumulators and collects statistics from rows.

@@ -1,12 +1,12 @@
 <Solution>
   <Folder Name="/benchmarks/">
-    <Project Path="benchmarks/DatumQuery.Benchmarks/DatumQuery.Benchmarks.csproj" />
+    <Project Path="benchmarks/DatumIngest.Benchmarks/DatumIngest.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/DatumQuery.Cli/DatumQuery.Cli.csproj" />
-    <Project Path="src/DatumQuery/DatumQuery.csproj" />
+    <Project Path="src/DatumIngest.Cli/DatumIngest.Cli.csproj" />
+    <Project Path="src/DatumIngest/DatumIngest.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/DatumQuery.Tests/DatumQuery.Tests.csproj" />
+    <Project Path="tests/DatumIngest.Tests/DatumIngest.Tests.csproj" />
   </Folder>
 </Solution>

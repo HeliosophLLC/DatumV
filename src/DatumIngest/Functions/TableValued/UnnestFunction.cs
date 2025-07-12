@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.TableValued;
+namespace DatumIngest.Functions.TableValued;
 
 /// <summary>
 /// Takes an array-valued column (Vector, UInt8Array, or JsonValue array) and

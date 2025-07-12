@@ -1,8 +1,8 @@
-namespace DatumQuery.Manifest;
+namespace DatumIngest.Manifest;
 
 using System.Text.Json.Serialization;
-using DatumQuery.Model;
-using DatumQuery.Statistics.Accumulators;
+using DatumIngest.Model;
+using DatumIngest.Statistics.Accumulators;
 
 /// <summary>
 /// A frequency entry pairing a value string with its occurrence count.

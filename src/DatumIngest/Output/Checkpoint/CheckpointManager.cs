@@ -1,4 +1,4 @@
-namespace DatumQuery.Output.Checkpoint;
+namespace DatumIngest.Output.Checkpoint;
 
 /// <summary>
 /// Orchestrates checkpoint read/write operations for sharded output.

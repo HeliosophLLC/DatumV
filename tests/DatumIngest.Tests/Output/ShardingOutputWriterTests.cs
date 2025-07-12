@@ -1,9 +1,9 @@
-namespace DatumQuery.Tests.Output;
+namespace DatumIngest.Tests.Output;
 
-using DatumQuery.Model;
-using DatumQuery.Output;
-using DatumQuery.Output.Checkpoint;
-using DatumQuery.Output.Writers;
+using DatumIngest.Model;
+using DatumIngest.Output;
+using DatumIngest.Output.Checkpoint;
+using DatumIngest.Output.Writers;
 
 public sealed class ShardingOutputWriterTests : IAsyncLifetime
 {
@@ -154,8 +154,8 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
         OutputSummary summary = await writer.FinalizeAsync();
 
         // Read first shard and verify it has 3 rows
-        DatumQuery.Catalog.Providers.CsvTableProvider provider = new();
-        DatumQuery.Catalog.TableDescriptor descriptor = new("csv", "test", summary.FilesCreated[0], new Dictionary<string, string>());
+        DatumIngest.Catalog.Providers.CsvTableProvider provider = new();
+        DatumIngest.Catalog.TableDescriptor descriptor = new("csv", "test", summary.FilesCreated[0], new Dictionary<string, string>());
 
         List<Row> rows = new();
         await foreach (Row row in provider.OpenAsync(descriptor, null, CancellationToken.None))

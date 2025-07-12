@@ -1,6 +1,6 @@
-using DatumQuery.Functions.Image;
+using DatumIngest.Functions.Image;
 
-namespace DatumQuery.Model;
+namespace DatumIngest.Model;
 
 /// <summary>
 /// An immutable, discriminated union value that carries typed data through the query pipeline.

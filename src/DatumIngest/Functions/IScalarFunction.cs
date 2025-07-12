@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions;
+namespace DatumIngest.Functions;
 
 /// <summary>
 /// Interface for scalar SQL functions that take one or more <see cref="DataValue"/>

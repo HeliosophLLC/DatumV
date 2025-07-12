@@ -1,8 +1,8 @@
-using DatumQuery.Parsing.Tokens;
+using DatumIngest.Parsing.Tokens;
 using Superpower;
 using Superpower.Model;
 
-namespace DatumQuery.Tests.Parsing;
+namespace DatumIngest.Tests.Parsing;
 
 public class SqlTokenizerTests
 {

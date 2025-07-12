@@ -1,7 +1,7 @@
-using DatumQuery.Catalog;
-using DatumQuery.Output.Checkpoint;
+using DatumIngest.Catalog;
+using DatumIngest.Output.Checkpoint;
 
-namespace DatumQuery.Tests.Output;
+namespace DatumIngest.Tests.Output;
 
 /// <summary>
 /// Tests for <see cref="SourceFingerprintCollector"/>.

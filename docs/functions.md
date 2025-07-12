@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
 
-DatumQuery provides a comprehensive function library for data transformation, ML feature engineering, and image processing. All functions can be composed in SQL expressions.
+DatumIngest provides a comprehensive function library for data transformation, ML feature engineering, and image processing. All functions can be composed in SQL expressions.
 
 ## Numeric / Array
 

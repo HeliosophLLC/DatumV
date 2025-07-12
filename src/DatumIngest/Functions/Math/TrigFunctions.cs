@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Functions.Math;
+namespace DatumIngest.Functions.Math;
 
 /// <summary>Element-wise sine: sin(x) in radians.</summary>
 public sealed class SinFunction : UnaryMathFunction

@@ -1,6 +1,6 @@
-using DatumQuery.Model;
+using DatumIngest.Model;
 
-namespace DatumQuery.Tests.Model;
+namespace DatumIngest.Tests.Model;
 
 public class TypeCoercionTests
 {

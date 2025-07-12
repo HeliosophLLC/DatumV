@@ -1,11 +1,11 @@
-using DatumQuery.Catalog;
-using DatumQuery.Catalog.Providers;
-using DatumQuery.Model;
+using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
+using DatumIngest.Model;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
 
-namespace DatumQuery.Tests.Catalog;
+namespace DatumIngest.Tests.Catalog;
 
 /// <summary>
 /// Tests for <see cref="ParquetTableProvider"/> using Parquet fixture files
