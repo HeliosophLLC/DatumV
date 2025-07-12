@@ -1,10 +1,13 @@
 namespace DatumIngest.LanguageServer;
 
+using DatumIngest.Manifest;
 using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 
 /// <summary>
-/// Produces diagnostics (parse errors) for SQL text by running the full parser
-/// and converting any <see cref="ParseException"/> into LSP-aligned diagnostics.
+/// Produces diagnostics (parse errors and semantic warnings) for SQL text by
+/// running the full parser and optionally validating references against a
+/// <see cref="LanguageServerManifest"/>.
 /// </summary>
 public static class DiagnosticsProvider
 {
@@ -16,15 +19,31 @@ public static class DiagnosticsProvider
     /// <returns>An array of diagnostics (currently at most one, since the parser stops at the first error).</returns>
     public static Diagnostic[] GetDiagnostics(string sql)
     {
+        return GetDiagnostics(sql, manifest: null);
+    }
+
+    /// <summary>
+    /// Analyzes the SQL text for parse errors and, when a
+    /// <paramref name="manifest"/> is provided, for semantic warnings
+    /// about unknown tables, columns, and functions.
+    /// </summary>
+    /// <param name="sql">The SQL text to analyze.</param>
+    /// <param name="manifest">
+    /// Optional manifest for semantic validation. When <see langword="null"/>,
+    /// only syntax errors are reported.
+    /// </param>
+    /// <returns>An array of diagnostics ordered by position.</returns>
+    public static Diagnostic[] GetDiagnostics(string sql, LanguageServerManifest? manifest)
+    {
         if (string.IsNullOrWhiteSpace(sql))
         {
             return [];
         }
 
+        SelectStatement statement;
         try
         {
-            SqlParser.Parse(sql);
-            return [];
+            statement = SqlParser.Parse(sql);
         }
         catch (ParseException exception)
         {
@@ -48,5 +67,13 @@ public static class DiagnosticsProvider
                 }
             ];
         }
+
+        if (manifest is null)
+        {
+            return [];
+        }
+
+        SemanticAnalyzer analyzer = new(manifest);
+        return analyzer.Analyze(statement);
     }
 }

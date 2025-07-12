@@ -24,6 +24,22 @@ public static class SqlParser
         return token.ToStringValue();
     }
 
+    /// <summary>Creates a <see cref="SourceSpan"/> from a single token.</summary>
+    private static SourceSpan ToSpan(Token<SqlToken> token)
+    {
+        return new SourceSpan(token.Span.Position.Line, token.Span.Position.Column, token.Span.Length);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="SourceSpan"/> that covers from the start of
+    /// <paramref name="first"/> to the end of <paramref name="last"/>.
+    /// </summary>
+    private static SourceSpan ToSpan(Token<SqlToken> first, Token<SqlToken> last)
+    {
+        int length = (last.Span.Position.Absolute + last.Span.Length) - first.Span.Position.Absolute;
+        return new SourceSpan(first.Span.Position.Line, first.Span.Position.Column, length);
+    }
+
     /// <summary>
     /// Strips surrounding single quotes and un-escapes doubled quotes
     /// from a string literal token.
@@ -50,9 +66,9 @@ public static class SqlParser
         ).OptionalOrDefault()
         select rest.HasValue
             ? (rest.Kind == SqlToken.Star
-                ? (Expression)new ColumnReference(GetTokenText(first), "*")
-                : new ColumnReference(GetTokenText(first), GetTokenText(rest)))
-            : new ColumnReference(GetTokenText(first));
+                ? (Expression)new ColumnReference(GetTokenText(first), "*", ToSpan(first, rest))
+                : new ColumnReference(GetTokenText(first), GetTokenText(rest), ToSpan(first, rest)))
+            : new ColumnReference(null, GetTokenText(first), ToSpan(first));
 
     /// <summary>Number literal parsed as a double.</summary>
     private static readonly TokenListParser<SqlToken, Expression> NumberLiteral =
@@ -90,7 +106,7 @@ public static class SqlParser
         from args in SP.Ref(() => ExpressionParser!)
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
-        select (Expression)new FunctionCallExpression(GetTokenText(name), args);
+        select (Expression)new FunctionCallExpression(GetTokenText(name), args, ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =
@@ -100,7 +116,7 @@ public static class SqlParser
         from asKw in Token.EqualTo(SqlToken.As)
         from targetType in Token.EqualTo(SqlToken.Identifier)
         from close in Token.EqualTo(SqlToken.RightParen)
-        select (Expression)new CastExpression(expression, GetTokenText(targetType));
+        select (Expression)new CastExpression(expression, GetTokenText(targetType), ToSpan(cast, close));
 
     /// <summary>Parenthesized expression or subquery.</summary>
     private static readonly TokenListParser<SqlToken, Expression> ParenExpression =
@@ -299,7 +315,7 @@ public static class SqlParser
         from table in Token.EqualTo(SqlToken.Identifier)
         from dot in Token.EqualTo(SqlToken.Dot)
         from star in Token.EqualTo(SqlToken.Star)
-        select (SelectColumn)new SelectTableColumns(GetTokenText(table));
+        select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star));
 
     /// <summary>A single expression column with optional AS alias.</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ExpressionColumn =
@@ -331,7 +347,7 @@ public static class SqlParser
             from aliasName in Token.EqualTo(SqlToken.Identifier)
             select GetTokenText(aliasName)
         ).OptionalOrDefault()
-        select (TableSource)new TableReference(GetTokenText(name), alias);
+        select (TableSource)new TableReference(GetTokenText(name), alias, ToSpan(name));
 
     /// <summary>A subquery source: (SELECT ...) AS alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> SubquerySourceParser =
@@ -357,7 +373,7 @@ public static class SqlParser
             from aliasName in Token.EqualTo(SqlToken.Identifier)
             select GetTokenText(aliasName)
         ).OptionalOrDefault()
-        select (TableSource)new FunctionSource(GetTokenText(name), args, alias);
+        select (TableSource)new FunctionSource(GetTokenText(name), args, alias, ToSpan(name));
 
     /// <summary>A table source: subquery, function call, or table reference.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> TableSourceParser =

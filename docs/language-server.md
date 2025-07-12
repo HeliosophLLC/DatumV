@@ -26,6 +26,7 @@ DatumIngest includes a SQL language server that provides autocomplete, diagnosti
 │  ┌─────────────────────┐    │
 │  │ CompletionProvider   │    │
 │  │ DiagnosticsProvider  │    │
+│  │ SemanticAnalyzer     │    │
 │  │ HoverProvider        │    │
 │  └─────────────────────┘    │
 └──────────┬───────────────┘
@@ -108,9 +109,32 @@ Prefix filtering narrows suggestions as the user types. For example, typing `na`
 
 ## Diagnostics
 
-Diagnostics uses the full SQL parser (`SqlParser.Parse`). Parse errors are converted to 0-based line/column positions aligned with the LSP Diagnostic specification.
+The diagnostics pipeline runs in two stages:
 
-Currently returns at most one error (the first parse failure). Future work may add semantic diagnostics (unknown table/column references).
+1. **Syntax errors** — `SqlParser.Parse` is invoked and any `ParseException` is converted to an `Error`-severity diagnostic at the precise token position.
+
+2. **Semantic warnings** — When the service has been initialized with a manifest, the AST is passed to `SemanticAnalyzer` which validates every table, column, and function reference against the known schema. Unknown references produce `Warning`-severity diagnostics with accurate underline spans.
+
+### Validated references
+
+| Reference kind | Example | Diagnostic message |
+|----------------|---------|--------------------|
+| Unknown table | `FROM ghost` | Unknown table 'ghost'. |
+| Unknown column (unqualified) | `SELECT phantom FROM t` | Unknown column 'phantom'. |
+| Unknown column (qualified) | `SELECT t.bogus FROM t` | Unknown column 'bogus' in table 't'. |
+| Unknown scalar function | `SELECT bad_fn(x) FROM t` | Unknown function 'bad_fn'. |
+| Unknown table-valued function | `FROM missing_tvf('path')` | Unknown function 'missing_tvf'. |
+| Unknown table qualifier | `SELECT z.id FROM t AS u` | Unknown table or alias 'z'. |
+
+All lookups are **case-insensitive** — the manifest may use `Users` while the query says `users`.
+
+### Opaque sources
+
+Subqueries and table-valued function sources are treated as **opaque**: their output columns are unknown at manifest-analysis time, so column references qualified by a subquery alias or function alias are never flagged.
+
+### Source spans
+
+AST nodes that carry names (`ColumnReference`, `TableReference`, `FunctionCallExpression`, `FunctionSource`, `CastExpression`, `SelectTableColumns`) include a `SourceSpan` with 1-based line, column, and character length. `DiagnosticsProvider` converts these to 0-based LSP coordinates for accurate editor underlining.
 
 ## Hover
 

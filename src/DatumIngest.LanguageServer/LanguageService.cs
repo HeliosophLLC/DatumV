@@ -42,13 +42,15 @@ public sealed class LanguageService
     }
 
     /// <summary>
-    /// Returns parse error diagnostics for the given SQL text.
+    /// Returns parse error diagnostics and semantic warnings for the given SQL text.
+    /// When the service has been initialized with a manifest, unknown table,
+    /// column, and function references are reported as warnings.
     /// </summary>
     /// <param name="sql">The SQL text to analyze.</param>
-    /// <returns>An array of diagnostics (at most one for the initial implementation).</returns>
+    /// <returns>An array of diagnostics.</returns>
     public Diagnostic[] GetDiagnostics(string sql)
     {
-        return DiagnosticsProvider.GetDiagnostics(sql);
+        return DiagnosticsProvider.GetDiagnostics(sql, _manifest);
     }
 
     /// <summary>

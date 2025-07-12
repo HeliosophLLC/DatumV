@@ -1,6 +1,16 @@
 namespace DatumIngest.Parsing.Ast;
 
 /// <summary>
+/// A source-level position span attached to AST nodes that carry names
+/// (tables, columns, functions) so that semantic diagnostics can report
+/// accurate underline ranges in the editor.
+/// </summary>
+/// <param name="Line">1-based line number.</param>
+/// <param name="Column">1-based column number.</param>
+/// <param name="Length">Character length of the token or span.</param>
+public sealed record SourceSpan(int Line, int Column, int Length);
+
+/// <summary>
 /// A complete SELECT statement, the top-level AST node for the query language.
 /// </summary>
 public sealed record SelectStatement(
@@ -29,7 +39,7 @@ public sealed record SelectAllColumns() : SelectColumn(
 /// <summary>
 /// Represents <c>SELECT table.*</c> as a column entry.
 /// </summary>
-public sealed record SelectTableColumns(string TableName) : SelectColumn(
+public sealed record SelectTableColumns(string TableName, SourceSpan? Span = null) : SelectColumn(
     new ColumnReference(TableName, "*"),
     null);
 
@@ -46,7 +56,7 @@ public abstract record TableSource;
 /// <summary>
 /// A reference to a named table, optionally aliased.
 /// </summary>
-public sealed record TableReference(string Name, string? Alias = null) : TableSource;
+public sealed record TableReference(string Name, string? Alias = null, SourceSpan? Span = null) : TableSource;
 
 /// <summary>
 /// A subquery used as a table source (derived table), always aliased.
@@ -56,7 +66,7 @@ public sealed record SubquerySource(SelectStatement Query, string Alias) : Table
 /// <summary>
 /// A table-valued function call used as a table source in FROM or JOIN.
 /// </summary>
-public sealed record FunctionSource(string FunctionName, IReadOnlyList<Expression> Arguments, string? Alias = null) : TableSource;
+public sealed record FunctionSource(string FunctionName, IReadOnlyList<Expression> Arguments, string? Alias = null, SourceSpan? Span = null) : TableSource;
 
 /// <summary>
 /// A single JOIN clause combining a source with a join condition.
@@ -156,7 +166,7 @@ public abstract record Expression;
 /// <summary>
 /// A reference to a column, optionally qualified with a table name.
 /// </summary>
-public sealed record ColumnReference(string? TableName, string ColumnName) : Expression
+public sealed record ColumnReference(string? TableName, string ColumnName, SourceSpan? Span = null) : Expression
 {
     /// <summary>Pre-computed "TableName.ColumnName" string, built once and cached to avoid per-row interpolation.</summary>
     private string? _qualifiedName;
@@ -262,7 +272,8 @@ public enum UnaryOperator
 /// </summary>
 public sealed record FunctionCallExpression(
     string FunctionName,
-    IReadOnlyList<Expression> Arguments) : Expression;
+    IReadOnlyList<Expression> Arguments,
+    SourceSpan? Span = null) : Expression;
 
 /// <summary>
 /// The IN predicate: <c>expression IN (value1, value2, ...)</c>.
@@ -296,4 +307,4 @@ public sealed record SubqueryExpression(SelectStatement Query) : Expression;
 /// <summary>
 /// A CAST expression: <c>CAST(expression AS type)</c>.
 /// </summary>
-public sealed record CastExpression(Expression Expression, string TargetType) : Expression;
+public sealed record CastExpression(Expression Expression, string TargetType, SourceSpan? Span = null) : Expression;
