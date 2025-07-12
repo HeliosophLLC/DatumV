@@ -33,6 +33,10 @@ WHERE len(caption) > 20
 
 The query planner analyzes column references in SELECT/WHERE/ON and passes required-column sets down to `ScanOperator`, allowing providers to skip unreferenced columns. WHERE predicates referencing only one table are pushed below JoinOperator.
 
+## Statistics-based partition pruning
+
+Pushed-down WHERE predicates are also forwarded to providers that implement `IFilterableTableProvider` as advisory filter hints. Currently only the Parquet provider implements this interface — Parquet is the only supported format with standardized per-partition column statistics. The provider reads each row group's min/max bounds from the file footer via `StatisticsPredicateEvaluator` and skips row groups whose statistics prove the predicate unsatisfiable — no column data is read. Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL, and AND/OR compositions. EXPLAIN shows the filter hint on the scan node; EXPLAIN ANALYZE reports how many row groups were pruned.
+
 ## Join implementation
 
 Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:

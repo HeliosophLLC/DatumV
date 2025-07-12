@@ -166,6 +166,8 @@ public sealed class QueryPlanner
     /// <summary>
     /// Pushes predicates that reference only the given set of aliases below the
     /// current operator as filter nodes. Pushed predicates are removed from the list.
+    /// When the underlying source is a <see cref="ScanOperator"/>, the predicate
+    /// is also added as an advisory filter hint for statistics-based partition pruning.
     /// </summary>
     private static IQueryOperator PushPredicatesBelow(
         IQueryOperator operatorNode,
@@ -185,10 +187,40 @@ public sealed class QueryPlanner
             {
                 result = new FilterOperator(result, predicate);
                 predicates.RemoveAt(index);
+
+                // Pass the predicate as a filter hint to the underlying scan
+                // so filterable providers can use statistics to skip partitions.
+                AddFilterHintToScan(operatorNode, predicate);
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Walks down the operator tree to find the <see cref="ScanOperator"/>
+    /// and adds the predicate as an advisory filter hint.
+    /// </summary>
+    private static void AddFilterHintToScan(IQueryOperator operatorNode, Expression predicate)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case ScanOperator scan:
+                    scan.AddFilterHint(predicate);
+                    return;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                default:
+                    return; // Not a simple scan chain — cannot push hints.
+            }
+        }
     }
 
     /// <summary>

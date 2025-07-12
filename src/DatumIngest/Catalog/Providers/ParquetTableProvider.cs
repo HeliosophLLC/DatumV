@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
+using DatumIngest.Execution;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
@@ -9,10 +11,16 @@ namespace DatumIngest.Catalog.Providers;
 /// <summary>
 /// Reads Apache Parquet files via the Parquet.Net low-level columnar API.
 /// Maps Parquet column types to <see cref="DataKind"/>, supports projection pushdown,
-/// and reads across multiple row groups.
+/// statistics-based row group pruning, and reads across multiple row groups.
 /// </summary>
-public sealed class ParquetTableProvider : ITableProvider
+public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvider
 {
+    /// <summary>Total number of row groups examined in the most recent read.</summary>
+    public int TotalRowGroups { get; private set; }
+
+    /// <summary>Number of row groups skipped by statistics-based pruning in the most recent read.</summary>
+    public int PrunedRowGroups { get; private set; }
+
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -107,6 +115,184 @@ public sealed class ParquetTableProvider : ITableProvider
                 yield return new Row(columnNames, values, nameIndex);
             }
         }
+    }
+
+    /// <inheritdoc />
+    IAsyncEnumerable<Row> IFilterableTableProvider.OpenAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        Expression filterHint,
+        CancellationToken cancellationToken)
+    {
+        return OpenWithFilterAsync(descriptor, requiredColumns, filterHint, cancellationToken);
+    }
+
+    private async IAsyncEnumerable<Row> OpenWithFilterAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        Expression filterHint,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using FileStream stream = File.OpenRead(descriptor.FilePath);
+        using ParquetReader reader = await ParquetReader.CreateAsync(stream);
+
+        DataField[] allFields = reader.Schema.GetDataFields();
+
+        // Apply projection pushdown
+        DataField[] projectedFields;
+        if (requiredColumns is not null)
+        {
+            projectedFields = Array.FindAll(allFields, field => requiredColumns.Contains(field.Name));
+        }
+        else
+        {
+            projectedFields = allFields;
+        }
+
+        if (projectedFields.Length == 0)
+        {
+            yield break;
+        }
+
+        // Build column names array once
+        string[] columnNames = new string[projectedFields.Length];
+        DataKind[] columnKinds = new DataKind[projectedFields.Length];
+        for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+        {
+            columnNames[fieldIndex] = projectedFields[fieldIndex].Name;
+            columnKinds[fieldIndex] = MapClrTypeToDataKind(projectedFields[fieldIndex].ClrType);
+        }
+
+        Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int fieldIndex = 0; fieldIndex < columnNames.Length; fieldIndex++)
+        {
+            nameIndex[columnNames[fieldIndex]] = fieldIndex;
+        }
+
+        // Collect referenced columns from the filter for statistics lookup.
+        HashSet<string> filterColumns = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string? _, string columnName) in ColumnReferenceCollector.Collect(filterHint))
+        {
+            filterColumns.Add(columnName);
+        }
+
+        // Build a lookup from column name to DataField for statistics queries.
+        Dictionary<string, DataField> fieldsByName = new(allFields.Length, StringComparer.OrdinalIgnoreCase);
+        foreach (DataField field in allFields)
+        {
+            fieldsByName[field.Name] = field;
+        }
+
+        TotalRowGroups = reader.RowGroupCount;
+        PrunedRowGroups = 0;
+
+        // Iterate row groups with statistics-based pruning
+        for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using ParquetRowGroupReader rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            long rowCount = rowGroupReader.RowCount;
+
+            // Try to skip this row group using column statistics.
+            if (TryBuildStatistics(rowGroupReader, filterColumns, fieldsByName, rowCount,
+                    out Dictionary<string, ColumnStatisticsRange>? statistics)
+                && StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics!))
+            {
+                PrunedRowGroups++;
+                continue;
+            }
+
+            // Read all projected columns for this row group
+            DataColumn[] dataColumns = new DataColumn[projectedFields.Length];
+            for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+            {
+                dataColumns[fieldIndex] = await rowGroupReader.ReadColumnAsync(projectedFields[fieldIndex]);
+            }
+
+            // Yield row-by-row
+            for (long rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                DataValue[] values = new DataValue[projectedFields.Length];
+                for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+                {
+                    values[fieldIndex] = ExtractValue(
+                        dataColumns[fieldIndex],
+                        columnKinds[fieldIndex],
+                        rowIndex);
+                }
+
+                yield return new Row(columnNames, values, nameIndex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Attempts to collect column statistics from a row group for the given filter columns.
+    /// Returns <c>false</c> if no statistics are available for any referenced column.
+    /// </summary>
+    private static bool TryBuildStatistics(
+        ParquetRowGroupReader rowGroupReader,
+        HashSet<string> filterColumns,
+        Dictionary<string, DataField> fieldsByName,
+        long rowCount,
+        out Dictionary<string, ColumnStatisticsRange>? statistics)
+    {
+        statistics = null;
+
+        foreach (string columnName in filterColumns)
+        {
+            if (!fieldsByName.TryGetValue(columnName, out DataField? field))
+            {
+                continue;
+            }
+
+            DataColumnStatistics? parquetStatistics = rowGroupReader.GetStatistics(field);
+            if (parquetStatistics is null)
+            {
+                continue;
+            }
+
+            DataKind kind = MapClrTypeToDataKind(field.ClrType);
+            DataValue? minimum = ConvertStatisticsValue(parquetStatistics.MinValue, kind);
+            DataValue? maximum = ConvertStatisticsValue(parquetStatistics.MaxValue, kind);
+
+            if (minimum is null && maximum is null && parquetStatistics.NullCount is null)
+            {
+                continue; // No usable statistics for this column.
+            }
+
+            statistics ??= new Dictionary<string, ColumnStatisticsRange>(StringComparer.OrdinalIgnoreCase);
+            statistics[columnName] = new ColumnStatisticsRange(
+                minimum, maximum, parquetStatistics.NullCount, rowCount);
+        }
+
+        return statistics is not null;
+    }
+
+    /// <summary>
+    /// Converts a Parquet statistics value (CLR-typed object) to a <see cref="DataValue"/>.
+    /// </summary>
+    private static DataValue? ConvertStatisticsValue(object? value, DataKind kind)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        return kind switch
+        {
+            DataKind.Scalar => ConvertToScalar(value),
+            DataKind.String => DataValue.FromString(value.ToString() ?? string.Empty),
+            DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(value)),
+            DataKind.DateTime => DataValue.FromDateTime(Convert.ToDateTime(value)),
+            DataKind.Date => value is DateOnly dateOnly
+                ? DataValue.FromDate(dateOnly)
+                : DataValue.FromDate(DateOnly.FromDateTime(Convert.ToDateTime(value))),
+            _ => null,
+        };
     }
 
     /// <inheritdoc />

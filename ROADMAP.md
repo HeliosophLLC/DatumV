@@ -11,7 +11,8 @@ The following features are architecturally accounted for but deferred from V1:
 - **User-defined functions**: Plugin DLL support via FunctionRegistry
 - **Pipe mode**: Stream results to stdout as CSV/JSON/NDJSON
 - **Cost-based optimizer**: Replace greedy join heuristic with cost model
-- **Index / bloom filter acceleration**: Skip non-matching partitions
+- ~~**Statistics-based partition pruning**: Skip row groups whose min/max statistics prove a predicate unsatisfiable~~ ✅
+- **Bloom filter acceleration**: Use Parquet bloom filters to skip partitions for equality predicates
 - **Remote data sources**: HTTP/S3/Azure Blob providers
 - **Schema caching**: Skip re-inference on repeated queries
 - **Data validation**: CHECK constraints / VALIDATE clause for data quality gates

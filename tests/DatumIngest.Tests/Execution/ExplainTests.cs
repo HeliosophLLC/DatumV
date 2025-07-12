@@ -842,6 +842,56 @@ public class ExplainTests
     }
 
     [Fact]
+    public void Explain_WherePredicatePushdown_ShowsStatisticsFilterOnScan()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("x"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(5.0)));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode root = QueryExplainer.Explain(plan);
+
+        // The root is a Filter; its child is the Scan with the statistics filter annotation.
+        ExplainPlanNode scanNode = root.Children[0];
+        Assert.Equal("Scan", scanNode.OperatorName);
+        Assert.Contains("statistics filter:", scanNode.Details);
+        Assert.Contains("x > 5", scanNode.Details);
+    }
+
+    [Fact]
+    public void Explain_WherePredicatePushdown_AliasedTable_ShowsStatisticsFilter()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data", Alias: "d")),
+            Where: new BinaryExpression(
+                new ColumnReference("d", "x"),
+                BinaryOperator.LessThan,
+                new LiteralExpression(10.0)));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode root = QueryExplainer.Explain(plan);
+
+        // Walk into the tree: Filter → Alias → Scan
+        ExplainPlanNode aliasNode = root.Children[0];
+        Assert.Equal("Alias", aliasNode.OperatorName);
+
+        ExplainPlanNode scanNode = aliasNode.Children[0];
+        Assert.Equal("Scan", scanNode.OperatorName);
+        Assert.Contains("statistics filter:", scanNode.Details);
+    }
+
+    [Fact]
     public void Explain_CastBasedJoin_ReportsHashStrategy()
     {
         TableCatalog catalog = CreateCatalogWithCsv("source_a", "a.csv");

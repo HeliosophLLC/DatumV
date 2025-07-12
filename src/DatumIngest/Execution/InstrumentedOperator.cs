@@ -134,6 +134,19 @@ public sealed class InstrumentedOperator : IQueryOperator
         planNode.TotalTime = instrumentedOp.TotalElapsed;
         planNode.SelfTime = instrumentedOp.SelfElapsed;
 
+        // Add pruning statistics for scan operators backed by filterable providers.
+        if (instrumentedOp.Inner is Operators.ScanOperator scan
+            && scan.LastFilterableProvider is Catalog.Providers.ParquetTableProvider parquetProvider
+            && parquetProvider.TotalRowGroups > 0
+            && parquetProvider.PrunedRowGroups > 0)
+        {
+            int total = parquetProvider.TotalRowGroups;
+            int pruned = parquetProvider.PrunedRowGroups;
+            double percentage = (double)pruned / total * 100.0;
+            planNode.RuntimeAnnotations.Add(
+                $"row groups: {total} total, {pruned} pruned ({percentage:F0}%)");
+        }
+
         // Compute rows consumed from children.
         List<InstrumentedOperator> instrumentedChildren = instrumentedOp.GetInstrumentedChildren().ToList();
 

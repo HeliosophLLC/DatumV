@@ -49,7 +49,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, subqueries
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI)
-- **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection and predicate pushdown
+- **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with optional runtime metrics

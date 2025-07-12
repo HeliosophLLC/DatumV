@@ -51,10 +51,17 @@ public static class QueryExplainer
             ? string.Join(", ", scan.RequiredColumns)
             : "*";
 
+        string details = $"table: {tableName}, provider: {provider}, columns: [{columns}]";
+
+        if (scan.FilterHint is not null)
+        {
+            details += $", statistics filter: {FormatExpression(scan.FilterHint)}";
+        }
+
         return new ExplainPlanNode
         {
             OperatorName = "Scan",
-            Details = $"table: {tableName}, provider: {provider}, columns: [{columns}]",
+            Details = details,
         };
     }
 

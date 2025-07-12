@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Ast;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
@@ -474,5 +475,177 @@ public sealed class ParquetTableProviderTests : IDisposable
             Descriptor(path), CancellationToken.None);
 
         Assert.Equal(5L, capabilities.EstimatedRowCount);
+    }
+
+    // ───────────────────── Statistics-based row group pruning ─────────────────────
+
+    /// <summary>
+    /// Creates a Parquet file with two row groups having non-overlapping id ranges:
+    /// group 1 has ids [1, 2, 3, 4, 5], group 2 has ids [6, 7, 8, 9, 10].
+    /// </summary>
+    private async Task<string> CreatePruningFixtureAsync()
+    {
+        string path = FixturePath("pruning.parquet");
+
+        ParquetSchema schema = new(
+            new DataField<int>("id"),
+            new DataField<string>("name"));
+
+        using FileStream stream = File.Create(path);
+        using ParquetWriter writer = await ParquetWriter.CreateAsync(schema, stream);
+        writer.CompressionMethod = CompressionMethod.None;
+
+        // Row group 1: ids 1-5
+        using (ParquetRowGroupWriter rowGroup1 = writer.CreateRowGroup())
+        {
+            await rowGroup1.WriteColumnAsync(new DataColumn(schema.DataFields[0], new int[] { 1, 2, 3, 4, 5 }));
+            await rowGroup1.WriteColumnAsync(new DataColumn(schema.DataFields[1], new string[] { "a", "b", "c", "d", "e" }));
+        }
+
+        // Row group 2: ids 6-10
+        using (ParquetRowGroupWriter rowGroup2 = writer.CreateRowGroup())
+        {
+            await rowGroup2.WriteColumnAsync(new DataColumn(schema.DataFields[0], new int[] { 6, 7, 8, 9, 10 }));
+            await rowGroup2.WriteColumnAsync(new DataColumn(schema.DataFields[1], new string[] { "f", "g", "h", "i", "j" }));
+        }
+
+        return path;
+    }
+
+    [Fact]
+    public async Task OpenWithFilter_GreaterThan7_SkipsFirstRowGroup()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+        IFilterableTableProvider filterable = provider;
+
+        // id > 7 → group 1 [1-5] has max 5 ≤ 7, should be pruned.
+        // Filter is advisory: all rows from non-pruned group 2 are returned.
+        Expression filter = new BinaryExpression(
+            new ColumnReference("id"), BinaryOperator.GreaterThan, new LiteralExpression(7.0));
+
+        List<Row> rows = await ReadAllAsync(
+            filterable.OpenAsync(Descriptor(path), null, filter, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count); // All rows from group 2
+        Assert.Equal(6f, rows[0]["id"].AsScalar());
+        Assert.Equal(10f, rows[4]["id"].AsScalar());
+        Assert.Equal(2, provider.TotalRowGroups);
+        Assert.Equal(1, provider.PrunedRowGroups);
+    }
+
+    [Fact]
+    public async Task OpenWithFilter_Equal3_SkipsSecondRowGroup()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+        IFilterableTableProvider filterable = provider;
+
+        // id = 3 → group 2 [6-10] has min 6 > 3, should be pruned
+        Expression filter = new BinaryExpression(
+            new ColumnReference("id"), BinaryOperator.Equal, new LiteralExpression(3.0));
+
+        List<Row> rows = await ReadAllAsync(
+            filterable.OpenAsync(Descriptor(path), null, filter, CancellationToken.None));
+
+        // Group 1 is read (contains rows 1-5), but filter is advisory so all 5 rows returned
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(2, provider.TotalRowGroups);
+        Assert.Equal(1, provider.PrunedRowGroups);
+    }
+
+    [Fact]
+    public async Task OpenWithFilter_LessThan3_SkipsSecondRowGroup()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+        IFilterableTableProvider filterable = provider;
+
+        // id < 3 → group 2 [6-10] has min 6 ≥ 3, should be pruned
+        Expression filter = new BinaryExpression(
+            new ColumnReference("id"), BinaryOperator.LessThan, new LiteralExpression(3.0));
+
+        List<Row> rows = await ReadAllAsync(
+            filterable.OpenAsync(Descriptor(path), null, filter, CancellationToken.None));
+
+        // Only group 1 read (advisory filter, all 5 rows returned)
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(2, provider.TotalRowGroups);
+        Assert.Equal(1, provider.PrunedRowGroups);
+    }
+
+    [Fact]
+    public async Task OpenWithFilter_MatchesBothGroups_NoPruning()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+        IFilterableTableProvider filterable = provider;
+
+        // id > 3 → group 1 max=5 > 3 (cannot skip), group 2 max=10 > 3 (cannot skip)
+        Expression filter = new BinaryExpression(
+            new ColumnReference("id"), BinaryOperator.GreaterThan, new LiteralExpression(3.0));
+
+        List<Row> rows = await ReadAllAsync(
+            filterable.OpenAsync(Descriptor(path), null, filter, CancellationToken.None));
+
+        Assert.Equal(10, rows.Count);
+        Assert.Equal(2, provider.TotalRowGroups);
+        Assert.Equal(0, provider.PrunedRowGroups);
+    }
+
+    [Fact]
+    public async Task OpenWithFilter_UnsupportedPredicate_NoPruning()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+        IFilterableTableProvider filterable = provider;
+
+        // LIKE is unsupported → no pruning
+        Expression filter = new BinaryExpression(
+            new ColumnReference("name"), BinaryOperator.Like, new LiteralExpression("%test%"));
+
+        List<Row> rows = await ReadAllAsync(
+            filterable.OpenAsync(Descriptor(path), null, filter, CancellationToken.None));
+
+        Assert.Equal(10, rows.Count);
+        Assert.Equal(2, provider.TotalRowGroups);
+        Assert.Equal(0, provider.PrunedRowGroups);
+    }
+
+    [Fact]
+    public async Task OpenWithFilter_WithProjectionPushdown_PrunesCorrectly()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+        IFilterableTableProvider filterable = provider;
+
+        // id > 7 with projection to name only.
+        // Filter is advisory: all rows from non-pruned group 2 are returned.
+        Expression filter = new BinaryExpression(
+            new ColumnReference("id"), BinaryOperator.GreaterThan, new LiteralExpression(7.0));
+
+        HashSet<string> requiredColumns = new(["name"]);
+        List<Row> rows = await ReadAllAsync(
+            filterable.OpenAsync(Descriptor(path), requiredColumns, filter, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count); // All rows from group 2
+        Assert.Equal("f", rows[0]["name"].AsString());
+        Assert.Equal(1, provider.PrunedRowGroups);
+    }
+
+    [Fact]
+    public async Task OpenWithoutFilter_ReadsAllRowGroups()
+    {
+        string path = await CreatePruningFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        // Using the non-filter OpenAsync — should read all groups
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
+
+        Assert.Equal(10, rows.Count);
+        // TotalRowGroups/PrunedRowGroups are not set by the non-filter path
+        Assert.Equal(0, provider.TotalRowGroups);
+        Assert.Equal(0, provider.PrunedRowGroups);
     }
 }
