@@ -187,6 +187,37 @@ parquet:labels=./labels.parquet
 | [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
 | [ROADMAP.md](ROADMAP.md) | Deferred features for future releases |
 
+## Installation
+
+### As a .NET library
+
+```bash
+dotnet add package DatumQuery
+```
+
+### As a CLI tool
+
+```bash
+dotnet tool install --global DatumQuery.Cli
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/your-org/DatumQuery.git
+cd DatumQuery
+dotnet build
+dotnet test
+```
+
+#### Publish a self-contained single-file binary
+
+```bash
+dotnet publish src/DatumQuery.Cli -c Release -r win-x64
+dotnet publish src/DatumQuery.Cli -c Release -r linux-x64
+dotnet publish src/DatumQuery.Cli -c Release -r osx-arm64
+```
+
 ## Benchmarks
 
 Run benchmarks with:
@@ -278,37 +309,6 @@ Statistics collection runs all accumulators (numeric, string, vector, image, car
 | CSV write 10K rows with sharding (1000/shard) | 20.502 ms | 0.3845 ms | 0.3210 ms | 1,256.13 KB |
 
 CSV writes with minimal allocation overhead (~115 bytes/row). Vector columns use a direct `StringBuilder` loop instead of LINQ enumerable formatting. Sharding adds overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
-
-## Installation
-
-### As a .NET library
-
-```bash
-dotnet add package DatumQuery
-```
-
-### As a CLI tool
-
-```bash
-dotnet tool install --global DatumQuery.Cli
-```
-
-### Build from source
-
-```bash
-git clone https://github.com/your-org/DatumQuery.git
-cd DatumQuery
-dotnet build
-dotnet test
-```
-
-#### Publish a self-contained single-file binary
-
-```bash
-dotnet publish src/DatumQuery.Cli -c Release -r win-x64
-dotnet publish src/DatumQuery.Cli -c Release -r linux-x64
-dotnet publish src/DatumQuery.Cli -c Release -r osx-arm64
-```
 
 ## Building & Testing
 
