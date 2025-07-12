@@ -12,7 +12,7 @@ The following features are architecturally accounted for but deferred from V1:
 - **Pipe mode**: Stream results to stdout as CSV/JSON/NDJSON
 - **Cost-based optimizer**: Replace greedy join heuristic with cost model
 - ~~**Statistics-based partition pruning**: Skip row groups whose min/max statistics prove a predicate unsatisfiable~~ ✅
-- **Bloom filter acceleration**: Use Parquet bloom filters to skip partitions for equality predicates
+- ~~**Bloom filter acceleration**: Use Parquet bloom filters to skip partitions for equality predicates~~ ✅
 - **Remote data sources**: HTTP/S3/Azure Blob providers
-- **Schema caching**: Skip re-inference on repeated queries
+- ~~**Schema caching**: Skip re-inference on repeated queries~~ ✅
 - **Data validation**: CHECK constraints / VALIDATE clause for data quality gates

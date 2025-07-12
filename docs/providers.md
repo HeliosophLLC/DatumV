@@ -1,6 +1,6 @@
 # Data Providers
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
 
 DatumIngest reads from six file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file.
 
@@ -15,6 +15,8 @@ Reads RFC 4180 CSV files. Auto-detects numeric vs string columns from the first 
 
 Columns: derived from header row. Numeric values parsed as Scalar, others as String.
 
+Implements `IChunkMeasuringProvider` for source index byte-range measurement. The pre-scan is quote-aware, correctly handling multi-line quoted fields and CRLF line endings.
+
 ## JSON
 
 Reads JSON files using System.Text.Json streaming. Supports root arrays.
@@ -26,6 +28,8 @@ Each object in the array becomes a row with properties as columns. Nested object
 Reads newline-delimited JSON (JSONL/NDJSON) files where each line is a self-contained JSON object. Streams line-by-line for constant memory usage regardless of file size.
 
 Schema inference samples up to 100 lines and widens column types across the sample. Type inference and value conversion are shared with the JSON provider via `JsonTypeInference`.
+
+Implements `IChunkMeasuringProvider` for source index byte-range measurement. The pre-scan detects data rows by looking for `{` at the start of each line, skipping blank lines and non-object content.
 
 ```bash
 datum-ingest explore "SELECT * FROM data" --source "jsonl:data=./records.jsonl"

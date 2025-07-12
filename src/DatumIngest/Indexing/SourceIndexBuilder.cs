@@ -54,6 +54,13 @@ public sealed class SourceIndexBuilder
             ? await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken).ConfigureAwait(false)
             : new SourceFingerprint(0, Array.Empty<byte>());
 
+        IReadOnlyList<ChunkByteRange>? chunkByteRanges = null;
+        if (provider is IChunkMeasuringProvider measuringProvider)
+        {
+            chunkByteRanges = await measuringProvider.MeasureChunkByteRangesAsync(
+                descriptor, _chunkSize, cancellationToken).ConfigureAwait(false);
+        }
+
         Schema? schema = null;
         List<IndexChunk> chunks = new();
         long totalRowCount = 0;
@@ -106,7 +113,8 @@ public sealed class SourceIndexBuilder
 
             if (rowsInCurrentChunk >= _chunkSize)
             {
-                chunks.Add(FinalizeChunk(currentChunkRowOffset, rowsInCurrentChunk, currentAccumulators));
+                (long byteOffset, long byteLength) = GetByteRange(chunkByteRanges, currentChunkIndex);
+                chunks.Add(FinalizeChunk(currentChunkRowOffset, rowsInCurrentChunk, currentAccumulators, byteOffset, byteLength));
                 if (allChunkBloomFilters is not null && currentBloomFilters is not null)
                 {
                     allChunkBloomFilters.Add(currentBloomFilters);
@@ -122,7 +130,8 @@ public sealed class SourceIndexBuilder
         // Finalize the last partial chunk.
         if (rowsInCurrentChunk > 0)
         {
-            chunks.Add(FinalizeChunk(currentChunkRowOffset, rowsInCurrentChunk, currentAccumulators));
+            (long byteOffset, long byteLength) = GetByteRange(chunkByteRanges, currentChunkIndex);
+            chunks.Add(FinalizeChunk(currentChunkRowOffset, rowsInCurrentChunk, currentAccumulators, byteOffset, byteLength));
             if (allChunkBloomFilters is not null && currentBloomFilters is not null)
             {
                 allChunkBloomFilters.Add(currentBloomFilters);
@@ -193,7 +202,9 @@ public sealed class SourceIndexBuilder
     private static IndexChunk FinalizeChunk(
         long rowOffset,
         int rowCount,
-        Dictionary<string, ChunkAccumulator> accumulators)
+        Dictionary<string, ChunkAccumulator> accumulators,
+        long sourceByteOffset = -1,
+        long sourceByteLength = -1)
     {
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase);
 
@@ -205,9 +216,26 @@ public sealed class SourceIndexBuilder
         return new IndexChunk(
             RowOffset: rowOffset,
             RowCount: rowCount,
-            SourceByteOffset: -1,
-            SourceByteLength: -1,
+            SourceByteOffset: sourceByteOffset,
+            SourceByteLength: sourceByteLength,
             ColumnStatistics: stats);
+    }
+
+    /// <summary>
+    /// Retrieves the byte offset and length for the specified chunk index from
+    /// pre-scanned byte ranges, or returns <c>(-1, -1)</c> when no byte ranges
+    /// are available.
+    /// </summary>
+    private static (long ByteOffset, long ByteLength) GetByteRange(
+        IReadOnlyList<ChunkByteRange>? chunkByteRanges, int chunkIndex)
+    {
+        if (chunkByteRanges is not null && chunkIndex < chunkByteRanges.Count)
+        {
+            ChunkByteRange range = chunkByteRanges[chunkIndex];
+            return (range.ByteOffset, range.ByteLength);
+        }
+
+        return (-1, -1);
     }
 
     /// <summary>

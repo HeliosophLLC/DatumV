@@ -1,6 +1,6 @@
 # Architecture
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Programmatic API](api.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Programmatic API](api.md)
 
 DatumIngest executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
 
@@ -33,9 +33,13 @@ WHERE len(caption) > 20
 
 The query planner analyzes column references in SELECT/WHERE/ON and passes required-column sets down to `ScanOperator`, allowing providers to skip unreferenced columns. WHERE predicates referencing only one table are pushed below JoinOperator.
 
-## Statistics-based partition pruning
+## Partition and chunk pruning
 
-Pushed-down WHERE predicates are also forwarded to providers that implement `IFilterableTableProvider` as advisory filter hints. Currently only the Parquet provider implements this interface — Parquet is the only supported format with standardized per-partition column statistics. The provider reads each row group's min/max bounds from the file footer via `StatisticsPredicateEvaluator` and skips row groups whose statistics prove the predicate unsatisfiable — no column data is read. Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL, and AND/OR compositions. EXPLAIN shows the filter hint on the scan node; EXPLAIN ANALYZE reports how many row groups were pruned.
+Pushed-down WHERE predicates are forwarded to providers that implement `IFilterableTableProvider` as advisory filter hints. The Parquet provider uses this interface to read each row group's min/max column statistics from the file footer and skip row groups whose statistics prove the predicate unsatisfiable.
+
+For any format, `.datum-index` sidecar files extend this capability to chunk-level pruning — including CSV, JSONL, JSON, and ZIP sources. When a source index is loaded, `ScanOperator` applies up to three pruning levels (statistics, bloom filters, sorted value indexes) to skip entire chunks before reading source data. See [Source Indexes](indexes.md) for the full specification.
+
+Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL, and AND/OR compositions. EXPLAIN shows the filter hint on the scan node; EXPLAIN ANALYZE reports how many chunks or row groups were pruned.
 
 ## Join implementation
 
@@ -56,11 +60,12 @@ DatumIngest/
       Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet)
       Execution/                  # Query planner, operators, expression evaluator
       Functions/                  # Scalar and table-valued functions
+      Indexing/                   # Source indexes, bloom filters, sorted indexes, binary I/O
       Statistics/                 # Column statistics with pluggable accumulators
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
-    DatumIngest.Cli/         # CLI tool (query, explore, stats, schema commands)
+    DatumIngest.Cli/         # CLI tool (query, explore, stats, schema, index commands)
   tests/
-    DatumIngest.Tests/       # 1,600+ unit tests
+    DatumIngest.Tests/       # 1,850+ unit tests
   benchmarks/
     DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
 ```

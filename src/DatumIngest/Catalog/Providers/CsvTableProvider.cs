@@ -1,16 +1,23 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads CSV files conforming to RFC 4180. Supports configurable delimiter,
-/// automatic numeric column detection, and projection pushdown.
+/// automatic numeric column detection, projection pushdown, and byte-level
+/// chunk measurement for index building.
 /// </summary>
-public sealed class CsvTableProvider : ITableProvider
+public sealed class CsvTableProvider : IChunkMeasuringProvider
 {
     private const char DefaultDelimiter = ',';
+
+    /// <summary>
+    /// Byte-level scan buffer size for chunk measurement.
+    /// </summary>
+    private const int MeasurementBufferSize = 65536;
 
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
@@ -178,8 +185,94 @@ public sealed class CsvTableProvider : ITableProvider
         return Task.FromResult(new ProviderCapabilities(
             EstimatedRowCount: null,
             EstimatedRowSizeBytes: null,
-            SupportsSeek: false,
+            SupportsSeek: true,
             ColumnCosts: new Dictionary<string, ColumnCost>()));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ChunkByteRange>> MeasureChunkByteRangesAsync(
+        TableDescriptor descriptor,
+        int chunkSize,
+        CancellationToken cancellationToken)
+    {
+        using FileStream stream = new(
+            descriptor.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: MeasurementBufferSize, useAsync: true);
+
+        byte[] buffer = new byte[MeasurementBufferSize];
+        List<ChunkByteRange> ranges = new();
+
+        long currentOffset = 0;
+        long chunkStartOffset = 0;
+        int rowsInChunk = 0;
+        bool headerSkipped = false;
+        bool inQuote = false;
+        bool hasUnterminatedRow = false;
+
+        int bytesRead;
+        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, MeasurementBufferSize), cancellationToken)
+            .ConfigureAwait(false)) > 0)
+        {
+            for (int i = 0; i < bytesRead; i++)
+            {
+                byte b = buffer[i];
+
+                if (b == (byte)'"')
+                {
+                    inQuote = !inQuote;
+                    if (headerSkipped)
+                    {
+                        hasUnterminatedRow = true;
+                    }
+                }
+                else if (b == (byte)'\n' && !inQuote)
+                {
+                    if (!headerSkipped)
+                    {
+                        headerSkipped = true;
+                        chunkStartOffset = currentOffset + 1;
+                    }
+                    else
+                    {
+                        rowsInChunk++;
+                        hasUnterminatedRow = false;
+
+                        if (rowsInChunk >= chunkSize)
+                        {
+                            long chunkEndOffset = currentOffset + 1;
+                            ranges.Add(new ChunkByteRange(
+                                chunkStartOffset,
+                                chunkEndOffset - chunkStartOffset,
+                                rowsInChunk));
+                            chunkStartOffset = chunkEndOffset;
+                            rowsInChunk = 0;
+                        }
+                    }
+                }
+                else if (headerSkipped && b != (byte)'\r')
+                {
+                    hasUnterminatedRow = true;
+                }
+
+                currentOffset++;
+            }
+        }
+
+        // Account for unterminated last row (file not ending with newline).
+        if (hasUnterminatedRow)
+        {
+            rowsInChunk++;
+        }
+
+        if (rowsInChunk > 0)
+        {
+            ranges.Add(new ChunkByteRange(
+                chunkStartOffset,
+                currentOffset - chunkStartOffset,
+                rowsInChunk));
+        }
+
+        return ranges;
     }
 
     /// <summary>

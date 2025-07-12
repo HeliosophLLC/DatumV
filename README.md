@@ -50,6 +50,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI)
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
+- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, and sorted value indexes for equality/range predicates
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with optional runtime metrics
@@ -148,6 +149,7 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `explain` | Show the query execution plan without running it. |
 | `manifest` | Generate a JSON manifest with per-column feature statistics. |
 | `schema` | Show the column schema of a query's FROM/JOIN sources without executing. |
+| `index` | Build a `.datum-index` sidecar for one or more source files. |
 
 ### Flags
 
@@ -159,6 +161,11 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 | `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |
 | `--checkpoint` | Enable checkpoint-based resume for sharded writes. Requires `SHARD ON`. |
+| `--index <path>` | Load a pre-built `.datum-index` file for chunk-level query pruning. Repeatable. |
+| `--with-index` | Co-generate a `.datum-index` for each source during query execution. |
+| `--chunk-size <n>` | Rows per index chunk (default: 10,000). |
+| `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
+| `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
 
 ### Source definition format
 
@@ -184,6 +191,7 @@ parquet:labels=./labels.parquet
 | [docs/functions.md](docs/functions.md) | All 100+ functions: math, string, JSON, temporal, image, vector |
 | [docs/providers.md](docs/providers.md) | Data provider details, options, catalog file format |
 | [docs/statistics.md](docs/statistics.md) | Statistics accumulators, manifest schema, column interactions |
+| [docs/indexes.md](docs/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, CLI usage |
 | [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
 | [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
 | [ROADMAP.md](ROADMAP.md) | Deferred features for future releases |

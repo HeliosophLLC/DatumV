@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog.Providers;
@@ -10,10 +11,15 @@ namespace DatumIngest.Catalog.Providers;
 /// regardless of file size. Type inference and value conversion are shared
 /// with <see cref="JsonTableProvider"/> via <see cref="JsonTypeInference"/>.
 /// </summary>
-public sealed class JsonlTableProvider : ITableProvider
+public sealed class JsonlTableProvider : IChunkMeasuringProvider
 {
     /// <summary>Maximum number of lines sampled for schema inference.</summary>
     private const int SchemaSampleSize = 100;
+
+    /// <summary>
+    /// Byte-level scan buffer size for chunk measurement.
+    /// </summary>
+    private const int MeasurementBufferSize = 65536;
 
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
@@ -164,7 +170,88 @@ public sealed class JsonlTableProvider : ITableProvider
         return Task.FromResult(new ProviderCapabilities(
             EstimatedRowCount: null,
             EstimatedRowSizeBytes: null,
-            SupportsSeek: false,
+            SupportsSeek: true,
             ColumnCosts: new Dictionary<string, ColumnCost>()));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ChunkByteRange>> MeasureChunkByteRangesAsync(
+        TableDescriptor descriptor,
+        int chunkSize,
+        CancellationToken cancellationToken)
+    {
+        using FileStream stream = new(
+            descriptor.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: MeasurementBufferSize, useAsync: true);
+
+        byte[] buffer = new byte[MeasurementBufferSize];
+        List<ChunkByteRange> ranges = new();
+
+        long currentOffset = 0;
+        long chunkStartOffset = 0;
+        int rowsInChunk = 0;
+        bool lineHasNonWhitespace = false;
+        bool lineStartsWithBrace = false;
+        bool hasUnterminatedDataRow = false;
+
+        int bytesRead;
+        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, MeasurementBufferSize), cancellationToken)
+            .ConfigureAwait(false)) > 0)
+        {
+            for (int i = 0; i < bytesRead; i++)
+            {
+                byte b = buffer[i];
+
+                if (b == (byte)'\n')
+                {
+                    if (lineHasNonWhitespace && lineStartsWithBrace)
+                    {
+                        rowsInChunk++;
+                        hasUnterminatedDataRow = false;
+
+                        if (rowsInChunk >= chunkSize)
+                        {
+                            long chunkEndOffset = currentOffset + 1;
+                            ranges.Add(new ChunkByteRange(
+                                chunkStartOffset,
+                                chunkEndOffset - chunkStartOffset,
+                                rowsInChunk));
+                            chunkStartOffset = chunkEndOffset;
+                            rowsInChunk = 0;
+                        }
+                    }
+
+                    lineHasNonWhitespace = false;
+                    lineStartsWithBrace = false;
+                }
+                else if (b != (byte)'\r' && b != (byte)' ' && b != (byte)'\t')
+                {
+                    if (!lineHasNonWhitespace)
+                    {
+                        lineHasNonWhitespace = true;
+                        lineStartsWithBrace = b == (byte)'{';
+                        hasUnterminatedDataRow = lineStartsWithBrace;
+                    }
+                }
+
+                currentOffset++;
+            }
+        }
+
+        // Account for unterminated last line (file not ending with newline).
+        if (hasUnterminatedDataRow)
+        {
+            rowsInChunk++;
+        }
+
+        if (rowsInChunk > 0)
+        {
+            ranges.Add(new ChunkByteRange(
+                chunkStartOffset,
+                currentOffset - chunkStartOffset,
+                rowsInChunk));
+        }
+
+        return ranges;
     }
 }

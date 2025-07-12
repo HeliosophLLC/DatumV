@@ -203,7 +203,7 @@ public sealed class CsvTableProviderTests
             Descriptor("simple.csv"), CancellationToken.None);
 
         Assert.Null(capabilities.EstimatedRowCount);
-        Assert.False(capabilities.SupportsSeek);
+        Assert.True(capabilities.SupportsSeek);
     }
 
     // ───────────────────── Cancellation ─────────────────────
