@@ -296,6 +296,154 @@ public sealed class SourceIndexBuilderTests
         Assert.False(filter1.MayContain(DataValue.FromString("A")));
     }
 
+    [Fact]
+    public async Task BuildAsync_WithIndexColumns_BuildsSortedIndexes()
+    {
+        Row[] rows =
+        [
+            MakeRow(("id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("charlie"))),
+            MakeRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("bob"))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("test");
+        HashSet<string> indexColumns = ["id"];
+        SourceIndexBuilder builder = new(chunkSize: 100, indexColumns: indexColumns);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.SortedIndexes.HasColumn("id"));
+        Assert.False(index.SortedIndexes.HasColumn("name"));
+
+        Assert.True(index.SortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
+        Assert.Equal(3, sortedIndex!.Count);
+
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(2.0f));
+        Assert.Single(found);
+        Assert.Equal(0, found[0].ChunkIndex);
+        Assert.Equal(2, found[0].RowOffsetInChunk);
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithIndexColumns_MultipleChunks_CorrectChunkIndexes()
+    {
+        Row[] rows = Enumerable.Range(0, 15).Select(i =>
+            MakeRow(("value", DataValue.FromScalar((float)i)))).ToArray();
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("multi");
+        HashSet<string> indexColumns = ["value"];
+        SourceIndexBuilder builder = new(chunkSize: 5, indexColumns: indexColumns);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.SortedIndexes.TryGetIndex("value", out SortedValueIndex? sortedIndex));
+        Assert.Equal(15, sortedIndex!.Count);
+
+        // Value 0.0 should be in chunk 0, row 0.
+        IReadOnlyList<ValueIndexEntry> found0 = sortedIndex.FindExact(DataValue.FromScalar(0.0f));
+        Assert.Single(found0);
+        Assert.Equal(0, found0[0].ChunkIndex);
+        Assert.Equal(0, found0[0].RowOffsetInChunk);
+
+        // Value 7.0 should be in chunk 1, row 2 (rows 5-9 are chunk 1).
+        IReadOnlyList<ValueIndexEntry> found7 = sortedIndex.FindExact(DataValue.FromScalar(7.0f));
+        Assert.Single(found7);
+        Assert.Equal(1, found7[0].ChunkIndex);
+        Assert.Equal(2, found7[0].RowOffsetInChunk);
+
+        // Value 12.0 should be in chunk 2, row 2 (rows 10-14 are chunk 2).
+        IReadOnlyList<ValueIndexEntry> found12 = sortedIndex.FindExact(DataValue.FromScalar(12.0f));
+        Assert.Single(found12);
+        Assert.Equal(2, found12[0].ChunkIndex);
+        Assert.Equal(2, found12[0].RowOffsetInChunk);
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithoutIndexColumns_NoSortedIndexes()
+    {
+        Row[] rows = [MakeRow(("id", DataValue.FromScalar(1.0f)))];
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("test");
+        SourceIndexBuilder builder = new(chunkSize: 100);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.Null(index.SortedIndexes);
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithIndexColumns_SkipsNullValues()
+    {
+        Row[] rows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1.0f))),
+            MakeRow(("id", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("id", DataValue.FromScalar(3.0f))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("nulls");
+        HashSet<string> indexColumns = ["id"];
+        SourceIndexBuilder builder = new(chunkSize: 100, indexColumns: indexColumns);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.SortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
+        // Null values should be excluded from the sorted index.
+        Assert.Equal(2, sortedIndex!.Count);
+    }
+
+    [Fact]
+    public void IncrementalBuilder_WithIndexColumns_BuildsSortedIndexes()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        HashSet<string> indexColumns = ["id"];
+        SourceIndexBuilder builder = new(chunkSize: 100, indexColumns: indexColumns);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        incremental.AddRow(MakeRow(("id", DataValue.FromScalar(3.0f))));
+        incremental.AddRow(MakeRow(("id", DataValue.FromScalar(1.0f))));
+        incremental.AddRow(MakeRow(("id", DataValue.FromScalar(2.0f))));
+
+        SourceIndex result = incremental.Finalize();
+
+        Assert.NotNull(result.SortedIndexes);
+        Assert.True(result.SortedIndexes.HasColumn("id"));
+        Assert.True(result.SortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
+        Assert.Equal(3, sortedIndex!.Count);
+
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(2.0f));
+        Assert.Single(found);
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithBothBloomAndIndexColumns_BuildsBoth()
+    {
+        Row[] rows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1.0f)), ("category", DataValue.FromString("A"))),
+            MakeRow(("id", DataValue.FromScalar(2.0f)), ("category", DataValue.FromString("B"))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("both");
+        HashSet<string> bloomColumns = ["category"];
+        HashSet<string> indexColumns = ["id"];
+        SourceIndexBuilder builder = new(chunkSize: 100, bloomColumns: bloomColumns, indexColumns: indexColumns);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.BloomFilters);
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.BloomFilters.HasColumn("category"));
+        Assert.True(index.SortedIndexes.HasColumn("id"));
+    }
+
     // ───────────── Helpers ─────────────
 
     private static TableDescriptor CreateDescriptor(string name)

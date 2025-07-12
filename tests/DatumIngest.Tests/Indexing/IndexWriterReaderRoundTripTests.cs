@@ -449,4 +449,192 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.True(restored.BloomFilters.TryGetFilter("name", 0, out BloomFilter? nameResult));
         Assert.True(nameResult!.MayContain(DataValue.FromString("alice")));
     }
+
+    [Fact]
+    public void RoundTrip_SortedIndexes_PreservesEntries()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("name", DataKind.String, nullable: true),
+        ]);
+        IndexSchema indexSchema = new(schema, 300);
+
+        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new ChunkColumnStatistics(
+                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                NullCount: 0, RowCount: 100, EstimatedCardinality: 100),
+            ["name"] = new ChunkColumnStatistics(
+                DataValue.FromString("alice"), DataValue.FromString("zoe"),
+                NullCount: 0, RowCount: 100, EstimatedCardinality: 50)
+        };
+
+        List<IndexChunk> chunks =
+        [
+            new IndexChunk(0, 100, -1, -1, stats),
+            new IndexChunk(100, 100, -1, -1, stats),
+            new IndexChunk(200, 100, -1, -1, stats),
+        ];
+
+        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = SortedValueIndex.BuildFromUnsorted(
+            [
+                new ValueIndexEntry(DataValue.FromScalar(50.0f), 1, 10),
+                new ValueIndexEntry(DataValue.FromScalar(1.0f), 0, 0),
+                new ValueIndexEntry(DataValue.FromScalar(100.0f), 2, 99),
+            ]),
+            ["name"] = SortedValueIndex.BuildFromUnsorted(
+            [
+                new ValueIndexEntry(DataValue.FromString("bob"), 0, 5),
+                new ValueIndexEntry(DataValue.FromString("alice"), 0, 0),
+            ]),
+        };
+
+        SortedValueIndexSet sortedIndexSet = new(sortedIndexes);
+        SourceIndex original = new(fingerprint, indexSchema, chunks, sortedIndexes: sortedIndexSet);
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.NotNull(restored.SortedIndexes);
+        Assert.Equal(2, restored.SortedIndexes.Count);
+        Assert.True(restored.SortedIndexes.HasColumn("id"));
+        Assert.True(restored.SortedIndexes.HasColumn("name"));
+
+        Assert.True(restored.SortedIndexes.TryGetIndex("id", out SortedValueIndex? idIndex));
+        Assert.Equal(3, idIndex!.Count);
+
+        // Verify lookup works on deserialized index.
+        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromScalar(50.0f));
+        Assert.Single(found);
+        Assert.Equal(1, found[0].ChunkIndex);
+        Assert.Equal(10, found[0].RowOffsetInChunk);
+
+        Assert.True(restored.SortedIndexes.TryGetIndex("name", out SortedValueIndex? nameIndex));
+        IReadOnlyList<ValueIndexEntry> nameFound = nameIndex!.FindExact(DataValue.FromString("alice"));
+        Assert.Single(nameFound);
+        Assert.Equal(0, nameFound[0].ChunkIndex);
+    }
+
+    [Fact]
+    public void RoundTrip_NoSortedIndexes_PreservesNull()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 10);
+        SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.Null(restored.SortedIndexes);
+    }
+
+    [Fact]
+    public void RoundTrip_ZipDirectory_PreservesEntries()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("x", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 10);
+
+        ZipDirectoryEntry[] zipEntries =
+        [
+            new("data/file1.csv", CompressedSize: 1024, UncompressedSize: 4096, LocalHeaderOffset: 0, Crc32: 0xDEADBEEF),
+            new("data/file2.csv", CompressedSize: 2048, UncompressedSize: 8192, LocalHeaderOffset: 4096, Crc32: 0xCAFEBABE),
+        ];
+
+        ZipDirectoryCache zipDirectory = new(zipEntries);
+        SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>(), zipDirectory: zipDirectory);
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.NotNull(restored.ZipDirectory);
+        Assert.Equal(2, restored.ZipDirectory.Count);
+
+        ReadOnlySpan<ZipDirectoryEntry> restoredEntries = restored.ZipDirectory.Entries;
+        Assert.Equal("data/file1.csv", restoredEntries[0].FileName);
+        Assert.Equal(1024, restoredEntries[0].CompressedSize);
+        Assert.Equal(4096, restoredEntries[0].UncompressedSize);
+        Assert.Equal(0, restoredEntries[0].LocalHeaderOffset);
+        Assert.Equal(0xDEADBEEFu, restoredEntries[0].Crc32);
+
+        Assert.Equal("data/file2.csv", restoredEntries[1].FileName);
+        Assert.Equal(2048, restoredEntries[1].CompressedSize);
+        Assert.Equal(8192, restoredEntries[1].UncompressedSize);
+        Assert.Equal(4096, restoredEntries[1].LocalHeaderOffset);
+        Assert.Equal(0xCAFEBABEu, restoredEntries[1].Crc32);
+    }
+
+    [Fact]
+    public void RoundTrip_NoZipDirectory_PreservesNull()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 10);
+        SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.Null(restored.ZipDirectory);
+    }
+
+    [Fact]
+    public void RoundTrip_AllSections_PreservedTogether()
+    {
+        SourceFingerprint fingerprint = new(42, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 200);
+
+        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new ChunkColumnStatistics(
+                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                NullCount: 0, RowCount: 100, EstimatedCardinality: 100)
+        };
+
+        List<IndexChunk> chunks =
+        [
+            new IndexChunk(0, 100, -1, -1, stats),
+            new IndexChunk(100, 100, -1, -1, stats),
+        ];
+
+        // Bloom filters
+        BloomFilter filter0 = new(100);
+        filter0.Add(DataValue.FromScalar(1.0f));
+        BloomFilter filter1 = new(100);
+        filter1.Add(DataValue.FromScalar(50.0f));
+        BloomFilterSet bloomFilterSet = new(
+            new Dictionary<string, BloomFilter[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = [filter0, filter1]
+            },
+            chunkCount: 2);
+
+        // Sorted indexes
+        Dictionary<string, SortedValueIndex> sortedIndexes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = SortedValueIndex.BuildFromUnsorted(
+            [
+                new ValueIndexEntry(DataValue.FromScalar(1.0f), 0, 0),
+                new ValueIndexEntry(DataValue.FromScalar(50.0f), 1, 25),
+            ]),
+        };
+        SortedValueIndexSet sortedIndexSet = new(sortedIndexes);
+
+        // Zip directory
+        ZipDirectoryEntry[] zipEntries = [new("test.csv", 100, 200, 0, 0x12345678)];
+        ZipDirectoryCache zipDirectory = new(zipEntries);
+
+        SourceIndex original = new(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet, zipDirectory);
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.Equal(42, restored.Fingerprint.FileSize);
+        Assert.Equal(2, restored.Chunks.Count);
+        Assert.NotNull(restored.BloomFilters);
+        Assert.NotNull(restored.SortedIndexes);
+        Assert.NotNull(restored.ZipDirectory);
+        Assert.Equal(1, restored.ZipDirectory.Count);
+        Assert.True(restored.SortedIndexes.HasColumn("id"));
+    }
 }

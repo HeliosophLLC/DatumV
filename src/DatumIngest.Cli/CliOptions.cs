@@ -43,6 +43,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the column names to build bloom filters for during index creation.</summary>
     public HashSet<string> BloomColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Gets or sets the column names to build sorted value indexes for during index creation.</summary>
+    public HashSet<string> IndexColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -144,6 +147,17 @@ internal sealed class CliOptions
                     foreach (string column in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                     {
                         options.BloomColumns.Add(column);
+                    }
+                    break;
+
+                case "--index-columns":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--index-columns requires a comma-separated list of column names");
+                    }
+                    foreach (string column in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        options.IndexColumns.Add(column);
                     }
                     break;
 

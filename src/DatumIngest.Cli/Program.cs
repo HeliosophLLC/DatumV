@@ -135,7 +135,8 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
     }
 
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
-    SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns);
+    HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
+    SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns, indexColumns);
 
     foreach (string source in options.Sources)
     {
@@ -172,6 +173,11 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
             if (index.BloomFilters is not null)
             {
                 Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
+            }
+
+            if (index.SortedIndexes is not null)
+            {
+                Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
             }
         }
         finally

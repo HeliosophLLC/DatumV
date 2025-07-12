@@ -40,7 +40,15 @@ public sealed class IndexReader
             ? ReadSectionAs(reader, input, sections, IndexSectionType.BloomFilters, ReadBloomFilters)
             : null;
 
-        return new SourceIndex(fingerprint, schema, chunks, bloomFilters);
+        SortedValueIndexSet? sortedIndexes = sections.ContainsKey(IndexSectionType.SortedIndexes)
+            ? ReadSectionAs(reader, input, sections, IndexSectionType.SortedIndexes, ReadSortedIndexes)
+            : null;
+
+        ZipDirectoryCache? zipDirectory = sections.ContainsKey(IndexSectionType.ZipDirectory)
+            ? ReadSectionAs(reader, input, sections, IndexSectionType.ZipDirectory, ReadZipDirectory)
+            : null;
+
+        return new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory);
     }
 
     private static void ReadHeader(BinaryReader reader, out long tableOfContentsOffset)
@@ -191,6 +199,49 @@ public sealed class IndexReader
         }
 
         return new BloomFilterSet(filters, chunkCount);
+    }
+
+    private static SortedValueIndexSet ReadSortedIndexes(BinaryReader reader)
+    {
+        int columnCount = reader.ReadInt32();
+        Dictionary<string, SortedValueIndex> indexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < columnCount; i++)
+        {
+            string columnName = reader.ReadString();
+            int entryCount = reader.ReadInt32();
+            ValueIndexEntry[] entries = new ValueIndexEntry[entryCount];
+
+            for (int j = 0; j < entryCount; j++)
+            {
+                DataValue key = ReadDataValue(reader);
+                int chunkIndex = reader.ReadInt32();
+                long rowOffsetInChunk = reader.ReadInt64();
+                entries[j] = new ValueIndexEntry(key, chunkIndex, rowOffsetInChunk);
+            }
+
+            indexes[columnName] = new SortedValueIndex(entries);
+        }
+
+        return new SortedValueIndexSet(indexes);
+    }
+
+    private static ZipDirectoryCache ReadZipDirectory(BinaryReader reader)
+    {
+        int entryCount = reader.ReadInt32();
+        ZipDirectoryEntry[] entries = new ZipDirectoryEntry[entryCount];
+
+        for (int i = 0; i < entryCount; i++)
+        {
+            string fileName = reader.ReadString();
+            long compressedSize = reader.ReadInt64();
+            long uncompressedSize = reader.ReadInt64();
+            long localHeaderOffset = reader.ReadInt64();
+            uint crc32 = reader.ReadUInt32();
+            entries[i] = new ZipDirectoryEntry(fileName, compressedSize, uncompressedSize, localHeaderOffset, crc32);
+        }
+
+        return new ZipDirectoryCache(entries);
     }
 
     internal static DataValue? ReadNullableDataValue(BinaryReader reader)

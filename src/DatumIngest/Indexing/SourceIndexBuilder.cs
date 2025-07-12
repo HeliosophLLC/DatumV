@@ -15,18 +15,22 @@ public sealed class SourceIndexBuilder
 {
     private readonly int _chunkSize;
     private readonly IReadOnlySet<string>? _bloomColumns;
+    private readonly IReadOnlySet<string>? _indexColumns;
 
     /// <summary>
     /// Creates a builder with the specified chunk size.
     /// </summary>
     /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
     /// <param name="bloomColumns">Column names to build bloom filters for, or <c>null</c> for no bloom filters.</param>
+    /// <param name="indexColumns">Column names to build sorted value indexes for, or <c>null</c> for no sorted indexes.</param>
     public SourceIndexBuilder(
         int chunkSize = IndexConstants.DefaultChunkSize,
-        IReadOnlySet<string>? bloomColumns = null)
+        IReadOnlySet<string>? bloomColumns = null,
+        IReadOnlySet<string>? indexColumns = null)
     {
         _chunkSize = chunkSize;
         _bloomColumns = bloomColumns;
+        _indexColumns = indexColumns;
     }
 
     /// <summary>
@@ -59,7 +63,10 @@ public sealed class SourceIndexBuilder
         Dictionary<string, BloomFilter>? currentBloomFilters = null;
         List<Dictionary<string, BloomFilter>>? allChunkBloomFilters =
             _bloomColumns is not null && _bloomColumns.Count > 0 ? new() : null;
+        Dictionary<string, List<ValueIndexEntry>>? indexCollectors =
+            _indexColumns is not null && _indexColumns.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) : null;
         int rowsInCurrentChunk = 0;
+        int currentChunkIndex = 0;
 
         await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
@@ -69,6 +76,7 @@ public sealed class SourceIndexBuilder
                 schema = BuildSchemaFromRow(row);
                 currentAccumulators = CreateAccumulators(row);
                 currentBloomFilters = CreateBloomFilters(_bloomColumns, _chunkSize);
+                InitializeIndexCollectors(indexCollectors, _indexColumns);
             }
 
             foreach (string columnName in row.ColumnNames)
@@ -85,6 +93,12 @@ public sealed class SourceIndexBuilder
                 {
                     bloom.Add(value);
                 }
+
+                if (indexCollectors is not null && !value.IsNull
+                    && indexCollectors.TryGetValue(columnName, out List<ValueIndexEntry>? entries))
+                {
+                    entries.Add(new ValueIndexEntry(value, currentChunkIndex, rowsInCurrentChunk));
+                }
             }
 
             rowsInCurrentChunk++;
@@ -99,6 +113,7 @@ public sealed class SourceIndexBuilder
                 }
                 currentChunkRowOffset = totalRowCount;
                 rowsInCurrentChunk = 0;
+                currentChunkIndex++;
                 currentAccumulators = CreateAccumulators(schema);
                 currentBloomFilters = CreateBloomFilters(_bloomColumns, _chunkSize);
             }
@@ -120,8 +135,12 @@ public sealed class SourceIndexBuilder
             ? BuildBloomFilterSet(allChunkBloomFilters, chunks.Count)
             : null;
 
+        SortedValueIndexSet? sortedIndexSet = indexCollectors is not null
+            ? BuildSortedValueIndexSet(indexCollectors)
+            : null;
+
         IndexSchema indexSchema = new(schema, totalRowCount);
-        return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet);
+        return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet);
     }
 
     /// <summary>
@@ -131,7 +150,7 @@ public sealed class SourceIndexBuilder
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
     {
-        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns);
+        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns);
     }
 
     private static Schema BuildSchemaFromRow(Row row)
@@ -256,6 +275,41 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
+    /// Initializes per-column entry lists for sorted index collection.
+    /// </summary>
+    internal static void InitializeIndexCollectors(
+        Dictionary<string, List<ValueIndexEntry>>? collectors,
+        IReadOnlySet<string>? indexColumns)
+    {
+        if (collectors is null || indexColumns is null)
+        {
+            return;
+        }
+
+        foreach (string column in indexColumns)
+        {
+            collectors.TryAdd(column, new List<ValueIndexEntry>());
+        }
+    }
+
+    /// <summary>
+    /// Sorts collected entries per column and assembles a <see cref="SortedValueIndexSet"/>.
+    /// </summary>
+    internal static SortedValueIndexSet BuildSortedValueIndexSet(
+        Dictionary<string, List<ValueIndexEntry>> collectors)
+    {
+        Dictionary<string, SortedValueIndex> indexes = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (KeyValuePair<string, List<ValueIndexEntry>> entry in collectors)
+        {
+            ValueIndexEntry[] entries = entry.Value.ToArray();
+            indexes[entry.Key] = SortedValueIndex.BuildFromUnsorted(entries);
+        }
+
+        return new SortedValueIndexSet(indexes);
+    }
+
+    /// <summary>
     /// Lightweight per-column accumulator that tracks min, max, null count, and
     /// estimated cardinality for a single chunk. Much lighter than the full
     /// <see cref="Statistics.StatisticsCollector"/> — no histograms, percentiles,
@@ -351,21 +405,32 @@ public sealed class IncrementalIndexBuilder
     private readonly int _chunkSize;
     private readonly SourceFingerprint _fingerprint;
     private readonly IReadOnlySet<string>? _bloomColumns;
+    private readonly IReadOnlySet<string>? _indexColumns;
     private Schema? _schema;
     private readonly List<IndexChunk> _chunks = new();
     private Dictionary<string, SourceIndexBuilder_ChunkAccumulatorProxy> _currentAccumulators = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, BloomFilter>? _currentBloomFilters;
     private readonly List<Dictionary<string, BloomFilter>>? _allChunkBloomFilters;
+    private readonly Dictionary<string, List<ValueIndexEntry>>? _indexCollectors;
     private int _rowsInCurrentChunk;
     private long _totalRowCount;
     private long _currentChunkRowOffset;
+    private int _currentChunkIndex;
 
-    internal IncrementalIndexBuilder(int chunkSize, SourceFingerprint fingerprint, IReadOnlySet<string>? bloomColumns = null)
+    internal IncrementalIndexBuilder(
+        int chunkSize,
+        SourceFingerprint fingerprint,
+        IReadOnlySet<string>? bloomColumns = null,
+        IReadOnlySet<string>? indexColumns = null)
     {
         _chunkSize = chunkSize;
         _fingerprint = fingerprint;
         _bloomColumns = bloomColumns;
+        _indexColumns = indexColumns;
         _allChunkBloomFilters = bloomColumns is not null && bloomColumns.Count > 0 ? new() : null;
+        _indexCollectors = indexColumns is not null && indexColumns.Count > 0
+            ? new(StringComparer.OrdinalIgnoreCase)
+            : null;
     }
 
     /// <summary>
@@ -380,6 +445,7 @@ public sealed class IncrementalIndexBuilder
             _schema = BuildSchemaFromRow(row);
             InitializeAccumulators(row);
             _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_bloomColumns, _chunkSize);
+            SourceIndexBuilder.InitializeIndexCollectors(_indexCollectors, _indexColumns);
         }
 
         foreach (string columnName in row.ColumnNames)
@@ -395,6 +461,12 @@ public sealed class IncrementalIndexBuilder
                 && _currentBloomFilters.TryGetValue(columnName, out BloomFilter? bloom))
             {
                 bloom.Add(value);
+            }
+
+            if (_indexCollectors is not null && !value.IsNull
+                && _indexCollectors.TryGetValue(columnName, out List<ValueIndexEntry>? entries))
+            {
+                entries.Add(new ValueIndexEntry(value, _currentChunkIndex, _rowsInCurrentChunk));
             }
         }
 
@@ -424,8 +496,12 @@ public sealed class IncrementalIndexBuilder
             ? SourceIndexBuilder.BuildBloomFilterSet(_allChunkBloomFilters, _chunks.Count)
             : null;
 
+        SortedValueIndexSet? sortedIndexSet = _indexCollectors is not null
+            ? SourceIndexBuilder.BuildSortedValueIndexSet(_indexCollectors)
+            : null;
+
         IndexSchema indexSchema = new(schema, _totalRowCount);
-        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet);
+        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet, sortedIndexSet);
     }
 
     private void FinalizeCurrentChunk()
@@ -451,6 +527,7 @@ public sealed class IncrementalIndexBuilder
 
         _currentChunkRowOffset = _totalRowCount;
         _rowsInCurrentChunk = 0;
+        _currentChunkIndex++;
 
         if (_schema is not null)
         {

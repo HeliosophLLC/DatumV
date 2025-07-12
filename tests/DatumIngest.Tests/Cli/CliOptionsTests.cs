@@ -147,4 +147,54 @@ public sealed class CliOptionsTests
 
         Assert.Equal("csv:data=/path/file.csv;delimiter=;;header=true", options.Sources[0]);
     }
+
+    [Fact]
+    public void Parse_IndexColumns_ParsesCommaSeparated()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv", "--index-columns", "id,name,value"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal(3, options.IndexColumns.Count);
+        Assert.Contains("id", options.IndexColumns);
+        Assert.Contains("name", options.IndexColumns);
+        Assert.Contains("value", options.IndexColumns);
+    }
+
+    [Fact]
+    public void Parse_IndexColumns_TrimsWhitespace()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv", "--index-columns", " id , name "];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal(2, options.IndexColumns.Count);
+        Assert.Contains("id", options.IndexColumns);
+        Assert.Contains("name", options.IndexColumns);
+    }
+
+    [Fact]
+    public void Parse_IndexColumns_DefaultEmpty()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Empty(options.IndexColumns);
+    }
+
+    [Fact]
+    public void Parse_BothBloomAndIndexColumns_ParsedIndependently()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv",
+            "--bloom-columns", "category",
+            "--index-columns", "id"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Single(options.BloomColumns);
+        Assert.Contains("category", options.BloomColumns);
+        Assert.Single(options.IndexColumns);
+        Assert.Contains("id", options.IndexColumns);
+    }
 }

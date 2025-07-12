@@ -24,21 +24,39 @@ public sealed class SourceIndex
     public BloomFilterSet? BloomFilters { get; }
 
     /// <summary>
+    /// Per-column sorted value indexes for O(log n) key lookup,
+    /// or <c>null</c> if sorted indexes were not built.
+    /// </summary>
+    public SortedValueIndexSet? SortedIndexes { get; }
+
+    /// <summary>
+    /// Cached ZIP central directory entries,
+    /// or <c>null</c> if the source is not a ZIP file.
+    /// </summary>
+    public ZipDirectoryCache? ZipDirectory { get; }
+
+    /// <summary>
     /// Creates a new source index.
     /// </summary>
     /// <param name="fingerprint">Source file fingerprint.</param>
     /// <param name="schema">Cached schema and row count.</param>
     /// <param name="chunks">Ordered list of row chunks with column statistics.</param>
     /// <param name="bloomFilters">Optional bloom filter set for membership testing.</param>
+    /// <param name="sortedIndexes">Optional sorted value indexes for key lookup.</param>
+    /// <param name="zipDirectory">Optional cached ZIP central directory.</param>
     public SourceIndex(
         SourceFingerprint fingerprint,
         IndexSchema schema,
         IReadOnlyList<IndexChunk> chunks,
-        BloomFilterSet? bloomFilters = null)
+        BloomFilterSet? bloomFilters = null,
+        SortedValueIndexSet? sortedIndexes = null,
+        ZipDirectoryCache? zipDirectory = null)
     {
         Fingerprint = fingerprint;
         Schema = schema;
         Chunks = chunks;
         BloomFilters = bloomFilters;
+        SortedIndexes = sortedIndexes;
+        ZipDirectory = zipDirectory;
     }
 }

@@ -38,6 +38,18 @@ public sealed class IndexWriter
                 WriteBloomFilters(writer, index.BloomFilters));
         }
 
+        if (index.SortedIndexes is not null)
+        {
+            RecordSection(sections, IndexSectionType.SortedIndexes, writer, () =>
+                WriteSortedIndexes(writer, index.SortedIndexes));
+        }
+
+        if (index.ZipDirectory is not null)
+        {
+            RecordSection(sections, IndexSectionType.ZipDirectory, writer, () =>
+                WriteZipDirectory(writer, index.ZipDirectory));
+        }
+
         long tableOfContentsOffset = output.Position;
         WriteTableOfContents(writer, sections);
 
@@ -153,6 +165,40 @@ public sealed class IndexWriter
                 writer.Write(filter.SizeInBytes);
                 writer.Write(filter.Bits);
             }
+        }
+    }
+
+    private static void WriteSortedIndexes(BinaryWriter writer, SortedValueIndexSet sortedIndexes)
+    {
+        IReadOnlyDictionary<string, SortedValueIndex> indexes = sortedIndexes.Indexes;
+        writer.Write(indexes.Count);
+
+        foreach (KeyValuePair<string, SortedValueIndex> column in indexes)
+        {
+            writer.Write(column.Key);
+            ReadOnlySpan<ValueIndexEntry> entries = column.Value.Entries;
+            writer.Write(entries.Length);
+
+            foreach (ValueIndexEntry entry in entries)
+            {
+                WriteDataValue(writer, entry.Key);
+                writer.Write(entry.ChunkIndex);
+                writer.Write(entry.RowOffsetInChunk);
+            }
+        }
+    }
+
+    private static void WriteZipDirectory(BinaryWriter writer, ZipDirectoryCache zipDirectory)
+    {
+        writer.Write(zipDirectory.Count);
+
+        foreach (ZipDirectoryEntry entry in zipDirectory.Entries)
+        {
+            writer.Write(entry.FileName);
+            writer.Write(entry.CompressedSize);
+            writer.Write(entry.UncompressedSize);
+            writer.Write(entry.LocalHeaderOffset);
+            writer.Write(entry.Crc32);
         }
     }
 

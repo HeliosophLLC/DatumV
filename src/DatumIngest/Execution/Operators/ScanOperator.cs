@@ -112,10 +112,11 @@ public sealed class ScanOperator : IQueryOperator
             rows = provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
         }
 
-        // When a source index is available and either a filter hint or bloom pruning
-        // keys are present, apply chunk-level pruning.
+        // When a source index is available and either a filter hint, bloom pruning
+        // keys, or sorted indexes are present, apply chunk-level pruning.
         bool hasIndexPruning = _sourceIndex is not null
-            && (_filterHint is not null || _bloomPruningKeys is not null);
+            && (_filterHint is not null || _bloomPruningKeys is not null
+                || _sourceIndex.SortedIndexes is not null);
 
         if (hasIndexPruning)
         {
@@ -137,6 +138,7 @@ public sealed class ScanOperator : IQueryOperator
     {
         IReadOnlyList<IndexChunk> chunks = _sourceIndex!.Chunks;
         BloomFilterSet? bloomFilters = _sourceIndex.BloomFilters;
+        SortedValueIndexSet? sortedIndexes = _sourceIndex.SortedIndexes;
         TotalIndexChunks = chunks.Count;
         PrunedIndexChunks = 0;
 
@@ -191,6 +193,13 @@ public sealed class ScanOperator : IQueryOperator
                 }
             }
 
+            // Sorted-index-based pruning: if equality predicates are present and
+            // sorted indexes exist, check whether the chunk contains the key.
+            if (!pruned && _filterHint is not null && sortedIndexes is not null)
+            {
+                pruned = ShouldPruneWithSortedIndexes(_filterHint, sortedIndexes, chunkIndex);
+            }
+
             if (pruned)
             {
                 PrunedIndexChunks++;
@@ -233,5 +242,90 @@ public sealed class ScanOperator : IQueryOperator
 
             rowIndex++;
         }
+    }
+
+    /// <summary>
+    /// Checks whether a chunk can be pruned based on sorted value indexes.
+    /// Extracts equality predicates (column = literal) from the filter expression
+    /// and checks the sorted index to see if the chunk contains any matching key.
+    /// </summary>
+    private static bool ShouldPruneWithSortedIndexes(
+        Expression filterHint, SortedValueIndexSet sortedIndexes, int chunkIndex)
+    {
+        // Walk the expression tree looking for equality comparisons of the form
+        // column = literal. Each such predicate can rule out chunks that do not
+        // contain the literal in their sorted index.
+        return CheckExpressionForPruning(filterHint, sortedIndexes, chunkIndex);
+    }
+
+    private static bool CheckExpressionForPruning(
+        Expression expression, SortedValueIndexSet sortedIndexes, int chunkIndex)
+    {
+        if (expression is BinaryExpression binary)
+        {
+            if (binary.Operator == BinaryOperator.And)
+            {
+                // AND: prune if either side says we can prune.
+                return CheckExpressionForPruning(binary.Left, sortedIndexes, chunkIndex)
+                    || CheckExpressionForPruning(binary.Right, sortedIndexes, chunkIndex);
+            }
+
+            if (binary.Operator == BinaryOperator.Equal)
+            {
+                return CheckEqualityForPruning(binary.Left, binary.Right, sortedIndexes, chunkIndex);
+            }
+        }
+
+        return false;
+    }
+
+    private static bool CheckEqualityForPruning(
+        Expression left, Expression right, SortedValueIndexSet sortedIndexes, int chunkIndex)
+    {
+        // Match: column = literal  or  literal = column
+        string? columnName = null;
+        object? rawLiteral = null;
+
+        if (left is ColumnReference columnRef && right is LiteralExpression literal)
+        {
+            columnName = columnRef.ColumnName;
+            rawLiteral = literal.Value;
+        }
+        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
+        {
+            columnName = columnRight.ColumnName;
+            rawLiteral = literalLeft.Value;
+        }
+
+        if (columnName is null || rawLiteral is null)
+        {
+            return false;
+        }
+
+        if (!sortedIndexes.TryGetIndex(columnName, out SortedValueIndex? index))
+        {
+            return false;
+        }
+
+        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        IReadOnlySet<int> matchingChunks = index.FindChunksContaining(literalValue);
+        return !matchingChunks.Contains(chunkIndex);
+    }
+
+    /// <summary>
+    /// Converts an AST literal value (<see cref="LiteralExpression.Value"/>) to a <see cref="DataValue"/>.
+    /// </summary>
+    private static DataValue ConvertLiteralToDataValue(object rawLiteral)
+    {
+        return rawLiteral switch
+        {
+            int intValue => DataValue.FromScalar(intValue),
+            long longValue => DataValue.FromScalar(longValue),
+            float floatValue => DataValue.FromScalar(floatValue),
+            double doubleValue => DataValue.FromScalar((float)doubleValue),
+            string stringValue => DataValue.FromString(stringValue),
+            bool boolValue => DataValue.FromScalar(boolValue ? 1f : 0f),
+            _ => DataValue.Null(DataKind.Scalar),
+        };
     }
 }
