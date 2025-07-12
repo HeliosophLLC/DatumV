@@ -7,7 +7,7 @@
 			"command": "dotnet",
 			"args": [
 				"pack",
-				"src/DatumIngest/DatumIngest.csproj",
+				"DatumIngest.slnx",
 				"-c",
 				"Release",
 				"-o",

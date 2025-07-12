@@ -2,43 +2,43 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
 
-DatumIngest includes a SQL language server that provides autocomplete, diagnostics, and hover for the DatumIngest SQL dialect. It runs in the browser via Blazor WebAssembly and powers Monaco editor integration.
+DatumIngest includes a SQL language server that provides autocomplete, diagnostics, and hover for the DatumIngest SQL dialect. Two transport options are available: **Blazor WebAssembly** (client-side, no server required) and **SignalR** (server-side, integrated into any ASP.NET host).
 
 ## Architecture
 
 ```
-┌──────────────────────────┐
-│     Monaco Editor        │
-│  (CompletionProvider,    │
-│   DiagnosticsAdapter,    │
-│   HoverProvider)         │
-└──────────┬───────────────┘
-           │ [JSInvokable]
-┌──────────▼───────────────┐
-│  DatumIngest.Wasm        │
-│  LanguageServerInterop   │
-│  (Blazor WebAssembly)    │
-└──────────┬───────────────┘
-           │
-┌──────────▼───────────────┐
-│  DatumIngest.LanguageServer │
-│  LanguageService (facade)   │
-│  ┌─────────────────────┐    │
-│  │ CompletionProvider   │    │
-│  │ DiagnosticsProvider  │    │
-│  │ SemanticAnalyzer     │    │
-│  │ HoverProvider        │    │
-│  └─────────────────────┘    │
-└──────────┬───────────────┘
-           │
-┌──────────▼───────────────┐
-│  Schema Manifest (JSON)  │
-│  Pre-built via CLI:      │
-│  datumingest manifest-schema │
-└──────────────────────────┘
+┌──────────────────────────┐     ┌──────────────────────────┐
+│     Monaco Editor        │     │     Monaco Editor        │
+│   (browser, standalone)  │     │   (browser, hosted app)  │
+└──────────┬───────────────┘     └──────────┬───────────────┘
+           │ [JSInvokable]                  │ SignalR (WebSocket)
+┌──────────▼───────────────┐     ┌──────────▼───────────────┐
+│  DatumIngest.Wasm        │     │  DatumIngest.Editor      │
+│  LanguageServerInterop   │     │  LanguageServerHub       │
+│  (Blazor WebAssembly)    │     │  (ASP.NET SignalR)       │
+└──────────┬───────────────┘     └──────────┬───────────────┘
+           │                                │
+           └───────────┬───────────────────┘
+                       │
+           ┌───────────▼───────────────┐
+           │  DatumIngest.LanguageServer │
+           │  LanguageService (facade)   │
+           │  ┌─────────────────────┐    │
+           │  │ CompletionProvider   │    │
+           │  │ DiagnosticsProvider  │    │
+           │  │ SemanticAnalyzer     │    │
+           │  │ HoverProvider        │    │
+           │  └─────────────────────┘    │
+           └───────────┬───────────────┘
+                       │
+           ┌───────────▼───────────────┐
+           │  Schema Manifest (JSON)    │
+           │  Pre-built via CLI:        │
+           │  datumingest manifest-schema │
+           └───────────────────────────┘
 ```
 
-The design is transport-agnostic: `LanguageService` can be called directly from WASM interop or wrapped in an LSP JSON-RPC server for VS Code integration.
+The design is transport-agnostic: `LanguageService` can be called from WASM interop, a SignalR hub, or wrapped in an LSP JSON-RPC server for VS Code integration.
 
 ## Schema Manifest
 
@@ -174,6 +174,49 @@ All methods are synchronous (no I/O) and return JSON strings for simple marshali
 | Project | Purpose |
 |---------|---------|
 | `DatumIngest.LanguageServer` | Core library: completion, diagnostics, hover. No WASM or ASP.NET dependency. |
+| `DatumIngest.Editor` | SignalR hub + extension methods. Class library — add to any ASP.NET host. |
 | `DatumIngest.Wasm` | Blazor WebAssembly host with `[JSInvokable]` interop surface. |
 
 The core library is reusable — it can also be wrapped in an LSP server for VS Code extension support without any Blazor dependency.
+
+## SignalR Integration
+
+The `DatumIngest.Editor` package provides a SignalR hub that wraps `LanguageService` for server-side language intelligence over WebSocket. Each connection maintains its own `LanguageService` instance, cleaned up automatically on disconnect.
+
+### Host setup
+
+```csharp
+// The host application already has SignalR configured (e.g. with Redis backplane).
+builder.Services.AddSignalR().AddStackExchangeRedis(...);
+
+// Map the language server hub (defaults to /language-server).
+app.MapDatumIngestEditor();
+// Or with a custom path:
+app.MapDatumIngestEditor("/custom/path");
+```
+
+### JavaScript client
+
+```javascript
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl("/language-server")
+    .withAutomaticReconnect()
+    .build();
+
+await connection.start();
+await connection.invoke("Initialize", manifestJson);
+
+// On keystroke (debounced)
+const completions = await connection.invoke("GetCompletions", sql, cursorOffset);
+const diagnostics = await connection.invoke("GetDiagnostics", sql);
+const hover = await connection.invoke("GetHover", sql, cursorOffset);
+```
+
+SignalR handles JSON serialization natively — no manual marshaling.
+
+### Connection lifecycle
+
+- **Initialize**: Client sends the manifest JSON. The hub creates a `LanguageService` bound to this connection.
+- **Request/Response**: `GetCompletions`, `GetDiagnostics`, `GetHover` — all synchronous, pure computation.
+- **Reconnect**: If the WebSocket drops and reconnects (possibly to a different server behind a load balancer), the client must call `Initialize` again. Per-connection state is server-local by design.
+- **Disconnect**: The hub removes the `LanguageService` instance from memory.
