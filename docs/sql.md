@@ -106,11 +106,11 @@ Add `--checkpoint` to resume a sharded write from the last completed shard after
 
 ```bash
 # First run — crashes after writing shards 0–4
-dq query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
+datum-ingest query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
   --source csv:data=large.csv --checkpoint
 
 # Re-run the same command — resumes from shard 5
-dq query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
+datum-ingest query "SELECT * FROM data INTO 'output.csv' SHARD ON sample_count 10000" \
   --source csv:data=large.csv --checkpoint
 ```
 
@@ -200,7 +200,7 @@ The `explain` command shows the query execution plan as a tree. Two modes are su
 Shows the operator tree structure, join strategies, filter predicates, and warnings — without executing the query:
 
 ```bash
-dq explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
+datum-ingest explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --source csv:data=measurements.csv
 ```
 
 ```
@@ -217,7 +217,7 @@ Limit (limit: 100)
 Add `--analyze` to actually execute the query and report runtime metrics — row counts, filter selectivity, self time, and total time per operator:
 
 ```bash
-dq explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
+datum-ingest explain "SELECT x FROM data WHERE x > 0.5" --source csv:data=measurements.csv --analyze
 ```
 
 ```
@@ -244,7 +244,7 @@ The `schema` command resolves column metadata from all table sources in a query'
 
 ```bash
 # Single table
-dq schema "SELECT * FROM data" --source csv:data=measurements.csv
+datum-ingest schema "SELECT * FROM data" --source csv:data=measurements.csv
 ```
 
 ```
@@ -259,7 +259,7 @@ score                          Scalar       YES        data
 
 ```bash
 # JOIN — columns from both sides, with LEFT JOIN marking the right side nullable
-dq schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
+datum-ingest schema "SELECT * FROM images AS img LEFT JOIN captions AS cap ON img.id = cap.image_id" \
   --source "zip:images=./train2017.zip" \
   --source "json:captions=./captions.json"
 ```
@@ -277,7 +277,7 @@ caption                        String       YES        cap
 
 ```bash
 # Table-valued function
-dq schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
+datum-ingest schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeholder.csv
 ```
 
 ```

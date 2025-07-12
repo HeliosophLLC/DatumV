@@ -86,10 +86,10 @@ The `manifest` command generates a structured JSON manifest describing every col
 
 ```bash
 # Print to stdout
-dq manifest "SELECT * FROM data" --source csv:data=measurements.csv
+datum-ingest manifest "SELECT * FROM data" --source csv:data=measurements.csv
 
 # Write to file
-dq manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
+datum-ingest manifest "SELECT * FROM data" --source csv:data=measurements.csv --output manifest.json
 ```
 
 ### Feature types

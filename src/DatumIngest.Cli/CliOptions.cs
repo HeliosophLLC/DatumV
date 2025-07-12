@@ -38,7 +38,7 @@ internal sealed class CliOptions
 
         if (args.Length < 2)
         {
-            throw new ArgumentException("Usage: dq <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint]");
+            throw new ArgumentException("Usage: datum-ingest <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint]");
         }
 
         options.Command = args[0].ToLowerInvariant();

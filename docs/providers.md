@@ -28,7 +28,7 @@ Reads newline-delimited JSON (JSONL/NDJSON) files where each line is a self-cont
 Schema inference samples up to 100 lines and widens column types across the sample. Type inference and value conversion are shared with the JSON provider via `JsonTypeInference`.
 
 ```bash
-dq explore "SELECT * FROM data" --source "jsonl:data=./records.jsonl"
+datum-ingest explore "SELECT * FROM data" --source "jsonl:data=./records.jsonl"
 ```
 
 ## ZIP

@@ -71,13 +71,13 @@ If you need GROUP BY, window functions, or billion-row analytics, use DuckDB. If
 ### 1. Query a CSV file
 
 ```bash
-dq explore "SELECT name, score FROM data WHERE score > 90" --source "csv:data=./iris.csv"
+datum-ingest explore "SELECT name, score FROM data WHERE score > 90" --source "csv:data=./iris.csv"
 ```
 
 ### 2. Join ZIP + JSON, transform images, output to HDF5
 
 ```bash
-dq query "
+datum-ingest query "
   SELECT resize_and_crop(load_image(img.file_bytes), 224, 224, 'center') AS image,
          cap.caption
   FROM images AS img
@@ -90,7 +90,7 @@ dq query "
 ### 3. ETL with sharded output
 
 ```bash
-dq query "
+datum-ingest query "
   SELECT id, normalize(value) AS norm_value, category
   FROM data
   INTO 'output/result.csv' SHARD ON sample_count 10000
