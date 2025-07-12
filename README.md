@@ -1,4 +1,4 @@
-# DatumIngest
+# DatumIngest™
 
 A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, JSONL, ZIP, HDF5, and Parquet files into ML-ready output formats with optional sharding.
 
@@ -8,7 +8,7 @@ Preparing datasets for machine learning means writing custom scripts to parse fi
 
 ## What It Does
 
-DatumIngest replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
+DatumIngest™ replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
 
 ## Mental Model
 
@@ -326,3 +326,7 @@ dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*
 ## License
 
 MIT
+
+---
+
+DatumIngest™ is a trademark of Heliosoph LLC.
