@@ -181,7 +181,7 @@ public sealed record ColumnReference(string? TableName, string ColumnName, Sourc
     /// Computed once on first access and cached for the lifetime of this AST node.
     /// Returns <see langword="null"/> for unqualified references.
     /// </summary>
-    internal string? QualifiedName => TableName is not null
+    public string? QualifiedName => TableName is not null
         ? (_qualifiedName ??= string.Concat(TableName, ".", ColumnName))
         : null;
 }

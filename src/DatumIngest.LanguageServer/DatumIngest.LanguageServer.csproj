@@ -11,14 +11,21 @@
     <IsPackable>true</IsPackable>
     <PackageId>DatumIngest.LanguageServer</PackageId>
     <Description>Transport-agnostic SQL language intelligence for the DatumIngest SQL dialect. Provides autocomplete, diagnostics, and hover for Monaco and VS Code integration.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  
   <ItemGroup>
     <InternalsVisibleTo Include="DatumIngest.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DatumIngest\DatumIngest.csproj" />
+    <ProjectReference Include="..\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
   </ItemGroup>
 
 </Project>

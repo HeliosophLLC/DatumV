@@ -13,6 +13,7 @@
     <PackageId>DatumIngest</PackageId>
     <Description>High-performance dataset query engine for ML ETL pipelines.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +22,7 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
   
   <ItemGroup>
@@ -28,7 +30,10 @@
     <PackageReference Include="PureHDF" Version="2.1.1" />
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.0" />
-    <PackageReference Include="Superpower" Version="3.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
   </ItemGroup>
 
 </Project>

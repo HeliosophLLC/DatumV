@@ -1,16 +1,16 @@
-<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <AssemblyName>DatumIngest.Wasm</AssemblyName>
-    <RootNamespace>DatumIngest.Wasm</RootNamespace>
+    <AssemblyName>DatumIngest.Parsing</AssemblyName>
+    <RootNamespace>DatumIngest.Parsing</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-
-    <!-- Optimize for size: the WASM module is loaded in a browser. -->
-    <PublishTrimmed>true</PublishTrimmed>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsTrimmable>true</IsTrimmable>
+    <IsPackable>true</IsPackable>
+    <PackageId>DatumIngest.Parsing</PackageId>
+    <Description>SQL parser, tokenizer, and AST types for the DatumIngest query dialect. Lightweight — no data-provider dependencies.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
@@ -21,11 +21,11 @@
   </ItemGroup>
   
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.3" />
+    <InternalsVisibleTo Include="DatumIngest.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
+    <PackageReference Include="Superpower" Version="3.1.0" />
   </ItemGroup>
 
 </Project>
