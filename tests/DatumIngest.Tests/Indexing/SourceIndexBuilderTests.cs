@@ -223,6 +223,79 @@ public sealed class SourceIndexBuilderTests
         Assert.Equal("charlie", stats.Maximum!.AsString());
     }
 
+    [Fact]
+    public async Task BuildAsync_WithBloomColumns_ProducesBloomFilters()
+    {
+        Row[] rows = Enumerable.Range(0, 20).Select(i =>
+            MakeRow(("id", DataValue.FromScalar((float)i)),
+                    ("name", DataValue.FromString($"name_{i}")))).ToArray();
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("bloom");
+        HashSet<string> bloomColumns = new(StringComparer.OrdinalIgnoreCase) { "id" };
+        SourceIndexBuilder builder = new(chunkSize: 10, bloomColumns: bloomColumns);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.BloomFilters);
+        Assert.True(index.BloomFilters.HasColumn("id"));
+        Assert.False(index.BloomFilters.HasColumn("name"));
+        Assert.Equal(2, index.BloomFilters.ChunkCount);
+
+        // Values in chunk 0 (ids 0-9) should be found.
+        Assert.True(index.BloomFilters.TryGetFilter("id", 0, out BloomFilter? chunk0));
+        Assert.True(chunk0!.MayContain(DataValue.FromScalar(5.0f)));
+
+        // Values in chunk 1 (ids 10-19) should be found.
+        Assert.True(index.BloomFilters.TryGetFilter("id", 1, out BloomFilter? chunk1));
+        Assert.True(chunk1!.MayContain(DataValue.FromScalar(15.0f)));
+
+        // Value 15 should NOT be in chunk 0 (it was in chunk 1).
+        Assert.False(chunk0.MayContain(DataValue.FromScalar(15.0f)));
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithoutBloomColumns_NoBloomFilters()
+    {
+        Row[] rows = [MakeRow(("id", DataValue.FromScalar(1.0f)))];
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("no-bloom");
+        SourceIndexBuilder builder = new(chunkSize: 100);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.Null(index.BloomFilters);
+    }
+
+    [Fact]
+    public void IncrementalBuilder_WithBloomColumns_ProducesBloomFilters()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        HashSet<string> bloomColumns = new(StringComparer.OrdinalIgnoreCase) { "category" };
+        SourceIndexBuilder builder = new(chunkSize: 5, bloomColumns: bloomColumns);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        for (int index = 0; index < 10; index++)
+        {
+            incremental.AddRow(MakeRow(
+                ("category", DataValue.FromString(index < 5 ? "A" : "B"))));
+        }
+
+        SourceIndex result = incremental.Finalize();
+
+        Assert.NotNull(result.BloomFilters);
+        Assert.True(result.BloomFilters.HasColumn("category"));
+        Assert.Equal(2, result.BloomFilters.ChunkCount);
+
+        Assert.True(result.BloomFilters.TryGetFilter("category", 0, out BloomFilter? filter0));
+        Assert.True(filter0!.MayContain(DataValue.FromString("A")));
+        Assert.False(filter0.MayContain(DataValue.FromString("B")));
+
+        Assert.True(result.BloomFilters.TryGetFilter("category", 1, out BloomFilter? filter1));
+        Assert.True(filter1!.MayContain(DataValue.FromString("B")));
+        Assert.False(filter1.MayContain(DataValue.FromString("A")));
+    }
+
     // ───────────── Helpers ─────────────
 
     private static TableDescriptor CreateDescriptor(string name)

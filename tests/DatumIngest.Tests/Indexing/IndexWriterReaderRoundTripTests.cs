@@ -335,4 +335,118 @@ public sealed class IndexWriterReaderRoundTripTests
                 break;
         }
     }
+
+    [Fact]
+    public void RoundTrip_BloomFilters_PreservesMembership()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 200);
+
+        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new ChunkColumnStatistics(
+                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                NullCount: 0, RowCount: 100, EstimatedCardinality: 100)
+        };
+
+        List<IndexChunk> chunks =
+        [
+            new IndexChunk(0, 100, -1, -1, stats),
+            new IndexChunk(100, 100, -1, -1, stats),
+        ];
+
+        BloomFilter filter0 = new(expectedElements: 100);
+        filter0.Add(DataValue.FromScalar(1.0f));
+        filter0.Add(DataValue.FromScalar(50.0f));
+
+        BloomFilter filter1 = new(expectedElements: 100);
+        filter1.Add(DataValue.FromScalar(51.0f));
+        filter1.Add(DataValue.FromScalar(100.0f));
+
+        Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = [filter0, filter1]
+        };
+
+        BloomFilterSet bloomFilterSet = new(bloomFilters, chunkCount: 2);
+        SourceIndex original = new(fingerprint, indexSchema, chunks, bloomFilterSet);
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.NotNull(restored.BloomFilters);
+        Assert.True(restored.BloomFilters.HasColumn("id"));
+        Assert.Equal(2, restored.BloomFilters.ChunkCount);
+
+        Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredFilter0));
+        Assert.True(restoredFilter0!.MayContain(DataValue.FromScalar(1.0f)));
+        Assert.True(restoredFilter0.MayContain(DataValue.FromScalar(50.0f)));
+        Assert.False(restoredFilter0.MayContain(DataValue.FromScalar(999.0f)));
+
+        Assert.True(restored.BloomFilters.TryGetFilter("id", 1, out BloomFilter? restoredFilter1));
+        Assert.True(restoredFilter1!.MayContain(DataValue.FromScalar(51.0f)));
+        Assert.True(restoredFilter1.MayContain(DataValue.FromScalar(100.0f)));
+    }
+
+    [Fact]
+    public void RoundTrip_NoBloomFilters_PreservesNull()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 10);
+        SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.Null(restored.BloomFilters);
+    }
+
+    [Fact]
+    public void RoundTrip_BloomFilters_MultipleColumns()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("name", DataKind.String, nullable: true),
+        ]);
+        IndexSchema indexSchema = new(schema, 100);
+
+        Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new ChunkColumnStatistics(
+                DataValue.FromScalar(1.0f), DataValue.FromScalar(50.0f),
+                NullCount: 0, RowCount: 100, EstimatedCardinality: 50),
+            ["name"] = new ChunkColumnStatistics(
+                DataValue.FromString("alice"), DataValue.FromString("zoe"),
+                NullCount: 0, RowCount: 100, EstimatedCardinality: 40)
+        };
+
+        List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
+
+        BloomFilter idFilter = new(expectedElements: 100);
+        idFilter.Add(DataValue.FromScalar(42.0f));
+
+        BloomFilter nameFilter = new(expectedElements: 100);
+        nameFilter.Add(DataValue.FromString("alice"));
+
+        Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = [idFilter],
+            ["name"] = [nameFilter]
+        };
+
+        BloomFilterSet bloomFilterSet = new(bloomFilters, chunkCount: 1);
+        SourceIndex original = new(fingerprint, indexSchema, chunks, bloomFilterSet);
+
+        SourceIndex restored = WriteAndRead(original);
+
+        Assert.NotNull(restored.BloomFilters);
+        Assert.Equal(2, restored.BloomFilters.ColumnNames.Count);
+
+        Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? idResult));
+        Assert.True(idResult!.MayContain(DataValue.FromScalar(42.0f)));
+
+        Assert.True(restored.BloomFilters.TryGetFilter("name", 0, out BloomFilter? nameResult));
+        Assert.True(nameResult!.MayContain(DataValue.FromString("alice")));
+    }
 }

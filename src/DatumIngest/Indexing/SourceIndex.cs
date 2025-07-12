@@ -18,18 +18,27 @@ public sealed class SourceIndex
     public IReadOnlyList<IndexChunk> Chunks { get; }
 
     /// <summary>
+    /// Per-column, per-chunk bloom filters for membership testing,
+    /// or <c>null</c> if bloom filters were not built.
+    /// </summary>
+    public BloomFilterSet? BloomFilters { get; }
+
+    /// <summary>
     /// Creates a new source index.
     /// </summary>
     /// <param name="fingerprint">Source file fingerprint.</param>
     /// <param name="schema">Cached schema and row count.</param>
     /// <param name="chunks">Ordered list of row chunks with column statistics.</param>
+    /// <param name="bloomFilters">Optional bloom filter set for membership testing.</param>
     public SourceIndex(
         SourceFingerprint fingerprint,
         IndexSchema schema,
-        IReadOnlyList<IndexChunk> chunks)
+        IReadOnlyList<IndexChunk> chunks,
+        BloomFilterSet? bloomFilters = null)
     {
         Fingerprint = fingerprint;
         Schema = schema;
         Chunks = chunks;
+        BloomFilters = bloomFilters;
     }
 }

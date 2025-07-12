@@ -47,6 +47,12 @@ public readonly struct CompositeKey : IEquatable<CompositeKey>
         return true;
     }
 
+    /// <summary>
+    /// Gets the key component at the specified position.
+    /// </summary>
+    /// <param name="index">Zero-based index of the key component.</param>
+    public DataValue this[int index] => _parts[index];
+
     /// <inheritdoc/>
     public override bool Equals(object? other) => other is CompositeKey key && Equals(key);
 

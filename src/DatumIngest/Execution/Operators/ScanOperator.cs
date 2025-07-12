@@ -12,7 +12,9 @@ namespace DatumIngest.Execution.Operators;
 /// <see cref="IFilterableTableProvider"/> and a filter hint is present,
 /// the provider may skip entire partitions based on column statistics.
 /// When a <see cref="SourceIndex"/> is available, chunk-level statistics
-/// enable partition pruning for any provider type.
+/// enable partition pruning for any provider type. Bloom filter pruning
+/// allows join operators to pre-filter chunks by providing build-side key
+/// values: chunks where no build-side key could possibly exist are skipped.
 /// </summary>
 public sealed class ScanOperator : IQueryOperator
 {
@@ -20,6 +22,7 @@ public sealed class ScanOperator : IQueryOperator
     private readonly IReadOnlySet<string>? _requiredColumns;
     private Expression? _filterHint;
     private SourceIndex? _sourceIndex;
+    private Dictionary<string, IReadOnlyCollection<DataValue>>? _bloomPruningKeys;
 
     /// <summary>
     /// Creates a scan operator for the given table.
@@ -72,6 +75,19 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <summary>
+    /// Registers join key values for bloom-filter-based chunk pruning.
+    /// During execution, chunks whose bloom filters report that none of the
+    /// provided key values could be present are skipped entirely.
+    /// </summary>
+    /// <param name="columnName">The column name to check bloom filters for.</param>
+    /// <param name="keyValues">The build-side key values from the join partner.</param>
+    public void AddBloomPruningKeys(string columnName, IReadOnlyCollection<DataValue> keyValues)
+    {
+        _bloomPruningKeys ??= new(StringComparer.OrdinalIgnoreCase);
+        _bloomPruningKeys[columnName] = keyValues;
+    }
+
+    /// <summary>
     /// The most recent <see cref="IFilterableTableProvider"/> used during execution,
     /// or <c>null</c> if the provider is not filterable. Used by the explain/instrumentation
     /// layer to retrieve pruning statistics after execution.
@@ -96,8 +112,12 @@ public sealed class ScanOperator : IQueryOperator
             rows = provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
         }
 
-        // When a source index and filter hint are available, apply chunk-level pruning.
-        if (_sourceIndex is not null && _filterHint is not null)
+        // When a source index is available and either a filter hint or bloom pruning
+        // keys are present, apply chunk-level pruning.
+        bool hasIndexPruning = _sourceIndex is not null
+            && (_filterHint is not null || _bloomPruningKeys is not null);
+
+        if (hasIndexPruning)
         {
             await foreach (Row row in ExecuteWithIndexPruningAsync(rows).ConfigureAwait(false))
             {
@@ -116,28 +136,69 @@ public sealed class ScanOperator : IQueryOperator
     private async IAsyncEnumerable<Row> ExecuteWithIndexPruningAsync(IAsyncEnumerable<Row> rows)
     {
         IReadOnlyList<IndexChunk> chunks = _sourceIndex!.Chunks;
+        BloomFilterSet? bloomFilters = _sourceIndex.BloomFilters;
         TotalIndexChunks = chunks.Count;
         PrunedIndexChunks = 0;
 
         // Build a set of non-pruned chunk row ranges.
         List<(long Start, long End)> activeRanges = new();
 
-        foreach (IndexChunk chunk in chunks)
+        for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
-            Dictionary<string, ColumnStatisticsRange> statistics = new(StringComparer.OrdinalIgnoreCase);
+            IndexChunk chunk = chunks[chunkIndex];
+            bool pruned = false;
 
-            foreach (KeyValuePair<string, ChunkColumnStatistics> entry in chunk.ColumnStatistics)
+            // Statistics-based pruning: check filter predicates against min/max stats.
+            if (!pruned && _filterHint is not null)
             {
-                statistics[entry.Key] = entry.Value.ToColumnStatisticsRange();
+                Dictionary<string, ColumnStatisticsRange> statistics = new(StringComparer.OrdinalIgnoreCase);
+
+                foreach (KeyValuePair<string, ChunkColumnStatistics> entry in chunk.ColumnStatistics)
+                {
+                    statistics[entry.Key] = entry.Value.ToColumnStatisticsRange();
+                }
+
+                if (StatisticsPredicateEvaluator.CanSkipPartition(_filterHint, statistics))
+                {
+                    pruned = true;
+                }
             }
 
-            if (StatisticsPredicateEvaluator.CanSkipPartition(_filterHint!, statistics))
+            // Bloom-filter-based pruning: check if any build-side join key could
+            // be present in this chunk. If no key could possibly match, skip it.
+            if (!pruned && _bloomPruningKeys is not null && bloomFilters is not null)
+            {
+                foreach (KeyValuePair<string, IReadOnlyCollection<DataValue>> entry in _bloomPruningKeys)
+                {
+                    if (bloomFilters.TryGetFilter(entry.Key, chunkIndex, out BloomFilter? filter))
+                    {
+                        bool anyMayMatch = false;
+                        foreach (DataValue keyValue in entry.Value)
+                        {
+                            if (filter.MayContain(keyValue))
+                            {
+                                anyMayMatch = true;
+                                break;
+                            }
+                        }
+
+                        if (!anyMayMatch)
+                        {
+                            pruned = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (pruned)
             {
                 PrunedIndexChunks++;
-                continue;
             }
-
-            activeRanges.Add((chunk.RowOffset, chunk.RowOffset + chunk.RowCount));
+            else
+            {
+                activeRanges.Add((chunk.RowOffset, chunk.RowOffset + chunk.RowCount));
+            }
         }
 
         // If no chunks were pruned, stream all rows without overhead.

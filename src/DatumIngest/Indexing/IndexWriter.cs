@@ -32,6 +32,12 @@ public sealed class IndexWriter
         RecordSection(sections, IndexSectionType.ChunkDirectory, writer, () =>
             WriteChunkDirectory(writer, index.Chunks));
 
+        if (index.BloomFilters is not null)
+        {
+            RecordSection(sections, IndexSectionType.BloomFilters, writer, () =>
+                WriteBloomFilters(writer, index.BloomFilters));
+        }
+
         long tableOfContentsOffset = output.Position;
         WriteTableOfContents(writer, sections);
 
@@ -129,6 +135,26 @@ public sealed class IndexWriter
     }
 
     // ───────────────────────── DataValue serialization ─────────────────────────
+
+    private static void WriteBloomFilters(BinaryWriter writer, BloomFilterSet bloomFilterSet)
+    {
+        IReadOnlyDictionary<string, BloomFilter[]> filters = bloomFilterSet.Filters;
+        writer.Write(filters.Count);       // Number of columns.
+        writer.Write(bloomFilterSet.ChunkCount); // Number of chunks.
+
+        foreach (KeyValuePair<string, BloomFilter[]> column in filters)
+        {
+            writer.Write(column.Key);      // Column name.
+
+            foreach (BloomFilter filter in column.Value)
+            {
+                writer.Write(filter.BitCount);
+                writer.Write(filter.HashCount);
+                writer.Write(filter.SizeInBytes);
+                writer.Write(filter.Bits);
+            }
+        }
+    }
 
     internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
     {

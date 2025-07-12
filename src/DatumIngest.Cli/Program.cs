@@ -134,7 +134,8 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
         throw new ArgumentException("The 'index' command requires at least one --source definition.");
     }
 
-    SourceIndexBuilder builder = new(options.ChunkSize);
+    HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
+    SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns);
 
     foreach (string source in options.Sources)
     {
@@ -167,6 +168,11 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
             Console.WriteLine($"Index created: {indexPath}");
             Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
             Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
+
+            if (index.BloomFilters is not null)
+            {
+                Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
+            }
         }
         finally
         {

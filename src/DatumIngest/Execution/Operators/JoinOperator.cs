@@ -1,4 +1,5 @@
 using System.Collections;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -138,6 +139,11 @@ public sealed class JoinOperator : IQueryOperator
                 bucket.Add((rightIndex, rightRow));
             }
         }
+
+        // Bloom pruning: if the probe (left) side has a source index with
+        // bloom filters and the join key is a simple column reference, push
+        // the build-side key values down so entire chunks can be skipped.
+        ApplyBloomPruning(keyPairs, singleKeyTable, compositeKeyTable, useSingleKey);
 
         // Track which right rows have been matched (for RIGHT/FULL OUTER).
         bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
@@ -490,6 +496,93 @@ public sealed class JoinOperator : IQueryOperator
             }
 
             return new Row(_names, values, _nameIndex);
+        }
+    }
+
+    /// <summary>
+    /// Pushes build-side key values to the probe-side <see cref="ScanOperator"/>
+    /// for bloom-filter-based chunk pruning. Only activates when the probe-side
+    /// key expression is a simple <see cref="ColumnReference"/> pointing to a
+    /// column that has bloom filters in the source index.
+    /// </summary>
+    private void ApplyBloomPruning(
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
+        Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable,
+        Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable,
+        bool useSingleKey)
+    {
+        ScanOperator? probeScan = FindScanOperator(_left);
+        if (probeScan?.SourceIndex?.BloomFilters is null)
+        {
+            return;
+        }
+
+        BloomFilterSet bloomFilters = probeScan.SourceIndex.BloomFilters;
+
+        for (int keyIndex = 0; keyIndex < keyPairs.Count; keyIndex++)
+        {
+            if (keyPairs[keyIndex].Left is not ColumnReference columnReference)
+            {
+                continue;
+            }
+
+            string columnName = columnReference.ColumnName;
+
+            if (!bloomFilters.HasColumn(columnName))
+            {
+                continue;
+            }
+
+            HashSet<DataValue> distinctKeys = new();
+
+            if (useSingleKey && singleKeyTable is not null)
+            {
+                foreach (DataValue key in singleKeyTable.Keys)
+                {
+                    distinctKeys.Add(key);
+                }
+            }
+            else if (compositeKeyTable is not null)
+            {
+                foreach (CompositeKey compositeKey in compositeKeyTable.Keys)
+                {
+                    DataValue partValue = compositeKey[keyIndex];
+                    if (!partValue.IsNull)
+                    {
+                        distinctKeys.Add(partValue);
+                    }
+                }
+            }
+
+            if (distinctKeys.Count > 0)
+            {
+                probeScan.AddBloomPruningKeys(columnName, distinctKeys);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Walks the operator chain to find the underlying <see cref="ScanOperator"/>,
+    /// traversing through <see cref="AliasOperator"/> and <see cref="FilterOperator"/> wrappers.
+    /// </summary>
+    private static ScanOperator? FindScanOperator(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case ScanOperator scan:
+                    return scan;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                default:
+                    return null;
+            }
         }
     }
 }

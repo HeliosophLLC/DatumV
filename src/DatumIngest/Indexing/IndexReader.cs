@@ -36,7 +36,11 @@ public sealed class IndexReader
             ? ReadSectionAs(reader, input, sections, IndexSectionType.ChunkDirectory, ReadChunkDirectory)
             : Array.Empty<IndexChunk>();
 
-        return new SourceIndex(fingerprint, schema, chunks);
+        BloomFilterSet? bloomFilters = sections.ContainsKey(IndexSectionType.BloomFilters)
+            ? ReadSectionAs(reader, input, sections, IndexSectionType.BloomFilters, ReadBloomFilters)
+            : null;
+
+        return new SourceIndex(fingerprint, schema, chunks, bloomFilters);
     }
 
     private static void ReadHeader(BinaryReader reader, out long tableOfContentsOffset)
@@ -161,6 +165,33 @@ public sealed class IndexReader
     }
 
     // ───────────────────────── DataValue deserialization ─────────────────────────
+
+    private static BloomFilterSet ReadBloomFilters(BinaryReader reader)
+    {
+        int columnCount = reader.ReadInt32();
+        int chunkCount = reader.ReadInt32();
+
+        Dictionary<string, BloomFilter[]> filters = new(columnCount, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < columnCount; i++)
+        {
+            string columnName = reader.ReadString();
+            BloomFilter[] columnFilters = new BloomFilter[chunkCount];
+
+            for (int j = 0; j < chunkCount; j++)
+            {
+                int bitCount = reader.ReadInt32();
+                int hashCount = reader.ReadInt32();
+                int byteCount = reader.ReadInt32();
+                byte[] bits = reader.ReadBytes(byteCount);
+                columnFilters[j] = new BloomFilter(bits, bitCount, hashCount);
+            }
+
+            filters[columnName] = columnFilters;
+        }
+
+        return new BloomFilterSet(filters, chunkCount);
+    }
 
     internal static DataValue? ReadNullableDataValue(BinaryReader reader)
     {
