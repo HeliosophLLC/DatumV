@@ -11,7 +11,6 @@
     <IsTrimmable>true</IsTrimmable>
     <IsPackable>true</IsPackable>
     <PackageId>DatumIngest</PackageId>
-    <Version>0.1.0</Version>
     <Description>High-performance dataset query engine for ML ETL pipelines.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

@@ -1,0 +1,109 @@
+name: Prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      version-suffix:
+        description: 'Prerelease suffix (appended as -suffix.run_number)'
+        required: false
+        default: 'preview'
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - run: dotnet restore DatumIngest.slnx
+
+      - run: dotnet build DatumIngest.slnx -c Release --no-restore
+
+      - run: dotnet test tests/DatumIngest.Tests -c Release --no-build --no-restore
+
+  pack-nuget:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          BASE=$(grep '<Version>' Directory.Build.props | sed 's/.*<Version>\(.*\)<\/Version>.*/\1/')
+          VERSION="${BASE}-${{ inputs.version-suffix || 'preview' }}.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - run: >
+          dotnet pack src/DatumIngest/DatumIngest.csproj
+          -c Release
+          -o ./artifacts/nuget
+          /p:Version=${{ steps.version.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget
+          path: ./artifacts/nuget/*.nupkg
+
+  publish-cli:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64, linux-arm64, osx-arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          BASE=$(grep '<Version>' Directory.Build.props | sed 's/.*<Version>\(.*\)<\/Version>.*/\1/')
+          VERSION="${BASE}-${{ inputs.version-suffix || 'preview' }}.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Publish CLI (${{ matrix.rid }})
+        run: >
+          dotnet publish src/DatumIngest.Cli/DatumIngest.Cli.csproj
+          -c Release
+          -r ${{ matrix.rid }}
+          -o ./artifacts/cli/${{ matrix.rid }}
+          /p:Version=${{ steps.version.outputs.version }}
+          /p:InformationalVersion=${{ steps.version.outputs.version }}
+
+      - name: Archive (tar.gz)
+        if: matrix.rid != 'win-x64'
+        run: >
+          tar -czf ./artifacts/datum-ingest-${{ matrix.rid }}.tar.gz
+          -C ./artifacts/cli/${{ matrix.rid }} .
+
+      - name: Archive (zip)
+        if: matrix.rid == 'win-x64'
+        run: >
+          cd ./artifacts/cli/${{ matrix.rid }} &&
+          zip -r ../../datum-ingest-${{ matrix.rid }}.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.rid }}
+          path: ./artifacts/datum-ingest-${{ matrix.rid }}.*
