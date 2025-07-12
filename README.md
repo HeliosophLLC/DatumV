@@ -193,6 +193,7 @@ parquet:labels=./labels.parquet
 | [docs/statistics.md](docs/statistics.md) | Statistics accumulators, manifest schema, column interactions |
 | [docs/indexes.md](docs/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, CLI usage |
 | [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
+| [docs/language-server.md](docs/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
 | [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
 | [ROADMAP.md](ROADMAP.md) | Deferred features for future releases |
 

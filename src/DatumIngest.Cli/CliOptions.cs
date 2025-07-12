@@ -60,10 +60,10 @@ internal sealed class CliOptions
 
         options.Command = args[0].ToLowerInvariant();
 
-        // The 'index' command does not require a SQL argument.
+        // The 'index' and 'manifest-schema' commands do not require a SQL argument.
         int argStart;
 
-        if (options.Command == "index")
+        if (options.Command is "index" or "manifest-schema")
         {
             argStart = 1;
         }

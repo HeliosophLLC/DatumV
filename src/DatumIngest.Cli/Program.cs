@@ -26,10 +26,15 @@ try
     // Load any pre-built indexes.
     LoadIndexes(catalog, options);
 
-    // The 'index' command does not require SQL.
+    // Commands that do not require SQL.
     if (options.Command == "index")
     {
         return await RunIndexAsync(catalog, options);
+    }
+
+    if (options.Command == "manifest-schema")
+    {
+        return await RunManifestSchemaAsync(catalog, options.OutputPath);
     }
 
     SelectStatement statement = SqlParser.Parse(options.Sql);
@@ -42,7 +47,7 @@ try
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(statement, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'schema', or 'index'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', or 'index'.")
     };
 }
 catch (ArgumentException ex)
@@ -557,6 +562,69 @@ static async Task<int> RunSchemaAsync(SelectStatement statement, TableCatalog ca
     }
 
     Console.WriteLine($"\n({schema.Columns.Count} column(s) from {schema.TableNames.Count()} source(s))");
+    return 0;
+}
+
+static async Task<int> RunManifestSchemaAsync(TableCatalog catalog, string? outputPath)
+{
+    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
+
+    // Resolve table schemas from all registered sources.
+    List<TableSchemaEntry> tableEntries = new();
+
+    foreach (string tableName in catalog.TableNames)
+    {
+        Schema tableSchema = await catalog.GetSchemaAsync(tableName, CancellationToken.None);
+        List<TableColumnEntry> columns = new();
+
+        foreach (ColumnInfo column in tableSchema.Columns)
+        {
+            columns.Add(new TableColumnEntry
+            {
+                Name = column.Name,
+                Kind = column.Kind.ToString(),
+                Nullable = column.Nullable,
+            });
+        }
+
+        tableEntries.Add(new TableSchemaEntry
+        {
+            Name = tableName,
+            Columns = columns,
+        });
+    }
+
+    // Collect function documentation.
+    List<FunctionSignature> functions = new(FunctionDocumentation.All);
+
+    // Collect keywords from the SQL token enum.
+    List<string> keywords = new()
+    {
+        "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "FULL", "OUTER",
+        "CROSS", "INNER", "ON", "INTO", "AS", "AND", "OR", "NOT", "IN",
+        "BETWEEN", "LIKE", "IS", "NULL", "ORDER", "BY", "ASC", "DESC",
+        "LIMIT", "OFFSET", "SHARD", "CAST", "TRUE", "FALSE",
+    };
+
+    LanguageServerManifest manifest = new()
+    {
+        Tables = tableEntries,
+        Functions = functions,
+        Keywords = keywords,
+    };
+
+    if (outputPath is not null)
+    {
+        await LanguageServerManifestSerializer.WriteToFileAsync(manifest, outputPath);
+        Console.WriteLine($"Language server manifest written to: {outputPath}");
+    }
+    else
+    {
+        string json = LanguageServerManifestSerializer.Serialize(manifest);
+        Console.WriteLine(json);
+    }
+
+    Console.Error.WriteLine($"({tableEntries.Count} table(s), {functions.Count} function(s), {keywords.Count} keyword(s))");
     return 0;
 }
 

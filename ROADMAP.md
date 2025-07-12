@@ -16,3 +16,8 @@ The following features are architecturally accounted for but deferred from V1:
 - **Remote data sources**: HTTP/S3/Azure Blob providers
 - ~~**Schema caching**: Skip re-inference on repeated queries~~ ✅
 - **Data validation**: CHECK constraints / VALIDATE clause for data quality gates
+- ~~**Language server (WASM)**: SQL autocomplete, diagnostics, hover via Blazor WebAssembly~~ ✅
+- **Language server — VS Code LSP extension**: Wrap LanguageServer core in LSP JSON-RPC over stdio
+- **Language server — multi-error diagnostics**: Error-recovering parser for multiple parse errors per document
+- **Language server — semantic diagnostics**: Unknown table/column warnings, type mismatch detection
+- **Language server — WASM size optimization**: Decouple LanguageServer from full DatumIngest to trim PureHDF/Parquet/SkiaSharp

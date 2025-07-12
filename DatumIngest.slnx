@@ -4,6 +4,8 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/DatumIngest.Cli/DatumIngest.Cli.csproj" />
+    <Project Path="src/DatumIngest.LanguageServer/DatumIngest.LanguageServer.csproj" />
+    <Project Path="src/DatumIngest.Wasm/DatumIngest.Wasm.csproj" />
     <Project Path="src/DatumIngest/DatumIngest.csproj" />
   </Folder>
   <Folder Name="/tests/">

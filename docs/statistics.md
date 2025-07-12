@@ -1,6 +1,6 @@
 # Statistics & Manifest
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Programmatic API](api.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
 
 DatumIngest collects per-column statistics in a single pass and generates structured JSON manifests describing dataset features for ML pipeline integration.
 
