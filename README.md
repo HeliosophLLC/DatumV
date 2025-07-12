@@ -80,8 +80,9 @@ datum-ingest explore "SELECT name, score FROM data WHERE score > 90" --source "c
 datum-ingest query "
   SELECT resize_and_crop(load_image(img.file_bytes), 224, 224, 'center') AS image,
          cap.caption
-  FROM images AS img
-  INNER JOIN captions AS cap ON img.id = cap.image_id
+  FROM images AS image_files
+  INNER JOIN captions AS image_captions ON image_captions.file_name = GET_FILENAME(image_files.file_name)
+  INNER JOIN captions AS cap ON img.id = image_captions.image_id
   WHERE len(cap.caption) > 20
   INTO 'dataset.h5'
 " --source "zip:images=./train2017.zip" --source "json:captions=./captions.json"

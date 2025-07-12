@@ -428,6 +428,12 @@ public sealed class QueryPlanner
 
         IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns);
 
+        // Attach source index for chunk-based pruning if one is registered.
+        if (_catalog.TryGetIndex(descriptor.Name, out Indexing.SourceIndex? sourceIndex))
+        {
+            ((ScanOperator)scanOperator).SetSourceIndex(sourceIndex!);
+        }
+
         // If the table has an alias, wrap column names.
         if (tableRef.Alias is not null)
         {

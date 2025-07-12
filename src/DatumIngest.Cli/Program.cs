@@ -5,9 +5,11 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Cli;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Output;
 using DatumIngest.Output.Checkpoint;
+using CheckpointFingerprint = DatumIngest.Output.Checkpoint.SourceFingerprint;
 using DatumIngest.Manifest;
 using DatumIngest.Output.Writers;
 using DatumIngest.Parsing;
@@ -21,6 +23,15 @@ try
     CliOptions options = CliOptions.Parse(args);
     TableCatalog catalog = BuildCatalog(options);
 
+    // Load any pre-built indexes.
+    LoadIndexes(catalog, options);
+
+    // The 'index' command does not require SQL.
+    if (options.Command == "index")
+    {
+        return await RunIndexAsync(catalog, options);
+    }
+
     SelectStatement statement = SqlParser.Parse(options.Sql);
 
     return options.Command switch
@@ -31,7 +42,7 @@ try
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(statement, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', or 'schema'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'schema', or 'index'.")
     };
 }
 catch (ArgumentException ex)
@@ -71,6 +82,102 @@ static TableCatalog BuildCatalog(CliOptions options)
     }
 
     return catalog;
+}
+
+static void LoadIndexes(TableCatalog catalog, CliOptions options)
+{
+    IndexReader reader = new();
+
+    foreach (string indexPath in options.IndexPaths)
+    {
+        if (!File.Exists(indexPath))
+        {
+            throw new FileNotFoundException($"Index file not found: {indexPath}");
+        }
+
+        using FileStream stream = File.OpenRead(indexPath);
+        SourceIndex index = reader.Read(stream);
+
+        // Derive table name from the index file path by stripping the .datum-index suffix.
+        string fileName = Path.GetFileName(indexPath);
+        string tableName = fileName.EndsWith(".datum-index", StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^".datum-index".Length]
+            : Path.GetFileNameWithoutExtension(fileName);
+
+        // If a table with this name is registered, attach the index.
+        // Otherwise check if stripping one more extension matches (e.g. "data.parquet.datum-index" → "data").
+        if (catalog.TryResolve(tableName, out _))
+        {
+            catalog.RegisterIndex(tableName, index);
+        }
+        else
+        {
+            string baseName = Path.GetFileNameWithoutExtension(tableName);
+
+            if (catalog.TryResolve(baseName, out _))
+            {
+                catalog.RegisterIndex(baseName, index);
+            }
+            else
+            {
+                // Register with the derived name; the user may reference it later.
+                catalog.RegisterIndex(tableName, index);
+            }
+        }
+    }
+}
+
+static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
+{
+    if (options.Sources.Count == 0)
+    {
+        throw new ArgumentException("The 'index' command requires at least one --source definition.");
+    }
+
+    SourceIndexBuilder builder = new(options.ChunkSize);
+
+    foreach (string source in options.Sources)
+    {
+        TableDescriptor descriptor = ParseSourceDefinition(source);
+
+        if (!catalog.TryResolve(descriptor.Name, out _))
+        {
+            catalog.Register(descriptor);
+        }
+
+        ITableProvider provider = catalog.CreateProvider(descriptor);
+
+        Stream? sourceStream = null;
+
+        if (File.Exists(descriptor.FilePath))
+        {
+            sourceStream = File.OpenRead(descriptor.FilePath);
+        }
+
+        try
+        {
+            SourceIndex index = await builder.BuildAsync(
+                descriptor, provider, sourceStream, CancellationToken.None);
+
+            string indexPath = descriptor.FilePath + ".datum-index";
+            using FileStream outputStream = File.Create(indexPath);
+            IndexWriter writer = new();
+            writer.Write(index, outputStream);
+
+            Console.WriteLine($"Index created: {indexPath}");
+            Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
+            Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
+        }
+        finally
+        {
+            if (sourceStream is not null)
+            {
+                await sourceStream.DisposeAsync();
+            }
+        }
+    }
+
+    return 0;
 }
 
 static void LoadCatalogFile(TableCatalog catalog, string catalogPath)
@@ -158,7 +265,7 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
     // Checkpoint setup
     bool checkpointEnabled = options.Checkpoint && statement.Into?.Shard is not null;
     CheckpointManager? checkpointManager = null;
-    IReadOnlyList<SourceFingerprint>? sourceFingerprints = null;
+    IReadOnlyList<CheckpointFingerprint>? sourceFingerprints = null;
     int startShardIndex = 0;
 
     if (options.Checkpoint && statement.Into?.Shard is null)
@@ -466,7 +573,7 @@ static IOutputWriter CreateOutputWriter(IntoClause into)
 static IOutputWriter CreateCheckpointedOutputWriter(
     IntoClause into,
     CheckpointManager checkpointManager,
-    IReadOnlyList<SourceFingerprint> sourceFingerprints,
+    IReadOnlyList<CheckpointFingerprint> sourceFingerprints,
     int startShardIndex)
 {
     DatumIngest.Output.ShardMode mode = into.Shard!.Mode switch

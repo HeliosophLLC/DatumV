@@ -1,3 +1,5 @@
+using DatumIngest.Indexing;
+
 namespace DatumIngest.Cli;
 
 /// <summary>
@@ -29,6 +31,15 @@ internal sealed class CliOptions
     /// <summary>Gets or sets whether to enable checkpoint-based resume for sharded writes.</summary>
     public bool Checkpoint { get; set; }
 
+    /// <summary>Gets or sets the paths to pre-built index files to load for query execution.</summary>
+    public List<string> IndexPaths { get; set; } = new();
+
+    /// <summary>Gets or sets whether to co-generate a source index alongside INTO output.</summary>
+    public bool WithIndex { get; set; }
+
+    /// <summary>Gets or sets the chunk size for index building (rows per chunk).</summary>
+    public int ChunkSize { get; set; } = Indexing.IndexConstants.DefaultChunkSize;
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -36,18 +47,35 @@ internal sealed class CliOptions
     {
         CliOptions options = new();
 
-        if (args.Length < 2)
+        if (args.Length < 1)
         {
-            throw new ArgumentException("Usage: datum-ingest <command> <sql> [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint]");
+            throw new ArgumentException("Usage: datum-ingest <command> [<sql>] [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint] [--index <path>...] [--with-index] [--chunk-size <n>]");
         }
 
         options.Command = args[0].ToLowerInvariant();
-        options.Sql = args[1];
+
+        // The 'index' command does not require a SQL argument.
+        int argStart;
+
+        if (options.Command == "index")
+        {
+            argStart = 1;
+        }
+        else
+        {
+            if (args.Length < 2)
+            {
+                throw new ArgumentException("Usage: datum-ingest <command> <sql> [...options]");
+            }
+
+            options.Sql = args[1];
+            argStart = 2;
+        }
 
         // Special handling: "explain" can have "--analyze" before or after sql
         // but otherwise needs the same source args.
 
-        for (int i = 2; i < args.Length; i++)
+        for (int i = argStart; i < args.Length; i++)
         {
             switch (args[i].ToLowerInvariant())
             {
@@ -82,6 +110,27 @@ internal sealed class CliOptions
 
                 case "--checkpoint":
                     options.Checkpoint = true;
+                    break;
+
+                case "--index":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--index requires a path argument");
+                    }
+                    options.IndexPaths.Add(args[++i]);
+                    break;
+
+                case "--with-index":
+                    options.WithIndex = true;
+                    break;
+
+                case "--chunk-size":
+                    if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out int chunkSize))
+                    {
+                        throw new ArgumentException("--chunk-size requires a numeric argument");
+                    }
+                    options.ChunkSize = chunkSize;
+                    i++;
                     break;
 
                 case "--output":

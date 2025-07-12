@@ -1,0 +1,252 @@
+using DatumIngest.Model;
+
+namespace DatumIngest.Indexing;
+
+/// <summary>
+/// Deserializes a <see cref="SourceIndex"/> from a <c>.datum-index</c> binary stream.
+/// Reads the header, seeks to the table of contents, then loads sections in order.
+/// Schema and fingerprint are loaded eagerly; future sections (bloom, sorted) will
+/// be loaded on demand.
+/// </summary>
+public sealed class IndexReader
+{
+    /// <summary>
+    /// Reads a source index from the given stream.
+    /// The stream must be readable and seekable.
+    /// </summary>
+    /// <param name="input">Readable, seekable input stream.</param>
+    /// <returns>The deserialized source index.</returns>
+    /// <exception cref="InvalidDataException">Thrown when the stream contains invalid or unsupported index data.</exception>
+    public SourceIndex Read(Stream input)
+    {
+        using BinaryReader reader = new(input, System.Text.Encoding.UTF8, leaveOpen: true);
+
+        ReadHeader(reader, out long tableOfContentsOffset);
+
+        input.Position = tableOfContentsOffset;
+        Dictionary<IndexSectionType, (long Offset, long Length)> sections = ReadTableOfContents(reader);
+
+        SourceFingerprint fingerprint = ReadSectionAs(
+            reader, input, sections, IndexSectionType.Fingerprint, ReadFingerprint);
+
+        IndexSchema schema = ReadSectionAs(
+            reader, input, sections, IndexSectionType.Schema, ReadSchema);
+
+        IReadOnlyList<IndexChunk> chunks = sections.ContainsKey(IndexSectionType.ChunkDirectory)
+            ? ReadSectionAs(reader, input, sections, IndexSectionType.ChunkDirectory, ReadChunkDirectory)
+            : Array.Empty<IndexChunk>();
+
+        return new SourceIndex(fingerprint, schema, chunks);
+    }
+
+    private static void ReadHeader(BinaryReader reader, out long tableOfContentsOffset)
+    {
+        Span<byte> magicBuffer = stackalloc byte[4];
+        int bytesRead = reader.Read(magicBuffer);
+
+        if (bytesRead < 4 || !magicBuffer.SequenceEqual(IndexConstants.Magic))
+        {
+            throw new InvalidDataException("Not a valid datum-index file: invalid magic bytes.");
+        }
+
+        ushort version = reader.ReadUInt16();
+
+        if (version > IndexConstants.FormatVersion)
+        {
+            throw new InvalidDataException(
+                $"Unsupported datum-index version {version} (max supported: {IndexConstants.FormatVersion}).");
+        }
+
+        _ = reader.ReadUInt16(); // Flags — reserved.
+        tableOfContentsOffset = reader.ReadInt64();
+    }
+
+    private static Dictionary<IndexSectionType, (long Offset, long Length)> ReadTableOfContents(BinaryReader reader)
+    {
+        int sectionCount = reader.ReadInt32();
+        Dictionary<IndexSectionType, (long, long)> sections = new(sectionCount);
+
+        for (int i = 0; i < sectionCount; i++)
+        {
+            IndexSectionType type = (IndexSectionType)reader.ReadByte();
+            long offset = reader.ReadInt64();
+            long length = reader.ReadInt64();
+            sections[type] = (offset, length);
+        }
+
+        return sections;
+    }
+
+    private static T ReadSectionAs<T>(
+        BinaryReader reader,
+        Stream input,
+        Dictionary<IndexSectionType, (long Offset, long Length)> sections,
+        IndexSectionType sectionType,
+        Func<BinaryReader, T> readBody)
+    {
+        if (!sections.TryGetValue(sectionType, out (long Offset, long Length) location))
+        {
+            throw new InvalidDataException($"Required section '{sectionType}' not found in datum-index file.");
+        }
+
+        input.Position = location.Offset;
+        return readBody(reader);
+    }
+
+    // ───────────────────────── Section readers ─────────────────────────
+
+    private static SourceFingerprint ReadFingerprint(BinaryReader reader)
+    {
+        long fileSize = reader.ReadInt64();
+        int hashLength = reader.ReadInt32();
+        byte[] stripedHash = reader.ReadBytes(hashLength);
+        return new SourceFingerprint(fileSize, stripedHash);
+    }
+
+    private static IndexSchema ReadSchema(BinaryReader reader)
+    {
+        long totalRowCount = reader.ReadInt64();
+        int columnCount = reader.ReadInt32();
+        List<ColumnInfo> columns = new(columnCount);
+
+        for (int i = 0; i < columnCount; i++)
+        {
+            string name = reader.ReadString();
+            DataKind kind = (DataKind)reader.ReadByte();
+            bool nullable = reader.ReadBoolean();
+            columns.Add(new ColumnInfo(name, kind, nullable));
+        }
+
+        Schema schema = new(columns);
+        return new IndexSchema(schema, totalRowCount);
+    }
+
+    private static IReadOnlyList<IndexChunk> ReadChunkDirectory(BinaryReader reader)
+    {
+        int chunkCount = reader.ReadInt32();
+        List<IndexChunk> chunks = new(chunkCount);
+
+        for (int i = 0; i < chunkCount; i++)
+        {
+            long rowOffset = reader.ReadInt64();
+            long rowCount = reader.ReadInt64();
+            long sourceByteOffset = reader.ReadInt64();
+            long sourceByteLength = reader.ReadInt64();
+
+            int columnCount = reader.ReadInt32();
+            Dictionary<string, ChunkColumnStatistics> columnStatistics =
+                new(columnCount, StringComparer.OrdinalIgnoreCase);
+
+            for (int j = 0; j < columnCount; j++)
+            {
+                string columnName = reader.ReadString();
+                ChunkColumnStatistics statistics = ReadChunkColumnStatistics(reader);
+                columnStatistics[columnName] = statistics;
+            }
+
+            chunks.Add(new IndexChunk(rowOffset, rowCount, sourceByteOffset, sourceByteLength, columnStatistics));
+        }
+
+        return chunks;
+    }
+
+    private static ChunkColumnStatistics ReadChunkColumnStatistics(BinaryReader reader)
+    {
+        long nullCount = reader.ReadInt64();
+        long rowCount = reader.ReadInt64();
+        long estimatedCardinality = reader.ReadInt64();
+        DataValue? minimum = ReadNullableDataValue(reader);
+        DataValue? maximum = ReadNullableDataValue(reader);
+        return new ChunkColumnStatistics(minimum, maximum, nullCount, rowCount, estimatedCardinality);
+    }
+
+    // ───────────────────────── DataValue deserialization ─────────────────────────
+
+    internal static DataValue? ReadNullableDataValue(BinaryReader reader)
+    {
+        bool hasValue = reader.ReadBoolean();
+
+        if (!hasValue)
+        {
+            return null;
+        }
+
+        return ReadDataValue(reader);
+    }
+
+    internal static DataValue ReadDataValue(BinaryReader reader)
+    {
+        DataKind kind = (DataKind)reader.ReadByte();
+
+        return kind switch
+        {
+            DataKind.Scalar => DataValue.FromScalar(reader.ReadSingle()),
+            DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
+            DataKind.String => DataValue.FromString(reader.ReadString()),
+            DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
+            DataKind.DateTime => DataValue.FromDateTime(DateTime.FromBinary(reader.ReadInt64())),
+            DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString()),
+            DataKind.UInt8Array => ReadUInt8Array(reader),
+            DataKind.Vector => ReadVector(reader),
+            DataKind.Matrix => ReadMatrix(reader),
+            DataKind.Tensor => ReadTensor(reader),
+            DataKind.Image => ReadImage(reader),
+            _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
+        };
+    }
+
+    private static DataValue ReadUInt8Array(BinaryReader reader)
+    {
+        int length = reader.ReadInt32();
+        byte[] bytes = reader.ReadBytes(length);
+        return DataValue.FromUInt8Array(bytes);
+    }
+
+    private static DataValue ReadVector(BinaryReader reader)
+    {
+        int length = reader.ReadInt32();
+        float[] values = new float[length];
+        for (int i = 0; i < length; i++)
+        {
+            values[i] = reader.ReadSingle();
+        }
+        return DataValue.FromVector(values);
+    }
+
+    private static DataValue ReadMatrix(BinaryReader reader)
+    {
+        int rows = reader.ReadInt32();
+        int columns = reader.ReadInt32();
+        int dataLength = reader.ReadInt32();
+        float[] values = new float[dataLength];
+        for (int i = 0; i < dataLength; i++)
+        {
+            values[i] = reader.ReadSingle();
+        }
+        return DataValue.FromMatrix(values, rows, columns);
+    }
+
+    private static DataValue ReadTensor(BinaryReader reader)
+    {
+        int rank = reader.ReadInt32();
+        int[] shape = new int[rank];
+        for (int i = 0; i < rank; i++)
+        {
+            shape[i] = reader.ReadInt32();
+        }
+        int dataLength = reader.ReadInt32();
+        float[] values = new float[dataLength];
+        for (int i = 0; i < dataLength; i++)
+        {
+            values[i] = reader.ReadSingle();
+        }
+        return DataValue.FromTensor(values, shape);
+    }
+
+    private static DataValue ReadImage(BinaryReader reader)
+    {
+        int length = reader.ReadInt32();
+        byte[] bytes = reader.ReadBytes(length);
+        return DataValue.FromImage(bytes);
+    }
+}

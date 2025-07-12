@@ -1,3 +1,4 @@
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog;
@@ -12,6 +13,7 @@ public sealed class TableCatalog
 {
     private readonly Dictionary<string, TableDescriptor> _descriptors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Func<ITableProvider>> _providerFactories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Registers a provider factory for a given provider identifier.
@@ -92,8 +94,36 @@ public sealed class TableCatalog
     /// </exception>
     public async Task<Schema> GetSchemaAsync(string tableName, CancellationToken cancellationToken)
     {
+        // Return cached schema from index if available, avoiding provider I/O.
+        if (_indexes.TryGetValue(tableName, out SourceIndex? index))
+        {
+            return index.Schema.Schema;
+        }
+
         TableDescriptor descriptor = Resolve(tableName);
         ITableProvider provider = CreateProvider(descriptor);
         return await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Registers a pre-built source index for a table, enabling chunk-based
+    /// partition pruning and cached schema resolution.
+    /// </summary>
+    /// <param name="tableName">Logical table name matching a registered descriptor.</param>
+    /// <param name="index">The source index to associate with the table.</param>
+    public void RegisterIndex(string tableName, SourceIndex index)
+    {
+        _indexes[tableName] = index;
+    }
+
+    /// <summary>
+    /// Attempts to retrieve a source index for the given table name.
+    /// </summary>
+    /// <param name="tableName">Logical table name.</param>
+    /// <param name="index">The source index, or <c>null</c> if none is registered.</param>
+    /// <returns><c>true</c> if an index was found; otherwise <c>false</c>.</returns>
+    public bool TryGetIndex(string tableName, out SourceIndex? index)
+    {
+        return _indexes.TryGetValue(tableName, out index);
     }
 }
