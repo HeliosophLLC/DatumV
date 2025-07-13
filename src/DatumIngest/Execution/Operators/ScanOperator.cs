@@ -55,6 +55,12 @@ public sealed class ScanOperator : IQueryOperator
     public int PrunedIndexChunks { get; private set; }
 
     /// <summary>
+    /// Number of rows fetched via exact index seek during the last execution,
+    /// or <c>null</c> if the exact seek path was not used.
+    /// </summary>
+    public int? ExactSeekRowsFetched { get; private set; }
+
+    /// <summary>
     /// Adds an advisory filter predicate for statistics-based partition pruning.
     /// Multiple calls combine predicates with AND.
     /// </summary>
@@ -146,9 +152,11 @@ public sealed class ScanOperator : IQueryOperator
         SortedValueIndexSet? sortedIndexes = _sourceIndex.SortedIndexes;
         TotalIndexChunks = chunks.Count;
         PrunedIndexChunks = 0;
+        ExactSeekRowsFetched = null;
 
-        // Build a set of non-pruned chunk row ranges.
+        // Build a set of non-pruned chunk row ranges and track active chunk indexes.
         List<(long Start, long End)> activeRanges = new();
+        HashSet<int> activeChunkIndexes = new();
 
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
@@ -212,6 +220,33 @@ public sealed class ScanOperator : IQueryOperator
             else
             {
                 activeRanges.Add((chunk.RowOffset, chunk.RowOffset + chunk.RowCount));
+                activeChunkIndexes.Add(chunkIndex);
+            }
+        }
+
+        // When the provider supports seeking and equality predicates have sorted
+        // index hits, seek directly to matching rows rather than reading entire chunks.
+        if (provider is ISeekableTableProvider seekable
+            && _filterHint is not null && sortedIndexes is not null)
+        {
+            List<long>? exactPositions = CollectExactSeekPositions(
+                _filterHint, sortedIndexes, chunks, activeChunkIndexes);
+
+            if (exactPositions is not null)
+            {
+                ExactSeekRowsFetched = exactPositions.Count;
+
+                foreach (long rowPosition in exactPositions)
+                {
+                    await foreach (Row row in seekable.ReadRowRangeAsync(
+                        _descriptor, _requiredColumns, rowPosition, 1,
+                        cancellationToken).ConfigureAwait(false))
+                    {
+                        yield return row;
+                    }
+                }
+
+                yield break;
             }
         }
 
@@ -245,13 +280,13 @@ public sealed class ScanOperator : IQueryOperator
 
         // When the provider supports seeking, read only the surviving chunks directly
         // instead of streaming all rows and discarding pruned ones.
-        if (provider is ISeekableTableProvider seekable)
+        if (provider is ISeekableTableProvider chunkSeekable)
         {
             foreach ((long start, long end) in activeRanges)
             {
                 int count = (int)(end - start);
 
-                await foreach (Row row in seekable.ReadRowRangeAsync(
+                await foreach (Row row in chunkSeekable.ReadRowRangeAsync(
                     _descriptor, _requiredColumns, start, count,
                     cancellationToken).ConfigureAwait(false))
                 {
@@ -369,5 +404,108 @@ public sealed class ScanOperator : IQueryOperator
             bool boolValue => DataValue.FromScalar(boolValue ? 1f : 0f),
             _ => DataValue.Null(DataKind.Scalar),
         };
+    }
+
+    /// <summary>
+    /// Attempts to collect exact row positions from equality predicates in the filter
+    /// hint by looking up values in sorted indexes. Only extracts from top-level AND
+    /// chains — OR predicates are not eligible for index seek. When multiple indexed
+    /// equality predicates exist, uses the most selective (fewest matches).
+    /// </summary>
+    /// <returns>Sorted list of absolute row positions, or <c>null</c> if no seek is possible.</returns>
+    private static List<long>? CollectExactSeekPositions(
+        Expression filterHint,
+        SortedValueIndexSet sortedIndexes,
+        IReadOnlyList<IndexChunk> chunks,
+        HashSet<int> activeChunkIndexes)
+    {
+        List<(string Column, DataValue Value)> equalities = new();
+        ExtractTopLevelEqualities(filterHint, equalities);
+
+        if (equalities.Count == 0)
+        {
+            return null;
+        }
+
+        // Find the most selective equality predicate with a sorted index.
+        List<long>? bestPositions = null;
+
+        foreach ((string column, DataValue value) in equalities)
+        {
+            if (!sortedIndexes.TryGetIndex(column, out SortedValueIndex? index))
+            {
+                continue;
+            }
+
+            IReadOnlyList<ValueIndexEntry> entries = index.FindExact(value);
+            List<long> positions = new(entries.Count);
+
+            foreach (ValueIndexEntry entry in entries)
+            {
+                if (activeChunkIndexes.Contains(entry.ChunkIndex))
+                {
+                    long absoluteRow = chunks[entry.ChunkIndex].RowOffset
+                        + entry.RowOffsetInChunk;
+                    positions.Add(absoluteRow);
+                }
+            }
+
+            if (bestPositions is null || positions.Count < bestPositions.Count)
+            {
+                bestPositions = positions;
+            }
+        }
+
+        if (bestPositions is null || bestPositions.Count == 0)
+        {
+            return bestPositions;
+        }
+
+        bestPositions.Sort();
+        return bestPositions;
+    }
+
+    /// <summary>
+    /// Extracts <c>column = literal</c> equality predicates from the top-level
+    /// AND chain of the filter expression. OR branches are ignored since they
+    /// cannot guarantee that all matching rows are in the index result set.
+    /// </summary>
+    private static void ExtractTopLevelEqualities(
+        Expression expression,
+        List<(string Column, DataValue Value)> results)
+    {
+        if (expression is BinaryExpression binary)
+        {
+            if (binary.Operator == BinaryOperator.And)
+            {
+                ExtractTopLevelEqualities(binary.Left, results);
+                ExtractTopLevelEqualities(binary.Right, results);
+                return;
+            }
+
+            if (binary.Operator == BinaryOperator.Equal)
+            {
+                string? columnName = null;
+                object? rawLiteral = null;
+
+                if (binary.Left is ColumnReference columnRef
+                    && binary.Right is LiteralExpression literal)
+                {
+                    columnName = columnRef.ColumnName;
+                    rawLiteral = literal.Value;
+                }
+                else if (binary.Left is LiteralExpression literalLeft
+                    && binary.Right is ColumnReference columnRight)
+                {
+                    columnName = columnRight.ColumnName;
+                    rawLiteral = literalLeft.Value;
+                }
+
+                if (columnName is not null && rawLiteral is not null)
+                {
+                    results.Add((columnName, ConvertLiteralToDataValue(rawLiteral)));
+                }
+            }
+        }
     }
 }

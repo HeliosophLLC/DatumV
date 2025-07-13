@@ -157,6 +157,16 @@ When chunks are pruned, `ScanOperator` must read only the surviving chunks. Prov
 
 Currently, the IDX provider implements `ISeekableTableProvider`. Line-oriented formats (CSV, JSONL) do not — they rely on byte-range measurement via `IChunkMeasuringProvider` instead.
 
+### Exact row seek for equality predicates
+
+When the provider supports seeking and the filter contains top-level AND-chained equality predicates on sorted-indexed columns, the scan operator bypasses chunk-level reading entirely. Instead, it calls `FindExact` on the sorted index to obtain exact `(chunkIndex, rowOffsetInChunk)` entries for matching values, converts them to absolute row positions, filters to only non-pruned chunks, and seeks directly to each matching row.
+
+This reduces I/O from reading entire surviving chunks (potentially thousands of rows per chunk) to reading only the rows that actually match. For high-selectivity predicates like `WHERE user_id = 12345` against a million-row source with a sorted index on `user_id`, this is the difference between reading the entire chunk containing the value and reading exactly one row.
+
+When multiple indexed equality predicates are present (e.g., `WHERE user_id = 42 AND category = 'train'`), the engine picks the most selective (fewest matching entries) to minimize seeks. The downstream `FilterOperator` handles any remaining predicates.
+
+OR predicates are not eligible for exact seek because the index result set for one branch may miss rows matching the other branch.
+
 ## ORDER BY optimization
 
 Sorted value indexes can eliminate the `OrderByOperator` entirely. When all of the following conditions are met, the query planner substitutes an `IndexScanOperator` for the usual `ScanOperator` + `OrderByOperator` combination:

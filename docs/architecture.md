@@ -45,7 +45,7 @@ The query planner analyzes column references in SELECT/WHERE/ON and passes requi
 
 Pushed-down WHERE predicates are forwarded to providers that implement `IFilterableTableProvider` as advisory filter hints. The Parquet provider uses this interface to read each row group's min/max column statistics from the file footer and skip row groups whose statistics prove the predicate unsatisfiable.
 
-For any format, `.datum-index` sidecar files extend this capability to chunk-level pruning — including CSV, JSONL, JSON, and ZIP sources. When a source index is loaded, `ScanOperator` applies up to three pruning levels (statistics, bloom filters, sorted value indexes) to skip entire chunks before reading source data. See [Source Indexes](indexes.md) for the full specification.
+For any format, `.datum-index` sidecar files extend this capability to chunk-level pruning — including CSV, JSONL, JSON, and ZIP sources. When a source index is loaded, `ScanOperator` applies up to three pruning levels (statistics, bloom filters, sorted value indexes) to skip entire chunks before reading source data. For equality predicates on sorted-indexed columns, providers that support seeking (`ISeekableTableProvider`) skip chunk-level reading entirely and seek directly to matching rows via exact index lookup. See [Source Indexes](indexes.md) for the full specification.
 
 Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL, and AND/OR compositions. EXPLAIN shows the filter hint on the scan node; EXPLAIN ANALYZE reports how many chunks or row groups were pruned.
 

@@ -351,6 +351,242 @@ public sealed class IndexScanOperatorTests
         Assert.Equal(30f, results[2]["value"].AsScalar());
     }
 
+    // ───────────────────── WHERE index seek tests ─────────────────────
+
+    [Fact]
+    public async Task Scan_WhereEqualityWithSortedIndex_SeeksToMatchingRows()
+    {
+        // 10 rows with values 0..9. WHERE value = 5 should yield exactly 1 row.
+        Row[] rows = CreateNumberedRows(
+            0f, 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSort("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("value"),
+                BinaryOperator.Equal,
+                new LiteralExpression(5.0)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
+
+        Assert.Single(results);
+        Assert.Equal(5f, results[0]["value"].AsScalar());
+    }
+
+    [Fact]
+    public async Task Scan_WhereEqualityWithSortedIndex_MultipleMatches()
+    {
+        // Duplicate values: [1, 2, 3, 2, 1]. WHERE value = 2 yields 2 rows.
+        Row[] rows =
+        [
+            new(["index", "value"], [DataValue.FromScalar(0f), DataValue.FromScalar(1f)]),
+            new(["index", "value"], [DataValue.FromScalar(1f), DataValue.FromScalar(2f)]),
+            new(["index", "value"], [DataValue.FromScalar(2f), DataValue.FromScalar(3f)]),
+            new(["index", "value"], [DataValue.FromScalar(3f), DataValue.FromScalar(2f)]),
+            new(["index", "value"], [DataValue.FromScalar(4f), DataValue.FromScalar(1f)]),
+        ];
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSortFromRows("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("value"),
+                BinaryOperator.Equal,
+                new LiteralExpression(2.0)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
+
+        Assert.Equal(2, results.Count);
+        Assert.All(results, r => Assert.Equal(2f, r["value"].AsScalar()));
+    }
+
+    [Fact]
+    public async Task Scan_WhereEqualityWithSortedIndex_NoMatches()
+    {
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSort("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("value"),
+                BinaryOperator.Equal,
+                new LiteralExpression(99.0)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task Scan_WhereCompoundAndWithSortedIndex_SeeksAndFilters()
+    {
+        // WHERE value = 2 AND index > 1 → index seek on value, filter on index.
+        Row[] rows =
+        [
+            new(["index", "value"], [DataValue.FromScalar(0f), DataValue.FromScalar(2f)]),
+            new(["index", "value"], [DataValue.FromScalar(1f), DataValue.FromScalar(2f)]),
+            new(["index", "value"], [DataValue.FromScalar(2f), DataValue.FromScalar(2f)]),
+            new(["index", "value"], [DataValue.FromScalar(3f), DataValue.FromScalar(3f)]),
+        ];
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSortFromRows("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // WHERE value = 2 AND index > 1
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new BinaryExpression(
+                    new ColumnReference("value"),
+                    BinaryOperator.Equal,
+                    new LiteralExpression(2.0)),
+                BinaryOperator.And,
+                new BinaryExpression(
+                    new ColumnReference("index"),
+                    BinaryOperator.GreaterThan,
+                    new LiteralExpression(1.0))));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
+
+        // value=2 matches rows at index 0,1,2. index>1 further filters to index 2 only.
+        Assert.Single(results);
+        Assert.Equal(2f, results[0]["index"].AsScalar());
+    }
+
+    [Fact]
+    public async Task Scan_WhereOrWithSortedIndex_DoesNotUseIndexSeek()
+    {
+        // OR predicates cannot use index seek — must scan all.
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSort("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // WHERE value = 2 OR value = 4
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new BinaryExpression(
+                    new ColumnReference("value"),
+                    BinaryOperator.Equal,
+                    new LiteralExpression(2.0)),
+                BinaryOperator.Or,
+                new BinaryExpression(
+                    new ColumnReference("value"),
+                    BinaryOperator.Equal,
+                    new LiteralExpression(4.0))));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
+
+        // Should still produce correct results via normal scan + filter.
+        Assert.Equal(2, results.Count);
+    }
+
+    [Fact]
+    public async Task Scan_WhereEqualityWithSortedIndex_ReportsExactSeekRowsFetched()
+    {
+        // Verify the exact seek path is used by checking the ScanOperator metric.
+        Row[] rows = CreateNumberedRows(
+            0f, 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSort("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        // Build operator tree manually to access ScanOperator properties.
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.Equal,
+            new LiteralExpression(5.0)));
+
+        FilterOperator filter = new(scan, new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.Equal,
+            new LiteralExpression(5.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Single(results);
+        Assert.Equal(5f, results[0]["value"].AsScalar());
+        Assert.Equal(1, scan.ExactSeekRowsFetched);
+    }
+
     // ───────────────────── Helpers ─────────────────────
 
     private static TableDescriptor CreateDescriptor(string name)
@@ -409,6 +645,37 @@ public sealed class IndexScanOperatorTests
                     new ColumnInfo("value", DataKind.Scalar, false),
                 ]),
                 rows.Length),
+            [chunk],
+            sortedIndexes: sortedSet);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="SourceIndex"/> with a sorted value index, deriving column
+    /// schema from the rows themselves. Handles rows with arbitrary column layouts.
+    /// </summary>
+    private static SourceIndex CreateSourceIndexWithSortFromRows(string columnName, Row[] rows)
+    {
+        ValueIndexEntry[] entries = new ValueIndexEntry[rows.Length];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            entries[i] = new ValueIndexEntry(rows[i][columnName], ChunkIndex: 0, RowOffsetInChunk: i);
+        }
+
+        SortedValueIndex sortedIndex = SortedValueIndex.BuildFromUnsorted(entries);
+        Dictionary<string, SortedValueIndex> indexes =
+            new(StringComparer.OrdinalIgnoreCase) { [columnName] = sortedIndex };
+        SortedValueIndexSet sortedSet = new(indexes);
+
+        IndexChunk chunk = new(0, rows.Length, -1, -1,
+            new Dictionary<string, ChunkColumnStatistics>());
+
+        ColumnInfo[] columns = rows[0].ColumnNames
+            .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+            .ToArray();
+
+        return new SourceIndex(
+            new SourceFingerprint(100, DummyHash),
+            new IndexSchema(new Schema(columns), rows.Length),
             [chunk],
             sortedIndexes: sortedSet);
     }
