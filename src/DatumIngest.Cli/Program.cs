@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
@@ -131,18 +132,43 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
             }
         }
     }
+
+    // Auto-discover sidecar index files for registered tables.
+    DiscoverSidecarIndexes(catalog, reader);
+}
+
+static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
+{
+    foreach (string tableName in catalog.TableNames)
+    {
+        // Skip tables that already have an index (e.g. from explicit --index).
+        if (catalog.TryGetIndex(tableName, out _))
+        {
+            continue;
+        }
+
+        TableDescriptor descriptor = catalog.Resolve(tableName);
+        string sidecarPath = descriptor.FilePath + ".datum-index";
+
+        if (!File.Exists(sidecarPath))
+        {
+            continue;
+        }
+
+        using FileStream stream = File.OpenRead(sidecarPath);
+        SourceIndex index = reader.Read(stream);
+        catalog.RegisterIndex(tableName, index);
+    }
 }
 
 static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
 {
-    if (options.Sources.Count == 0)
-    {
-        throw new ArgumentException("The 'index' command requires at least one --source definition.");
-    }
-
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
     HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
     SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns, indexColumns);
+
+    // Collect descriptors from inline --source definitions.
+    List<TableDescriptor> descriptors = new();
 
     foreach (string source in options.Sources)
     {
@@ -153,49 +179,77 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
             catalog.Register(descriptor);
         }
 
-        ITableProvider provider = catalog.CreateProvider(descriptor);
+        descriptors.Add(descriptor);
+    }
 
-        Stream? sourceStream = null;
-
-        if (File.Exists(descriptor.FilePath))
+    // When no explicit sources are given, index every table in the catalog.
+    if (descriptors.Count == 0)
+    {
+        foreach (string tableName in catalog.TableNames)
         {
-            sourceStream = File.OpenRead(descriptor.FilePath);
-        }
-
-        try
-        {
-            SourceIndex index = await builder.BuildAsync(
-                descriptor, provider, sourceStream, CancellationToken.None);
-
-            string indexPath = descriptor.FilePath + ".datum-index";
-            using FileStream outputStream = File.Create(indexPath);
-            IndexWriter writer = new();
-            writer.Write(index, outputStream);
-
-            Console.WriteLine($"Index created: {indexPath}");
-            Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
-            Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
-
-            if (index.BloomFilters is not null)
-            {
-                Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
-            }
-
-            if (index.SortedIndexes is not null)
-            {
-                Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
-            }
-        }
-        finally
-        {
-            if (sourceStream is not null)
-            {
-                await sourceStream.DisposeAsync();
-            }
+            descriptors.Add(catalog.Resolve(tableName));
         }
     }
 
+    if (descriptors.Count == 0)
+    {
+        throw new ArgumentException("The 'index' command requires at least one --source definition or a --catalog with tables.");
+    }
+
+    foreach (TableDescriptor descriptor in descriptors)
+    {
+        await BuildIndexForDescriptorAsync(descriptor, catalog, builder, options.ChunkSize);
+    }
+
     return 0;
+}
+
+static async Task BuildIndexForDescriptorAsync(
+    TableDescriptor descriptor,
+    TableCatalog catalog,
+    SourceIndexBuilder builder,
+    int chunkSize)
+{
+    ITableProvider provider = catalog.CreateProvider(descriptor);
+
+    Stream? sourceStream = null;
+
+    if (File.Exists(descriptor.FilePath))
+    {
+        sourceStream = File.OpenRead(descriptor.FilePath);
+    }
+
+    try
+    {
+        SourceIndex index = await builder.BuildAsync(
+            descriptor, provider, sourceStream, CancellationToken.None);
+
+        string indexPath = descriptor.FilePath + ".datum-index";
+        using FileStream outputStream = File.Create(indexPath);
+        IndexWriter writer = new();
+        writer.Write(index, outputStream);
+
+        Console.WriteLine($"Index created: {indexPath}");
+        Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
+        Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {chunkSize})");
+
+        if (index.BloomFilters is not null)
+        {
+            Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
+        }
+
+        if (index.SortedIndexes is not null)
+        {
+            Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
+        }
+    }
+    finally
+    {
+        if (sourceStream is not null)
+        {
+            await sourceStream.DisposeAsync();
+        }
+    }
 }
 
 static void LoadCatalogFile(TableCatalog catalog, string catalogPath)
@@ -426,6 +480,7 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
 
     int count = 0;
     bool headerPrinted = false;
+    Stopwatch stopwatch = Stopwatch.StartNew();
 
     await foreach (Row row in plan.ExecuteAsync(context))
     {
@@ -444,7 +499,8 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
         }
     }
 
-    Console.WriteLine($"\n({count} row(s))");
+    stopwatch.Stop();
+    Console.WriteLine($"\n{count} row(s) in {stopwatch.Elapsed.TotalSeconds:F2} second(s)");
     return 0;
 }
 

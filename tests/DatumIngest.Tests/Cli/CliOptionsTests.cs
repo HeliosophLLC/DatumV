@@ -197,4 +197,33 @@ public sealed class CliOptionsTests
         Assert.Single(options.IndexColumns);
         Assert.Contains("id", options.IndexColumns);
     }
+
+    [Fact]
+    public void Parse_IndexWithCatalogOnly_ParsesCorrectly()
+    {
+        string[] args = ["index", "--catalog", "catalog.json"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal("index", options.Command);
+        Assert.Equal("catalog.json", options.CatalogPath);
+        Assert.Empty(options.Sources);
+    }
+
+    [Fact]
+    public void Parse_IndexWithCatalogAndOptions_ParsesCorrectly()
+    {
+        string[] args = ["index", "--catalog", "catalog.json",
+            "--chunk-size", "5000",
+            "--bloom-columns", "label",
+            "--index-columns", "id"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal("index", options.Command);
+        Assert.Equal("catalog.json", options.CatalogPath);
+        Assert.Equal(5000, options.ChunkSize);
+        Assert.Contains("label", options.BloomColumns);
+        Assert.Contains("id", options.IndexColumns);
+    }
 }
