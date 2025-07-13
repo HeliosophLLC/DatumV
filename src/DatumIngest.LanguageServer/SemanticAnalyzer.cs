@@ -240,6 +240,10 @@ internal sealed class SemanticAnalyzer
                 diagnostics.AddRange(subDiagnostics);
                 break;
 
+            // ErrorExpression — inserted by error recovery; skip validation.
+            case ErrorExpression:
+                break;
+
             // LiteralExpression — nothing to validate.
         }
     }

@@ -308,3 +308,10 @@ public sealed record SubqueryExpression(SelectStatement Query) : Expression;
 /// A CAST expression: <c>CAST(expression AS type)</c>.
 /// </summary>
 public sealed record CastExpression(Expression Expression, string TargetType, SourceSpan? Span = null) : Expression;
+
+/// <summary>
+/// Placeholder expression inserted by the error-recovering parser where
+/// unparseable input was skipped. Downstream consumers (semantic analysis,
+/// expression evaluation) should treat this as opaque and skip validation.
+/// </summary>
+public sealed record ErrorExpression(SourceSpan? Span = null) : Expression;

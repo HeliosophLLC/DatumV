@@ -523,6 +523,26 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, SelectStatement> FullParser =
         SelectStatementParser.AtEnd();
 
+    /// <summary>
+    /// Set of tokens that begin top-level clauses. Used by the error-recovering
+    /// parser to find the next safe synchronization point after a clause failure.
+    /// </summary>
+    private static readonly HashSet<SqlToken> ClauseStartTokens =
+    [
+        SqlToken.From,
+        SqlToken.Join,
+        SqlToken.Inner,
+        SqlToken.Left,
+        SqlToken.Right,
+        SqlToken.Full,
+        SqlToken.Cross,
+        SqlToken.Where,
+        SqlToken.Into,
+        SqlToken.Order,
+        SqlToken.Limit,
+        SqlToken.Offset,
+    ];
+
     // ───────────────────── Public API ─────────────────────
 
     /// <summary>
@@ -544,6 +564,342 @@ public static class SqlParser
         }
 
         return result.Value;
+    }
+
+    /// <summary>
+    /// Parses SQL text with error recovery, collecting multiple errors and
+    /// returning a partial AST where possible. For valid SQL this is equivalent
+    /// to <see cref="Parse"/> but returns a <see cref="ParseResult"/> instead
+    /// of throwing.
+    /// </summary>
+    /// <param name="sql">The SQL query text.</param>
+    /// <returns>
+    /// A <see cref="ParseResult"/> containing the (possibly partial) AST and
+    /// any errors encountered. Check <see cref="ParseResult.IsSuccess"/> to
+    /// determine whether the parse succeeded without errors.
+    /// </returns>
+    public static ParseResult TryParseRecovering(string sql)
+    {
+        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+
+        // Fast path: try the full parser first. If it succeeds, no recovery needed.
+        TokenListParserResult<SqlToken, SelectStatement> fullResult = FullParser.TryParse(tokens);
+        if (fullResult.HasValue)
+        {
+            return new ParseResult(fullResult.Value);
+        }
+
+        // Recovery path: parse clause-by-clause, collecting errors.
+        return ParseWithRecovery(tokens);
+    }
+
+    /// <summary>
+    /// Parses SQL clause-by-clause with error recovery. When a clause combinator
+    /// fails, records the error, skips tokens to the next clause keyword, and
+    /// continues parsing subsequent clauses.
+    /// </summary>
+    private static ParseResult ParseWithRecovery(TokenList<SqlToken> tokens)
+    {
+        List<ParseError> errors = new();
+        Token<SqlToken>[] tokenArray = tokens.ToArray();
+        int position = 0;
+
+        // ── SELECT columns ──
+        SelectColumn[]? columns = null;
+        if (position < tokenArray.Length)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, Token<SqlToken>> selectResult =
+                Token.EqualTo(SqlToken.Select).TryParse(remaining);
+
+            if (!selectResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Expected SELECT keyword.");
+                position = SkipToNextClauseIndex(tokenArray, position);
+            }
+            else
+            {
+                position += CountConsumed(tokenArray, position, selectResult.Remainder);
+                TokenList<SqlToken> afterSelect = new(tokenArray[position..]);
+                TokenListParserResult<SqlToken, SelectColumn[]> columnsResult =
+                    ColumnList.TryParse(afterSelect);
+
+                if (!columnsResult.HasValue)
+                {
+                    AddErrorFromToken(errors, tokenArray, position, "Invalid column list after SELECT.");
+                    position = SkipToNextClauseIndex(tokenArray, position);
+                }
+                else
+                {
+                    columns = columnsResult.Value;
+                    position += CountConsumed(tokenArray, position, columnsResult.Remainder);
+                }
+            }
+        }
+        else
+        {
+            AddErrorFromToken(errors, tokenArray, position, "Expected SELECT keyword.");
+        }
+
+        // ── FROM clause ──
+        FromClause? fromClause = null;
+        if (position < tokenArray.Length)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, FromClause> fromResult =
+                FromClauseParser.TryParse(remaining);
+
+            if (!fromResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Expected FROM clause.");
+                position = SkipToNextClauseIndex(tokenArray, position);
+            }
+            else
+            {
+                fromClause = fromResult.Value;
+                position += CountConsumed(tokenArray, position, fromResult.Remainder);
+            }
+        }
+        else
+        {
+            AddErrorFromToken(errors, tokenArray, position, "Expected FROM clause.");
+        }
+
+        // ── JOIN clauses ──
+        List<JoinClause> joinClauses = new();
+        while (position < tokenArray.Length && IsJoinStartToken(tokenArray[position].Kind))
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, JoinClause> joinResult =
+                JoinClauseParser.TryParse(remaining);
+
+            if (!joinResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid JOIN clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                joinClauses.Add(joinResult.Value);
+                position += CountConsumed(tokenArray, position, joinResult.Remainder);
+            }
+        }
+
+        // ── WHERE clause ──
+        Expression? whereClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Where)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, Expression> whereResult =
+                WhereClauseParser.TryParse(remaining);
+
+            if (!whereResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid WHERE clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                whereClause = whereResult.Value;
+                position += CountConsumed(tokenArray, position, whereResult.Remainder);
+            }
+        }
+
+        // ── INTO clause ──
+        IntoClause? intoClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Into)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, IntoClause> intoResult =
+                IntoClauseParser.TryParse(remaining);
+
+            if (!intoResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid INTO clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                intoClause = intoResult.Value;
+                position += CountConsumed(tokenArray, position, intoResult.Remainder);
+            }
+        }
+
+        // ── ORDER BY clause ──
+        OrderByClause? orderByClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Order)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, OrderByClause> orderByResult =
+                OrderByClauseParser.TryParse(remaining);
+
+            if (!orderByResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid ORDER BY clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                orderByClause = orderByResult.Value;
+                position += CountConsumed(tokenArray, position, orderByResult.Remainder);
+            }
+        }
+
+        // ── LIMIT ──
+        int? limitValue = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Limit)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, int?> limitResult =
+                LimitParser.TryParse(remaining);
+
+            if (!limitResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid LIMIT value.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                limitValue = limitResult.Value;
+                position += CountConsumed(tokenArray, position, limitResult.Remainder);
+            }
+        }
+
+        // ── OFFSET ──
+        int? offsetValue = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Offset)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, int?> offsetResult =
+                OffsetParser.TryParse(remaining);
+
+            if (!offsetResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid OFFSET value.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                offsetValue = offsetResult.Value;
+                position += CountConsumed(tokenArray, position, offsetResult.Remainder);
+            }
+        }
+
+        // ── Trailing tokens ──
+        if (position < tokenArray.Length)
+        {
+            AddErrorFromToken(errors, tokenArray, position, "Unexpected tokens after end of statement.");
+        }
+
+        // Build partial AST if we have enough structure.
+        SelectStatement? statement = null;
+        if (columns is not null && fromClause is not null)
+        {
+            statement = new SelectStatement(
+                columns,
+                fromClause,
+                intoClause,
+                joinClauses.Count > 0 ? joinClauses.ToArray() : null,
+                whereClause,
+                orderByClause,
+                limitValue,
+                offsetValue);
+        }
+        else if (columns is not null)
+        {
+            // Partial: we have columns but no FROM — build with a placeholder
+            // source so downstream analysis can at least see the column expressions.
+            statement = new SelectStatement(
+                columns,
+                new FromClause(new TableReference("?", Span: new SourceSpan(1, 1, 0))),
+                intoClause,
+                joinClauses.Count > 0 ? joinClauses.ToArray() : null,
+                whereClause,
+                orderByClause,
+                limitValue,
+                offsetValue);
+        }
+
+        return new ParseResult(statement, errors);
+    }
+
+    /// <summary>
+    /// Checks whether the given token kind starts a JOIN clause.
+    /// </summary>
+    private static bool IsJoinStartToken(SqlToken kind)
+    {
+        return kind is SqlToken.Join or SqlToken.Inner or
+            SqlToken.Left or SqlToken.Right or SqlToken.Full or SqlToken.Cross;
+    }
+
+    /// <summary>
+    /// Skips forward in the token array from the given index until a
+    /// clause-starting keyword is found, returning that index. Returns
+    /// past-the-end if no clause keyword is found.
+    /// </summary>
+    private static int SkipToNextClauseIndex(Token<SqlToken>[] tokenArray, int startIndex)
+    {
+        for (int i = startIndex; i < tokenArray.Length; i++)
+        {
+            if (ClauseStartTokens.Contains(tokenArray[i].Kind))
+            {
+                return i;
+            }
+        }
+
+        return tokenArray.Length;
+    }
+
+    /// <summary>
+    /// Counts how many tokens were consumed by comparing the starting position
+    /// to the remainder returned by a <c>TryParse</c> call.
+    /// </summary>
+    private static int CountConsumed(Token<SqlToken>[] tokenArray, int startPosition, TokenList<SqlToken> remainder)
+    {
+        if (remainder.IsAtEnd)
+        {
+            return tokenArray.Length - startPosition;
+        }
+
+        Token<SqlToken> nextToken = remainder.ConsumeToken().Value;
+        for (int i = startPosition; i < tokenArray.Length; i++)
+        {
+            if (tokenArray[i].Span.Position.Absolute == nextToken.Span.Position.Absolute)
+            {
+                return i - startPosition;
+            }
+        }
+
+        return tokenArray.Length - startPosition;
+    }
+
+    /// <summary>
+    /// Records a parse error at the given token index, or a default position
+    /// if the index is past the end of the array.
+    /// </summary>
+    private static void AddErrorFromToken(List<ParseError> errors, Token<SqlToken>[] tokenArray, int index, string message)
+    {
+        if (index < tokenArray.Length)
+        {
+            Token<SqlToken> token = tokenArray[index];
+            errors.Add(new ParseError
+            {
+                Message = message,
+                Line = token.Span.Position.Line,
+                Column = token.Span.Position.Column,
+                Length = token.Span.Length,
+            });
+        }
+        else
+        {
+            errors.Add(new ParseError
+            {
+                Message = message,
+                Line = 1,
+                Column = 1,
+                Length = 1,
+            });
+        }
     }
 
     // ───────────────────── Helpers ─────────────────────

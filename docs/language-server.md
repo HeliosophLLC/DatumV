@@ -109,11 +109,11 @@ Prefix filtering narrows suggestions as the user types. For example, typing `na`
 
 ## Diagnostics
 
-The diagnostics pipeline runs in two stages:
+The diagnostics pipeline uses an **error-recovering parser** that collects multiple errors per document and produces partial ASTs for downstream analysis:
 
-1. **Syntax errors** — `SqlParser.Parse` is invoked and any `ParseException` is converted to an `Error`-severity diagnostic at the precise token position.
+1. **Syntax errors** — `SqlParser.TryParseRecovering` parses SQL clause-by-clause (SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, OFFSET). When a clause fails, the error is recorded and the parser skips to the next clause keyword to continue. This yields multiple `Error`-severity diagnostics from a single parse pass rather than stopping at the first failure.
 
-2. **Semantic warnings** — When the service has been initialized with a manifest, the AST is passed to `SemanticAnalyzer` which validates every table, column, and function reference against the known schema. Unknown references produce `Warning`-severity diagnostics with accurate underline spans.
+2. **Semantic warnings** — When the service has been initialized with a manifest and a partial AST is available, it is passed to `SemanticAnalyzer` which validates every table, column, and function reference against the known schema. `ErrorExpression` placeholder nodes inserted during recovery are silently skipped. Unknown references produce `Warning`-severity diagnostics with accurate underline spans.
 
 ### Validated references
 

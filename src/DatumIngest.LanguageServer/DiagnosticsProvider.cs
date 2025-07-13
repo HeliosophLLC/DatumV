@@ -6,8 +6,8 @@ using DatumIngest.Parsing.Ast;
 
 /// <summary>
 /// Produces diagnostics (parse errors and semantic warnings) for SQL text by
-/// running the full parser and optionally validating references against a
-/// <see cref="LanguageServerManifest"/>.
+/// running the error-recovering parser and optionally validating references
+/// against a <see cref="LanguageServerManifest"/>.
 /// </summary>
 public static class DiagnosticsProvider
 {
@@ -16,7 +16,7 @@ public static class DiagnosticsProvider
     /// Returns an empty array for valid SQL or empty input.
     /// </summary>
     /// <param name="sql">The SQL text to analyze.</param>
-    /// <returns>An array of diagnostics (currently at most one, since the parser stops at the first error).</returns>
+    /// <returns>An array of diagnostics (may contain multiple parse errors).</returns>
     public static Diagnostic[] GetDiagnostics(string sql)
     {
         return GetDiagnostics(sql, manifest: null);
@@ -40,40 +40,37 @@ public static class DiagnosticsProvider
             return [];
         }
 
-        SelectStatement statement;
-        try
-        {
-            statement = SqlParser.Parse(sql);
-        }
-        catch (ParseException exception)
-        {
-            Superpower.Model.Position position = exception.ErrorPosition;
+        ParseResult parseResult = SqlParser.TryParseRecovering(sql);
 
-            // Superpower's Position is 1-based; LSP diagnostics are 0-based.
-            int line = System.Math.Max(0, position.Line - 1);
-            int column = System.Math.Max(0, position.Column - 1);
+        List<Diagnostic> diagnostics = new();
 
-            return
-            [
-                new Diagnostic
-                {
-                    Message = exception.Message,
-                    Severity = DiagnosticSeverity.Error,
-                    StartLine = line,
-                    StartColumn = column,
-                    EndLine = line,
-                    // Highlight at least one character at the error position.
-                    EndColumn = column + 1,
-                }
-            ];
+        // Convert parse errors to diagnostics.
+        foreach (ParseError error in parseResult.Errors)
+        {
+            // ParseError uses 1-based positions; LSP diagnostics are 0-based.
+            int line = System.Math.Max(0, error.Line - 1);
+            int column = System.Math.Max(0, error.Column - 1);
+
+            diagnostics.Add(new Diagnostic
+            {
+                Message = error.Message,
+                Severity = DiagnosticSeverity.Error,
+                StartLine = line,
+                StartColumn = column,
+                EndLine = line,
+                EndColumn = column + error.Length,
+            });
         }
 
-        if (manifest is null)
+        // Run semantic analysis on the (possibly partial) AST if a manifest
+        // is available and the parser produced a tree.
+        if (manifest is not null && parseResult.Statement is not null)
         {
-            return [];
+            SemanticAnalyzer analyzer = new(manifest);
+            Diagnostic[] semanticDiagnostics = analyzer.Analyze(parseResult.Statement);
+            diagnostics.AddRange(semanticDiagnostics);
         }
 
-        SemanticAnalyzer analyzer = new(manifest);
-        return analyzer.Analyze(statement);
+        return diagnostics.ToArray();
     }
 }
