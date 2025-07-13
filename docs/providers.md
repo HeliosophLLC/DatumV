@@ -86,18 +86,24 @@ datum-ingest query \
    JOIN labels AS l ON i.index = l.index \
    WHERE l.value = 7 \
    INTO 'sevens.parquet'" \
-  --source "idx:images=train-images-idx3-ubyte" \
-  --source "idx:labels=train-labels-idx1-ubyte"
+  --source "images=train-images-idx3-ubyte" \
+  --source "labels=train-labels-idx1-ubyte"
 ```
 
 ## Source definition format
 
+Sources can be specified with or without an explicit provider prefix:
+
 ```
-provider:name=path[;key=value;...]
+name=path[;key=value;...]            # auto-detect provider from file
+provider:name=path[;key=value;...]   # explicit provider
 ```
 
 Examples:
 ```
+data=./data.csv
+images=./train-images-idx3-ubyte
+data=./data.csv;delimiter=,;header=true
 csv:data=./data.csv;delimiter=,;header=true
 json:annotations=./coco.json
 jsonl:records=./data.jsonl
@@ -106,6 +112,44 @@ hdf5:features=./embeddings.h5
 parquet:labels=./labels.parquet
 idx:images=./train-images-idx3-ubyte
 ```
+
+When the provider prefix is omitted, the format is detected automatically (see below). The explicit `provider:name=path` form is always available as an override.
+
+## Format auto-detection
+
+When a `--source` definition omits the provider prefix, or when the programmatic API uses `catalog.Register(name, filePath)`, the file format is detected using a three-tier strategy:
+
+### 1. File extension
+
+| Extension | Provider |
+|-----------|----------|
+| `.csv`, `.tsv` | csv |
+| `.json` | json |
+| `.jsonl`, `.ndjson` | jsonl |
+| `.parquet`, `.pq` | parquet |
+| `.hdf5`, `.h5`, `.hdf` | hdf5 |
+| `.zip` | zip |
+| `.idx` | idx |
+
+Extension matching is case-insensitive.
+
+### 2. Filename pattern
+
+Files matching the MNIST-style IDX naming convention (e.g. `train-images-idx3-ubyte`, `t10k-labels-idx1-ubyte`) are detected as IDX regardless of extension.
+
+### 3. Magic bytes
+
+If the extension and filename pattern are inconclusive, the first 8 bytes of the file are read to check for known signatures:
+
+| Signature | Provider |
+|-----------|----------|
+| `PAR1` | parquet |
+| `\x89HDF\r\n\x1a\n` | hdf5 |
+| `PK\x03\x04` | zip |
+| `\x00\x00` + valid IDX type code + dimension count ≥ 1 | idx |
+| `{` or `[` (first non-whitespace byte) | json |
+
+If all three tiers fail, an error is raised suggesting the explicit `provider:name=path` format.
 
 ## Catalog file format
 

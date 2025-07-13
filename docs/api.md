@@ -102,6 +102,31 @@ public class MyTableFunction : ISchemaAwareTableFunction
 }
 ```
 
+## Auto-detecting table registration
+
+The `Register` overloads detect the file format automatically from extension, filename pattern, or magic bytes:
+
+```csharp
+TableCatalog catalog = new();
+catalog.RegisterProvider("csv", () => new CsvTableProvider());
+catalog.RegisterProvider("idx", () => new IdxTableProvider());
+catalog.RegisterProvider("parquet", () => new ParquetTableProvider());
+
+// Auto-detect from file extension
+catalog.Register("data", "./iris.csv");
+
+// MNIST-style IDX files detected from filename pattern
+catalog.Register("images", "./train-images-idx3-ubyte");
+
+// Auto-detect with provider-specific options
+catalog.Register("data", "./data.tsv", new Dictionary<string, string> { ["delimiter"] = "\t" });
+
+// Explicit TableDescriptor still works as an override
+catalog.Register(new TableDescriptor("csv", "data", "./data.csv", new()));
+```
+
+When the format cannot be determined, `Register` throws `ArgumentException` with a message listing supported formats. See [Providers — Format auto-detection](providers.md#format-auto-detection) for the full detection rules.
+
 ## Stream-based output
 
 All three output writers accept a `Stream` instead of a file path, enabling purely in-memory pipelines:

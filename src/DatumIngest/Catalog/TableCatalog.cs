@@ -35,6 +35,45 @@ public sealed class TableCatalog
     }
 
     /// <summary>
+    /// Registers a table by name and file path, auto-detecting the provider
+    /// from the file extension, filename pattern, or magic bytes.
+    /// </summary>
+    /// <param name="name">Logical table name for SQL FROM clauses.</param>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the file format cannot be determined. Use the
+    /// <see cref="Register(TableDescriptor)"/> overload with an explicit provider.
+    /// </exception>
+    public void Register(string name, string filePath)
+    {
+        Register(name, filePath, new Dictionary<string, string>());
+    }
+
+    /// <summary>
+    /// Registers a table by name and file path with provider-specific options,
+    /// auto-detecting the provider from the file extension, filename pattern,
+    /// or magic bytes.
+    /// </summary>
+    /// <param name="name">Logical table name for SQL FROM clauses.</param>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <param name="options">Provider-specific key-value options (e.g. delimiter, header).</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the file format cannot be determined. Use the
+    /// <see cref="Register(TableDescriptor)"/> overload with an explicit provider.
+    /// </exception>
+    public void Register(string name, string filePath, IReadOnlyDictionary<string, string> options)
+    {
+        string provider = FileFormatDetector.DetectProvider(filePath)
+            ?? throw new ArgumentException(
+                $"Cannot detect file format for '{filePath}'. " +
+                "Supported formats: csv, json, jsonl, parquet, hdf5, zip, idx. " +
+                "Use Register(TableDescriptor) with an explicit provider.",
+                nameof(filePath));
+
+        Register(new TableDescriptor(provider, name, filePath, options));
+    }
+
+    /// <summary>
     /// Resolves a table name to its descriptor.
     /// </summary>
     /// <param name="tableName">Logical table name from the SQL query.</param>

@@ -72,7 +72,7 @@ If you need GROUP BY, window functions, or billion-row analytics, use DuckDB. If
 ### 1. Query a CSV file
 
 ```bash
-datum-ingest explore "SELECT name, score FROM data WHERE score > 90" --source "csv:data=./iris.csv"
+datum-ingest explore "SELECT name, score FROM data WHERE score > 90" --source "data=./iris.csv"
 ```
 
 ### 2. Join ZIP + JSON, transform images, output to HDF5
@@ -86,7 +86,7 @@ datum-ingest query "
   INNER JOIN captions AS cap ON img.id = image_captions.image_id
   WHERE len(cap.caption) > 20
   INTO 'dataset.h5'
-" --source "zip:images=./train2017.zip" --source "json:captions=./captions.json"
+" --source "images=./train2017.zip" --source "captions=./captions.json"
 ```
 
 ### 3. ETL with sharded output
@@ -96,7 +96,7 @@ datum-ingest query "
   SELECT id, normalize(value) AS norm_value, category
   FROM data
   INTO 'output/result.csv' SHARD ON sample_count 10000
-" --source "csv:data=./large_dataset.csv"
+" --source "data=./large_dataset.csv"
 ```
 
 ## Programmatic Usage
@@ -108,7 +108,7 @@ SelectStatement statement = SqlParser.Parse(
 
 TableCatalog catalog = new();
 catalog.RegisterProvider("csv", () => new CsvTableProvider());
-catalog.Register(new TableDescriptor("csv", "data", "./data.csv", new()));
+catalog.Register("data", "./data.csv");
 
 FunctionRegistry functions = FunctionRegistry.CreateDefault();
 QueryPlanner planner = new(catalog, functions);
@@ -156,7 +156,7 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | Flag | Description |
 |------|-------------|
 | `--catalog <path>` | Path to a JSON catalog file defining table sources. |
-| `--source <def>` | Inline source definition. Format: `provider:name=path[;key=value]`. Repeatable. |
+| `--source <def>` | Inline source definition. Format: `name=path` (auto-detect) or `provider:name=path[;key=value]` (explicit). Repeatable. |
 | `--limit <n>` | Row limit for explore mode (default: 10). |
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 | `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |

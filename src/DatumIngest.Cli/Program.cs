@@ -222,24 +222,43 @@ static void LoadCatalogFile(TableCatalog catalog, string catalogPath)
 
 static TableDescriptor ParseSourceDefinition(string source)
 {
-    // Format: provider:name=path[;key=value;...]
+    // Two supported formats:
+    //   Explicit:    provider:name=path[;key=value;...]
+    //   Auto-detect: name=path[;key=value;...]
+    //
+    // Heuristic: if '=' appears before ':' (or there is no ':'), the source
+    // omits the provider prefix and we auto-detect from the file.
+    // Windows drive letters (e.g. C:\) are handled because the '=' in
+    // "name=C:\..." always precedes the colon in the path.
     int colonIndex = source.IndexOf(':');
-    if (colonIndex < 0)
-    {
-        throw new ArgumentException($"Invalid source format: '{source}'. Expected format: provider:name=path[;key=value]");
-    }
+    int equalsIndex = source.IndexOf('=');
 
-    string provider = source[..colonIndex];
-    string remainder = source[(colonIndex + 1)..];
-
-    int equalsIndex = remainder.IndexOf('=');
     if (equalsIndex < 0)
     {
-        throw new ArgumentException($"Invalid source format: '{source}'. Expected format: provider:name=path[;key=value]");
+        throw new ArgumentException(
+            $"Invalid source format: '{source}'. " +
+            "Expected format: name=path or provider:name=path[;key=value]");
     }
 
-    string name = remainder[..equalsIndex];
-    string pathAndOptions = remainder[(equalsIndex + 1)..];
+    bool hasExplicitProvider = colonIndex >= 0 && colonIndex < equalsIndex;
+
+    string provider;
+    string remainder;
+
+    if (hasExplicitProvider)
+    {
+        provider = source[..colonIndex];
+        remainder = source[(colonIndex + 1)..];
+    }
+    else
+    {
+        provider = null!; // Resolved below after parsing the file path.
+        remainder = source;
+    }
+
+    int nameEqualsIndex = remainder.IndexOf('=');
+    string name = remainder[..nameEqualsIndex];
+    string pathAndOptions = remainder[(nameEqualsIndex + 1)..];
 
     Dictionary<string, string> options = new();
     string filePath;
@@ -262,6 +281,15 @@ static TableDescriptor ParseSourceDefinition(string source)
     else
     {
         filePath = pathAndOptions;
+    }
+
+    if (!hasExplicitProvider)
+    {
+        provider = FileFormatDetector.DetectProvider(filePath)
+            ?? throw new ArgumentException(
+                $"Cannot detect file format for '{filePath}'. " +
+                "Supported formats: csv, json, jsonl, parquet, hdf5, zip, idx. " +
+                "Use the explicit format: provider:name=path");
     }
 
     return new TableDescriptor(provider, name, filePath, options);
