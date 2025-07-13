@@ -13,8 +13,9 @@ namespace DatumIngest.Execution.Operators;
 /// <remarks>
 /// The operator buffers all rows from its child, collects the key values,
 /// fetches the deferred columns in a single batch, and re-emits rows with the
-/// additional columns merged in. Both unqualified and alias-qualified column
-/// names are added to match <see cref="AliasOperator"/> behavior.
+/// additional columns merged in. When an alias is present, physical column names
+/// use the qualified form and unqualified names are added to the lookup index
+/// only, matching <see cref="AliasOperator"/> behavior.
 /// </remarks>
 public sealed class LateMaterializationOperator : IQueryOperator
 {
@@ -164,20 +165,17 @@ public sealed class LateMaterializationOperator : IQueryOperator
         }
 
         /// <summary>
-        /// Builds a merged schema by appending deferred columns (unqualified and
-        /// optionally alias-qualified) to the original row columns.
+        /// Builds a merged schema by appending deferred columns to the original
+        /// row columns. When an alias is set, the physical column names use the
+        /// qualified form (<c>alias.column</c>) and the unqualified names are added
+        /// to the lookup index only, matching <see cref="AliasOperator"/> behavior.
         /// </summary>
         internal static MergedRowSchema Build(
             Row originalRow,
             IReadOnlySet<string> deferredColumns,
             string? alias)
         {
-            // Determine how many extra columns to add:
-            // each deferred column gets an unqualified name,
-            // plus a qualified name if alias is present.
-            int extraPerColumn = alias is not null ? 2 : 1;
-            int totalExtra = deferredColumns.Count * extraPerColumn;
-            int totalFields = originalRow.FieldCount + totalExtra;
+            int totalFields = originalRow.FieldCount + deferredColumns.Count;
 
             string[] names = new string[totalFields];
             string[] deferredColumnNames = new string[deferredColumns.Count];
@@ -197,20 +195,26 @@ public sealed class LateMaterializationOperator : IQueryOperator
                 deferredColumnNames[deferredIndex] = columnName;
                 deferredIndex++;
 
-                names[offset] = columnName;
+                // Physical name is qualified when alias is present.
+                names[offset] = alias is not null ? $"{alias}.{columnName}" : columnName;
                 offset++;
-
-                if (alias is not null)
-                {
-                    names[offset] = $"{alias}.{columnName}";
-                    offset++;
-                }
             }
 
-            Dictionary<string, int> nameIndex = new(totalFields, StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, int> nameIndex = new(totalFields + deferredColumns.Count, StringComparer.OrdinalIgnoreCase);
             for (int index = 0; index < totalFields; index++)
             {
                 nameIndex[names[index]] = index;
+            }
+
+            // Add unqualified shortcuts for aliased deferred columns.
+            if (alias is not null)
+            {
+                offset = originalRow.FieldCount;
+                foreach (string columnName in deferredColumns)
+                {
+                    nameIndex[columnName] = offset;
+                    offset++;
+                }
             }
 
             return new MergedRowSchema(names, nameIndex, originalRow.FieldCount, deferredColumnNames);
@@ -248,16 +252,8 @@ public sealed class LateMaterializationOperator : IQueryOperator
                     value = DataValue.Null(DataKind.UInt8Array);
                 }
 
-                // Unqualified name.
                 values[offset] = value;
                 offset++;
-
-                // Qualified name (same value).
-                if (_names.Length > _originalFieldCount + _deferredColumnNames.Length)
-                {
-                    values[offset] = value;
-                    offset++;
-                }
             }
 
             return new Row(_names, values, _nameIndex);

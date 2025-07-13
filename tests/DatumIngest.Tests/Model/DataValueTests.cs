@@ -299,4 +299,42 @@ public class DataValueTests
 
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
     }
+
+    // ─────────────── ToString tests ───────────────
+
+    [Fact]
+    public void ToString_Scalar_FormatsValue()
+    {
+        Assert.Equal("42", DataValue.FromScalar(42f).ToString());
+    }
+
+    [Fact]
+    public void ToString_UInt8_FormatsValue()
+    {
+        Assert.Equal("255", DataValue.FromUInt8(255).ToString());
+    }
+
+    [Fact]
+    public void ToString_String_ReturnsPayload()
+    {
+        Assert.Equal("hello", DataValue.FromString("hello").ToString());
+    }
+
+    [Fact]
+    public void ToString_Vector_ShowsLength()
+    {
+        Assert.Equal("Vector[3]", DataValue.FromVector([1f, 2f, 3f]).ToString());
+    }
+
+    [Fact]
+    public void ToString_Matrix_ShowsShape()
+    {
+        Assert.Equal("Matrix[2x3]", DataValue.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 2, 3).ToString());
+    }
+
+    [Fact]
+    public void ToString_Null_IncludesKind()
+    {
+        Assert.Equal("NULL(Scalar)", DataValue.Null(DataKind.Scalar).ToString());
+    }
 }

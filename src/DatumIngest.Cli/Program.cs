@@ -728,8 +728,24 @@ static string FormatValue(DataValue value)
         DataKind.DateTime => value.AsDateTime().ToString("O"),
         DataKind.JsonValue => value.AsJsonValue(),
         DataKind.Vector => $"[{string.Join(", ", value.AsVector().Select(v => v.ToString("G")))}]",
+        DataKind.Matrix => $"Matrix[{FormatMatrixShape(value)}]",
+        DataKind.Tensor => $"Tensor[{FormatTensorShape(value)}]",
+        DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
+        DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
         _ => value.ToString() ?? ""
     };
+}
+
+static string FormatMatrixShape(DataValue value)
+{
+    value.AsMatrix(out int rows, out int columns);
+    return $"{rows}x{columns}";
+}
+
+static string FormatTensorShape(DataValue value)
+{
+    value.AsTensor(out int[] shape);
+    return string.Join("x", shape);
 }
 
 static string FormatStatResult(StatisticResult result)

@@ -64,24 +64,27 @@ public sealed class AliasOperator : IQueryOperator
 
         /// <summary>
         /// Builds the alias schema from the alias prefix and the first source row.
+        /// The physical column names use the qualified form (<c>alias.column</c>).
+        /// The unqualified original names are added to the lookup index so that
+        /// expressions can resolve either form, without doubling the column count.
         /// </summary>
         internal static AliasSchema Build(string alias, Row firstRow)
         {
             int fieldCount = firstRow.FieldCount;
-            string[] names = new string[fieldCount * 2];
+            string[] names = new string[fieldCount];
 
             for (int index = 0; index < fieldCount; index++)
             {
-                string originalName = firstRow.ColumnNames[index];
-                names[index] = $"{alias}.{originalName}";
-                names[fieldCount + index] = originalName;
+                names[index] = $"{alias}.{firstRow.ColumnNames[index]}";
             }
 
+            // Map both qualified and unqualified names to the same slot.
             Dictionary<string, int> nameIndex =
-                new(names.Length, StringComparer.OrdinalIgnoreCase);
-            for (int index = 0; index < names.Length; index++)
+                new(fieldCount * 2, StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < fieldCount; index++)
             {
                 nameIndex[names[index]] = index;
+                nameIndex[firstRow.ColumnNames[index]] = index;
             }
 
             return new AliasSchema(names, nameIndex, fieldCount);
@@ -93,13 +96,11 @@ public sealed class AliasOperator : IQueryOperator
         /// </summary>
         internal Row Apply(Row sourceRow)
         {
-            DataValue[] values = new DataValue[_names.Length];
+            DataValue[] values = new DataValue[_sourceFieldCount];
 
             for (int index = 0; index < _sourceFieldCount; index++)
             {
-                DataValue value = sourceRow[index];
-                values[index] = value;
-                values[_sourceFieldCount + index] = value;
+                values[index] = sourceRow[index];
             }
 
             return new Row(_names, values, _nameIndex);

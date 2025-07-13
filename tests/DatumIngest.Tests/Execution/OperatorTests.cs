@@ -515,10 +515,74 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(alias);
 
         Assert.Single(rows);
+        // FieldCount matches the source — columns are not doubled.
+        Assert.Equal(2, rows[0].FieldCount);
+        // ColumnNames are qualified only.
+        Assert.Equal(["t.id", "t.name"], rows[0].ColumnNames);
         Assert.Equal(1f, rows[0]["t.id"].AsScalar());
         Assert.Equal("test", rows[0]["t.name"].AsString());
-        // Also accessible without prefix.
+        // Also accessible without prefix via the lookup index.
         Assert.Equal(1f, rows[0]["id"].AsScalar());
+    }
+
+    /// <summary>
+    /// SELECT * on a JOIN of aliased tables should emit only the qualified
+    /// (alias-prefixed) column names. <see cref="AliasOperator"/> exposes
+    /// unqualified names only via the lookup index, not as physical columns.
+    /// </summary>
+    [Fact]
+    public async Task Project_SelectStar_JoinedAliases_OnlyQualifiedColumns()
+    {
+        // AliasOperator produces only qualified column names (l.id, l.name)
+        // while keeping unqualified names in the lookup index.
+        // JoinOperator concatenates both sides: l.id, l.name, r.id, r.score.
+        MockOperator left = new(
+            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))));
+        MockOperator right = new(
+            MakeRow(("id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(95f))));
+
+        AliasOperator aliasLeft = new(left, "l");
+        AliasOperator aliasRight = new(right, "r");
+
+        JoinOperator join = new(aliasLeft, aliasRight, JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("l", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "id")));
+
+        ProjectOperator project = new(join, [new SelectAllColumns()]);
+
+        List<Row> rows = await CollectAsync(project);
+
+        Assert.Single(rows);
+
+        // Should contain only qualified names: l.id, l.name, r.id, r.score.
+        string[] expectedColumns = ["l.id", "l.name", "r.id", "r.score"];
+        Assert.Equal(expectedColumns.Length, rows[0].FieldCount);
+        Assert.Equal(expectedColumns, rows[0].ColumnNames);
+
+        Assert.Equal(1f, rows[0]["l.id"].AsScalar());
+        Assert.Equal("Alice", rows[0]["l.name"].AsString());
+        Assert.Equal(95f, rows[0]["r.score"].AsScalar());
+    }
+
+    /// <summary>
+    /// SELECT * on a single non-aliased table should still emit all columns
+    /// without any filtering.
+    /// </summary>
+    [Fact]
+    public async Task Project_SelectStar_NoAliases_EmitsAllColumns()
+    {
+        MockOperator source = new(
+            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))));
+
+        ProjectOperator project = new(source, [new SelectAllColumns()]);
+
+        List<Row> rows = await CollectAsync(project);
+
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(["id", "name"], rows[0].ColumnNames);
     }
 
     // ─────────────── Expression-based hash join tests ───────────────

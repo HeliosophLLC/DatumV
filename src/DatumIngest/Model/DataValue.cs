@@ -443,4 +443,28 @@ public sealed class DataValue : IEquatable<DataValue>
 
         return hash.ToHashCode();
     }
+
+    // ───────────────────────── Display ─────────────────────────
+
+    /// <inheritdoc/>
+    public override string ToString()
+    {
+        if (_isNull) return $"NULL({_kind})";
+
+        return _kind switch
+        {
+            DataKind.Scalar => ((float)_payload!).ToString("G"),
+            DataKind.UInt8 => ((byte)_payload!).ToString(),
+            DataKind.String => (string)_payload!,
+            DataKind.Date => ((DateOnly)_payload!).ToString("yyyy-MM-dd"),
+            DataKind.DateTime => ((DateTime)_payload!).ToString("O"),
+            DataKind.JsonValue => (string)_payload!,
+            DataKind.Vector => $"Vector[{((float[])_payload!).Length}]",
+            DataKind.Matrix => $"Matrix[{_shape![0]}x{_shape[1]}]",
+            DataKind.Tensor => $"Tensor[{string.Join("x", _shape!)}]",
+            DataKind.UInt8Array => $"UInt8Array[{((byte[])_payload!).Length}]",
+            DataKind.Image => $"Image[{AsImage().Length} bytes]",
+            _ => _kind.ToString(),
+        };
+    }
 }
