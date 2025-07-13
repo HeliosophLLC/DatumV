@@ -72,6 +72,7 @@ static TableCatalog BuildCatalog(CliOptions options)
     catalog.RegisterProvider("zip", () => new ZipTableProvider());
     catalog.RegisterProvider("hdf5", () => new Hdf5TableProvider());
     catalog.RegisterProvider("parquet", () => new ParquetTableProvider());
+    catalog.RegisterProvider("idx", () => new IdxTableProvider());
 
     // Load catalog file if specified
     if (options.CatalogPath is not null)

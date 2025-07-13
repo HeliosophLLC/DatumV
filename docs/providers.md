@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
 
-DatumIngest reads from six file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file.
+DatumIngest reads from seven file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file.
 
 ## CSV
 
@@ -57,6 +57,39 @@ Maps Parquet types to DataKind: INT32/INT64 → Scalar, FLOAT/DOUBLE → Scalar,
 
 Supports statistics-based row group pruning: when a WHERE predicate is pushed down, the provider reads each row group's min/max column statistics from the Parquet footer metadata and skips row groups that cannot contain matching rows. This avoids reading column data for pruned groups entirely. Use EXPLAIN to see which filter is applied (`statistics filter:` annotation on the scan node) and EXPLAIN ANALYZE to see how many row groups were pruned.
 
+## IDX
+
+Reads IDX binary files — the format used by MNIST, Fashion-MNIST, and similar datasets. Supports all IDX data type codes (uint8, int8, int16, int32, float32, float64) and any dimensionality.
+
+Every table has two columns:
+- `index` (Scalar) — 0-based row number, useful for joining separate image and label files
+- A data column whose name and type depend on the data:
+
+| Data type | Per-item dims | Column name | DataKind |
+|-----------|--------------|-------------|----------|
+| uint8 | 0 (scalar) | `value` | UInt8 |
+| uint8 | 1 (array) | `data` | UInt8Array |
+| uint8 | 2+ (image) | `image` | Image |
+| non-uint8 | 0 (scalar) | `value` | Scalar |
+| non-uint8 | 1 (vector) | `data` | Vector |
+| non-uint8 | 2 (matrix) | `data` | Matrix |
+| non-uint8 | 3+ (tensor) | `data` | Tensor |
+
+Uint8 data with 2+ per-item dimensions is materialized as RGBA8888 images via SkiaSharp, enabling direct use of all image functions (resize, crop, grayscale, etc.).
+
+### MNIST example
+
+```bash
+datum-ingest query \
+  "SELECT resize_image(i.image, 32, 32), l.value \
+   FROM images AS i \
+   JOIN labels AS l ON i.index = l.index \
+   WHERE l.value = 7 \
+   INTO 'sevens.parquet'" \
+  --source "idx:images=train-images-idx3-ubyte" \
+  --source "idx:labels=train-labels-idx1-ubyte"
+```
+
 ## Source definition format
 
 ```
@@ -71,6 +104,7 @@ jsonl:records=./data.jsonl
 zip:images=./train2017.zip
 hdf5:features=./embeddings.h5
 parquet:labels=./labels.parquet
+idx:images=./train-images-idx3-ubyte
 ```
 
 ## Catalog file format

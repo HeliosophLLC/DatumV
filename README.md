@@ -1,6 +1,6 @@
 # DatumIngest™
 
-A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, JSONL, ZIP, HDF5, and Parquet files into ML-ready output formats with optional sharding.
+A high-performance ML dataset query engine for .NET 10. Use SQL to extract, transform, and load data from CSV, JSON, JSONL, ZIP, HDF5, Parquet, and IDX files into ML-ready output formats with optional sharding.
 
 ## The Problem
 
@@ -8,13 +8,13 @@ Preparing datasets for machine learning means writing custom scripts to parse fi
 
 ## What It Does
 
-DatumIngest™ replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
+DatumIngest™ replaces those scripts with SQL. Point it at all your sources simultaneously — CSV, JSON, JSONL, ZIP, HDF5, Parquet, IDX — and join, filter, and transform across them in a single query. It handles streaming execution, lazy evaluation, image transform fusion, and sharded output, so you focus on *what* to extract rather than *how*.
 
 ## Mental Model
 
 ```
 ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
-│  CSV / JSON  │   │  ZIP archive │   │  HDF5 / Parquet  │
+│  CSV / JSON  │   │  ZIP / IDX   │   │  HDF5 / Parquet  │
 │  (tabular)   │   │  (images)    │   │  (tensors)       │
 └──────┬───────┘   └──────┬───────┘   └──────┬───────────┘
        │                  │                  │
@@ -33,7 +33,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
        └────────────────────────┘
 ```
 
-**Sources** are files — any mix of CSV, JSON, JSONL, ZIP, HDF5, and Parquet. Each becomes a named table. ZIP entries become rows with lazy-decompressed bytes. All sources are available simultaneously for joins.
+**Sources** are files — any mix of CSV, JSON, JSONL, ZIP, HDF5, Parquet, and IDX. Each becomes a named table. ZIP entries become rows with lazy-decompressed bytes. IDX files (MNIST, Fashion-MNIST, etc.) become tables with an `index` column for joining images with labels. All sources are available simultaneously for joins.
 
 **Operators** are expressed as SQL. Filter with WHERE, join across formats with JOIN, transform with 100+ functions. Columns can hold scalars, strings, vectors, matrices, tensors, or images — all as first-class types. Image transforms fuse automatically: `resize(grayscale(crop(img)))` decodes once and encodes once.
 
