@@ -167,6 +167,75 @@ public class ExplainTests
     }
 
     [Fact]
+    public void Explain_OrderByWithLimit_ShowsBoundedTopNAnnotation()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            OrderBy: new OrderByClause([
+                new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)
+            ]),
+            Limit: 10);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode root = QueryExplainer.Explain(plan);
+
+        Assert.Equal("Limit", root.OperatorName);
+        ExplainPlanNode sort = root.Children[0];
+        Assert.Equal("Sort", sort.OperatorName);
+        Assert.Contains(sort.Annotations, a => a.Contains("bounded top-N sort"));
+        Assert.Contains(sort.Annotations, a => a.Contains("N=10"));
+        Assert.Empty(sort.Warnings);
+    }
+
+    [Fact]
+    public void Explain_OrderByWithLimitAndOffset_TopNIncludesOffset()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            OrderBy: new OrderByClause([
+                new OrderByItem(new ColumnReference("x"), SortDirection.Descending)
+            ]),
+            Limit: 5,
+            Offset: 10);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode root = QueryExplainer.Explain(plan);
+
+        ExplainPlanNode sort = root.Children[0];
+        Assert.Contains(sort.Annotations, a => a.Contains("N=15"));
+        Assert.Empty(sort.Warnings);
+    }
+
+    [Fact]
+    public void Render_WithAnnotations_OutputsAnnotationMarkers()
+    {
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Sort",
+            Details = "x ASC",
+            Annotations = { "bounded top-N sort (N=10)" },
+            Children =
+            {
+                new ExplainPlanNode { OperatorName = "Scan", Details = "table: data" }
+            },
+        };
+
+        string output = node.Render();
+
+        Assert.Contains("→", output);
+        Assert.Contains("bounded top-N sort", output);
+        Assert.DoesNotContain("⚠", output);
+    }
+
+    [Fact]
     public void Explain_ProjectWithAlias_ShowsColumnExpressions()
     {
         TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");

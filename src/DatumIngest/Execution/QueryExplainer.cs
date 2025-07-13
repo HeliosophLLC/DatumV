@@ -192,7 +192,14 @@ public static class QueryExplainer
             Children = { BuildNode(orderBy.Source) },
         };
 
-        node.Warnings.Add("ORDER BY materializes all input rows for sorting.");
+        if (orderBy.TopNRows is int topN)
+        {
+            node.Annotations.Add($"bounded top-N sort (N={topN})");
+        }
+        else
+        {
+            node.Warnings.Add("ORDER BY materializes all input rows for sorting.");
+        }
 
         return node;
     }

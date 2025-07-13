@@ -206,7 +206,7 @@ datum-ingest explain "SELECT x, y FROM data WHERE x > 0 ORDER BY x LIMIT 100" --
 ```
 Limit (limit: 100)
 └─ Sort (x ASC)
-    ⚠ ORDER BY materializes all input rows for sorting.
+    → bounded top-N sort (N=100)
     └─ Project (x, y)
         └─ Filter (predicate: x > 0)
             └─ Scan (table: data, provider: csv, columns: [*])
@@ -245,7 +245,7 @@ The explain plan emits warnings about potential performance issues:
 
 | Warning | Trigger |
 |---------|---------|
-| ORDER BY materializes all input rows | Any ORDER BY clause |
+| ORDER BY materializes all input rows | ORDER BY without LIMIT |
 | CROSS JOIN produces a cartesian product | CROSS JOIN |
 | FULL OUTER JOIN materializes both sides | FULL OUTER JOIN |
 | LIKE predicate requires full scan | LIKE in WHERE |

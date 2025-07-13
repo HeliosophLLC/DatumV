@@ -154,7 +154,11 @@ public sealed class QueryPlanner
         {
             if (!TryReplaceWithIndexScan(ref source, statement.OrderBy))
             {
-                source = new OrderByOperator(source, statement.OrderBy.Items);
+                int? topNRows = statement.Limit is not null
+                    ? statement.Limit.Value + (statement.Offset ?? 0)
+                    : null;
+
+                source = new OrderByOperator(source, statement.OrderBy.Items, topNRows);
             }
         }
 

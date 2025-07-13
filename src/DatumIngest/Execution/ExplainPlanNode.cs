@@ -17,6 +17,9 @@ public sealed class ExplainPlanNode
     /// <summary>Warnings about potential performance concerns.</summary>
     public List<string> Warnings { get; init; } = [];
 
+    /// <summary>Static plan annotations (e.g. "bounded top-N sort (N=100)").</summary>
+    public List<string> Annotations { get; init; } = [];
+
     /// <summary>Child nodes in the operator tree.</summary>
     public List<ExplainPlanNode> Children { get; init; } = [];
 
@@ -107,6 +110,14 @@ public sealed class ExplainPlanNode
         {
             builder.Append(childPrefix);
             builder.Append("    ");
+            builder.AppendLine(annotation);
+        }
+
+        // Render static plan annotations.
+        foreach (string annotation in Annotations)
+        {
+            builder.Append(childPrefix);
+            builder.Append("    → ");
             builder.AppendLine(annotation);
         }
 

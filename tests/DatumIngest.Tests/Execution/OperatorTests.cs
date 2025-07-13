@@ -503,6 +503,139 @@ public class OperatorTests
         Assert.Equal(3f, rows[2]["val"].AsScalar());
     }
 
+    [Fact]
+    public async Task OrderBy_BoundedTopN_OnlyKeepsNRows()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(5f))),
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(3f))),
+            MakeRow(("val", DataValue.FromScalar(2f))),
+            MakeRow(("val", DataValue.FromScalar(4f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ], topNRows: 3);
+
+        List<Row> rows = await CollectAsync(orderBy);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(1f, rows[0]["val"].AsScalar());
+        Assert.Equal(2f, rows[1]["val"].AsScalar());
+        Assert.Equal(3f, rows[2]["val"].AsScalar());
+    }
+
+    [Fact]
+    public async Task OrderBy_BoundedTopN_Descending()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(5f))),
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(3f))),
+            MakeRow(("val", DataValue.FromScalar(2f))),
+            MakeRow(("val", DataValue.FromScalar(4f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Descending)
+        ], topNRows: 2);
+
+        List<Row> rows = await CollectAsync(orderBy);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(5f, rows[0]["val"].AsScalar());
+        Assert.Equal(4f, rows[1]["val"].AsScalar());
+    }
+
+    [Fact]
+    public async Task OrderBy_BoundedTopN_WithOffset()
+    {
+        // topNRows = limit + offset = 2 + 1 = 3, then LimitOperator skips 1.
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(5f))),
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(3f))),
+            MakeRow(("val", DataValue.FromScalar(2f))),
+            MakeRow(("val", DataValue.FromScalar(4f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ], topNRows: 3);
+
+        LimitOperator limit = new(orderBy, 2, offset: 1);
+        List<Row> rows = await CollectAsync(limit);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(2f, rows[0]["val"].AsScalar());
+        Assert.Equal(3f, rows[1]["val"].AsScalar());
+    }
+
+    [Fact]
+    public async Task OrderBy_BoundedTopN_MultiKey()
+    {
+        MockOperator source = new(
+            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromScalar(2f))),
+            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromScalar(3f))),
+            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromScalar(1f))),
+            MakeRow(("group", DataValue.FromString("C")), ("val", DataValue.FromScalar(0f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("group"), SortDirection.Ascending),
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ], topNRows: 2);
+
+        List<Row> rows = await CollectAsync(orderBy);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("A", rows[0]["group"].AsString());
+        Assert.Equal(1f, rows[0]["val"].AsScalar());
+        Assert.Equal("A", rows[1]["group"].AsString());
+        Assert.Equal(3f, rows[1]["val"].AsScalar());
+    }
+
+    [Fact]
+    public async Task OrderBy_BoundedTopN_FewerRowsThanN()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(2f))),
+            MakeRow(("val", DataValue.FromScalar(1f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ], topNRows: 10);
+
+        List<Row> rows = await CollectAsync(orderBy);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1f, rows[0]["val"].AsScalar());
+        Assert.Equal(2f, rows[1]["val"].AsScalar());
+    }
+
+    [Fact]
+    public async Task OrderBy_BoundedTopN_NullsLast()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.FromScalar(3f))),
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(2f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ], topNRows: 2);
+
+        List<Row> rows = await CollectAsync(orderBy);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1f, rows[0]["val"].AsScalar());
+        Assert.Equal(2f, rows[1]["val"].AsScalar());
+    }
+
     // ─────────────── AliasOperator tests ───────────────
 
     [Fact]

@@ -12,7 +12,7 @@ Queries execute as an `IAsyncEnumerable<Row>` pipeline:
 ScanOperator → FilterOperator → ProjectOperator → OrderByOperator → LimitOperator
 ```
 
-Each operator pulls rows from its child on demand. No intermediate materialization unless required (ORDER BY, JOIN build side).
+Each operator pulls rows from its child on demand. No intermediate materialization unless required (ORDER BY, JOIN build side). When ORDER BY is combined with LIMIT, a bounded max-heap retains only the top N rows without materializing the full result set.
 
 When a sorted value index exists for the ORDER BY column and the provider supports seeking (`ISeekableTableProvider`), the planner substitutes an `IndexScanOperator` that walks the index in sorted order and fetches rows via random-access reads. This eliminates both the `ScanOperator` and `OrderByOperator`, producing sorted output without materialization:
 

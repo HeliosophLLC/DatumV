@@ -205,7 +205,52 @@ public class QueryPlannerTests
 
         Assert.IsType<LimitOperator>(plan);
         LimitOperator limit = (LimitOperator)plan;
-        Assert.IsType<OrderByOperator>(limit.Source);
+        OrderByOperator orderBy = Assert.IsType<OrderByOperator>(limit.Source);
+        Assert.Equal(3, orderBy.TopNRows);
+    }
+
+    [Fact]
+    public void Plan_WithOrderByLimitAndOffset_PassesTopNRowsAsSumOfLimitAndOffset()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("test")),
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)
+            ]),
+            Limit: 5,
+            Offset: 10);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<LimitOperator>(plan);
+        LimitOperator limit = (LimitOperator)plan;
+        OrderByOperator orderBy = Assert.IsType<OrderByOperator>(limit.Source);
+        Assert.Equal(15, orderBy.TopNRows);
+    }
+
+    [Fact]
+    public void Plan_WithOrderByAndNoLimit_TopNRowsIsNull()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("test")),
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        OrderByOperator orderBy = Assert.IsType<OrderByOperator>(plan);
+        Assert.Null(orderBy.TopNRows);
     }
 
     [Fact]
