@@ -295,7 +295,8 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     }
 
     /// <summary>
-    /// Gets the delimiter character from the descriptor options, defaulting to comma.
+    /// Gets the delimiter character from the descriptor options, falling back to
+    /// extension-based heuristics (<c>.tsv</c> → tab) and then content sniffing.
     /// </summary>
     private static char GetDelimiter(TableDescriptor descriptor)
     {
@@ -303,6 +304,19 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             delimiterValue.Length > 0)
         {
             return delimiterValue[0];
+        }
+
+        // .tsv files always use tab.
+        string extension = Path.GetExtension(descriptor.FilePath);
+        if (extension.Equals(".tsv", StringComparison.OrdinalIgnoreCase))
+        {
+            return '\t';
+        }
+
+        // Sniff delimiter from file content when the file exists.
+        if (File.Exists(descriptor.FilePath))
+        {
+            return CsvDelimiterDetector.Detect(descriptor.FilePath);
         }
 
         return DefaultDelimiter;

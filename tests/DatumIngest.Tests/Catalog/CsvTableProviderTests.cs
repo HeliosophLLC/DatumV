@@ -206,6 +206,33 @@ public sealed class CsvTableProviderTests
         Assert.True(capabilities.SupportsSeek);
     }
 
+    // ───────────────────── Delimiter auto-detection ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_AutoDetectsSemicolonDelimiter()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("semicolon.csv"), CancellationToken.None);
+
+        Assert.Equal(3, schema.Columns.Count);
+        Assert.Equal("id", schema.Columns[0].Name);
+        Assert.Equal("value", schema.Columns[1].Name);
+        Assert.Equal("label", schema.Columns[2].Name);
+    }
+
+    [Fact]
+    public async Task Open_AutoDetectsSemicolonDelimiter()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("semicolon.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal("cat", rows[0]["label"].AsString());
+    }
+
     // ───────────────────── Cancellation ─────────────────────
 
     [Fact]
