@@ -57,6 +57,8 @@ Maps Parquet types to DataKind: INT32/INT64 → Scalar, FLOAT/DOUBLE → Scalar,
 
 Supports statistics-based row group pruning: when a WHERE predicate is pushed down, the provider reads each row group's min/max column statistics from the Parquet footer metadata and skips row groups that cannot contain matching rows. This avoids reading column data for pruned groups entirely. Use EXPLAIN to see which filter is applied (`statistics filter:` annotation on the scan node) and EXPLAIN ANALYZE to see how many row groups were pruned.
 
+Implements `ISeekableTableProvider` for random-access row reads. The provider builds a cumulative row offset table from row group metadata and binary-searches for the row group(s) spanning the requested range. Only the touched row groups are materialised; leading and trailing groups are skipped entirely. This enables chunk-level seeking during index pruning, sorted index scan for ORDER BY optimisation, and exact row seek for WHERE predicates.
+
 ## IDX
 
 Reads IDX binary files — the format used by MNIST, Fashion-MNIST, and similar datasets. Supports all IDX data type codes (uint8, int8, int16, int32, float32, float64) and any dimensionality.

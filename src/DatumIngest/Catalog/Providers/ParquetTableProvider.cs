@@ -13,7 +13,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Maps Parquet column types to <see cref="DataKind"/>, supports projection pushdown,
 /// statistics-based row group pruning, and reads across multiple row groups.
 /// </summary>
-public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvider
+public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider
 {
     /// <summary>Total number of row groups examined in the most recent read.</summary>
     public int TotalRowGroups { get; private set; }
@@ -313,8 +313,101 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         return new ProviderCapabilities(
             EstimatedRowCount: totalRows,
             EstimatedRowSizeBytes: null,
-            SupportsSeek: false,
+            SupportsSeek: true,
             ColumnCosts: new Dictionary<string, ColumnCost>());
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using FileStream stream = File.OpenRead(descriptor.FilePath);
+        using ParquetReader reader = await ParquetReader.CreateAsync(stream);
+
+        DataField[] allFields = reader.Schema.GetDataFields();
+
+        DataField[] projectedFields;
+        if (requiredColumns is not null)
+        {
+            projectedFields = Array.FindAll(allFields, field => requiredColumns.Contains(field.Name));
+        }
+        else
+        {
+            projectedFields = allFields;
+        }
+
+        if (projectedFields.Length == 0)
+        {
+            yield break;
+        }
+
+        string[] columnNames = new string[projectedFields.Length];
+        DataKind[] columnKinds = new DataKind[projectedFields.Length];
+        for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+        {
+            columnNames[fieldIndex] = projectedFields[fieldIndex].Name;
+            columnKinds[fieldIndex] = MapClrTypeToDataKind(projectedFields[fieldIndex].ClrType);
+        }
+
+        Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int fieldIndex = 0; fieldIndex < columnNames.Length; fieldIndex++)
+        {
+            nameIndex[columnNames[fieldIndex]] = fieldIndex;
+        }
+
+        // Walk row groups to find the range [startRow, startRow + count).
+        long cumulativeRowOffset = 0;
+        int remaining = count;
+
+        for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount && remaining > 0; rowGroupIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using ParquetRowGroupReader rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            long rowGroupRowCount = rowGroupReader.RowCount;
+            long rowGroupEnd = cumulativeRowOffset + rowGroupRowCount;
+
+            // Skip row groups entirely before the requested range.
+            if (rowGroupEnd <= startRow)
+            {
+                cumulativeRowOffset = rowGroupEnd;
+                continue;
+            }
+
+            // Determine the slice within this row group.
+            long localStart = Math.Max(0, startRow - cumulativeRowOffset);
+            long localEnd = Math.Min(rowGroupRowCount, startRow + count - cumulativeRowOffset);
+
+            // Read all projected columns for this row group.
+            DataColumn[] dataColumns = new DataColumn[projectedFields.Length];
+            for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+            {
+                dataColumns[fieldIndex] = await rowGroupReader.ReadColumnAsync(projectedFields[fieldIndex]);
+            }
+
+            for (long rowIndex = localStart; rowIndex < localEnd && remaining > 0; rowIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                DataValue[] values = new DataValue[projectedFields.Length];
+                for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+                {
+                    values[fieldIndex] = ExtractValue(
+                        dataColumns[fieldIndex],
+                        columnKinds[fieldIndex],
+                        rowIndex);
+                }
+
+                yield return new Row(columnNames, values, nameIndex);
+                remaining--;
+            }
+
+            cumulativeRowOffset = rowGroupEnd;
+        }
     }
 
     // ───────────────────── Type mapping ─────────────────────

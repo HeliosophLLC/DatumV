@@ -648,4 +648,122 @@ public sealed class ParquetTableProviderTests : IDisposable
         Assert.Equal(0, provider.TotalRowGroups);
         Assert.Equal(0, provider.PrunedRowGroups);
     }
+
+    // ───────────────────── Seekable row range access ─────────────────────
+
+    [Fact]
+    public async Task ReadRowRange_ReadsExactRange()
+    {
+        string path = await CreateSimpleFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        // 3 rows total: read rows 1..2 (Bob, Charlie).
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Bob", rows[0]["name"].AsString());
+        Assert.Equal("Charlie", rows[1]["name"].AsString());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_ClampsToAvailableRows()
+    {
+        string path = await CreateSimpleFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        // Only 3 rows; asking for 10 starting at row 1 should return 2.
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 10, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_StartBeyondEnd_ReturnsEmpty()
+    {
+        string path = await CreateSimpleFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 100, count: 5, CancellationToken.None));
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_SingleRow()
+    {
+        string path = await CreateSimpleFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 0, count: 1, CancellationToken.None));
+
+        Assert.Single(rows);
+        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal("Alice", rows[0]["name"].AsString());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_AcrossMultipleRowGroups()
+    {
+        // Multi-row-group fixture: group 1 has [1,2], group 2 has [3,4,5].
+        // Read rows 1..3 (crosses the row group boundary).
+        string path = await CreateMultiRowGroupFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 3, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(2f, rows[0]["id"].AsScalar());   // Last row of group 1
+        Assert.Equal("b", rows[0]["value"].AsString());
+        Assert.Equal(3f, rows[1]["id"].AsScalar());   // First row of group 2
+        Assert.Equal("c", rows[1]["value"].AsString());
+        Assert.Equal(4f, rows[2]["id"].AsScalar());   // Second row of group 2
+        Assert.Equal("d", rows[2]["value"].AsString());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_SkipsLeadingRowGroup()
+    {
+        // Multi-row-group fixture: group 1 has [1,2] (2 rows), group 2 has [3,4,5] (3 rows).
+        // Read rows 3..4 — entirely in group 2, group 1 should be skipped.
+        string path = await CreateMultiRowGroupFixtureAsync();
+        ParquetTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 3, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(4f, rows[0]["id"].AsScalar());
+        Assert.Equal(5f, rows[1]["id"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_WithProjection()
+    {
+        string path = await CreateSimpleFixtureAsync();
+        ParquetTableProvider provider = new();
+        HashSet<string> requiredColumns = new(["name"]);
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), requiredColumns, startRow: 0, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Alice", rows[0]["name"].AsString());
+        Assert.Throws<KeyNotFoundException>(() => rows[0]["id"]);
+    }
+
+    [Fact]
+    public async Task GetCapabilities_ReportsSupportsSeek()
+    {
+        string path = await CreateSimpleFixtureAsync();
+        ParquetTableProvider provider = new();
+        ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(
+            Descriptor(path), CancellationToken.None);
+
+        Assert.True(capabilities.SupportsSeek);
+    }
 }
