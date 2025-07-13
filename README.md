@@ -50,7 +50,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI)
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
-- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, and sorted value indexes for equality/range predicates
+- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, sorted value indexes for equality/range predicates, and ORDER BY elimination via index scan
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with optional runtime metrics

@@ -115,6 +115,8 @@ Line-oriented providers (CSV, JSONL) can implement `IChunkMeasuringProvider` to 
 
 Binary formats (Parquet, HDF5) use their own internal chunking and do not implement this interface.
 
+For providers that support random-access row reads (`ISeekableTableProvider`), pruned chunks can be read directly by seeking to the target row offset. See [Chunk-level seeking](#chunk-level-seeking) under Query-time pruning.
+
 ## Query-time pruning
 
 When a source index is loaded, `ScanOperator` applies three levels of chunk pruning before reading any source data:
@@ -148,6 +150,24 @@ For join operations, the query planner collects build-side key values and probes
 Equality predicates with literal values (e.g., `WHERE id = 42`) are checked against sorted value indexes. The engine identifies exactly which chunks contain the target value and skips all others.
 
 All three levels are applied in sequence; each subsequent level can only reduce the set of active chunks further. EXPLAIN ANALYZE reports the total and pruned chunk counts.
+
+### Chunk-level seeking
+
+When chunks are pruned, `ScanOperator` must read only the surviving chunks. Providers that implement `ISeekableTableProvider` support random-access row reads — the engine calls `ReadRowRangeAsync` with each surviving chunk's row offset and count, seeking directly to the target rows without streaming through skipped data. Providers without seeking support fall back to streaming all rows and discarding those outside surviving chunks by row index.
+
+Currently, the IDX provider implements `ISeekableTableProvider`. Line-oriented formats (CSV, JSONL) do not — they rely on byte-range measurement via `IChunkMeasuringProvider` instead.
+
+## ORDER BY optimization
+
+Sorted value indexes can eliminate the `OrderByOperator` entirely. When all of the following conditions are met, the query planner substitutes an `IndexScanOperator` for the usual `ScanOperator` + `OrderByOperator` combination:
+
+1. The ORDER BY clause references a single column
+2. A sorted value index exists for that column
+3. The underlying provider implements `ISeekableTableProvider`
+
+The `IndexScanOperator` walks the sorted index entries in order (ascending or descending) and fetches each row via `ReadRowRangeAsync`. Consecutive entries in the same chunk are batched into a single seek call. Because rows emerge already sorted, no materialization or in-memory sort is needed.
+
+This optimization composes with LIMIT — an `ORDER BY col LIMIT N` query reads only the first *N* index entries, avoiding a full table scan entirely.
 
 ## CLI usage
 

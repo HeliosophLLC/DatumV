@@ -14,6 +14,14 @@ ScanOperator → FilterOperator → ProjectOperator → OrderByOperator → Limi
 
 Each operator pulls rows from its child on demand. No intermediate materialization unless required (ORDER BY, JOIN build side).
 
+When a sorted value index exists for the ORDER BY column and the provider supports seeking (`ISeekableTableProvider`), the planner substitutes an `IndexScanOperator` that walks the index in sorted order and fetches rows via random-access reads. This eliminates both the `ScanOperator` and `OrderByOperator`, producing sorted output without materialization:
+
+```
+IndexScanOperator → FilterOperator → ProjectOperator → LimitOperator
+```
+
+See [ORDER BY optimization](indexes.md#order-by-optimization) for details.
+
 ## Lazy evaluation
 
 `ProjectOperator` wraps all SELECT expression results as `LazyDataValue` thunks. Values materialize only when accessed:
@@ -65,7 +73,7 @@ DatumIngest/
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
     DatumIngest.Cli/         # CLI tool (query, explore, stats, schema, index commands)
   tests/
-    DatumIngest.Tests/       # 1,850+ unit tests
+    DatumIngest.Tests/       # 2,125+ unit tests
   benchmarks/
     DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
 ```

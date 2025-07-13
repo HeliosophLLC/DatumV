@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
@@ -100,18 +101,6 @@ public sealed class ScanOperator : IQueryOperator
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
 
-        IAsyncEnumerable<Row> rows;
-
-        if (_filterHint is not null && provider is IFilterableTableProvider filterable)
-        {
-            LastFilterableProvider = filterable;
-            rows = filterable.OpenAsync(_descriptor, _requiredColumns, _filterHint, cancellationToken);
-        }
-        else
-        {
-            rows = provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
-        }
-
         // When a source index is available and either a filter hint, bloom pruning
         // keys, or sorted indexes are present, apply chunk-level pruning.
         bool hasIndexPruning = _sourceIndex is not null
@@ -120,13 +109,27 @@ public sealed class ScanOperator : IQueryOperator
 
         if (hasIndexPruning)
         {
-            await foreach (Row row in ExecuteWithIndexPruningAsync(rows).ConfigureAwait(false))
+            await foreach (Row row in ExecuteWithIndexPruningAsync(
+                provider, cancellationToken).ConfigureAwait(false))
             {
                 yield return row;
             }
         }
         else
         {
+            IAsyncEnumerable<Row> rows;
+
+            if (_filterHint is not null && provider is IFilterableTableProvider filterable)
+            {
+                LastFilterableProvider = filterable;
+                rows = filterable.OpenAsync(
+                    _descriptor, _requiredColumns, _filterHint, cancellationToken);
+            }
+            else
+            {
+                rows = provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
+            }
+
             await foreach (Row row in rows.ConfigureAwait(false))
             {
                 yield return row;
@@ -134,7 +137,9 @@ public sealed class ScanOperator : IQueryOperator
         }
     }
 
-    private async IAsyncEnumerable<Row> ExecuteWithIndexPruningAsync(IAsyncEnumerable<Row> rows)
+    private async IAsyncEnumerable<Row> ExecuteWithIndexPruningAsync(
+        ITableProvider provider,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         IReadOnlyList<IndexChunk> chunks = _sourceIndex!.Chunks;
         BloomFilterSet? bloomFilters = _sourceIndex.BloomFilters;
@@ -210,9 +215,26 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
+        // Open the source stream (needed for non-seekable fallback and no-pruning path).
+        IAsyncEnumerable<Row>? rows = null;
+
+        IAsyncEnumerable<Row> OpenStream()
+        {
+            if (_filterHint is not null && provider is IFilterableTableProvider filterable)
+            {
+                LastFilterableProvider = filterable;
+                return filterable.OpenAsync(
+                    _descriptor, _requiredColumns, _filterHint, cancellationToken);
+            }
+
+            return provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
+        }
+
         // If no chunks were pruned, stream all rows without overhead.
         if (PrunedIndexChunks == 0)
         {
+            rows = OpenStream();
+
             await foreach (Row row in rows.ConfigureAwait(false))
             {
                 yield return row;
@@ -221,7 +243,27 @@ public sealed class ScanOperator : IQueryOperator
             yield break;
         }
 
-        // Stream rows, skipping those in pruned chunks by row index.
+        // When the provider supports seeking, read only the surviving chunks directly
+        // instead of streaming all rows and discarding pruned ones.
+        if (provider is ISeekableTableProvider seekable)
+        {
+            foreach ((long start, long end) in activeRanges)
+            {
+                int count = (int)(end - start);
+
+                await foreach (Row row in seekable.ReadRowRangeAsync(
+                    _descriptor, _requiredColumns, start, count,
+                    cancellationToken).ConfigureAwait(false))
+                {
+                    yield return row;
+                }
+            }
+
+            yield break;
+        }
+
+        // Fallback: stream all rows and skip those in pruned chunks by row index.
+        rows = OpenStream();
         long rowIndex = 0;
         int rangeIndex = 0;
 

@@ -24,7 +24,7 @@ namespace DatumIngest.Catalog.Providers;
 /// with the 30+ built-in image functions (resize, crop, blur, etc.).
 /// </para>
 /// </remarks>
-public sealed class IdxTableProvider : ITableProvider
+public sealed class IdxTableProvider : ISeekableTableProvider
 {
     private const int MagicNumberLength = 4;
 
@@ -129,6 +129,87 @@ public sealed class IdxTableProvider : ITableProvider
             EstimatedRowSizeBytes: header.ItemByteSize + sizeof(float),
             SupportsSeek: true,
             ColumnCosts: new Dictionary<string, ColumnCost>()));
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using FileStream stream = OpenFile(descriptor);
+        IdxHeader header = ReadHeader(stream);
+
+        // Clamp to available rows.
+        if (startRow >= header.ItemCount)
+        {
+            yield break;
+        }
+
+        int rowsToRead = (int)Math.Min(count, header.ItemCount - startRow);
+
+        bool includeIndex = requiredColumns is null ||
+            requiredColumns.Contains("index");
+        bool includeData = requiredColumns is null ||
+            requiredColumns.Contains(DataColumnName(header));
+
+        List<string> columnNames = new();
+        if (includeIndex)
+        {
+            columnNames.Add("index");
+        }
+
+        if (includeData)
+        {
+            columnNames.Add(DataColumnName(header));
+        }
+
+        string[] names = columnNames.ToArray();
+        Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < names.Length; i++)
+        {
+            nameIndex[names[i]] = i;
+        }
+
+        // Seek directly to the start row, skipping the header and preceding rows.
+        int itemByteSize = header.ItemByteSize;
+        long dataOffset = stream.Position + startRow * itemByteSize;
+        stream.Seek(dataOffset, SeekOrigin.Begin);
+
+        byte[] itemBuffer = new byte[itemByteSize];
+
+        for (int i = 0; i < rowsToRead; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (includeData)
+            {
+                ReadExactly(stream, itemBuffer);
+            }
+            else
+            {
+                stream.Seek(itemByteSize, SeekOrigin.Current);
+            }
+
+            DataValue[] values = new DataValue[names.Length];
+            int valueIndex = 0;
+
+            if (includeIndex)
+            {
+                values[valueIndex++] = DataValue.FromScalar(startRow + i);
+            }
+
+            if (includeData)
+            {
+                values[valueIndex] = CreateDataValue(header, itemBuffer);
+            }
+
+            yield return new Row(names, values, nameIndex);
+        }
+
+        await Task.CompletedTask;
     }
 
     // ───────────────────── Header parsing ─────────────────────

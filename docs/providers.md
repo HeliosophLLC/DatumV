@@ -61,6 +61,8 @@ Supports statistics-based row group pruning: when a WHERE predicate is pushed do
 
 Reads IDX binary files — the format used by MNIST, Fashion-MNIST, and similar datasets. Supports all IDX data type codes (uint8, int8, int16, int32, float32, float64) and any dimensionality.
 
+Implements `ISeekableTableProvider` for random-access row reads, enabling chunk-level seeking during index pruning and sorted index scan for ORDER BY optimization.
+
 Every table has two columns:
 - `index` (Scalar) — 0-based row number, useful for joining separate image and label files
 - A data column whose name and type depend on the data:

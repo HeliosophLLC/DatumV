@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -148,10 +149,13 @@ public sealed class QueryPlanner
             source = new ProjectOperator(source, statement.Columns);
         }
 
-        // 5. Apply ORDER BY.
+        // 5. Apply ORDER BY — use index scan when a sorted index covers the sort column.
         if (statement.OrderBy is not null)
         {
-            source = new OrderByOperator(source, statement.OrderBy.Items);
+            if (!TryReplaceWithIndexScan(ref source, statement.OrderBy))
+            {
+                source = new OrderByOperator(source, statement.OrderBy.Items);
+            }
         }
 
         // 6. Apply LIMIT/OFFSET.
@@ -221,6 +225,113 @@ public sealed class QueryPlanner
                     return; // Not a simple scan chain — cannot push hints.
             }
         }
+    }
+
+    /// <summary>
+    /// Attempts to replace the <see cref="ScanOperator"/> in the operator tree with an
+    /// <see cref="IndexScanOperator"/> when the ORDER BY clause is a single column reference
+    /// covered by a sorted value index and the provider supports seeking.
+    /// Mutates <paramref name="source"/> in place when the substitution succeeds.
+    /// </summary>
+    /// <returns><c>true</c> if the index scan was substituted and the ORDER BY can be elided.</returns>
+    private static bool TryReplaceWithIndexScan(ref IQueryOperator source, OrderByClause orderBy)
+    {
+        // Only single-column, simple column reference ORDER BY is eligible.
+        if (orderBy.Items.Count != 1)
+        {
+            return false;
+        }
+
+        OrderByItem item = orderBy.Items[0];
+
+        if (item.Expression is not ColumnReference columnRef)
+        {
+            return false;
+        }
+
+        string sortColumn = columnRef.ColumnName;
+
+        // Walk the operator tree to find the ScanOperator.
+        ScanOperator? scan = FindScanOperator(source);
+
+        if (scan is null)
+        {
+            return false;
+        }
+
+        // The scan must have a source index with a sorted index for the sort column.
+        if (scan.SourceIndex?.SortedIndexes is null)
+        {
+            return false;
+        }
+
+        if (!scan.SourceIndex.SortedIndexes.TryGetIndex(sortColumn, out SortedValueIndex? sortedIndex))
+        {
+            return false;
+        }
+
+        bool descending = item.Direction == SortDirection.Descending;
+
+        IndexScanOperator indexScan = new(
+            scan.Descriptor,
+            scan.RequiredColumns,
+            sortedIndex,
+            scan.SourceIndex.Chunks,
+            descending);
+
+        // Replace the ScanOperator in the tree with the IndexScanOperator.
+        source = ReplaceScanOperator(source, scan, indexScan);
+        return true;
+    }
+
+    /// <summary>
+    /// Finds the <see cref="ScanOperator"/> in a simple operator chain
+    /// (ScanOperator, possibly wrapped in AliasOperator and/or FilterOperator).
+    /// Returns <c>null</c> if the tree shape is too complex for index scan substitution.
+    /// </summary>
+    private static ScanOperator? FindScanOperator(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+
+        while (true)
+        {
+            switch (current)
+            {
+                case ScanOperator scan:
+                    return scan;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                default:
+                    return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replaces the target <see cref="ScanOperator"/> in the operator tree with the given
+    /// <see cref="IndexScanOperator"/>, preserving any wrapping operators (alias, filter).
+    /// </summary>
+    private static IQueryOperator ReplaceScanOperator(
+        IQueryOperator root, ScanOperator target, IndexScanOperator replacement)
+    {
+        if (ReferenceEquals(root, target))
+        {
+            return replacement;
+        }
+
+        // Rebuild the wrapper chain with the replacement at the leaf.
+        return root switch
+        {
+            AliasOperator alias => new AliasOperator(
+                ReplaceScanOperator(alias.Source, target, replacement), alias.Alias),
+            FilterOperator filter => new FilterOperator(
+                ReplaceScanOperator(filter.Source, target, replacement), filter.Predicate),
+            _ => root,
+        };
     }
 
     /// <summary>

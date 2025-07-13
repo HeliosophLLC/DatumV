@@ -628,4 +628,121 @@ public sealed class IdxTableProviderTests : IDisposable
 
         Assert.Empty(rows);
     }
+
+    // ───────────────────── ReadRowRangeAsync (seeking) ─────────────────────
+
+    [Fact]
+    public async Task ReadRowRange_MiddleRange_ReturnsCorrectRows()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 3,
+                CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(1f, rows[0]["index"].AsScalar()); // row 1
+        Assert.Equal(2f, rows[0]["value"].AsUInt8());
+        Assert.Equal(2f, rows[1]["index"].AsScalar()); // row 2
+        Assert.Equal(1f, rows[1]["value"].AsUInt8());
+        Assert.Equal(3f, rows[2]["index"].AsScalar()); // row 3
+        Assert.Equal(0f, rows[2]["value"].AsUInt8());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_FirstRow_ReturnsSingleRow()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 0, count: 1,
+                CancellationToken.None));
+
+        Assert.Single(rows);
+        Assert.Equal(0f, rows[0]["index"].AsScalar());
+        Assert.Equal(7f, rows[0]["value"].AsUInt8());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_LastRow_ReturnsSingleRow()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 4, count: 1,
+                CancellationToken.None));
+
+        Assert.Single(rows);
+        Assert.Equal(4f, rows[0]["index"].AsScalar());
+        Assert.Equal(4f, rows[0]["value"].AsUInt8());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_BeyondEnd_ClampsToAvailable()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 3, count: 100,
+                CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(3f, rows[0]["index"].AsScalar());
+        Assert.Equal(4f, rows[1]["index"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_StartBeyondEnd_ReturnsEmpty()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 10, count: 5,
+                CancellationToken.None));
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_WithProjection_ReturnsOnlyRequestedColumns()
+    {
+        string path = CreateLabelsFixture();
+        IdxTableProvider provider = new();
+
+        HashSet<string> requiredColumns = new(StringComparer.OrdinalIgnoreCase) { "index" };
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), requiredColumns, startRow: 2, count: 2,
+                CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0].FieldCount);
+        Assert.Equal(2f, rows[0]["index"].AsScalar());
+        Assert.Equal(3f, rows[1]["index"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_AllRows_MatchesOpenAsync()
+    {
+        string path = CreateLabelsFixture(); // 5 labels
+        IdxTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+
+        List<Row> allRows = await ReadAllAsync(
+            provider.OpenAsync(descriptor, null, CancellationToken.None));
+        List<Row> seekRows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(descriptor, null, startRow: 0, count: 5,
+                CancellationToken.None));
+
+        Assert.Equal(allRows.Count, seekRows.Count);
+        for (int i = 0; i < allRows.Count; i++)
+        {
+            Assert.Equal(allRows[i]["index"].AsScalar(), seekRows[i]["index"].AsScalar());
+            Assert.Equal(allRows[i]["value"].AsUInt8(), seekRows[i]["value"].AsUInt8());
+        }
+    }
 }
