@@ -12,7 +12,7 @@ The following features are architecturally accounted for but deferred from V1:
 - **Pipe mode**: Stream results to stdout as CSV/JSON/NDJSON
 - ~~**Top-N bounded sort**: Bounded priority queue in `OrderByOperator` for ORDER BY + LIMIT without full materialization~~ ✅
 - ~~**WHERE index seek**: Use sorted value indexes to fetch matching rows directly via `ISeekableTableProvider` instead of streaming and discarding — point lookups for high-selectivity equality predicates~~ ✅
-- **Range predicate index pruning**: Extend sorted index chunk pruning to handle `<`, `<=`, `>`, `>=`, `BETWEEN`, and `IN` (currently equality only)
+- ~~**Range predicate index pruning**: Extend sorted index chunk pruning to handle `<`, `<=`, `>`, `>=`, `BETWEEN`, and `IN` (currently equality only)~~ ✅
 - **Seekable Parquet/HDF5 providers**: Implement `ISeekableTableProvider` on Parquet (row-group-level) and HDF5 (dataset-level) to unlock index scan and WHERE index seek for those formats
 - **Cost-based optimizer**: Replace greedy join heuristic with cost model
 - ~~**Statistics-based partition pruning**: Skip row groups whose min/max statistics prove a predicate unsatisfiable~~ ✅

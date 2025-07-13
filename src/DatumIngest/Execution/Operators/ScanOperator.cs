@@ -351,6 +351,23 @@ public sealed class ScanOperator : IQueryOperator
             {
                 return CheckEqualityForPruning(binary.Left, binary.Right, sortedIndexes, chunkIndex);
             }
+
+            if (binary.Operator is BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual
+                or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual)
+            {
+                return CheckComparisonForPruning(
+                    binary.Left, binary.Right, binary.Operator, sortedIndexes, chunkIndex);
+            }
+        }
+
+        if (expression is BetweenExpression between && !between.Negated)
+        {
+            return CheckBetweenForPruning(between, sortedIndexes, chunkIndex);
+        }
+
+        if (expression is InExpression inExpression && !inExpression.Negated)
+        {
+            return CheckInForPruning(inExpression, sortedIndexes, chunkIndex);
         }
 
         return false;
@@ -390,6 +407,137 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <summary>
+    /// Checks whether a chunk can be pruned based on a range comparison
+    /// (<c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c>, <c>&gt;=</c>) against a sorted index.
+    /// Handles both <c>column op literal</c> and <c>literal op column</c> orientations.
+    /// </summary>
+    private static bool CheckComparisonForPruning(
+        Expression left, Expression right, BinaryOperator op,
+        SortedValueIndexSet sortedIndexes, int chunkIndex)
+    {
+        string? columnName = null;
+        object? rawLiteral = null;
+        BinaryOperator effectiveOperator = op;
+
+        if (left is ColumnReference columnRef && right is LiteralExpression literal)
+        {
+            columnName = columnRef.ColumnName;
+            rawLiteral = literal.Value;
+        }
+        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
+        {
+            columnName = columnRight.ColumnName;
+            rawLiteral = literalLeft.Value;
+            effectiveOperator = FlipComparisonOperator(op);
+        }
+
+        if (columnName is null || rawLiteral is null)
+        {
+            return false;
+        }
+
+        if (!sortedIndexes.TryGetIndex(columnName, out SortedValueIndex? index))
+        {
+            return false;
+        }
+
+        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+
+        IReadOnlySet<int> matchingChunks = effectiveOperator switch
+        {
+            BinaryOperator.LessThan => index.FindChunksLessThan(literalValue),
+            BinaryOperator.LessThanOrEqual => index.FindChunksLessThanOrEqual(literalValue),
+            BinaryOperator.GreaterThan => index.FindChunksGreaterThan(literalValue),
+            BinaryOperator.GreaterThanOrEqual => index.FindChunksGreaterThanOrEqual(literalValue),
+            _ => throw new InvalidOperationException($"Unexpected operator: {effectiveOperator}"),
+        };
+
+        return !matchingChunks.Contains(chunkIndex);
+    }
+
+    /// <summary>
+    /// Flips a comparison operator to account for reversed operand order
+    /// (e.g. <c>5 &lt; col</c> becomes <c>col &gt; 5</c>).
+    /// </summary>
+    private static BinaryOperator FlipComparisonOperator(BinaryOperator op)
+    {
+        return op switch
+        {
+            BinaryOperator.LessThan => BinaryOperator.GreaterThan,
+            BinaryOperator.LessThanOrEqual => BinaryOperator.GreaterThanOrEqual,
+            BinaryOperator.GreaterThan => BinaryOperator.LessThan,
+            BinaryOperator.GreaterThanOrEqual => BinaryOperator.LessThanOrEqual,
+            _ => op,
+        };
+    }
+
+    /// <summary>
+    /// Checks whether a chunk can be pruned based on a BETWEEN predicate
+    /// by looking up the inclusive range in a sorted index.
+    /// </summary>
+    private static bool CheckBetweenForPruning(
+        BetweenExpression between, SortedValueIndexSet sortedIndexes, int chunkIndex)
+    {
+        if (between.Expression is not ColumnReference columnRef)
+        {
+            return false;
+        }
+
+        if (between.Low is not LiteralExpression { Value: not null } lowLiteral
+            || between.High is not LiteralExpression { Value: not null } highLiteral)
+        {
+            return false;
+        }
+
+        if (!sortedIndexes.TryGetIndex(columnRef.ColumnName, out SortedValueIndex? index))
+        {
+            return false;
+        }
+
+        DataValue low = ConvertLiteralToDataValue(lowLiteral.Value);
+        DataValue high = ConvertLiteralToDataValue(highLiteral.Value);
+        IReadOnlySet<int> matchingChunks = index.FindChunksInRange(low, high);
+        return !matchingChunks.Contains(chunkIndex);
+    }
+
+    /// <summary>
+    /// Checks whether a chunk can be pruned based on an IN predicate
+    /// by looking up each value in a sorted index.
+    /// </summary>
+    private static bool CheckInForPruning(
+        InExpression inExpression, SortedValueIndexSet sortedIndexes, int chunkIndex)
+    {
+        if (inExpression.Expression is not ColumnReference columnRef)
+        {
+            return false;
+        }
+
+        if (!sortedIndexes.TryGetIndex(columnRef.ColumnName, out SortedValueIndex? index))
+        {
+            return false;
+        }
+
+        // If any IN value exists in this chunk, the chunk cannot be pruned.
+        foreach (Expression valueExpression in inExpression.Values)
+        {
+            if (valueExpression is not LiteralExpression { Value: not null } literal)
+            {
+                return false;
+            }
+
+            DataValue value = ConvertLiteralToDataValue(literal.Value);
+            IReadOnlySet<int> matchingChunks = index.FindChunksContaining(value);
+
+            if (matchingChunks.Contains(chunkIndex))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Converts an AST literal value (<see cref="LiteralExpression.Value"/>) to a <see cref="DataValue"/>.
     /// </summary>
     private static DataValue ConvertLiteralToDataValue(object rawLiteral)
@@ -407,10 +555,10 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <summary>
-    /// Attempts to collect exact row positions from equality predicates in the filter
-    /// hint by looking up values in sorted indexes. Only extracts from top-level AND
-    /// chains — OR predicates are not eligible for index seek. When multiple indexed
-    /// equality predicates exist, uses the most selective (fewest matches).
+    /// Attempts to collect row positions from index-seekable predicates (equality,
+    /// BETWEEN, IN) in the filter hint. Only extracts from top-level AND chains —
+    /// OR predicates are not eligible for index seek. When multiple indexed predicates
+    /// exist, uses the most selective (fewest matches).
     /// </summary>
     /// <returns>Sorted list of absolute row positions, or <c>null</c> if no seek is possible.</returns>
     private static List<long>? CollectExactSeekPositions(
@@ -419,16 +567,11 @@ public sealed class ScanOperator : IQueryOperator
         IReadOnlyList<IndexChunk> chunks,
         HashSet<int> activeChunkIndexes)
     {
+        List<long>? bestPositions = null;
+
+        // Equality predicates: col = literal → FindExact
         List<(string Column, DataValue Value)> equalities = new();
         ExtractTopLevelEqualities(filterHint, equalities);
-
-        if (equalities.Count == 0)
-        {
-            return null;
-        }
-
-        // Find the most selective equality predicate with a sorted index.
-        List<long>? bestPositions = null;
 
         foreach ((string column, DataValue value) in equalities)
         {
@@ -438,16 +581,52 @@ public sealed class ScanOperator : IQueryOperator
             }
 
             IReadOnlyList<ValueIndexEntry> entries = index.FindExact(value);
-            List<long> positions = new(entries.Count);
+            List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
 
-            foreach (ValueIndexEntry entry in entries)
+            if (bestPositions is null || positions.Count < bestPositions.Count)
             {
-                if (activeChunkIndexes.Contains(entry.ChunkIndex))
-                {
-                    long absoluteRow = chunks[entry.ChunkIndex].RowOffset
-                        + entry.RowOffsetInChunk;
-                    positions.Add(absoluteRow);
-                }
+                bestPositions = positions;
+            }
+        }
+
+        // BETWEEN predicates: col BETWEEN low AND high → FindRange
+        List<(string Column, DataValue Low, DataValue High)> betweens = new();
+        ExtractTopLevelBetweens(filterHint, betweens);
+
+        foreach ((string column, DataValue low, DataValue high) in betweens)
+        {
+            if (!sortedIndexes.TryGetIndex(column, out SortedValueIndex? index))
+            {
+                continue;
+            }
+
+            IReadOnlyList<ValueIndexEntry> entries = index.FindRange(low, high);
+            List<long> positions = CollectPositionsFromEntries(entries, chunks, activeChunkIndexes);
+
+            if (bestPositions is null || positions.Count < bestPositions.Count)
+            {
+                bestPositions = positions;
+            }
+        }
+
+        // IN predicates: col IN (v1, v2, ...) → union of FindExact per value
+        List<(string Column, List<DataValue> Values)> inPredicates = new();
+        ExtractTopLevelIns(filterHint, inPredicates);
+
+        foreach ((string column, List<DataValue> values) in inPredicates)
+        {
+            if (!sortedIndexes.TryGetIndex(column, out SortedValueIndex? index))
+            {
+                continue;
+            }
+
+            List<long> positions = new();
+
+            foreach (DataValue value in values)
+            {
+                IReadOnlyList<ValueIndexEntry> entries = index.FindExact(value);
+                positions.AddRange(
+                    CollectPositionsFromEntries(entries, chunks, activeChunkIndexes));
             }
 
             if (bestPositions is null || positions.Count < bestPositions.Count)
@@ -463,6 +642,30 @@ public sealed class ScanOperator : IQueryOperator
 
         bestPositions.Sort();
         return bestPositions;
+    }
+
+    /// <summary>
+    /// Converts index entries to absolute row positions, keeping only entries
+    /// in active (non-pruned) chunks.
+    /// </summary>
+    private static List<long> CollectPositionsFromEntries(
+        IReadOnlyList<ValueIndexEntry> entries,
+        IReadOnlyList<IndexChunk> chunks,
+        HashSet<int> activeChunkIndexes)
+    {
+        List<long> positions = new(entries.Count);
+
+        foreach (ValueIndexEntry entry in entries)
+        {
+            if (activeChunkIndexes.Contains(entry.ChunkIndex))
+            {
+                long absoluteRow = chunks[entry.ChunkIndex].RowOffset
+                    + entry.RowOffsetInChunk;
+                positions.Add(absoluteRow);
+            }
+        }
+
+        return positions;
     }
 
     /// <summary>
@@ -506,6 +709,67 @@ public sealed class ScanOperator : IQueryOperator
                     results.Add((columnName, ConvertLiteralToDataValue(rawLiteral)));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Extracts <c>column BETWEEN low AND high</c> predicates from the top-level
+    /// AND chain. Only non-negated BETWEEN with literal bounds is extracted.
+    /// </summary>
+    private static void ExtractTopLevelBetweens(
+        Expression expression,
+        List<(string Column, DataValue Low, DataValue High)> results)
+    {
+        if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
+        {
+            ExtractTopLevelBetweens(binary.Left, results);
+            ExtractTopLevelBetweens(binary.Right, results);
+            return;
+        }
+
+        if (expression is BetweenExpression between && !between.Negated
+            && between.Expression is ColumnReference columnRef
+            && between.Low is LiteralExpression { Value: not null } lowLiteral
+            && between.High is LiteralExpression { Value: not null } highLiteral)
+        {
+            results.Add((
+                columnRef.ColumnName,
+                ConvertLiteralToDataValue(lowLiteral.Value),
+                ConvertLiteralToDataValue(highLiteral.Value)));
+        }
+    }
+
+    /// <summary>
+    /// Extracts <c>column IN (v1, v2, ...)</c> predicates from the top-level
+    /// AND chain. Only non-negated IN with all-literal values is extracted.
+    /// </summary>
+    private static void ExtractTopLevelIns(
+        Expression expression,
+        List<(string Column, List<DataValue> Values)> results)
+    {
+        if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
+        {
+            ExtractTopLevelIns(binary.Left, results);
+            ExtractTopLevelIns(binary.Right, results);
+            return;
+        }
+
+        if (expression is InExpression inExpression && !inExpression.Negated
+            && inExpression.Expression is ColumnReference columnRef)
+        {
+            List<DataValue> values = new(inExpression.Values.Count);
+
+            foreach (Expression valueExpression in inExpression.Values)
+            {
+                if (valueExpression is not LiteralExpression { Value: not null } literal)
+                {
+                    return;
+                }
+
+                values.Add(ConvertLiteralToDataValue(literal.Value));
+            }
+
+            results.Add((columnRef.ColumnName, values));
         }
     }
 }

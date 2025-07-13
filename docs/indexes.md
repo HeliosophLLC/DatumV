@@ -91,6 +91,7 @@ Sorted value indexes store every distinct value in a column alongside its chunk 
 - **Exact lookup** — `FindExact(key)` returns all entries matching a value in O(log n)
 - **Range lookup** — `FindRange(low, high)` returns entries within bounds
 - **Chunk-level lookup** — `FindChunksContaining(key)` returns the set of chunk indexes containing a value
+- **Chunk-level range** — `FindChunksInRange(low, high)`, `FindChunksLessThan(key)`, `FindChunksGreaterThan(key)`, and their inclusive variants return chunk sets for range predicates
 
 At query time, sorted indexes enable **equality and range predicate pruning**: the engine extracts literal values from WHERE predicates and uses the sorted index to identify which chunks contain matching values, skipping all others.
 
@@ -147,7 +148,19 @@ For join operations, the query planner collects build-side key values and probes
 
 ### Level 3: Sorted index pruning
 
-Equality predicates with literal values (e.g., `WHERE id = 42`) are checked against sorted value indexes. The engine identifies exactly which chunks contain the target value and skips all others.
+Predicate expressions with literal values are checked against sorted value indexes. The engine identifies exactly which chunks contain matching values and skips all others.
+
+| Predicate | Index method |
+|-----------|-------------|
+| `col = value` | `FindChunksContaining(value)` |
+| `col < value` | `FindChunksLessThan(value)` |
+| `col <= value` | `FindChunksLessThanOrEqual(value)` |
+| `col > value` | `FindChunksGreaterThan(value)` |
+| `col >= value` | `FindChunksGreaterThanOrEqual(value)` |
+| `col BETWEEN low AND high` | `FindChunksInRange(low, high)` |
+| `col IN (v1, v2, ...)` | Union of `FindChunksContaining` per value |
+
+Reversed operand order (e.g., `5 > col`) is handled by flipping the comparison operator. NOT BETWEEN and NOT IN are not eligible — they are exclusions, not point/range lookups.
 
 All three levels are applied in sequence; each subsequent level can only reduce the set of active chunks further. EXPLAIN ANALYZE reports the total and pruned chunk counts.
 
@@ -163,7 +176,17 @@ When the provider supports seeking and the filter contains top-level AND-chained
 
 This reduces I/O from reading entire surviving chunks (potentially thousands of rows per chunk) to reading only the rows that actually match. For high-selectivity predicates like `WHERE user_id = 12345` against a million-row source with a sorted index on `user_id`, this is the difference between reading the entire chunk containing the value and reading exactly one row.
 
-When multiple indexed equality predicates are present (e.g., `WHERE user_id = 42 AND category = 'train'`), the engine picks the most selective (fewest matching entries) to minimize seeks. The downstream `FilterOperator` handles any remaining predicates.
+When multiple indexed predicates are present (e.g., `WHERE user_id = 42 AND category = 'train'`), the engine picks the most selective (fewest matching entries) to minimize seeks. The downstream `FilterOperator` handles any remaining predicates.
+
+BEYOND equality, the seek path also handles:
+
+| Predicate | Index method |
+|-----------|-------------|
+| `col = value` | `FindExact(value)` |
+| `col BETWEEN low AND high` | `FindRange(low, high)` |
+| `col IN (v1, v2, ...)` | Union of `FindExact` per value |
+
+Range comparisons (`<`, `<=`, `>`, `>=`) are not eligible for row seek — they may match a large fraction of the dataset, where individual row seeking would be slower than a sequential scan. They benefit only from chunk-level pruning.
 
 OR predicates are not eligible for exact seek because the index result set for one branch may miss rows matching the other branch.
 

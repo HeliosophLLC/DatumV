@@ -141,6 +141,85 @@ public sealed class SortedValueIndex
     }
 
     /// <summary>
+    /// Returns the set of chunk indexes that contain any entry with a key
+    /// strictly less than the given bound.
+    /// </summary>
+    /// <param name="bound">The exclusive upper bound.</param>
+    /// <returns>Distinct chunk indexes with keys less than the bound.</returns>
+    public IReadOnlySet<int> FindChunksLessThan(DataValue bound)
+    {
+        int firstGreaterOrEqual = BinarySearchFirstGreaterOrEqual(bound);
+        return CollectChunksFromRange(0, firstGreaterOrEqual);
+    }
+
+    /// <summary>
+    /// Returns the set of chunk indexes that contain any entry with a key
+    /// less than or equal to the given bound.
+    /// </summary>
+    /// <param name="bound">The inclusive upper bound.</param>
+    /// <returns>Distinct chunk indexes with keys less than or equal to the bound.</returns>
+    public IReadOnlySet<int> FindChunksLessThanOrEqual(DataValue bound)
+    {
+        int firstGreaterOrEqual = BinarySearchFirstGreaterOrEqual(bound);
+
+        // Advance past all entries that are equal to the bound.
+        int end = firstGreaterOrEqual;
+        while (end < _entries.Length && CompareKeys(_entries[end].Key, bound) == 0)
+        {
+            end++;
+        }
+
+        return CollectChunksFromRange(0, end);
+    }
+
+    /// <summary>
+    /// Returns the set of chunk indexes that contain any entry with a key
+    /// strictly greater than the given bound.
+    /// </summary>
+    /// <param name="bound">The exclusive lower bound.</param>
+    /// <returns>Distinct chunk indexes with keys greater than the bound.</returns>
+    public IReadOnlySet<int> FindChunksGreaterThan(DataValue bound)
+    {
+        int firstGreaterOrEqual = BinarySearchFirstGreaterOrEqual(bound);
+
+        // Skip entries that are equal to the bound.
+        while (firstGreaterOrEqual < _entries.Length
+            && CompareKeys(_entries[firstGreaterOrEqual].Key, bound) == 0)
+        {
+            firstGreaterOrEqual++;
+        }
+
+        return CollectChunksFromRange(firstGreaterOrEqual, _entries.Length);
+    }
+
+    /// <summary>
+    /// Returns the set of chunk indexes that contain any entry with a key
+    /// greater than or equal to the given bound.
+    /// </summary>
+    /// <param name="bound">The inclusive lower bound.</param>
+    /// <returns>Distinct chunk indexes with keys greater than or equal to the bound.</returns>
+    public IReadOnlySet<int> FindChunksGreaterThanOrEqual(DataValue bound)
+    {
+        int firstGreaterOrEqual = BinarySearchFirstGreaterOrEqual(bound);
+        return CollectChunksFromRange(firstGreaterOrEqual, _entries.Length);
+    }
+
+    /// <summary>
+    /// Collects distinct chunk indexes from a contiguous slice of entries.
+    /// </summary>
+    private IReadOnlySet<int> CollectChunksFromRange(int startInclusive, int endExclusive)
+    {
+        HashSet<int> chunks = new();
+
+        for (int index = startInclusive; index < endExclusive; index++)
+        {
+            chunks.Add(_entries[index].ChunkIndex);
+        }
+
+        return chunks;
+    }
+
+    /// <summary>
     /// Finds the first entry whose key equals <paramref name="key"/>.
     /// Returns a negative value if not found.
     /// </summary>

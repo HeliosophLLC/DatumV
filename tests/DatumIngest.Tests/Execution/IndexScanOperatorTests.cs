@@ -587,6 +587,288 @@ public sealed class IndexScanOperatorTests
         Assert.Equal(1, scan.ExactSeekRowsFetched);
     }
 
+    // ───────────────────── Range predicate pruning tests ─────────────────────
+
+    [Fact]
+    public async Task Scan_WhereLessThanWithSortedIndex_PrunesChunks()
+    {
+        // 10 rows in 2 chunks of 5: chunk 0 has values 1-5, chunk 1 has values 6-10.
+        // WHERE value < 6 → chunk 1 has no values < 6, so it should be pruned.
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndex("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.LessThan,
+            new LiteralExpression(6.0)));
+
+        FilterOperator filter = new(scan, new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.LessThan,
+            new LiteralExpression(6.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(5, results.Count);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
+    [Fact]
+    public async Task Scan_WhereGreaterThanWithSortedIndex_PrunesChunks()
+    {
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndex("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.GreaterThan,
+            new LiteralExpression(5.0)));
+
+        FilterOperator filter = new(scan, new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.GreaterThan,
+            new LiteralExpression(5.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(5, results.Count);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
+    [Fact]
+    public async Task Scan_WhereLessThanOrEqualWithSortedIndex_PrunesChunks()
+    {
+        // WHERE value <= 5 → chunk 1 (values 6-10) should be pruned.
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndex("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.LessThanOrEqual,
+            new LiteralExpression(5.0)));
+
+        FilterOperator filter = new(scan, new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.LessThanOrEqual,
+            new LiteralExpression(5.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(5, results.Count);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
+    [Fact]
+    public async Task Scan_WhereBetweenWithSortedIndex_PrunesChunks()
+    {
+        // 15 rows in 3 chunks of 5: chunk 0 [1-5], chunk 1 [6-10], chunk 2 [11-15].
+        // WHERE value BETWEEN 6 AND 10 → chunks 0 and 2 should be pruned.
+        Row[] rows = CreateNumberedRows(
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f, 13f, 14f, 15f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndex("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BetweenExpression(
+            new ColumnReference("value"),
+            new LiteralExpression(6.0),
+            new LiteralExpression(10.0)));
+
+        FilterOperator filter = new(scan, new BetweenExpression(
+            new ColumnReference("value"),
+            new LiteralExpression(6.0),
+            new LiteralExpression(10.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(5, results.Count);
+        Assert.Equal(2, scan.PrunedIndexChunks);
+    }
+
+    [Fact]
+    public async Task Scan_WhereInWithSortedIndex_PrunesChunks()
+    {
+        // 10 rows in 2 chunks of 5: chunk 0 [1-5], chunk 1 [6-10].
+        // WHERE value IN (1, 3) → only chunk 0 matched, chunk 1 pruned.
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndex("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new InExpression(
+            new ColumnReference("value"),
+            [new LiteralExpression(1.0), new LiteralExpression(3.0)]));
+
+        FilterOperator filter = new(scan, new InExpression(
+            new ColumnReference("value"),
+            [new LiteralExpression(1.0), new LiteralExpression(3.0)]));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(2, results.Count);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
+    // ───────────────────── Range predicate row seek tests ─────────────────────
+
+    [Fact]
+    public async Task Scan_WhereBetweenWithSortedIndex_SeeksToMatchingRows()
+    {
+        // Single chunk with 10 rows. BETWEEN 3 AND 7 should seek to 5 rows.
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSort("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BetweenExpression(
+            new ColumnReference("value"),
+            new LiteralExpression(3.0),
+            new LiteralExpression(7.0)));
+
+        FilterOperator filter = new(scan, new BetweenExpression(
+            new ColumnReference("value"),
+            new LiteralExpression(3.0),
+            new LiteralExpression(7.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(5, results.Count);
+        Assert.Equal(5, scan.ExactSeekRowsFetched);
+        Assert.All(results, r =>
+        {
+            float value = r["value"].AsScalar();
+            Assert.InRange(value, 3f, 7f);
+        });
+    }
+
+    [Fact]
+    public async Task Scan_WhereInWithSortedIndex_SeeksToMatchingRows()
+    {
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithSort("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new InExpression(
+            new ColumnReference("value"),
+            [new LiteralExpression(2.0), new LiteralExpression(5.0), new LiteralExpression(8.0)]));
+
+        FilterOperator filter = new(scan, new InExpression(
+            new ColumnReference("value"),
+            [new LiteralExpression(2.0), new LiteralExpression(5.0), new LiteralExpression(8.0)]));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Equal(3, results.Count);
+        Assert.Equal(3, scan.ExactSeekRowsFetched);
+        float[] expected = [2f, 5f, 8f];
+        Assert.Equal(expected, results.Select(r => r["value"].AsScalar()).OrderBy(v => v).ToArray());
+    }
+
+    [Fact]
+    public async Task Scan_WhereFlippedLiteralComparison_PrunesCorrectly()
+    {
+        // Test "5 > value" (literal on left) — should be handled like "value < 5".
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndex("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        // 5 > value means value < 5 (flipped).
+        Expression predicate = new BinaryExpression(
+            new LiteralExpression(5.0),
+            BinaryOperator.GreaterThan,
+            new ColumnReference("value"));
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(predicate);
+
+        FilterOperator filter = new(scan, predicate);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        // value < 5 → rows with values 1,2,3,4 from chunk 0.
+        Assert.Equal(4, results.Count);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
     // ───────────────────── Helpers ─────────────────────
 
     private static TableDescriptor CreateDescriptor(string name)
@@ -677,6 +959,47 @@ public sealed class IndexScanOperatorTests
             new SourceFingerprint(100, DummyHash),
             new IndexSchema(new Schema(columns), rows.Length),
             [chunk],
+            sortedIndexes: sortedSet);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="SourceIndex"/> with multiple chunks of the given size,
+    /// each with a sorted value index on the specified column.
+    /// </summary>
+    private static SourceIndex CreateMultiChunkSourceIndex(
+        string columnName, Row[] allRows, int chunkSize)
+    {
+        int chunkCount = (allRows.Length + chunkSize - 1) / chunkSize;
+        List<IndexChunk> chunks = new();
+        List<ValueIndexEntry> entries = new();
+
+        for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+        {
+            int start = chunkIndex * chunkSize;
+            int count = Math.Min(chunkSize, allRows.Length - start);
+            chunks.Add(new IndexChunk(start, count, -1, -1,
+                new Dictionary<string, ChunkColumnStatistics>()));
+
+            for (int row = 0; row < count; row++)
+            {
+                entries.Add(new ValueIndexEntry(
+                    allRows[start + row][columnName], chunkIndex, row));
+            }
+        }
+
+        SortedValueIndex sortedIndex = SortedValueIndex.BuildFromUnsorted(entries.ToArray());
+        Dictionary<string, SortedValueIndex> indexes =
+            new(StringComparer.OrdinalIgnoreCase) { [columnName] = sortedIndex };
+        SortedValueIndexSet sortedSet = new(indexes);
+
+        ColumnInfo[] columns = allRows[0].ColumnNames
+            .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+            .ToArray();
+
+        return new SourceIndex(
+            new SourceFingerprint(100, DummyHash),
+            new IndexSchema(new Schema(columns), allRows.Length),
+            chunks,
             sortedIndexes: sortedSet);
     }
 
