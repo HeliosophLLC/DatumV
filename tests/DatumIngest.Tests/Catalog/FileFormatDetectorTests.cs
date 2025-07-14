@@ -234,4 +234,92 @@ public sealed class FileFormatDetectorTests : IDisposable
 
         Assert.Equal("csv", result);
     }
+
+    // ──────────────────────────────────────────────
+    //  Stream overload
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public void DetectProviderStream_ParquetMagicBytes_ReturnsParquet()
+    {
+        using MemoryStream stream = new("PAR1"u8.ToArray());
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Equal("parquet", result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_Hdf5MagicBytes_ReturnsHdf5()
+    {
+        byte[] header = [0x89, (byte)'H', (byte)'D', (byte)'F', 0x0D, 0x0A, 0x1A, 0x0A];
+        using MemoryStream stream = new(header);
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Equal("hdf5", result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_ZipMagicBytes_ReturnsZip()
+    {
+        byte[] header = [(byte)'P', (byte)'K', 0x03, 0x04];
+        using MemoryStream stream = new(header);
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Equal("zip", result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_IdxMagicBytes_ReturnsIdx()
+    {
+        byte[] header = [0x00, 0x00, 0x08, 0x01];
+        using MemoryStream stream = new(header);
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Equal("idx", result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_JsonObjectMagicBytes_ReturnsJson()
+    {
+        using MemoryStream stream = new("{ \"key\": 1 }"u8.ToArray());
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Equal("json", result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_UnrecognizedBytes_ReturnsNull()
+    {
+        byte[] garbage = [0xFF, 0xFE, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x11];
+        using MemoryStream stream = new(garbage);
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_TooShort_ReturnsNull()
+    {
+        using MemoryStream stream = new([0x01, 0x02]);
+
+        string? result = FileFormatDetector.DetectProvider(stream);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void DetectProviderStream_RestoresPosition()
+    {
+        using MemoryStream stream = new("PAR1extra"u8.ToArray());
+
+        FileFormatDetector.DetectProvider(stream);
+
+        Assert.Equal(0, stream.Position);
+    }
 }

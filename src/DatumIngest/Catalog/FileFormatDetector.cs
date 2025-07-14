@@ -79,6 +79,31 @@ public static class FileFormatDetector
     }
 
     /// <summary>
+    /// Attempts to detect the provider name by reading magic byte signatures
+    /// from the given stream. If the stream is seekable, the position is
+    /// restored after reading.
+    /// </summary>
+    /// <param name="stream">A readable stream positioned at the start of the data.</param>
+    /// <returns>
+    /// The provider name (e.g. "parquet", "hdf5", "json"), or <c>null</c>
+    /// if the format cannot be determined from magic bytes alone.
+    /// </returns>
+    public static string? DetectProvider(Stream stream)
+    {
+        long originalPosition = stream.CanSeek ? stream.Position : -1;
+
+        Span<byte> buffer = stackalloc byte[MagicByteBufferLength];
+        int bytesRead = stream.Read(buffer);
+
+        if (stream.CanSeek)
+        {
+            stream.Position = originalPosition;
+        }
+
+        return MatchMagicBytes(buffer[..bytesRead]);
+    }
+
+    /// <summary>
     /// Reads the first few bytes of a file and attempts to identify its format
     /// via well-known magic byte signatures.
     /// </summary>
@@ -89,39 +114,47 @@ public static class FileFormatDetector
         using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         int bytesRead = stream.Read(buffer);
 
-        if (bytesRead < 4)
+        return MatchMagicBytes(buffer[..bytesRead]);
+    }
+
+    /// <summary>
+    /// Matches a header buffer against well-known magic byte signatures.
+    /// </summary>
+    private static string? MatchMagicBytes(ReadOnlySpan<byte> header)
+    {
+        if (header.Length < 4)
         {
             return null;
         }
 
         // Parquet: "PAR1" magic at start of file.
-        if (buffer[0] == 'P' && buffer[1] == 'A' && buffer[2] == 'R' && buffer[3] == '1')
+        if (header[0] == 'P' && header[1] == 'A' && header[2] == 'R' && header[3] == '1')
         {
             return "parquet";
         }
 
         // HDF5: 8-byte signature "\x89HDF\r\n\x1a\n".
-        if (bytesRead >= 8
-            && buffer[0] == 0x89 && buffer[1] == 'H' && buffer[2] == 'D' && buffer[3] == 'F'
-            && buffer[4] == 0x0D && buffer[5] == 0x0A && buffer[6] == 0x1A && buffer[7] == 0x0A)
+        if (header.Length >= 8
+            && header[0] == 0x89 && header[1] == 'H' && header[2] == 'D' && header[3] == 'F'
+            && header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A)
         {
             return "hdf5";
         }
 
         // ZIP: local file header "PK\x03\x04".
-        if (buffer[0] == 'P' && buffer[1] == 'K' && buffer[2] == 0x03 && buffer[3] == 0x04)
+        if (header[0] == 'P' && header[1] == 'K' && header[2] == 0x03 && header[3] == 0x04)
         {
             return "zip";
         }
 
         // IDX: first two bytes 0x00, third byte is a valid type code, fourth is dimension count >= 1.
-        if (buffer[0] == 0x00 && buffer[1] == 0x00 && IsValidIdxTypeCode(buffer[2]) && buffer[3] >= 1)
+        if (header[0] == 0x00 && header[1] == 0x00 && IsValidIdxTypeCode(header[2]) && header[3] >= 1)
         {
             return "idx";
         }
 
         // JSON: first non-whitespace byte is '{' or '['.
-        byte firstNonWhitespace = FindFirstNonWhitespace(buffer[..bytesRead]);
+        byte firstNonWhitespace = FindFirstNonWhitespace(header);
         if (firstNonWhitespace == '{' || firstNonWhitespace == '[')
         {
             return "json";
