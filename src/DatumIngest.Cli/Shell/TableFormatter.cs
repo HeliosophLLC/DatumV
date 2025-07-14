@@ -1,0 +1,181 @@
+using System.Text;
+using DatumIngest.Model;
+
+namespace DatumIngest.Cli.Shell;
+
+/// <summary>
+/// Formats streaming rows into psql-style aligned tables with column headers,
+/// separator lines, right-aligned numerics, and a row-count footer.
+/// </summary>
+internal sealed class TableFormatter
+{
+    /// <summary>Maximum number of rows buffered before truncating output.</summary>
+    private const int MaxBufferedRows = 1000;
+
+    /// <summary>Maximum display width for any single column.</summary>
+    private const int MaxColumnWidth = 40;
+
+    /// <summary>
+    /// Formats an asynchronous stream of rows into a psql-style table written to a <see cref="TextWriter"/>.
+    /// </summary>
+    /// <param name="rows">Asynchronous stream of rows to display.</param>
+    /// <param name="schema">Schema describing the column names and types.</param>
+    /// <param name="writer">Target text writer (typically <see cref="Console.Out"/>).</param>
+    public async Task FormatAsync(IAsyncEnumerable<Row> rows, Schema schema, TextWriter writer)
+    {
+        List<string[]> bufferedCells = new();
+        int columnCount = schema.Columns.Count;
+        bool truncated = false;
+
+        // Buffer all rows (up to limit) and format cell values.
+        await foreach (Row row in rows.ConfigureAwait(false))
+        {
+            if (bufferedCells.Count >= MaxBufferedRows)
+            {
+                truncated = true;
+                continue;
+            }
+
+            string[] cells = new string[columnCount];
+            for (int i = 0; i < columnCount; i++)
+            {
+                DataValue value = row[i];
+                cells[i] = value.IsNull ? "NULL" : FormatValue(value);
+            }
+
+            bufferedCells.Add(cells);
+        }
+
+        if (columnCount == 0)
+        {
+            await writer.WriteLineAsync("(empty result)").ConfigureAwait(false);
+            return;
+        }
+
+        // Compute column widths.
+        int[] widths = new int[columnCount];
+        for (int i = 0; i < columnCount; i++)
+        {
+            widths[i] = schema.Columns[i].Name.Length;
+        }
+
+        foreach (string[] cells in bufferedCells)
+        {
+            for (int i = 0; i < columnCount; i++)
+            {
+                if (cells[i].Length > widths[i])
+                {
+                    widths[i] = cells[i].Length;
+                }
+            }
+        }
+
+        // Cap widths and determine alignment.
+        bool[] rightAlign = new bool[columnCount];
+        for (int i = 0; i < columnCount; i++)
+        {
+            if (widths[i] > MaxColumnWidth)
+            {
+                widths[i] = MaxColumnWidth;
+            }
+
+            rightAlign[i] = schema.Columns[i].Kind is DataKind.Scalar or DataKind.UInt8;
+        }
+
+        // Write header.
+        StringBuilder line = new();
+        FormatRow(line, schema.Columns.Select(c => c.Name).ToArray(), widths, rightAlign);
+        await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
+
+        // Write separator.
+        line.Clear();
+        for (int i = 0; i < columnCount; i++)
+        {
+            if (i > 0)
+            {
+                line.Append("-+-");
+            }
+
+            line.Append('-', widths[i]);
+        }
+
+        await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
+
+        // Write data rows.
+        foreach (string[] cells in bufferedCells)
+        {
+            line.Clear();
+            FormatRow(line, cells, widths, rightAlign);
+            await writer.WriteLineAsync(line.ToString()).ConfigureAwait(false);
+        }
+
+        // Write footer.
+        string rowLabel = bufferedCells.Count == 1 ? "row" : "rows";
+        string footer = truncated
+            ? $"({bufferedCells.Count} {rowLabel}, truncated)"
+            : $"({bufferedCells.Count} {rowLabel})";
+        await writer.WriteLineAsync(footer).ConfigureAwait(false);
+    }
+
+    private static void FormatRow(StringBuilder builder, string[] values, int[] widths, bool[] rightAlign)
+    {
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(" | ");
+            }
+
+            string value = values[i];
+
+            // Truncate if exceeding max width.
+            if (value.Length > widths[i])
+            {
+                value = string.Concat(value.AsSpan(0, widths[i] - 1), "~");
+            }
+
+            if (rightAlign[i])
+            {
+                builder.Append(value.PadLeft(widths[i]));
+            }
+            else
+            {
+                builder.Append(value.PadRight(widths[i]));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Formats a single <see cref="DataValue"/> for display in the table.
+    /// </summary>
+    internal static string FormatValue(DataValue value)
+    {
+        return value.Kind switch
+        {
+            DataKind.Scalar => value.AsScalar().ToString("G"),
+            DataKind.UInt8 => value.AsUInt8().ToString(),
+            DataKind.String => value.AsString(),
+            DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
+            DataKind.DateTime => value.AsDateTime().ToString("O"),
+            DataKind.JsonValue => value.AsJsonValue(),
+            DataKind.Vector => $"[{string.Join(", ", value.AsVector().Select(v => v.ToString("G")))}]",
+            DataKind.Matrix => FormatMatrixShape(value),
+            DataKind.Tensor => FormatTensorShape(value),
+            DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
+            DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
+            _ => value.ToString() ?? ""
+        };
+    }
+
+    private static string FormatMatrixShape(DataValue value)
+    {
+        float[] data = value.AsMatrix(out int rows, out int columns);
+        return $"Matrix[{rows}x{columns}]";
+    }
+
+    private static string FormatTensorShape(DataValue value)
+    {
+        float[] data = value.AsTensor(out int[] shape);
+        return $"Tensor[{string.Join("x", shape)}]";
+    }
+}

@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DatumIngest\DatumIngest.csproj" />
     <ProjectReference Include="..\..\src\DatumIngest.Cli\DatumIngest.Cli.csproj" />
+    <ProjectReference Include="..\..\src\DatumIngest.Server\DatumIngest.Server.csproj" />
     <ProjectReference Include="..\..\src\DatumIngest.Editor\DatumIngest.Editor.csproj" />
     <ProjectReference Include="..\..\src\DatumIngest.LanguageServer\DatumIngest.LanguageServer.csproj" />
   </ItemGroup>

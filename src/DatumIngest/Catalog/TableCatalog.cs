@@ -111,6 +111,11 @@ public sealed class TableCatalog
     public IEnumerable<string> TableNames => _descriptors.Keys;
 
     /// <summary>
+    /// Returns all registered provider names.
+    /// </summary>
+    public IEnumerable<string> ProviderNames => _providerFactories.Keys;
+
+    /// <summary>
     /// Attempts to resolve a table name without throwing.
     /// </summary>
     /// <param name="tableName">Logical table name from the SQL query.</param>

@@ -63,7 +63,7 @@ internal sealed class CliOptions
         // The 'index' and 'manifest-schema' commands do not require a SQL argument.
         int argStart;
 
-        if (options.Command is "index" or "manifest-schema")
+        if (options.Command is "index" or "manifest-schema" or "shell")
         {
             argStart = 1;
         }

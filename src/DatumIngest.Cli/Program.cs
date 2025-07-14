@@ -13,6 +13,7 @@ using DatumIngest.Output.Checkpoint;
 using CheckpointFingerprint = DatumIngest.Output.Checkpoint.SourceFingerprint;
 using DatumIngest.Manifest;
 using DatumIngest.Output.Writers;
+using DatumIngest.Cli.Shell;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Statistics;
@@ -38,6 +39,12 @@ try
         return await RunManifestSchemaAsync(catalog, options.OutputPath);
     }
 
+    if (options.Command == "shell")
+    {
+        InteractiveShell shell = new(catalog);
+        return await shell.RunAsync(CancellationToken.None);
+    }
+
     SelectStatement statement = SqlParser.Parse(options.Sql);
 
     return options.Command switch
@@ -48,7 +55,7 @@ try
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(statement, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', or 'index'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', or 'index'.")
     };
 }
 catch (ArgumentException ex)
