@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Model;
 using PureHDF;
+using PureHDF.Selections;
 using PureHDF.VOL.Native;
 
 namespace DatumIngest.Catalog.Providers;
@@ -10,7 +11,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Each 1-D dataset becomes a column; 2-D datasets yield one vector per row.
 /// Datasets inside groups use a flattened slash-separated name (e.g. "sensors/temperature").
 /// </summary>
-public sealed class Hdf5TableProvider : ITableProvider
+public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 {
     /// <inheritdoc />
     public Task<Schema> GetSchemaAsync(
@@ -127,7 +128,7 @@ public sealed class Hdf5TableProvider : ITableProvider
             return Task.FromResult(new ProviderCapabilities(
                 EstimatedRowCount: rowCount,
                 EstimatedRowSizeBytes: null,
-                SupportsSeek: false,
+                SupportsSeek: true,
                 ColumnCosts: new Dictionary<string, ColumnCost>()));
         }
         catch
@@ -138,6 +139,85 @@ public sealed class Hdf5TableProvider : ITableProvider
                 SupportsSeek: false,
                 ColumnCosts: new Dictionary<string, ColumnCost>()));
         }
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using NativeFile file = H5File.OpenRead(descriptor.FilePath);
+
+        List<DatasetEntry> allEntries = new();
+        DiscoverDatasets(file, "", allEntries);
+
+        List<DatasetEntry> entries = requiredColumns is not null
+            ? allEntries.FindAll(entry => requiredColumns.Contains(entry.Path))
+            : allEntries;
+
+        if (entries.Count == 0)
+        {
+            yield break;
+        }
+
+        // Determine actual row count from datasets.
+        long totalRows = 0;
+        foreach (DatasetEntry entry in entries)
+        {
+            if (entry.Dataset.Space.Rank >= 1)
+            {
+                long datasetRows = (long)entry.Dataset.Space.Dimensions[0];
+                totalRows = totalRows == 0 ? datasetRows : Math.Min(totalRows, datasetRows);
+            }
+        }
+
+        // Clamp the requested range to available rows.
+        long effectiveStart = Math.Min(startRow, totalRows);
+        int effectiveCount = (int)Math.Min(count, totalRows - effectiveStart);
+
+        if (effectiveCount <= 0)
+        {
+            yield break;
+        }
+
+        // Read sliced column data.
+        List<ColumnData> columnDataList = new(entries.Count);
+        foreach (DatasetEntry entry in entries)
+        {
+            ColumnData columnData = ReadDatasetColumnSlice(entry, effectiveStart, effectiveCount);
+            columnDataList.Add(columnData);
+        }
+
+        // Build column names array and name index once.
+        string[] columnNames = new string[columnDataList.Count];
+        for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
+        {
+            columnNames[columnIndex] = columnDataList[columnIndex].Name;
+        }
+
+        Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int columnIndex = 0; columnIndex < columnNames.Length; columnIndex++)
+        {
+            nameIndex[columnNames[columnIndex]] = columnIndex;
+        }
+
+        for (long rowIndex = 0; rowIndex < effectiveCount; rowIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            DataValue[] values = new DataValue[columnDataList.Count];
+            for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
+            {
+                values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
+            }
+
+            yield return new Row(columnNames, values, nameIndex);
+        }
+
+        await Task.CompletedTask;
     }
 
     // ───────────────────── Dataset discovery ─────────────────────
@@ -340,6 +420,71 @@ public sealed class Hdf5TableProvider : ITableProvider
     }
 
     /// <summary>
+    /// Reads a slice of a dataset into the appropriate <see cref="ColumnData"/> subclass
+    /// using a <see cref="HyperslabSelection"/> to avoid materialising the entire dataset.
+    /// </summary>
+    private static ColumnData ReadDatasetColumnSlice(
+        DatasetEntry entry,
+        long startRow,
+        int sliceRowCount)
+    {
+        IH5Dataset dataset = entry.Dataset;
+        IH5DataType type = dataset.Type;
+        byte rank = dataset.Space.Rank;
+
+        // 1-D selection used for scalar, string, and uint8 datasets.
+        HyperslabSelection selection = new(start: (ulong)startRow, block: (ulong)sliceRowCount);
+
+        if (type.Class == H5DataTypeClass.String || type.Class == H5DataTypeClass.VariableLength)
+        {
+            string[] data = dataset.Read<string[]>(fileSelection: selection);
+            return new StringColumnData(entry.Path, data);
+        }
+
+        if (rank >= 2 && (type.Class == H5DataTypeClass.FloatingPoint || type.Class == H5DataTypeClass.FixedPoint))
+        {
+            ulong[] dimensions = dataset.Space.Dimensions;
+            int vectorLength = 1;
+            for (int dimensionIndex = 1; dimensionIndex < dimensions.Length; dimensionIndex++)
+            {
+                vectorLength *= (int)dimensions[dimensionIndex];
+            }
+
+            // For multi-dimensional datasets, build an N-D hyperslab selection
+            // that slices only the first dimension (rows).
+            ulong[] starts = new ulong[rank];
+            ulong[] blocks = new ulong[rank];
+            starts[0] = (ulong)startRow;
+            blocks[0] = (ulong)sliceRowCount;
+            for (int dimensionIndex = 1; dimensionIndex < rank; dimensionIndex++)
+            {
+                starts[dimensionIndex] = 0;
+                blocks[dimensionIndex] = dimensions[dimensionIndex];
+            }
+
+            HyperslabSelection multiDimensionalSelection = new(rank: rank, starts: starts, blocks: blocks);
+            float[] flatData = ReadAsFloatArraySlice(dataset, type, multiDimensionalSelection);
+            return new VectorColumnData(entry.Path, flatData, sliceRowCount, vectorLength);
+        }
+
+        if (type.Class == H5DataTypeClass.FixedPoint && type.Size == 1 && !type.FixedPoint.IsSigned)
+        {
+            byte[] data = dataset.Read<byte[]>(fileSelection: selection);
+            return new UInt8ColumnData(entry.Path, data);
+        }
+
+        if (type.Class == H5DataTypeClass.FixedPoint || type.Class == H5DataTypeClass.FloatingPoint)
+        {
+            float[] data = ReadAsFloatArraySlice(dataset, type, selection);
+            return new ScalarColumnData(entry.Path, data);
+        }
+
+        string[] fallback = new string[sliceRowCount];
+        Array.Fill(fallback, string.Empty);
+        return new StringColumnData(entry.Path, fallback);
+    }
+
+    /// <summary>
     /// Reads a numeric dataset as a float[] array, converting from the native type.
     /// </summary>
     private static float[] ReadAsFloatArray(IH5Dataset dataset, IH5DataType type)
@@ -375,6 +520,55 @@ public sealed class Hdf5TableProvider : ITableProvider
             }
 
             long[] longData = dataset.Read<long[]>();
+            float[] result = new float[longData.Length];
+            for (int index = 0; index < longData.Length; index++)
+            {
+                result[index] = longData[index];
+            }
+            return result;
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// Reads a slice of a numeric dataset as a float[] array using a file selection.
+    /// </summary>
+    private static float[] ReadAsFloatArraySlice(
+        IH5Dataset dataset,
+        IH5DataType type,
+        HyperslabSelection selection)
+    {
+        if (type.Class == H5DataTypeClass.FloatingPoint)
+        {
+            if (type.Size == 4)
+            {
+                return dataset.Read<float[]>(fileSelection: selection);
+            }
+
+            double[] doubleData = dataset.Read<double[]>(fileSelection: selection);
+            float[] floatData = new float[doubleData.Length];
+            for (int index = 0; index < doubleData.Length; index++)
+            {
+                floatData[index] = (float)doubleData[index];
+            }
+            return floatData;
+        }
+
+        if (type.Class == H5DataTypeClass.FixedPoint)
+        {
+            if (type.Size <= 4)
+            {
+                int[] intData = dataset.Read<int[]>(fileSelection: selection);
+                float[] floatData = new float[intData.Length];
+                for (int index = 0; index < intData.Length; index++)
+                {
+                    floatData[index] = intData[index];
+                }
+                return floatData;
+            }
+
+            long[] longData = dataset.Read<long[]>(fileSelection: selection);
             float[] result = new float[longData.Length];
             for (int index = 0; index < longData.Length; index++)
             {

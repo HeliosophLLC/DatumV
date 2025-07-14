@@ -49,6 +49,8 @@ Reads HDF5 files via PureHDF (managed .NET).
 
 Each 1-D dataset becomes a column. 2-D datasets yield one vector per row. Grouped datasets use flattened names (e.g., `group/dataset`).
 
+Implements `ISeekableTableProvider` for random-access row reads using PureHDF's `HyperslabSelection` API. Instead of materialising entire datasets, the provider constructs a hyperslab selection covering only the requested row range and passes it to `dataset.Read<T[]>(fileSelection: selection)`. For multi-dimensional datasets (vectors), an N-D selection slices the first dimension (rows) while spanning all remaining dimensions. This enables chunk-level seeking during index pruning and sorted index scan for ORDER BY optimisation.
+
 ## Parquet
 
 Reads Parquet files via Parquet.Net low-level API.

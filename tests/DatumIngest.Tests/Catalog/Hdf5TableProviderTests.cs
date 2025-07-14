@@ -44,6 +44,33 @@ public sealed class Hdf5TableProviderTests : IDisposable
         return rows;
     }
 
+    /// <summary>
+    /// Creates an HDF5 file with 10 rows for seek testing:
+    /// "id" (int32 0..9), "value" (float64), "label" (string).
+    /// </summary>
+    private string CreateSeekFixture()
+    {
+        string path = FixturePath("seek.h5");
+        int[] identifiers = new int[10];
+        double[] values = new double[10];
+        string[] labels = new string[10];
+        for (int index = 0; index < 10; index++)
+        {
+            identifiers[index] = index;
+            values[index] = index * 1.5;
+            labels[index] = $"row{index}";
+        }
+
+        H5File file = new()
+        {
+            ["id"] = identifiers,
+            ["value"] = values,
+            ["label"] = labels,
+        };
+        file.Write(path);
+        return path;
+    }
+
     // ───────────────────── Fixture creation helpers ─────────────────────
 
     /// <summary>
@@ -362,5 +389,137 @@ public sealed class Hdf5TableProviderTests : IDisposable
             Descriptor(path), CancellationToken.None);
 
         Assert.Equal(3L, capabilities.EstimatedRowCount);
+    }
+
+    // ───────────────────── Seekable read tests ─────────────────────
+
+    [Fact]
+    public async Task GetCapabilities_ReportsSeekSupport()
+    {
+        string path = CreateSimpleFixture();
+        Hdf5TableProvider provider = new();
+        ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(
+            Descriptor(path), CancellationToken.None);
+
+        Assert.True(capabilities.SupportsSeek);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_ReadsMiddleSlice()
+    {
+        string path = CreateSeekFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 3, count: 4, CancellationToken.None));
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(3.0f, rows[0]["id"].AsScalar());
+        Assert.Equal(4.0f, rows[1]["id"].AsScalar());
+        Assert.Equal(5.0f, rows[2]["id"].AsScalar());
+        Assert.Equal(6.0f, rows[3]["id"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_ReadsFirstRows()
+    {
+        string path = CreateSeekFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 0, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(0.0f, rows[0]["id"].AsScalar());
+        Assert.Equal(1.0f, rows[1]["id"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_ReadsLastRows()
+    {
+        string path = CreateSeekFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 8, count: 5, CancellationToken.None));
+
+        // Only 2 rows remain (indices 8 and 9), so clamped.
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(8.0f, rows[0]["id"].AsScalar());
+        Assert.Equal(9.0f, rows[1]["id"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_StartBeyondEnd_ReturnsEmpty()
+    {
+        string path = CreateSeekFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 100, count: 5, CancellationToken.None));
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_RespectsProjectionPushdown()
+    {
+        string path = CreateSeekFixture();
+        Hdf5TableProvider provider = new();
+        HashSet<string> requested = new(["label"]);
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), requested, startRow: 2, count: 3, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("row2", rows[0]["label"].AsString());
+        Assert.Equal("row3", rows[1]["label"].AsString());
+        Assert.Equal("row4", rows[2]["label"].AsString());
+
+        Assert.Throws<KeyNotFoundException>(() => rows[0]["id"]);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_Float64ValuesSlicedCorrectly()
+    {
+        string path = CreateSeekFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 5, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(7.5f, rows[0]["value"].AsScalar());
+        Assert.Equal(9.0f, rows[1]["value"].AsScalar());
+    }
+
+    [Fact]
+    public async Task ReadRowRange_2DDataset_SlicesVectors()
+    {
+        string path = Create2DFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+
+        // Row 1 of [3,4] matrix: [5, 6, 7, 8]
+        float[] firstVector = rows[0]["matrix"].AsVector();
+        Assert.Equal(4, firstVector.Length);
+        Assert.Equal(5.0f, firstVector[0]);
+        Assert.Equal(8.0f, firstVector[3]);
+
+        // Row 2 of [3,4] matrix: [9, 10, 11, 12]
+        float[] secondVector = rows[1]["matrix"].AsVector();
+        Assert.Equal(9.0f, secondVector[0]);
+        Assert.Equal(12.0f, secondVector[3]);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_UInt8Dataset_SlicedCorrectly()
+    {
+        string path = CreateUInt8Fixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 3, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal((byte)20, rows[0]["bytes"].AsUInt8());
+        Assert.Equal((byte)30, rows[1]["bytes"].AsUInt8());
+        Assert.Equal((byte)40, rows[2]["bytes"].AsUInt8());
     }
 }
