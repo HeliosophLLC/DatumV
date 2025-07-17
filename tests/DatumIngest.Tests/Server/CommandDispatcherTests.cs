@@ -58,6 +58,24 @@ public sealed class CommandDispatcherTests : IDisposable
     }
 
     /// <summary>
+    /// .help returns a success result listing available commands.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_Help_ReturnsCommandList()
+    {
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _userSession, ".help", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.Contains(".tables", result.Message);
+        Assert.Contains(".schema", result.Message);
+        Assert.Contains(".explain", result.Message);
+        Assert.Contains(".source", result.Message);
+        Assert.Contains(".sessions", result.Message);
+        Assert.Contains(".kill", result.Message);
+    }
+
+    /// <summary>
     /// .tables returns a list result.
     /// </summary>
     [Fact]

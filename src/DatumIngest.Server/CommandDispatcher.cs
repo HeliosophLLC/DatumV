@@ -86,6 +86,7 @@ public sealed class CommandDispatcher
 
         return command switch
         {
+            ".help" => HandleHelp(),
             ".tables" => HandleListTables(session),
             ".schema" or ".columns" => await HandleSchemaAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".providers" => HandleListProviders(session),
@@ -137,6 +138,30 @@ public sealed class CommandDispatcher
         }
 
         return new Schema(columns);
+    }
+
+    /// <summary>
+    /// Returns a summary of all available dot-commands with usage and descriptions.
+    /// </summary>
+    private static CommandResult HandleHelp()
+    {
+        string helpText =
+            """
+            .help                          Show this help message
+            .tables                        List all registered tables
+            .schema <table>                Show column schema for a table
+            .providers                     List registered format providers
+            .functions                     List available scalar and table-valued functions
+            .source <definition>           Add a data source (admin only)
+            .explain <sql>                 Show the query execution plan
+            .sessions                      List all active sessions (admin only)
+            .kill <session_id>             Cancel a query on another session (admin only)
+            
+            Any other input is executed as a SQL query.
+            Source definition format: provider:name=path[;key=value;...]
+            """;
+
+        return CommandResult.Success(helpText);
     }
 
     private static CommandResult HandleListTables(Session session)
