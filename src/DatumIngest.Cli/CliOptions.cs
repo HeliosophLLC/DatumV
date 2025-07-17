@@ -46,6 +46,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the column names to build sorted value indexes for during index creation.</summary>
     public HashSet<string> IndexColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
+    public bool WithInteractions { get; set; }
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -55,7 +58,7 @@ internal sealed class CliOptions
 
         if (args.Length < 1)
         {
-            throw new ArgumentException("Usage: datum-ingest <command> [<sql>] [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint] [--index <path>...] [--with-index] [--chunk-size <n>]");
+            throw new ArgumentException("Usage: datum-ingest <command> [<sql>] [--catalog <path>] [--source <source>...] [--limit <n>] [--analyze] [--output <path>] [--checkpoint] [--index <path>...] [--with-index] [--with-interactions] [--chunk-size <n>]");
         }
 
         options.Command = args[0].ToLowerInvariant();
@@ -63,7 +66,7 @@ internal sealed class CliOptions
         // The 'index' and 'manifest-schema' commands do not require a SQL argument.
         int argStart;
 
-        if (options.Command is "index" or "manifest-schema" or "shell")
+        if (options.Command is "index" or "index-manifest" or "manifest-schema" or "shell")
         {
             argStart = 1;
         }
@@ -128,6 +131,10 @@ internal sealed class CliOptions
 
                 case "--with-index":
                     options.WithIndex = true;
+                    break;
+
+                case "--with-interactions":
+                    options.WithInteractions = true;
                     break;
 
                 case "--chunk-size":

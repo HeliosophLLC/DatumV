@@ -226,4 +226,69 @@ public sealed class CliOptionsTests
         Assert.Contains("label", options.BloomColumns);
         Assert.Contains("id", options.IndexColumns);
     }
+
+    [Fact]
+    public void Parse_IndexManifest_NoSqlRequired()
+    {
+        string[] args = ["index-manifest", "--source", "csv:data=data.csv"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal("index-manifest", options.Command);
+        Assert.Equal("", options.Sql);
+        Assert.Single(options.Sources);
+    }
+
+    [Fact]
+    public void Parse_IndexManifest_WithInteractions()
+    {
+        string[] args = ["index-manifest", "--source", "csv:data=data.csv", "--with-interactions"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal("index-manifest", options.Command);
+        Assert.True(options.WithInteractions);
+    }
+
+    [Fact]
+    public void Parse_IndexManifest_WithoutInteractions_DefaultsFalse()
+    {
+        string[] args = ["index-manifest", "--source", "csv:data=data.csv"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.False(options.WithInteractions);
+    }
+
+    [Fact]
+    public void Parse_IndexManifest_WithOutput()
+    {
+        string[] args = ["index-manifest", "--source", "csv:data=data.csv", "--output", "custom.json"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal("custom.json", options.OutputPath);
+    }
+
+    [Fact]
+    public void Parse_IndexManifest_AcceptsAllIndexFlags()
+    {
+        string[] args = [
+            "index-manifest", "--source", "csv:data=data.csv",
+            "--chunk-size", "2000",
+            "--bloom-columns", "category",
+            "--index-columns", "id",
+            "--with-interactions",
+            "--output", "manifest.json"
+        ];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal("index-manifest", options.Command);
+        Assert.Equal(2000, options.ChunkSize);
+        Assert.Contains("category", options.BloomColumns);
+        Assert.Contains("id", options.IndexColumns);
+        Assert.True(options.WithInteractions);
+        Assert.Equal("manifest.json", options.OutputPath);
+    }
 }

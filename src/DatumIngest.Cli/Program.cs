@@ -34,6 +34,11 @@ try
         return await RunIndexAsync(catalog, options);
     }
 
+    if (options.Command == "index-manifest")
+    {
+        return await RunIndexManifestAsync(catalog, options);
+    }
+
     if (options.Command == "manifest-schema")
     {
         return await RunManifestSchemaAsync(catalog, options.OutputPath);
@@ -55,7 +60,7 @@ try
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(statement, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', or 'index'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', or 'index-manifest'.")
     };
 }
 catch (ArgumentException ex)
@@ -248,6 +253,143 @@ static async Task BuildIndexForDescriptorAsync(
         if (index.SortedIndexes is not null)
         {
             Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
+        }
+    }
+    finally
+    {
+        if (sourceStream is not null)
+        {
+            await sourceStream.DisposeAsync();
+        }
+    }
+}
+
+static async Task<int> RunIndexManifestAsync(TableCatalog catalog, CliOptions options)
+{
+    HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
+    HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
+    SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns, indexColumns);
+
+    List<TableDescriptor> descriptors = new();
+
+    foreach (string source in options.Sources)
+    {
+        TableDescriptor descriptor = ParseSourceDefinition(source);
+
+        if (!catalog.TryResolve(descriptor.Name, out _))
+        {
+            catalog.Register(descriptor);
+        }
+
+        descriptors.Add(descriptor);
+    }
+
+    if (descriptors.Count == 0)
+    {
+        foreach (string tableName in catalog.TableNames)
+        {
+            descriptors.Add(catalog.Resolve(tableName));
+        }
+    }
+
+    if (descriptors.Count == 0)
+    {
+        throw new ArgumentException("The 'index-manifest' command requires at least one --source definition or a --catalog with tables.");
+    }
+
+    foreach (TableDescriptor descriptor in descriptors)
+    {
+        await BuildIndexAndManifestForDescriptorAsync(descriptor, catalog, builder, options);
+    }
+
+    return 0;
+}
+
+static async Task BuildIndexAndManifestForDescriptorAsync(
+    TableDescriptor descriptor,
+    TableCatalog catalog,
+    SourceIndexBuilder builder,
+    CliOptions options)
+{
+    ITableProvider provider = catalog.CreateProvider(descriptor);
+
+    Stream? sourceStream = null;
+
+    if (File.Exists(descriptor.FilePath))
+    {
+        sourceStream = File.OpenRead(descriptor.FilePath);
+    }
+
+    try
+    {
+        DatumIngest.Indexing.SourceFingerprint fingerprint = sourceStream is not null
+            ? await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(sourceStream, CancellationToken.None).ConfigureAwait(false)
+            : new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
+
+        IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
+        StatisticsCollector statisticsCollector = new();
+        ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
+        ProgressReporter progress = new();
+        Dictionary<string, DataKind> columnKinds = new();
+        long rowCount = 0;
+
+        await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, CancellationToken.None)
+            .ConfigureAwait(false))
+        {
+            if (rowCount == 0)
+            {
+                foreach (string columnName in row.ColumnNames)
+                {
+                    columnKinds[columnName] = row[columnName].Kind;
+                }
+            }
+
+            indexBuilder.AddRow(row);
+            statisticsCollector.AddRow(row);
+            interactionCollector?.AddRow(row);
+            rowCount++;
+            progress.ReportRow();
+        }
+
+        progress.WriteSummary();
+
+        // Write index.
+        SourceIndex index = indexBuilder.Finalize();
+        string indexPath = descriptor.FilePath + ".datum-index";
+        using (FileStream outputStream = File.Create(indexPath))
+        {
+            IndexWriter writer = new();
+            writer.Write(index, outputStream);
+        }
+
+        Console.WriteLine($"Index created: {indexPath}");
+        Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
+        Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
+
+        if (index.BloomFilters is not null)
+        {
+            Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
+        }
+
+        if (index.SortedIndexes is not null)
+        {
+            Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
+        }
+
+        // Write manifest.
+        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
+        IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
+
+        string manifestPath = options.OutputPath ?? descriptor.FilePath + ".datum-manifest";
+        await ManifestSerializer.WriteToFileAsync(manifest, manifestPath).ConfigureAwait(false);
+
+        Console.WriteLine($"Manifest created: {manifestPath}");
+        Console.WriteLine($"  Features: {manifest.Features.Count}");
+
+        if (interactions is { Count: > 0 })
+        {
+            Console.WriteLine($"  Interactions: {interactions.Count} pairs");
         }
     }
     finally

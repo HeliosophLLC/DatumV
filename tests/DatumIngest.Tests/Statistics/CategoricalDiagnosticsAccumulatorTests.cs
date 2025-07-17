@@ -194,4 +194,92 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         Assert.Equal(2, result.TotalCategoryCount);
         Assert.Equal(0.0, result.RareRatio);
     }
+
+    [Fact]
+    public void Add_BeyondMaxDistinctValues_CapsFrequencyMap()
+    {
+        CategoricalDiagnosticsAccumulator accumulator = new(10);
+
+        // Add MaxDistinctValues + 100 distinct categories.
+        int totalDistinct = CategoricalDiagnosticsAccumulator.MaxDistinctValues + 100;
+
+        for (int i = 0; i < totalDistinct; i++)
+        {
+            accumulator.Add(DataValue.FromString($"cat_{i}"));
+        }
+
+        CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
+
+        // The frequency map should be capped at MaxDistinctValues.
+        Assert.Equal(CategoricalDiagnosticsAccumulator.MaxDistinctValues, result.TotalCategoryCount);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public void Add_ExistingKeysStillIncrementedAfterCap()
+    {
+        CategoricalDiagnosticsAccumulator accumulator = new(10);
+
+        // Fill to cap with distinct values, but add a known key many times first.
+        for (int i = 0; i < 100; i++)
+        {
+            accumulator.Add(DataValue.FromString("tracked"));
+        }
+
+        for (int i = 0; i < CategoricalDiagnosticsAccumulator.MaxDistinctValues; i++)
+        {
+            accumulator.Add(DataValue.FromString($"fill_{i}"));
+        }
+
+        // After capping, existing key should still be tracked.
+        accumulator.Add(DataValue.FromString("tracked"));
+
+        CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
+
+        Assert.True(result.Approximate);
+        // "tracked" should be in top-K with 101 occurrences, making coverage > 0
+        Assert.True(result.CoverageTopK > 0);
+    }
+
+    [Fact]
+    public void GetResult_BelowCap_NotApproximate()
+    {
+        CategoricalDiagnosticsAccumulator accumulator = new(10);
+
+        for (int i = 0; i < 100; i++)
+        {
+            accumulator.Add(DataValue.FromString($"cat_{i}"));
+        }
+
+        CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
+
+        Assert.False(result.Approximate);
+        Assert.Equal(100, result.TotalCategoryCount);
+    }
+
+    [Fact]
+    public void Merge_BothCapped_PreservesApproximateFlag()
+    {
+        CategoricalDiagnosticsAccumulator first = new(10);
+        CategoricalDiagnosticsAccumulator second = new(10);
+
+        // Fill both to near cap.
+        for (int i = 0; i < CategoricalDiagnosticsAccumulator.MaxDistinctValues; i++)
+        {
+            first.Add(DataValue.FromString($"a_{i}"));
+        }
+
+        for (int i = 0; i < CategoricalDiagnosticsAccumulator.MaxDistinctValues; i++)
+        {
+            second.Add(DataValue.FromString($"b_{i}"));
+        }
+
+        first.Merge(second);
+
+        CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)first.GetResult().Value!;
+
+        Assert.True(result.Approximate);
+        // The merged result should still be capped at MaxDistinctValues.
+        Assert.Equal(CategoricalDiagnosticsAccumulator.MaxDistinctValues, result.TotalCategoryCount);
+    }
 }

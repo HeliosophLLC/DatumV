@@ -215,6 +215,17 @@ datum-ingest index --source "csv:data=./large_dataset.csv" \
 
 This creates `large_dataset.csv.datum-index` alongside the source file.
 
+### Co-generate an index and manifest
+
+```bash
+datum-ingest index-manifest --source "csv:data=./data.csv" \
+  --chunk-size 50000 \
+  --bloom-columns "id,category" \
+  --with-interactions
+```
+
+This creates both `data.csv.datum-index` and `data.csv.datum-manifest` in a single pass. Use `--with-interactions` to include pairwise column interaction statistics in the manifest (opt-in due to O(C²) scaling). See [Statistics & Manifest](statistics.md) for details.
+
 ### Co-generate an index during query output
 
 ```bash
@@ -243,6 +254,7 @@ The engine validates the index fingerprint against the source, applies chunk-lev
 |------|-------------|
 | `--index <path>` | Load a pre-built `.datum-index` file. Repeatable for multiple sources. |
 | `--with-index` | Co-generate a `.datum-index` for each source during query execution. |
+| `--with-interactions` | Include pairwise column interactions in the manifest (`index-manifest` only). |
 | `--chunk-size <n>` | Rows per index chunk (default: 10,000). |
 | `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
 | `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |

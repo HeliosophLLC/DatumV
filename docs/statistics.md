@@ -78,6 +78,57 @@ The `manifest` command also computes pairwise interaction statistics between col
 
 Missingness correlation detects structurally correlated missing data — for example, when `income` is null, `credit_score` is often null too. This is useful for identifying data leakage, pipeline bugs, or columns that share an upstream data source.
 
+### Controlling interactions
+
+Interaction computation scales O(C²) with the number of columns due to pairwise analysis. For wide schemas (50+ columns), this can consume significant memory — primarily from Spearman and Mutual Information reservoirs (~156 KB per numeric pair).
+
+**CLI:** The `manifest` command always computes interactions. The `index-manifest` command makes interactions opt-in via `--with-interactions`, since index generation is typically used on raw source files where column count is unknown ahead of time.
+
+```bash
+# Interactions included (opt-in)
+datum-ingest index-manifest --source csv:data=data.csv --with-interactions
+
+# Interactions excluded (default)
+datum-ingest index-manifest --source csv:data=data.csv
+```
+
+**Programmatic API:** Interaction collection is controlled by composition — instantiate `ColumnInteractionCollector` and pass the results to `ManifestBuilder.Build()`, or omit it entirely. No configuration flags are needed.
+
+```csharp
+StatisticsCollector collector = new();
+
+// With interactions:
+ColumnInteractionCollector interactionCollector = new();
+// ... feed rows to both collectors ...
+QueryResultsManifest manifest = ManifestBuilder.Build(
+    collector.GetStatistics(), columnKinds, rowCount,
+    interactionCollector.GetInteractions());
+
+// Without interactions:
+QueryResultsManifest manifest = ManifestBuilder.Build(
+    collector.GetStatistics(), columnKinds, rowCount);
+```
+
+## Index + Manifest Co-Generation
+
+The `index-manifest` command generates both a `.datum-index` and a `.datum-manifest` file in a single pass over the source data. This avoids reading the data twice when both artifacts are needed.
+
+```bash
+# Generate both files (interactions excluded by default)
+datum-ingest index-manifest --source csv:data=measurements.csv
+
+# With pairwise interaction analysis
+datum-ingest index-manifest --source csv:data=measurements.csv --with-interactions
+
+# Override manifest output path
+datum-ingest index-manifest --source csv:data=measurements.csv --output custom-manifest.json
+
+# All index flags are supported
+datum-ingest index-manifest --source csv:data=measurements.csv --chunk-size 5000 --bloom-columns category --index-columns id
+```
+
+No SQL query is required — the command scans raw source tables directly (equivalent to `SELECT *`). Output files default to `<source-file>.datum-index` and `<source-file>.datum-manifest`.
+
 ## Manifest
 
 The `manifest` command generates a structured JSON manifest describing every column in a query result with type-specific statistics.
