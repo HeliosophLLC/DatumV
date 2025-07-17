@@ -5,8 +5,9 @@ using DatumIngest.Model;
 /// <summary>
 /// Builds an approximate histogram for numeric columns using reservoir sampling.
 /// Collects up to <see cref="MaxSamples"/> values; once exceeded, uses Algorithm R
-/// reservoir sampling. On <see cref="GetResult"/> the samples are binned into a fixed
-/// number of equal-width bins between observed min and max.
+/// reservoir sampling. On <see cref="GetResult"/> the samples are binned using
+/// integer-aligned edges when all values are integral (producing human-readable bins
+/// like [17, 18), [18, 19)...) or equal-width bins for continuous data.
 /// </summary>
 public sealed class HistogramAccumulator : IStatisticAccumulator
 {
@@ -120,10 +121,101 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
                 [_samples.Count]));
         }
 
+        bool isIntegerData = IsIntegerData(_samples);
         int effectiveBinCount = Math.Min(_binCount, _samples.Count);
+
+        double[] binEdges;
+        long[] counts;
+
+        if (isIntegerData)
+        {
+            BuildIntegerAlignedBins(min, max, effectiveBinCount, out binEdges, out counts);
+        }
+        else
+        {
+            BuildEqualWidthBins(min, max, effectiveBinCount, out binEdges, out counts);
+        }
+
+        return new StatisticResult("histogram", new HistogramResult(binEdges, counts));
+    }
+
+    /// <summary>
+    /// Determines whether all samples in the reservoir are integers (no fractional part).
+    /// </summary>
+    private static bool IsIntegerData(List<float> samples)
+    {
+        foreach (float sample in samples)
+        {
+            if (sample != MathF.Floor(sample))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds bins with integer-aligned edges. When the number of distinct integer values
+    /// fits within the bin count, each integer gets its own bin. Otherwise, the bin width
+    /// is rounded up to the nearest integer so edges land on whole numbers.
+    /// </summary>
+    private void BuildIntegerAlignedBins(
+        float min, float max, int requestedBinCount,
+        out double[] binEdges, out long[] counts)
+    {
+        long intMin = (long)min;
+        long intMax = (long)max;
+        long distinctRange = intMax - intMin + 1;
+
+        int effectiveBinCount;
+        long binWidth;
+
+        if (distinctRange <= requestedBinCount)
+        {
+            // One bin per integer value — exact histogram.
+            effectiveBinCount = (int)distinctRange;
+            binWidth = 1;
+        }
+        else
+        {
+            // Round bin width up to the nearest integer so edges stay aligned.
+            binWidth = (distinctRange + requestedBinCount - 1) / requestedBinCount;
+            effectiveBinCount = (int)((distinctRange + binWidth - 1) / binWidth);
+        }
+
+        binEdges = new double[effectiveBinCount + 1];
+
+        for (int i = 0; i <= effectiveBinCount; i++)
+        {
+            binEdges[i] = intMin + i * binWidth;
+        }
+
+        counts = new long[effectiveBinCount];
+
+        foreach (float sample in _samples)
+        {
+            int bin = (int)((long)sample - intMin) / (int)binWidth;
+
+            if (bin >= effectiveBinCount)
+            {
+                bin = effectiveBinCount - 1;
+            }
+
+            counts[bin]++;
+        }
+    }
+
+    /// <summary>
+    /// Builds equal-width bins for continuous (non-integer) data.
+    /// </summary>
+    private void BuildEqualWidthBins(
+        float min, float max, int effectiveBinCount,
+        out double[] binEdges, out long[] counts)
+    {
         double binWidth = (double)(max - min) / effectiveBinCount;
 
-        double[] binEdges = new double[effectiveBinCount + 1];
+        binEdges = new double[effectiveBinCount + 1];
 
         for (int i = 0; i <= effectiveBinCount; i++)
         {
@@ -133,7 +225,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
         // Ensure the last edge exactly equals max to avoid floating-point edge cases
         binEdges[^1] = max;
 
-        long[] counts = new long[effectiveBinCount];
+        counts = new long[effectiveBinCount];
 
         foreach (float sample in _samples)
         {
@@ -146,8 +238,6 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 
             counts[bin]++;
         }
-
-        return new StatisticResult("histogram", new HistogramResult(binEdges, counts));
     }
 }
 
