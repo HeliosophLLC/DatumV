@@ -1,6 +1,6 @@
 # Architecture
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
 
@@ -71,9 +71,15 @@ DatumIngest/
       Indexing/                   # Source indexes, bloom filters, sorted indexes, binary I/O
       Statistics/                 # Column statistics with pluggable accumulators
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
+    DatumIngest.Parsing/     # Extracted tokenizer/parser (shared by core and language server)
+    DatumIngest.Server/      # Session engine: SessionManager, CommandDispatcher, IDatasetStore
+    DatumIngest.Compute/     # gRPC service library wrapping the server engine (embeddable)
+    DatumIngest.LanguageServer/  # SQL language service: completion, diagnostics, hover
+    DatumIngest.Editor/      # SignalR hub for server-side language intelligence
+    DatumIngest.Wasm/        # Blazor WebAssembly host with JSInvokable interop
     DatumIngest.Cli/         # CLI tool (query, explore, stats, schema, index commands)
   tests/
-    DatumIngest.Tests/       # 2,125+ unit tests
+    DatumIngest.Tests/       # 2,300+ unit tests
   benchmarks/
     DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
 ```

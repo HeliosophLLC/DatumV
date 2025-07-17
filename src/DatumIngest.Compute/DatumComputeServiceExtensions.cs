@@ -1,0 +1,101 @@
+using DatumIngest.Compute.Services;
+using DatumIngest.Functions;
+using DatumIngest.Server;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace DatumIngest.Compute;
+
+/// <summary>
+/// Extension methods for registering the DatumIngest gRPC compute backend
+/// in an ASP.NET application. Call <see cref="AddDatumCompute"/> on the
+/// service collection and <see cref="MapDatumCompute"/> on the endpoint
+/// route builder.
+/// </summary>
+public static class DatumComputeServiceExtensions
+{
+    /// <summary>
+    /// Registers the DatumIngest compute backend services: gRPC service,
+    /// session management, command dispatch, and optional API key authentication.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The compute backend requires a <see cref="FunctionRegistry"/> and a
+    /// <see cref="SessionManager"/>. If they are not already registered in the
+    /// service collection, this method registers default singletons.
+    /// </para>
+    /// <para>
+    /// To supply a custom <see cref="IDatasetStore"/> (for example, backed by
+    /// blob storage or S3), register it as a singleton <em>before</em> calling
+    /// this method:
+    /// </para>
+    /// <code>
+    /// builder.Services.AddSingleton&lt;IDatasetStore&gt;(new MyBlobDatasetStore(...));
+    /// builder.Services.AddDatumCompute(options =&gt; options.ApiKey = "secret");
+    /// </code>
+    /// <para>
+    /// If no <see cref="IDatasetStore"/> is registered, the <see cref="SessionManager"/>
+    /// runs in local-only mode (no remote dataset pulling).
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to add to.</param>
+    /// <param name="configure">
+    /// Optional callback to configure <see cref="DatumComputeOptions"/>.
+    /// </param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddDatumCompute(
+        this IServiceCollection services,
+        Action<DatumComputeOptions>? configure = null)
+    {
+        DatumComputeOptions options = new();
+        configure?.Invoke(options);
+
+        // Wire ApiKeyOptions from the new unified options object.
+        services.Configure<ApiKeyOptions>(apiKeyOptions =>
+        {
+            apiKeyOptions.Key = options.ApiKey;
+        });
+
+        // Register engine services only if the host has not already provided them.
+        services.TryAddSingleton<FunctionRegistry>(_ => FunctionRegistry.CreateDefault());
+
+        services.TryAddSingleton<SessionManager>(provider =>
+        {
+            FunctionRegistry functionRegistry = provider.GetRequiredService<FunctionRegistry>();
+            IDatasetStore? store = provider.GetService<IDatasetStore>();
+            return new SessionManager(functionRegistry, store);
+        });
+
+        services.TryAddSingleton<CommandDispatcher>();
+
+        // Register the gRPC interceptor and service.
+        services.AddSingleton<ApiKeyInterceptor>();
+
+        services.AddGrpc(grpcOptions =>
+        {
+            grpcOptions.MaxReceiveMessageSize = options.MaxReceiveMessageSize;
+            grpcOptions.MaxSendMessageSize = options.MaxSendMessageSize;
+
+            if (!string.IsNullOrEmpty(options.ApiKey))
+            {
+                grpcOptions.Interceptors.Add<ApiKeyInterceptor>();
+            }
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Maps the DatumIngest gRPC compute service endpoint.
+    /// Call this after <see cref="AddDatumCompute"/> during application startup.
+    /// </summary>
+    /// <param name="endpoints">The endpoint route builder (typically <c>app</c>).</param>
+    /// <returns>The gRPC service endpoint convention builder for further configuration.</returns>
+    public static GrpcServiceEndpointConventionBuilder MapDatumCompute(
+        this IEndpointRouteBuilder endpoints)
+    {
+        return endpoints.MapGrpcService<ComputeService>();
+    }
+}

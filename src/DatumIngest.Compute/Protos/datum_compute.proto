@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+option csharp_namespace = "DatumIngest.Compute.Grpc";
+
+package datum_compute;
+
+// Compute backend service for DatumIngest query execution.
+// Server-side streaming is used for query results; all other
+// operations are unary RPCs.
+service DatumCompute {
+  // Creates a new session on the compute backend.
+  rpc CreateSession (CreateSessionRequest) returns (CreateSessionResponse);
+
+  // Destroys a session and frees associated resources.
+  rpc DestroySession (DestroySessionRequest) returns (DestroySessionResponse);
+
+  // Executes a SQL query and streams result rows back.
+  rpc Query (QueryRequest) returns (stream QueryRow);
+
+  // Returns the schema of a registered table.
+  rpc GetSchema (GetSchemaRequest) returns (SchemaResponse);
+
+  // Lists all registered tables in the session's catalog.
+  rpc ListTables (ListTablesRequest) returns (ListResponse);
+
+  // Lists all registered format providers.
+  rpc ListProviders (ListProvidersRequest) returns (ListResponse);
+
+  // Lists all available functions.
+  rpc ListFunctions (ListFunctionsRequest) returns (ListResponse);
+
+  // Returns the execution plan for a SQL query.
+  rpc Explain (ExplainRequest) returns (ExplainResponse);
+
+  // Adds a data source to the session's catalog.
+  rpc AddSource (AddSourceRequest) returns (AddSourceResponse);
+
+  // Lists active sessions (admin only).
+  rpc ListSessions (ListSessionsRequest) returns (ListSessionsResponse);
+
+  // Cancels a running query on another session (admin only).
+  rpc KillQuery (KillQueryRequest) returns (KillQueryResponse);
+}
+
+// ───────────────────── Session Management ─────────────────────
+
+message CreateSessionRequest {
+  // Authorization role: "user" or "admin".
+  string role = 1;
+
+  // Dataset identifier to load. Empty for local sessions.
+  string dataset_id = 2;
+}
+
+message CreateSessionResponse {
+  // Unique session identifier for subsequent calls.
+  string session_id = 1;
+}
+
+message DestroySessionRequest {
+  string session_id = 1;
+}
+
+message DestroySessionResponse {
+}
+
+// ───────────────────── Query Execution ─────────────────────
+
+message QueryRequest {
+  string session_id = 1;
+  string sql = 2;
+}
+
+// Each streamed message contains one result row. The first message
+// also carries the schema so clients can interpret the values.
+message QueryRow {
+  // Schema is set only on the first row of the stream.
+  SchemaMessage schema = 1;
+
+  // One value per column, in schema order.
+  repeated DataValueMessage values = 2;
+}
+
+// ───────────────────── Schema & Catalog ─────────────────────
+
+message GetSchemaRequest {
+  string session_id = 1;
+  string table_name = 2;
+}
+
+message SchemaResponse {
+  repeated ColumnInfoMessage columns = 1;
+}
+
+message ListTablesRequest {
+  string session_id = 1;
+}
+
+message ListProvidersRequest {
+  string session_id = 1;
+}
+
+message ListFunctionsRequest {
+  string session_id = 1;
+}
+
+message ListResponse {
+  repeated string items = 1;
+}
+
+// ───────────────────── Explain ─────────────────────
+
+message ExplainRequest {
+  string session_id = 1;
+  string sql = 2;
+}
+
+message ExplainResponse {
+  string plan_text = 1;
+}
+
+// ───────────────────── Source Management ─────────────────────
+
+message AddSourceRequest {
+  string session_id = 1;
+
+  // Source definition: "provider:name=path[;key=value;...]".
+  string source_definition = 2;
+}
+
+message AddSourceResponse {
+  string message = 1;
+}
+
+// ───────────────────── Admin Operations ─────────────────────
+
+message ListSessionsRequest {
+  string session_id = 1;
+}
+
+message ListSessionsResponse {
+  repeated SessionInfoMessage sessions = 1;
+}
+
+message KillQueryRequest {
+  string session_id = 1;
+  string target_session_id = 2;
+}
+
+message KillQueryResponse {
+  string message = 1;
+}
+
+// ───────────────────── Shared Types ─────────────────────
+
+message SchemaMessage {
+  repeated ColumnInfoMessage columns = 1;
+}
+
+message ColumnInfoMessage {
+  string name = 1;
+  DataKindValue kind = 2;
+  bool nullable = 3;
+}
+
+// Mirrors DatumIngest.Model.DataKind enum values.
+enum DataKindValue {
+  DATA_KIND_UINT8 = 0;
+  DATA_KIND_SCALAR = 1;
+  DATA_KIND_VECTOR = 2;
+  DATA_KIND_MATRIX = 3;
+  DATA_KIND_TENSOR = 4;
+  DATA_KIND_UINT8_ARRAY = 5;
+  DATA_KIND_IMAGE = 6;
+  DATA_KIND_STRING = 7;
+  DATA_KIND_DATE = 8;
+  DATA_KIND_DATE_TIME = 9;
+  DATA_KIND_JSON_VALUE = 10;
+}
+
+// Discriminated value type transported over the wire.
+// Exactly one field is set based on the column's DataKind.
+message DataValueMessage {
+  bool is_null = 1;
+
+  oneof value {
+    uint32 uint8_value = 2;
+    float scalar_value = 3;
+    string string_value = 4;
+    string date_value = 5;       // ISO 8601 date string
+    string date_time_value = 6;  // ISO 8601 datetime string
+    string json_value = 7;       // Raw JSON string
+    bytes uint8_array_value = 8;
+    bytes image_value = 9;
+    VectorMessage vector_value = 10;
+    MatrixMessage matrix_value = 11;
+    TensorMessage tensor_value = 12;
+  }
+}
+
+message VectorMessage {
+  repeated float values = 1;
+}
+
+message MatrixMessage {
+  int32 rows = 1;
+  int32 columns = 2;
+  repeated float values = 3;
+}
+
+message TensorMessage {
+  repeated int32 shape = 1;
+  repeated float values = 2;
+}
+
+message SessionInfoMessage {
+  string session_id = 1;
+  string role = 2;
+  string dataset_id = 3;
+  string created_at = 4;
+  string last_activity_at = 5;
+  int32 query_count = 6;
+}

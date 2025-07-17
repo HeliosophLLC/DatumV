@@ -195,6 +195,7 @@ parquet:labels=./labels.parquet
 | [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
 | [docs/language-server.md](docs/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
 | [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
+| [docs/compute.md](docs/compute.md) | gRPC compute library: embedding, remote sessions, streaming queries, admin operations |
 | [ROADMAP.md](ROADMAP.md) | Deferred features for future releases |
 
 ## Installation
@@ -204,6 +205,14 @@ parquet:labels=./labels.parquet
 ```bash
 dotnet add package DatumIngest
 ```
+
+### As a gRPC compute service
+
+```bash
+dotnet add package DatumIngest.Compute
+```
+
+See [docs/compute.md](docs/compute.md) for embedding in an ASP.NET host.
 
 ### As a CLI tool
 

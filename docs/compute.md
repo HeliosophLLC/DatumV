@@ -1,0 +1,434 @@
+# Compute Backend (gRPC)
+
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
+
+DatumIngest.Compute is a gRPC service library that exposes the DatumIngest query engine over the network. It wraps the same `SessionManager` and `CommandDispatcher` used by the interactive shell, enabling remote session management, SQL query streaming, and administrative operations. Embed it in any ASP.NET application with two method calls.
+
+## Embedding in an ASP.NET Host
+
+### Minimal Setup
+
+```csharp
+using DatumIngest.Compute;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDatumCompute(options =>
+{
+    options.ApiKey = "my-secret-key";
+});
+
+WebApplication app = builder.Build();
+
+app.MapDatumCompute();
+app.Run();
+```
+
+### With a Custom Dataset Store
+
+The compute backend optionally depends on `IDatasetStore` (defined in `DatumIngest.Server`) for pulling remote datasets into sessions. Register your implementation **before** calling `AddDatumCompute`:
+
+```csharp
+using DatumIngest.Compute;
+using DatumIngest.Server;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// Register your own dataset store (e.g., blob storage, S3).
+builder.Services.AddSingleton<IDatasetStore>(new MyBlobDatasetStore("connection-string"));
+
+builder.Services.AddDatumCompute(options =>
+{
+    options.ApiKey = builder.Configuration["ApiKey"]!;
+    options.MaxReceiveMessageSize = 128 * 1024 * 1024; // 128 MB
+});
+
+WebApplication app = builder.Build();
+
+app.MapDatumCompute();
+app.Run();
+```
+
+If no `IDatasetStore` is registered, the `SessionManager` runs in local-only mode — sessions use empty catalogs and sources are added at runtime via `AddSource`.
+
+### IDatasetStore Contract
+
+Implement `DatumIngest.Server.IDatasetStore` to integrate with your storage backend:
+
+```csharp
+public interface IDatasetStore
+{
+    /// <summary>Checks whether the dataset is already available locally.</summary>
+    Task<bool> ExistsLocallyAsync(string datasetId, CancellationToken cancellationToken);
+
+    /// <summary>Pulls the dataset to local disk, returning the local directory path.</summary>
+    Task<string> PullAsync(string datasetId, CancellationToken cancellationToken);
+
+    /// <summary>Removes the dataset from local storage.</summary>
+    Task EvictAsync(string datasetId, CancellationToken cancellationToken);
+}
+```
+
+A built-in `LocalFileDatasetStore` is provided for filesystem-backed deployments:
+
+```csharp
+builder.Services.AddSingleton<IDatasetStore>(
+    new LocalFileDatasetStore("/data/datasets"));
+```
+
+### Overriding Defaults
+
+`AddDatumCompute` uses `TryAddSingleton` for the engine services, so you can register your own before calling it:
+
+```csharp
+// Custom function registry with extra functions.
+builder.Services.AddSingleton(myCustomFunctionRegistry);
+
+// Custom session manager with specific configuration.
+builder.Services.AddSingleton(mySessionManager);
+
+// AddDatumCompute will skip these — your registrations take precedence.
+builder.Services.AddDatumCompute(options => options.ApiKey = "key");
+```
+
+### DatumComputeOptions
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ApiKey` | `string` | `""` | API key clients must send in `x-api-key` header. Empty disables auth. |
+| `MaxReceiveMessageSize` | `int` | `67108864` (64 MB) | Maximum inbound gRPC message size in bytes. |
+| `MaxSendMessageSize` | `int` | `67108864` (64 MB) | Maximum outbound gRPC message size in bytes. |
+
+## Calling with grpcurl
+
+```bash
+# Create a session
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"role": "admin"}' \
+  localhost:5050 datum_compute.DatumCompute/CreateSession
+
+# Add a data source
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>", "source_definition": "csv:wine=winequality-red.csv"}' \
+  localhost:5050 datum_compute.DatumCompute/AddSource
+
+# Run a query (server-streaming)
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine LIMIT 5"}' \
+  localhost:5050 datum_compute.DatumCompute/Query
+
+# List tables
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>"}' \
+  localhost:5050 datum_compute.DatumCompute/ListTables
+
+# Destroy session
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>"}' \
+  localhost:5050 datum_compute.DatumCompute/DestroySession
+```
+
+## Authentication
+
+All RPCs require an `x-api-key` metadata header when `DatumComputeOptions.ApiKey` is set to a non-empty value. Requests without a valid key receive `StatusCode.Unauthenticated`. Set `ApiKey` to an empty string to disable authentication entirely.
+
+```
+x-api-key: <your-api-key>
+```
+
+The key is compared using ordinal (case-sensitive) string comparison.
+
+## Service Reference
+
+The service is defined in `datum_compute.proto` under the `datum_compute` package.
+
+### Session Management
+
+#### CreateSession
+
+Creates a new session on the compute backend.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `role` | `string` | `"user"` or `"admin"`. Defaults to `user` if empty. |
+| `dataset_id` | `string` | Dataset to load via `IDatasetStore`. Empty for local sessions where sources are added at runtime via `AddSource`. |
+
+**Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
+
+When `dataset_id` is provided, the backend pulls the dataset to local storage and auto-discovers all supported files (CSV, JSON, JSONL, Parquet, HDF5, ZIP, IDX) in the resulting directory. Each file becomes a table named after its filename without extension. If no `IDatasetStore` is registered, passing a non-empty `dataset_id` returns `FailedPrecondition`.
+
+**Roles:**
+- **User** — can run queries, inspect schemas, list tables/providers/functions, and view explain plans.
+- **Admin** — all user capabilities, plus: add sources (`.source`), list sessions (`.sessions`), kill queries (`.kill`).
+
+#### DestroySession
+
+Destroys a session and frees associated resources.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID to destroy. |
+
+**Errors:** `NotFound` if the session does not exist; `InvalidArgument` if the GUID is malformed.
+
+### Query Execution
+
+#### Query (server-streaming)
+
+Executes a SQL query and streams result rows back. The first `QueryRow` message includes the schema; subsequent messages carry only values.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+| `sql` | `string` | SQL query to execute. |
+
+**Stream response (`QueryRow`):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schema` | `SchemaMessage` | Set on the first row only. Column names, kinds, and nullability. |
+| `values` | `repeated DataValueMessage` | One value per column, in schema order. |
+
+**Errors:** `InvalidArgument` on syntax errors or query failures; `NotFound` if the session does not exist.
+
+#### Explain
+
+Returns the execution plan for a SQL query without running it.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+| `sql` | `string` | SQL query to explain. |
+
+**Returns:** `plan_text` — the rendered query execution plan tree.
+
+### Catalog Inspection
+
+#### GetSchema
+
+Returns the column schema of a registered table.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+| `table_name` | `string` | Name of the table. |
+
+**Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, and `nullable`.
+
+#### ListTables / ListProviders / ListFunctions
+
+Returns string lists of registered tables, format providers, or available functions.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+
+**Returns:** `repeated string items`.
+
+### Source Management
+
+#### AddSource *(admin only)*
+
+Adds a data source to the session's catalog at runtime.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID (must be admin). |
+| `source_definition` | `string` | Source definition string. |
+
+**Source definition format:** `provider:name=path[;key=value;...]`
+
+Examples:
+- `csv:sales=data/sales.csv`
+- `parquet:events=events.parquet`
+- `csv:data=file.csv;delimiter=|;header=true`
+- `sales=data/sales.csv` *(auto-detects provider from extension)*
+
+**Errors:** `InvalidArgument` on parse failure or permission denial (user role).
+
+### Administrative Operations
+
+#### ListSessions *(admin only)*
+
+Lists all active sessions on the server.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Calling session GUID (must be admin). |
+
+**Returns:** `repeated SessionInfoMessage` with `session_id`, `role`, `dataset_id`, `created_at`, `last_activity_at`, `query_count`.
+
+**Errors:** `PermissionDenied` if the calling session is not admin.
+
+#### KillQuery *(admin only)*
+
+Cancels a running query on another session.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Calling session GUID (must be admin). |
+| `target_session_id` | `string` | Session whose query should be cancelled. |
+
+**Errors:** `InvalidArgument` if the target session is not found or the GUID is malformed.
+
+## Data Types
+
+The `DataValueMessage` uses a `oneof` discriminated union to carry typed values:
+
+| DataKind | Proto field | Wire type | Notes |
+|----------|-------------|-----------|-------|
+| `UInt8` | `uint8_value` | `uint32` | Single byte (0–255) |
+| `Scalar` | `scalar_value` | `float` | 32-bit float |
+| `String` | `string_value` | `string` | UTF-8 text |
+| `Date` | `date_value` | `string` | ISO 8601 date (`2024-06-15`) |
+| `DateTime` | `date_time_value` | `string` | ISO 8601 round-trip (`O` format) |
+| `JsonValue` | `json_value` | `string` | Raw JSON string |
+| `UInt8Array` | `uint8_array_value` | `bytes` | Binary data |
+| `Image` | `image_value` | `bytes` | Encoded image bytes |
+| `Vector` | `vector_value` | `VectorMessage` | `repeated float values` |
+| `Matrix` | `matrix_value` | `MatrixMessage` | `rows`, `columns`, `repeated float values` |
+| `Tensor` | `tensor_value` | `TensorMessage` | `repeated int32 shape`, `repeated float values` |
+
+Null values set `is_null = true` with no `oneof` field populated.
+
+## .NET Client Example
+
+```csharp
+using Grpc.Net.Client;
+using Grpc.Core;
+using DatumIngest.Compute.Grpc;
+
+// Connect to the server.
+GrpcChannel channel = GrpcChannel.ForAddress("http://localhost:5050");
+DatumCompute.DatumComputeClient client = new(channel);
+
+// Attach the API key to all calls.
+Metadata headers = new() { { "x-api-key", "my-secret-key" } };
+CallOptions callOptions = new(headers: headers);
+
+// Create a session.
+CreateSessionResponse session = await client.CreateSessionAsync(
+    new CreateSessionRequest { Role = "admin" }, callOptions);
+
+string sessionId = session.SessionId;
+
+// Add a CSV source.
+await client.AddSourceAsync(
+    new AddSourceRequest
+    {
+        SessionId = sessionId,
+        SourceDefinition = "csv:wine=winequality-red.csv",
+    }, callOptions);
+
+// Stream query results.
+using AsyncServerStreamingCall<QueryRow> stream = client.Query(
+    new QueryRequest
+    {
+        SessionId = sessionId,
+        Sql = "SELECT alcohol, quality FROM wine WHERE quality > 6 LIMIT 10",
+    }, callOptions);
+
+SchemaMessage? schema = null;
+
+await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
+{
+    // Schema is attached to the first row only.
+    if (row.Schema is not null)
+    {
+        schema = row.Schema;
+        Console.WriteLine(string.Join("\t",
+            schema.Columns.Select(column => column.Name)));
+    }
+
+    Console.WriteLine(string.Join("\t",
+        row.Values.Select(value => value.IsNull ? "NULL" : FormatValue(value))));
+}
+
+// Clean up.
+await client.DestroySessionAsync(
+    new DestroySessionRequest { SessionId = sessionId }, callOptions);
+
+static string FormatValue(DataValueMessage value)
+{
+    if (value.HasScalarValue) return value.ScalarValue.ToString("F2");
+    if (value.HasStringValue) return value.StringValue;
+    if (value.HasUint8Value) return value.Uint8Value.ToString();
+    return value.ToString();
+}
+```
+
+## Python Client Example
+
+```python
+import grpc
+import datum_compute_pb2
+import datum_compute_pb2_grpc
+
+# Connect with API key metadata.
+channel = grpc.insecure_channel("localhost:5050")
+stub = datum_compute_pb2_grpc.DatumComputeStub(channel)
+metadata = [("x-api-key", "my-secret-key")]
+
+# Create a session.
+response = stub.CreateSession(
+    datum_compute_pb2.CreateSessionRequest(role="admin"),
+    metadata=metadata,
+)
+session_id = response.session_id
+
+# Add a source.
+stub.AddSource(
+    datum_compute_pb2.AddSourceRequest(
+        session_id=session_id,
+        source_definition="csv:wine=winequality-red.csv",
+    ),
+    metadata=metadata,
+)
+
+# Stream query results.
+for row in stub.Query(
+    datum_compute_pb2.QueryRequest(
+        session_id=session_id,
+        sql="SELECT alcohol, quality FROM wine LIMIT 5",
+    ),
+    metadata=metadata,
+):
+    if row.schema.columns:
+        print([col.name for col in row.schema.columns])
+    print([v.scalar_value if v.HasField("scalar_value") else str(v) for v in row.values])
+
+# Clean up.
+stub.DestroySession(
+    datum_compute_pb2.DestroySessionRequest(session_id=session_id),
+    metadata=metadata,
+)
+```
+
+Generate the Python stubs from the proto file:
+
+```bash
+python -m grpc_tools.protoc \
+  -I src/DatumIngest.Compute/Protos \
+  --python_out=. \
+  --grpc_python_out=. \
+  datum_compute.proto
+```
+
+## Error Codes
+
+| gRPC Status Code | When |
+|------------------|------|
+| `Unauthenticated` | Missing or invalid `x-api-key` header |
+| `InvalidArgument` | Malformed session ID, bad SQL syntax, invalid source definition |
+| `NotFound` | Session ID not found, table not found |
+| `PermissionDenied` | User-role session attempting admin operation |
+| `Internal` | Unexpected server error |
+
+## Message Size Limits
+
+Both send and receive limits are set to **64 MB** by default, configurable via `DatumComputeOptions.MaxReceiveMessageSize` and `DatumComputeOptions.MaxSendMessageSize`. This accommodates large result sets with image or tensor columns.
