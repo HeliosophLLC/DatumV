@@ -19,11 +19,13 @@ public static class ManifestBuilder
     /// <param name="columnKinds">Map of column name to <see cref="DataKind"/>, used to select the correct manifest subclass.</param>
     /// <param name="rowCount">Total number of rows in the result set.</param>
     /// <param name="interactions">Optional pairwise column interaction results.</param>
+    /// <param name="suggestionThresholds">Optional thresholds for heuristic suggestion tags. Pass null to disable suggestions.</param>
     public static QueryResultsManifest Build(
         IReadOnlyDictionary<string, ColumnStatistics> statistics,
         IReadOnlyDictionary<string, DataKind> columnKinds,
         long rowCount,
-        IReadOnlyList<ColumnInteractionResult>? interactions = null)
+        IReadOnlyList<ColumnInteractionResult>? interactions = null,
+        SuggestionThresholds? suggestionThresholds = null)
     {
         List<FeatureManifest> features = new();
 
@@ -31,6 +33,14 @@ public static class ManifestBuilder
         {
             DataKind kind = columnKinds.TryGetValue(entry.Key, out DataKind k) ? k : DataKind.String;
             FeatureManifest manifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
+
+            if (suggestionThresholds is not null)
+            {
+                IReadOnlyList<string>? suggestions = SuggestionEngine.Suggest(
+                    manifest, rowCount, suggestionThresholds);
+                manifest.Suggestions = suggestions;
+            }
+
             features.Add(manifest);
         }
 
@@ -138,7 +148,8 @@ public static class ManifestBuilder
             ZeroCount = numericResult.ZeroCount,
             ZeroRatio = numericResult.ZeroRatio,
             OutlierCount = numericResult.OutlierCount,
-            OutlierRatio = numericResult.OutlierRatio
+            OutlierRatio = numericResult.OutlierRatio,
+            IntegerValued = histogramResult.IntegerValued
         };
     }
 

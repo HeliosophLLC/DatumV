@@ -105,7 +105,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     {
         if (_samples.Count == 0)
         {
-            return new StatisticResult("histogram", new HistogramResult([], []));
+            return new StatisticResult("histogram", new HistogramResult([], [], false));
         }
 
         _samples.Sort();
@@ -116,9 +116,11 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
         if (Math.Abs(max - min) < float.Epsilon)
         {
             // All values are the same — single bin
+            bool singleValueInteger = min == MathF.Floor(min);
             return new StatisticResult("histogram", new HistogramResult(
                 [min, max],
-                [_samples.Count]));
+                [_samples.Count],
+                singleValueInteger));
         }
 
         bool isIntegerData = IsIntegerData(_samples);
@@ -136,7 +138,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
             BuildEqualWidthBins(min, max, effectiveBinCount, out binEdges, out counts);
         }
 
-        return new StatisticResult("histogram", new HistogramResult(binEdges, counts));
+        return new StatisticResult("histogram", new HistogramResult(binEdges, counts, isIntegerData));
     }
 
     /// <summary>
@@ -246,8 +248,9 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 /// </summary>
 /// <param name="BinEdges">Edge values defining the bins (length = bin count + 1).</param>
 /// <param name="Counts">Number of values in each bin (length = bin count).</param>
-public sealed record HistogramResult(IReadOnlyList<double> BinEdges, IReadOnlyList<long> Counts)
+/// <param name="IntegerValued">Whether all observed values were integers (no fractional part).</param>
+public sealed record HistogramResult(IReadOnlyList<double> BinEdges, IReadOnlyList<long> Counts, bool IntegerValued)
 {
     /// <summary>An empty histogram with no bins.</summary>
-    public static HistogramResult Empty { get; } = new([], []);
+    public static HistogramResult Empty { get; } = new([], [], false);
 }

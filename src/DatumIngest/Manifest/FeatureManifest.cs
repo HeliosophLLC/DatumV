@@ -72,6 +72,14 @@ public abstract class FeatureManifest
 
     /// <summary>Gets whether the entropy value is an approximate lower bound due to frequency map capping.</summary>
     public bool? EntropyApproximate { get; init; }
+
+    /// <summary>
+    /// Gets advisory suggestions about the column's statistical profile.
+    /// These are heuristic labels derived from the computed statistics using configurable
+    /// thresholds in <see cref="SuggestionThresholds"/>. Consumers should treat them as
+    /// hints, not definitive classifications.
+    /// </summary>
+    public IReadOnlyList<string>? Suggestions { get; set; }
 }
 
 /// <summary>
@@ -118,6 +126,9 @@ public sealed class NumericFeatureManifest : FeatureManifest
 
     /// <summary>Gets the ratio of outlier values to total count.</summary>
     public required double OutlierRatio { get; init; }
+
+    /// <summary>Gets whether all observed values are integers (no fractional part).</summary>
+    public required bool IntegerValued { get; init; }
 }
 
 /// <summary>

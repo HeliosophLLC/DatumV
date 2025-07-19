@@ -423,7 +423,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
 
         if (Math.Abs(max - min) < float.Epsilon)
         {
-            return new HistogramResult([min, max], [_aspectSamples.Count]);
+            return new HistogramResult([min, max], [_aspectSamples.Count], false);
         }
 
         int effectiveBinCount = Math.Min(AspectBinCount, _aspectSamples.Count);
@@ -452,7 +452,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
             counts[bin]++;
         }
 
-        return new HistogramResult(binEdges, counts);
+        return new HistogramResult(binEdges, counts, false);
     }
 
 }
