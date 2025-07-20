@@ -196,7 +196,10 @@ Executes a SQL query and streams result rows back. The first `QueryRow` message 
 
 **Errors:** `InvalidArgument` on syntax errors or query failures; `NotFound` if the session does not exist.
 
-#### Explain
+**Cancellation:** The stream can be stopped in two ways:
+
+1. **Client disconnect** — disposing the streaming call (`stream.Dispose()`) triggers gRPC call cancellation on the server.
+2. **Admin kill** — another session calls `KillQuery` with this session as the target. The server links both the gRPC call token and the session token, so either cancellation source stops the row stream immediately.
 
 Returns the execution plan for a SQL query without running it.
 
@@ -339,12 +342,14 @@ Lists all active sessions on the server.
 
 #### KillQuery *(admin only)*
 
-Cancels a running query on another session.
+Cancels a running query on another session. The target session's cancellation token is linked into the active query's execution pipeline, so cancellation takes effect immediately — the server stops reading rows and the streaming call ends with `OperationCanceledException`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Calling session GUID (must be admin). |
 | `target_session_id` | `string` | Session whose query should be cancelled. |
+
+**Returns:** `message` — confirmation text (e.g. `"Cancelled active query on session '...'"`). The target session remains open and can run new queries.
 
 **Errors:** `InvalidArgument` if the target session is not found or the GUID is malformed.
 
@@ -426,6 +431,31 @@ await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
 // Clean up.
 await connection.Client.DestroySessionAsync(
     new DestroySessionRequest { SessionId = sessionId });
+```
+
+#### Cancelling a streaming query
+
+Dispose the streaming call to stop the server from sending more rows:
+
+```csharp
+using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
+    new QueryRequest { SessionId = sessionId, Sql = "SELECT * FROM huge_table" });
+
+await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
+{
+    if (ShouldStop(row))
+    {
+        break; // Exiting the loop disposes the stream, cancelling the server call.
+    }
+}
+```
+
+To cancel another session's query (requires admin):
+
+```csharp
+string message = await connection.CancelQueryAsync(
+    adminSessionId, targetSessionId);
+```
 
 static string FormatValue(DataValueMessage value)
 {

@@ -85,8 +85,14 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
 
+        // Link the gRPC per-call token with the session token so that
+        // KillQuery (which cancels the session token) stops the stream.
+        using CancellationTokenSource linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+            context.CancellationToken, session.CancellationToken);
+        CancellationToken cancellationToken = linkedTokenSource.Token;
+
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, request.Sql, context.CancellationToken).ConfigureAwait(false);
+            session, request.Sql, cancellationToken).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -100,7 +106,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         bool schemaWritten = false;
 
-        await foreach (Row row in result.Rows.WithCancellation(context.CancellationToken).ConfigureAwait(false))
+        await foreach (Row row in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             QueryRow queryRow = new();
 
@@ -116,7 +122,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
             }
 
-            await responseStream.WriteAsync(queryRow, context.CancellationToken).ConfigureAwait(false);
+            await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -125,9 +131,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         GetSchemaRequest request, ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
+        CancellationToken cancellationToken = LinkedToken(context, session);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".schema {request.TableName}", context.CancellationToken).ConfigureAwait(false);
+            session, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -154,7 +161,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, ".tables", context.CancellationToken).ConfigureAwait(false);
+            session, ".tables", LinkedToken(context, session)).ConfigureAwait(false);
 
         return ToListResponse(result);
     }
@@ -165,7 +172,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, ".providers", context.CancellationToken).ConfigureAwait(false);
+            session, ".providers", LinkedToken(context, session)).ConfigureAwait(false);
 
         return ToListResponse(result);
     }
@@ -176,7 +183,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, ".functions", context.CancellationToken).ConfigureAwait(false);
+            session, ".functions", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -220,7 +227,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         Session session = ResolveSession(request.SessionId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".explain {request.Sql}", context.CancellationToken).ConfigureAwait(false);
+            session, $".explain {request.Sql}", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -280,7 +287,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         Session session = ResolveSession(request.SessionId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".source {request.SourceDefinition}", context.CancellationToken).ConfigureAwait(false);
+            session, $".source {request.SourceDefinition}", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -297,7 +304,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         Session session = ResolveSession(request.SessionId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, ".sessions", context.CancellationToken).ConfigureAwait(false);
+            session, ".sessions", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -332,7 +339,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         Session session = ResolveSession(request.SessionId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".kill {request.TargetSessionId}", context.CancellationToken).ConfigureAwait(false);
+            session, $".kill {request.TargetSessionId}", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -340,6 +347,21 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
 
         return new KillQueryResponse { Message = result.Message ?? "Query cancelled." };
+    }
+
+    /// <summary>
+    /// Creates a cancellation token that fires when either the gRPC call is cancelled
+    /// or the session token is cancelled (via <see cref="Session.CancelAndReset"/>).
+    /// </summary>
+    /// <remarks>
+    /// For the streaming <see cref="Query"/> method the linked source is managed with
+    /// <c>using</c> so it is disposed deterministically. For unary RPCs the short-lived
+    /// linked source is collected with the request scope.
+    /// </remarks>
+    private static CancellationToken LinkedToken(ServerCallContext context, Session session)
+    {
+        return CancellationTokenSource.CreateLinkedTokenSource(
+            context.CancellationToken, session.CancellationToken).Token;
     }
 
     /// <summary>

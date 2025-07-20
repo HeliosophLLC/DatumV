@@ -443,6 +443,71 @@ public sealed class ComputeServiceTests : IDisposable
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
     }
 
+    // ─────────────────── Query Cancellation ───────────────────
+
+    /// <summary>
+    /// When the gRPC call is cancelled (client disconnects), the linked
+    /// token propagates the cancellation through the execution pipeline.
+    /// </summary>
+    [Fact]
+    public async Task Query_GrpcCallCancelled_StopsStreaming()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        CancellationTokenSource callCancellation = new();
+        callCancellation.Cancel();
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+
+        // The gRPC call token is already cancelled, so the dispatcher
+        // catches the OperationCanceledException and returns an error
+        // which surfaces as RpcException.
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.Query(request, writer, TestCallContext.Create(callCancellation.Token)));
+
+        Assert.Contains("cancelled", exception.Status.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// When the session token is cancelled during row streaming, the linked
+    /// token causes the row enumeration to throw <see cref="OperationCanceledException"/>.
+    /// </summary>
+    [Fact]
+    public async Task Query_SessionCancelledDuringStreaming_StopsStream()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        // Writer that cancels the session after the first row is written,
+        // simulating a mid-stream KillQuery from another session.
+        CancellingStreamWriter<QueryRow> writer = new(session, cancelAfterRow: 1);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _service.Query(request, writer, TestCallContext.Create()));
+
+        // At least one row was written before cancellation.
+        Assert.True(writer.Messages.Count >= 1);
+    }
+
     // ─────────────────── GetSchema ───────────────────
 
     /// <summary>
@@ -554,5 +619,82 @@ public sealed class ComputeServiceTests : IDisposable
         /// <inheritdoc/>
         public Task EvictAsync(string datasetId, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// <see cref="IServerStreamWriter{T}"/> that captures written messages into a list
+    /// for test assertion.
+    /// </summary>
+    private sealed class CapturingStreamWriter<T> : IServerStreamWriter<T>
+    {
+        /// <summary>Messages written to this stream.</summary>
+        public List<T> Messages { get; } = new();
+
+        /// <inheritdoc/>
+        public WriteOptions? WriteOptions { get; set; }
+
+        /// <inheritdoc/>
+        public Task WriteAsync(T message)
+        {
+            Messages.Add(message);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Overrides the default interface method to support cancellation tokens
+        /// passed by <see cref="ComputeService.Query"/>.
+        /// </summary>
+        Task IAsyncStreamWriter<T>.WriteAsync(T message, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return WriteAsync(message);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="IServerStreamWriter{T}"/> that cancels a session after a specified
+    /// number of rows, simulating a mid-stream <c>KillQuery</c> from another session.
+    /// </summary>
+    private sealed class CancellingStreamWriter<T> : IServerStreamWriter<T>
+    {
+        private readonly Session _session;
+        private readonly int _cancelAfterRow;
+
+        /// <summary>Messages written before and at cancellation.</summary>
+        public List<T> Messages { get; } = new();
+
+        public CancellingStreamWriter(Session session, int cancelAfterRow)
+        {
+            _session = session;
+            _cancelAfterRow = cancelAfterRow;
+        }
+
+        /// <inheritdoc/>
+        public WriteOptions? WriteOptions { get; set; }
+
+        /// <inheritdoc/>
+        public Task WriteAsync(T message)
+        {
+            Messages.Add(message);
+
+            if (Messages.Count >= _cancelAfterRow)
+            {
+                _session.CancelAndReset();
+            }
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Overrides the default interface method to support cancellation tokens
+        /// passed by <see cref="ComputeService.Query"/>.
+        /// </summary>
+        Task IAsyncStreamWriter<T>.WriteAsync(T message, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Task result = WriteAsync(message);
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
     }
 }

@@ -53,6 +53,31 @@ public sealed class DatumComputeConnection : IDisposable
         Client = new DatumCompute.DatumComputeClient(invoker);
     }
 
+    /// <summary>
+    /// Cancels the active query on the specified target session.
+    /// Requires the calling session to have admin privileges.
+    /// </summary>
+    /// <param name="sessionId">The admin session issuing the kill command.</param>
+    /// <param name="targetSessionId">The session whose query should be cancelled.</param>
+    /// <param name="cancellationToken">Cancellation token for this RPC call.</param>
+    /// <returns>The server's confirmation message.</returns>
+    public async Task<string> CancelQueryAsync(
+        string sessionId,
+        string targetSessionId,
+        CancellationToken cancellationToken = default)
+    {
+        KillQueryRequest request = new()
+        {
+            SessionId = sessionId,
+            TargetSessionId = targetSessionId,
+        };
+
+        KillQueryResponse response = await Client.KillQueryAsync(
+            request, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return response.Message;
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
