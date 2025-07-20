@@ -248,4 +248,130 @@ public sealed class CsvTableProviderTests
                 provider.OpenAsync(Descriptor("simple.csv"), null, cancellationTokenSource.Token));
         });
     }
+
+    // ───────────────────── Header auto-detection ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_HeaderlessNumeric_GeneratesColumnNames()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("headerless_numeric.csv"), CancellationToken.None);
+
+        Assert.Equal(5, schema.Columns.Count);
+        Assert.Equal("col_0", schema.Columns[0].Name);
+        Assert.Equal("col_1", schema.Columns[1].Name);
+        Assert.Equal("col_4", schema.Columns[4].Name);
+    }
+
+    [Fact]
+    public async Task GetSchema_HeaderlessNumeric_InfersAllScalar()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("headerless_numeric.csv"), CancellationToken.None);
+
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            Assert.Equal(DataKind.Scalar, column.Kind);
+        }
+    }
+
+    [Fact]
+    public async Task Open_HeaderlessNumeric_FirstRowIsData()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("headerless_numeric.csv"), null, CancellationToken.None));
+
+        // 5 data rows — first row (39,77516,13,...) should be data, not skipped.
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(39f, rows[0]["col_0"].AsScalar());
+        Assert.Equal(77516f, rows[0]["col_1"].AsScalar());
+    }
+
+    [Fact]
+    public async Task GetSchema_WithHeader_DetectsHeaderRow()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("simple.csv"), CancellationToken.None);
+
+        // simple.csv has "name,age,score" header — non-numeric "name" vs numeric data → header detected.
+        Assert.Equal("name", schema.Columns[0].Name);
+        Assert.Equal("age", schema.Columns[1].Name);
+        Assert.Equal("score", schema.Columns[2].Name);
+    }
+
+    [Fact]
+    public async Task GetSchema_HeaderFalseOverride_ForcesGeneratedNames()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("simple.csv", new Dictionary<string, string> { ["header"] = "false" }),
+            CancellationToken.None);
+
+        // Even though simple.csv has string headers, header=false forces generated names.
+        Assert.Equal("col_0", schema.Columns[0].Name);
+        Assert.Equal("col_1", schema.Columns[1].Name);
+        Assert.Equal("col_2", schema.Columns[2].Name);
+    }
+
+    [Fact]
+    public async Task Open_HeaderFalseOverride_FirstRowIsData()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(
+                Descriptor("simple.csv", new Dictionary<string, string> { ["header"] = "false" }),
+                null, CancellationToken.None));
+
+        // simple.csv has 3 data rows + 1 header row → 4 rows when header=false.
+        Assert.Equal(4, rows.Count);
+
+        // First row is the former header line: "name,age,score" — all String since row 1 is non-numeric.
+        Assert.Equal("name", rows[0]["col_0"].AsString());
+    }
+
+    [Fact]
+    public async Task GetSchema_HeaderTrueOverride_ForcesHeaderEvenWhenAllNumeric()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("headerless_numeric.csv", new Dictionary<string, string> { ["header"] = "true" }),
+            CancellationToken.None);
+
+        // header=true forces row 1 ("39,77516,13,2174,0") to be treated as column names.
+        Assert.Equal("39", schema.Columns[0].Name);
+        Assert.Equal("77516", schema.Columns[1].Name);
+    }
+
+    [Fact]
+    public async Task Open_HeaderTrueOverride_SkipsFirstRow()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(
+                Descriptor("headerless_numeric.csv", new Dictionary<string, string> { ["header"] = "true" }),
+                null, CancellationToken.None));
+
+        // 5 rows in file, header=true skips row 1 → 4 data rows.
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(50f, rows[0]["39"].AsScalar());
+    }
+
+    [Fact]
+    public async Task Open_HeaderlessNumeric_ProjectionPushdown()
+    {
+        CsvTableProvider provider = new();
+        HashSet<string> required = new(StringComparer.OrdinalIgnoreCase) { "col_0", "col_2" };
+
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("headerless_numeric.csv"), required, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(39f, rows[0]["col_0"].AsScalar());
+        Assert.Equal(13f, rows[0]["col_2"].AsScalar());
+    }
 }

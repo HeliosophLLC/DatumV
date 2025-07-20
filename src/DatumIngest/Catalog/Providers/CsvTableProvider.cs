@@ -7,9 +7,23 @@ namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads CSV files conforming to RFC 4180. Supports configurable delimiter,
-/// automatic numeric column detection, projection pushdown, and byte-level
-/// chunk measurement for index building.
+/// automatic numeric column detection, projection pushdown, byte-level
+/// chunk measurement for index building, and automatic header row detection.
 /// </summary>
+/// <remarks>
+/// <para>
+/// When the <c>header</c> option is absent or set to <c>"auto"</c>, the provider
+/// infers whether the first row is a header by comparing its type profile against
+/// subsequent rows. If any column is predominantly numeric in rows 2–20 but the
+/// corresponding row-1 value is non-numeric, the first row is treated as a header.
+/// Otherwise it is treated as data and columns receive generated names
+/// (<c>col_0</c>, <c>col_1</c>, …).
+/// </para>
+/// <para>
+/// Set <c>header=true</c> to force the original behavior (first row is always a header)
+/// or <c>header=false</c> to force generated column names and treat every row as data.
+/// </para>
+/// </remarks>
 public sealed class CsvTableProvider : IChunkMeasuringProvider
 {
     private const char DefaultDelimiter = ',';
@@ -25,21 +39,19 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         CancellationToken cancellationToken)
     {
         char delimiter = GetDelimiter(descriptor);
+        bool? headerOverride = GetHeaderOverride(descriptor);
 
         using StreamReader reader = new(descriptor.FilePath);
-        string? headerLine = await reader.ReadLineAsync(cancellationToken);
-        if (headerLine is null)
+        string? firstLine = await reader.ReadLineAsync(cancellationToken);
+        if (firstLine is null)
         {
-            throw new InvalidOperationException($"CSV file '{descriptor.FilePath}' is empty (no header row).");
+            throw new InvalidOperationException($"CSV file '{descriptor.FilePath}' is empty.");
         }
 
-        string[] headers = ParseCsvLine(headerLine, delimiter);
+        string[] firstRowFields = ParseCsvLine(firstLine, delimiter);
 
-        // Read up to 100 rows to detect numeric columns
-        DataKind[] kinds = new DataKind[headers.Length];
-        Array.Fill(kinds, DataKind.Scalar); // Assume numeric until proven otherwise
-        bool[] hasData = new bool[headers.Length];
-
+        // Read up to 100 rows for type inference (also used for header detection).
+        List<string[]> sampleRows = new();
         int sampledRows = 0;
         while (sampledRows < 100)
         {
@@ -49,7 +61,41 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 break;
             }
 
-            string[] fields = ParseCsvLine(line, delimiter);
+            sampleRows.Add(ParseCsvLine(line, delimiter));
+            sampledRows++;
+        }
+
+        bool hasHeader = headerOverride ?? DetectHeader(firstRowFields, sampleRows, delimiter);
+
+        string[] headers;
+        List<string[]> dataRows;
+
+        if (hasHeader)
+        {
+            headers = firstRowFields;
+            dataRows = sampleRows;
+        }
+        else
+        {
+            headers = new string[firstRowFields.Length];
+            for (int columnIndex = 0; columnIndex < firstRowFields.Length; columnIndex++)
+            {
+                headers[columnIndex] = $"col_{columnIndex}";
+            }
+
+            // Row 1 is data, prepend it.
+            dataRows = new List<string[]>(sampleRows.Count + 1);
+            dataRows.Add(firstRowFields);
+            dataRows.AddRange(sampleRows);
+        }
+
+        // Infer column types from data rows.
+        DataKind[] kinds = new DataKind[headers.Length];
+        Array.Fill(kinds, DataKind.Scalar);
+        bool[] hasData = new bool[headers.Length];
+
+        foreach (string[] fields in dataRows)
+        {
             for (int columnIndex = 0; columnIndex < Math.Min(fields.Length, headers.Length); columnIndex++)
             {
                 string field = fields[columnIndex].Trim();
@@ -65,8 +111,6 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                     kinds[columnIndex] = DataKind.String;
                 }
             }
-
-            sampledRows++;
         }
 
         // Columns with no data default to String
@@ -95,17 +139,18 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     {
         char delimiter = GetDelimiter(descriptor);
 
-        // First pass: infer schema to know column types
+        // First pass: infer schema to know column types and header status.
         Schema schema = await GetSchemaAsync(descriptor, cancellationToken);
+        bool hasHeader = HasHeaderRow(descriptor, schema);
 
         using StreamReader reader = new(descriptor.FilePath);
-        string? headerLine = await reader.ReadLineAsync(cancellationToken);
-        if (headerLine is null)
+        string? firstLine = await reader.ReadLineAsync(cancellationToken);
+        if (firstLine is null)
         {
             yield break;
         }
 
-        string[] headers = ParseCsvLine(headerLine, delimiter);
+        string[] headerFields = ParseCsvLine(firstLine, delimiter);
 
         // Build projection map: which columns to include
         int[] projectedIndices;
@@ -118,9 +163,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             List<string> names = new();
             List<DataKind> kinds = new();
 
-            for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
+            for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
             {
-                string name = headers[columnIndex].Trim();
+                string name = schema.Columns[columnIndex].Name;
                 if (requiredColumns.Contains(name))
                 {
                     indices.Add(columnIndex);
@@ -135,14 +180,14 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         }
         else
         {
-            projectedIndices = new int[headers.Length];
-            projectedNames = new string[headers.Length];
-            projectedKinds = new DataKind[headers.Length];
+            projectedIndices = new int[schema.Columns.Count];
+            projectedNames = new string[schema.Columns.Count];
+            projectedKinds = new DataKind[schema.Columns.Count];
 
-            for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
+            for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
             {
                 projectedIndices[columnIndex] = columnIndex;
-                projectedNames[columnIndex] = headers[columnIndex].Trim();
+                projectedNames[columnIndex] = schema.Columns[columnIndex].Name;
                 projectedKinds[columnIndex] = schema.Columns[columnIndex].Kind;
             }
         }
@@ -152,6 +197,20 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         for (int index = 0; index < projectedNames.Length; index++)
         {
             nameIndex[projectedNames[index]] = index;
+        }
+
+        // If headerless, the first line is data — emit it as a row.
+        if (!hasHeader)
+        {
+            DataValue[] firstValues = new DataValue[projectedIndices.Length];
+            for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
+            {
+                int sourceIndex = projectedIndices[projectionIndex];
+                string field = sourceIndex < headerFields.Length ? headerFields[sourceIndex].Trim() : string.Empty;
+                firstValues[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
+            }
+
+            yield return new Row(projectedNames, firstValues, nameIndex);
         }
 
         while (!cancellationToken.IsCancellationRequested)
@@ -195,6 +254,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         int chunkSize,
         CancellationToken cancellationToken)
     {
+        Schema schema = await GetSchemaAsync(descriptor, cancellationToken);
+        bool hasHeader = HasHeaderRow(descriptor, schema);
+
         using FileStream stream = new(
             descriptor.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: MeasurementBufferSize, useAsync: true);
@@ -205,7 +267,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         long currentOffset = 0;
         long chunkStartOffset = 0;
         int rowsInChunk = 0;
-        bool headerSkipped = false;
+        bool headerSkipped = !hasHeader; // If no header, treat first row as data immediately.
         bool inQuote = false;
         bool hasUnterminatedRow = false;
 
@@ -292,6 +354,118 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             DataKind.Scalar => DataValue.Null(DataKind.Scalar),
             _ => DataValue.FromString(field)
         };
+    }
+
+    /// <summary>
+    /// Returns the explicit <c>header</c> option if set, or null for auto-detection.
+    /// </summary>
+    private static bool? GetHeaderOverride(TableDescriptor descriptor)
+    {
+        if (descriptor.Options.TryGetValue("header", out string? headerValue))
+        {
+            if (headerValue.Equals("false", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (headerValue.Equals("true", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Determines whether the file has a header row by re-examining the schema.
+    /// When columns use generated names (<c>col_0</c>, <c>col_1</c>, …), the file
+    /// is headerless and the first physical row is data.
+    /// </summary>
+    private static bool HasHeaderRow(TableDescriptor descriptor, Schema schema)
+    {
+        bool? headerOverride = GetHeaderOverride(descriptor);
+        if (headerOverride.HasValue)
+        {
+            return headerOverride.Value;
+        }
+
+        // Generated names follow the pattern col_N — if all columns match, no header.
+        for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
+        {
+            if (schema.Columns[columnIndex].Name != $"col_{columnIndex}")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Infers whether the first row of a CSV file is a header by comparing its
+    /// type profile against subsequent data rows.
+    /// </summary>
+    /// <remarks>
+    /// The heuristic: if any column is predominantly numeric in <paramref name="dataRows"/>
+    /// (rows 2–N) but the corresponding <paramref name="firstRowFields"/> value is
+    /// non-numeric, the first row is treated as a header. This catches the common case
+    /// of <c>age,income</c> followed by <c>39,77516</c>.
+    /// When all columns have matching type profiles between row 1 and subsequent rows
+    /// (e.g. all-numeric or all-string), the first row is treated as data and columns
+    /// receive generated names.
+    /// </remarks>
+    private static bool DetectHeader(string[] firstRowFields, List<string[]> dataRows, char delimiter)
+    {
+        if (dataRows.Count == 0)
+        {
+            // Only one row in the file — can't compare, assume header for backward compatibility.
+            return true;
+        }
+
+        int columnCount = firstRowFields.Length;
+
+        for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
+        {
+            string firstValue = firstRowFields[columnIndex].Trim();
+            bool firstIsNumeric = firstValue.Length > 0 &&
+                float.TryParse(firstValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+
+            // Count how many data rows have a numeric value in this column.
+            int numericCount = 0;
+            int nonEmptyCount = 0;
+
+            foreach (string[] row in dataRows)
+            {
+                if (columnIndex >= row.Length)
+                {
+                    continue;
+                }
+
+                string field = row[columnIndex].Trim();
+                if (field.Length == 0)
+                {
+                    continue;
+                }
+
+                nonEmptyCount++;
+                if (float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+                {
+                    numericCount++;
+                }
+            }
+
+            // Column is predominantly numeric if > 50% of non-empty data values parse as numbers.
+            bool columnIsNumeric = nonEmptyCount > 0 && (double)numericCount / nonEmptyCount > 0.5;
+
+            // If data is numeric but row 1 is not numeric → row 1 is a header.
+            if (columnIsNumeric && !firstIsNumeric)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

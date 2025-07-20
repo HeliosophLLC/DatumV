@@ -11,9 +11,15 @@ Reads RFC 4180 CSV files. Auto-detects numeric vs string columns from the first 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `delimiter` | Field delimiter character | `,` |
-| `header` | Whether first row is header | `true` |
+| `header` | Header row handling | `auto` |
 
-Columns: derived from header row. Numeric values parsed as Scalar, others as String.
+### Header detection
+
+By default (`header=auto`), the provider infers whether the first row is a header by comparing its type profile against subsequent rows. If any column is predominantly numeric in rows 2–20 but the corresponding row-1 value is non-numeric, the first row is treated as a header. Otherwise it is treated as data and columns receive generated names (`col_0`, `col_1`, …).
+
+Set `header=true` to force the first row to be treated as column names, or `header=false` to force generated column names and treat every row as data.
+
+Columns: derived from header row (or generated when headerless). Numeric values parsed as Scalar, others as String.
 
 Implements `IChunkMeasuringProvider` for source index byte-range measurement. The pre-scan is quote-aware, correctly handling multi-line quoted fields and CRLF line endings.
 
