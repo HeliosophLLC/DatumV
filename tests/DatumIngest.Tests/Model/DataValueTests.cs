@@ -209,7 +209,7 @@ public class DataValueTests
     [Fact]
     public void DateTimeValueStoresDateTime()
     {
-        DateTime dateTime = new(2026, 3, 15, 10, 30, 0, DateTimeKind.Utc);
+        DateTimeOffset dateTime = new(2026, 3, 15, 10, 30, 0, TimeSpan.Zero);
         DataValue value = DataValue.FromDateTime(dateTime);
 
         Assert.Equal(DataKind.DateTime, value.Kind);

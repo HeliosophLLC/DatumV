@@ -42,7 +42,7 @@ public class ToEpochFunctionTests
     public void ToEpoch_DateTimeReturnsEpochSeconds()
     {
         // 2000-01-01T00:00:00 is 946684800 seconds after Unix epoch.
-        DataValue result = _function.Execute([DataValue.FromDateTime(new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc))]);
+        DataValue result = _function.Execute([DataValue.FromDateTime(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero))]);
         Assert.Equal(946684800f, result.AsScalar());
     }
 
@@ -50,7 +50,7 @@ public class ToEpochFunctionTests
     public void ToEpoch_DateTimeWithTimeComponent()
     {
         // 1970-01-01T01:00:00 is 3600 seconds after Unix epoch.
-        DataValue result = _function.Execute([DataValue.FromDateTime(new DateTime(1970, 1, 1, 1, 0, 0, DateTimeKind.Utc))]);
+        DataValue result = _function.Execute([DataValue.FromDateTime(new DateTimeOffset(1970, 1, 1, 1, 0, 0, TimeSpan.Zero))]);
         Assert.Equal(3600f, result.AsScalar());
     }
 

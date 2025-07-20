@@ -9,8 +9,8 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
 {
     private DateOnly _minDate = DateOnly.MaxValue;
     private DateOnly _maxDate = DateOnly.MinValue;
-    private DateTime _minDateTime = DateTime.MaxValue;
-    private DateTime _maxDateTime = DateTime.MinValue;
+    private DateTimeOffset _minDateTime = DateTimeOffset.MaxValue;
+    private DateTimeOffset _maxDateTime = DateTimeOffset.MinValue;
     private long _count;
     private DataKind _observedKind;
 
@@ -40,7 +40,7 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
         }
         else if (value.Kind == DataKind.DateTime)
         {
-            DateTime dateTime = value.AsDateTime();
+            DateTimeOffset dateTime = value.AsDateTime();
             _count++;
             _observedKind = DataKind.DateTime;
 

@@ -54,7 +54,7 @@ public sealed class DatePartFunction : IScalarFunction
         // Normalize to a DateTime for uniform extraction.
         DateTime dateTime = input.Kind == DataKind.Date
             ? input.AsDate().ToDateTime(TimeOnly.MinValue)
-            : input.AsDateTime();
+            : input.AsDateTime().DateTime;
 
         float result = partName.ToLowerInvariant() switch
         {

@@ -122,6 +122,49 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             }
         }
 
+        // Second pass: detect ISO 8601 dates in String columns.
+        for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
+        {
+            if (kinds[columnIndex] != DataKind.String || !hasData[columnIndex])
+            {
+                continue;
+            }
+
+            bool allDates = true;
+            bool anyHasTime = false;
+
+            foreach (string[] fields in dataRows)
+            {
+                if (columnIndex >= fields.Length)
+                {
+                    continue;
+                }
+
+                string field = fields[columnIndex].Trim();
+                if (field.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out DateTimeOffset parsed))
+                {
+                    allDates = false;
+                    break;
+                }
+
+                if (parsed.TimeOfDay != TimeSpan.Zero)
+                {
+                    anyHasTime = true;
+                }
+            }
+
+            if (allDates)
+            {
+                kinds[columnIndex] = anyHasTime ? DataKind.DateTime : DataKind.Date;
+            }
+        }
+
         List<ColumnInfo> columns = new(headers.Length);
         for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
         {
@@ -352,6 +395,13 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             DataKind.Scalar when float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
                 => DataValue.FromScalar(number),
             DataKind.Scalar => DataValue.Null(DataKind.Scalar),
+            DataKind.Date when DateOnly.TryParse(field, CultureInfo.InvariantCulture, out DateOnly date)
+                => DataValue.FromDate(date),
+            DataKind.Date => DataValue.Null(DataKind.Date),
+            DataKind.DateTime when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out DateTimeOffset dateTime)
+                => DataValue.FromDateTime(dateTime),
+            DataKind.DateTime => DataValue.Null(DataKind.DateTime),
             _ => DataValue.FromString(field)
         };
     }

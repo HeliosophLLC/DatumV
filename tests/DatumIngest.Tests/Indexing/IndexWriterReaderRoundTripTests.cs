@@ -169,7 +169,7 @@ public sealed class IndexWriterReaderRoundTripTests
         { DataValue.FromUInt8(42), "UInt8" },
         { DataValue.FromString("hello world"), "String" },
         { DataValue.FromDate(new DateOnly(2024, 6, 15)), "Date" },
-        { DataValue.FromDateTime(new DateTime(2024, 6, 15, 12, 30, 0, DateTimeKind.Utc)), "DateTime" },
+        { DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 12, 30, 0, TimeSpan.Zero)), "DateTime" },
         { DataValue.FromJsonValue("{\"key\":\"value\"}"), "JsonValue" },
         { DataValue.FromUInt8Array([1, 2, 3, 4, 5]), "UInt8Array" },
         { DataValue.FromVector([1.0f, 2.0f, 3.0f]), "Vector" },

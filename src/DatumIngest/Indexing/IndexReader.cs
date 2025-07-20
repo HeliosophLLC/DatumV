@@ -266,7 +266,8 @@ public sealed class IndexReader
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
             DataKind.String => DataValue.FromString(reader.ReadString()),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
-            DataKind.DateTime => DataValue.FromDateTime(DateTime.FromBinary(reader.ReadInt64())),
+            DataKind.DateTime => DataValue.FromDateTime(
+                new DateTimeOffset(reader.ReadInt64(), TimeSpan.FromMinutes(reader.ReadInt16()))),
             DataKind.JsonValue => DataValue.FromJsonValue(reader.ReadString()),
             DataKind.UInt8Array => ReadUInt8Array(reader),
             DataKind.Vector => ReadVector(reader),

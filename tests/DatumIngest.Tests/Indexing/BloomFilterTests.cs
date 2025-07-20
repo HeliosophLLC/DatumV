@@ -119,7 +119,7 @@ public sealed class BloomFilterTests
             DataKind.UInt8 => DataValue.FromUInt8(42),
             DataKind.String => DataValue.FromString("test"),
             DataKind.Date => DataValue.FromDate(new DateOnly(2024, 6, 15)),
-            DataKind.DateTime => DataValue.FromDateTime(new DateTime(2024, 6, 15, 12, 0, 0, DateTimeKind.Utc)),
+            DataKind.DateTime => DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero)),
             _ => throw new ArgumentException($"Unsupported kind: {kind}")
         };
 

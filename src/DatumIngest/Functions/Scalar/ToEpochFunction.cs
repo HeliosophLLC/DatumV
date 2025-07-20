@@ -44,7 +44,7 @@ public sealed class ToEpochFunction : IScalarFunction
         {
             DataKind.Date => DataValue.FromScalar(input.AsDate().DayNumber - UnixEpochDayNumber),
             DataKind.DateTime => DataValue.FromScalar(
-                (float)(input.AsDateTime().ToUniversalTime() - DateTime.UnixEpoch).TotalSeconds),
+                (float)(input.AsDateTime().ToUniversalTime() - DateTimeOffset.UnixEpoch).TotalSeconds),
             _ => throw new InvalidOperationException($"to_epoch() does not support {input.Kind}."),
         };
     }

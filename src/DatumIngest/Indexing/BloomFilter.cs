@@ -170,7 +170,7 @@ public sealed class BloomFilter
             }
             case DataKind.DateTime:
             {
-                return BitConverter.GetBytes(value.AsDateTime().ToBinary());
+                return BitConverter.GetBytes(value.AsDateTime().ToUnixTimeMilliseconds());
             }
             case DataKind.JsonValue:
             {

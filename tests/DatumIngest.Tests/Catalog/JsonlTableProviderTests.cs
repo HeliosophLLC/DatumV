@@ -234,4 +234,44 @@ public sealed class JsonlTableProviderTests
         Assert.Null(capabilities.EstimatedRowCount);
         Assert.True(capabilities.SupportsSeek);
     }
+
+    // ───────────────────── ISO 8601 date auto-detection ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_DetectsDateAndDateTimeColumns()
+    {
+        JsonlTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(Descriptor("dates.jsonl"), CancellationToken.None);
+
+        ColumnInfo? created = schema.FindColumn("created");
+        ColumnInfo? updated = schema.FindColumn("updated");
+        Assert.NotNull(created);
+        Assert.NotNull(updated);
+        Assert.Equal(DataKind.Date, created!.Kind);
+        Assert.Equal(DataKind.DateTime, updated!.Kind);
+    }
+
+    [Fact]
+    public async Task Open_ParsesDateValues()
+    {
+        JsonlTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("dates.jsonl"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(new DateOnly(2024, 1, 15), rows[0]["created"].AsDate());
+        Assert.Equal(new DateOnly(2024, 6, 20), rows[1]["created"].AsDate());
+    }
+
+    [Fact]
+    public async Task Open_ParsesDateTimeValues()
+    {
+        JsonlTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("dates.jsonl"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.False(rows[0]["updated"].IsNull);
+        Assert.Equal(DataKind.DateTime, rows[0]["updated"].Kind);
+    }
 }

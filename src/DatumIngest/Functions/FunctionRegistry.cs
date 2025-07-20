@@ -90,6 +90,30 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.DatePartFunction());
         registry.RegisterScalar(new Scalar.CyclicalEncodeFunction());
 
+        // Date/Time — Extraction
+        registry.RegisterScalar(new Scalar.YearFunction());
+        registry.RegisterScalar(new Scalar.MonthFunction());
+        registry.RegisterScalar(new Scalar.DayFunction());
+        registry.RegisterScalar(new Scalar.HourFunction());
+        registry.RegisterScalar(new Scalar.MinuteFunction());
+        registry.RegisterScalar(new Scalar.SecondFunction());
+        registry.RegisterScalar(new Scalar.QuarterFunction());
+        registry.RegisterScalar(new Scalar.DayOfWeekFunction());
+        registry.RegisterScalar(new Scalar.DayOfYearFunction());
+
+        // Date/Time — Construction & Arithmetic
+        registry.RegisterScalar(new Scalar.NowFunction());
+        registry.RegisterScalar(new Scalar.MakeDateFunction());
+        registry.RegisterScalar(new Scalar.MakeTimestampFunction());
+        registry.RegisterScalar(new Scalar.DateDiffFunction());
+        registry.RegisterScalar(new Scalar.DateAddFunction());
+        registry.RegisterScalar(new Scalar.DateTruncFunction());
+        registry.RegisterScalar(new Scalar.DateBucketFunction());
+
+        // Date/Time — Formatting & Probing
+        registry.RegisterScalar(new Scalar.StrftimeFunction());
+        registry.RegisterScalar(new Scalar.IsDateFunction());
+
         // JSON
         registry.RegisterScalar(new Scalar.JsonValueFunction());
         registry.RegisterScalar(new Scalar.JsonQueryFunction());

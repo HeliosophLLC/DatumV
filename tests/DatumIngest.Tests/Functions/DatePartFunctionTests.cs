@@ -56,21 +56,21 @@ public class DatePartFunctionTests
     [Fact]
     public void DatePart_Hour_FromDateTime()
     {
-        DataValue result = _function.Execute([DataValue.FromString("hour"), DataValue.FromDateTime(new DateTime(2026, 3, 16, 14, 30, 45))]);
+        DataValue result = _function.Execute([DataValue.FromString("hour"), DataValue.FromDateTime(new DateTimeOffset(2026, 3, 16, 14, 30, 45, TimeSpan.Zero))]);
         Assert.Equal(14f, result.AsScalar());
     }
 
     [Fact]
     public void DatePart_Minute_FromDateTime()
     {
-        DataValue result = _function.Execute([DataValue.FromString("minute"), DataValue.FromDateTime(new DateTime(2026, 3, 16, 14, 30, 45))]);
+        DataValue result = _function.Execute([DataValue.FromString("minute"), DataValue.FromDateTime(new DateTimeOffset(2026, 3, 16, 14, 30, 45, TimeSpan.Zero))]);
         Assert.Equal(30f, result.AsScalar());
     }
 
     [Fact]
     public void DatePart_Second_FromDateTime()
     {
-        DataValue result = _function.Execute([DataValue.FromString("second"), DataValue.FromDateTime(new DateTime(2026, 3, 16, 14, 30, 45))]);
+        DataValue result = _function.Execute([DataValue.FromString("second"), DataValue.FromDateTime(new DateTimeOffset(2026, 3, 16, 14, 30, 45, TimeSpan.Zero))]);
         Assert.Equal(45f, result.AsScalar());
     }
 

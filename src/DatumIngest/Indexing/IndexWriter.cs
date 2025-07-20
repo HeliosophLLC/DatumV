@@ -238,8 +238,9 @@ public sealed class IndexWriter
                 break;
 
             case DataKind.DateTime:
-                DateTime dateTime = value.AsDateTime();
-                writer.Write(dateTime.ToBinary());
+                DateTimeOffset dateTimeOffset = value.AsDateTime();
+                writer.Write(dateTimeOffset.Ticks);
+                writer.Write((short)dateTimeOffset.Offset.TotalMinutes);
                 break;
 
             case DataKind.JsonValue:

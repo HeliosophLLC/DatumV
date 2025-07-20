@@ -151,7 +151,7 @@ public sealed class TableFormatterTests
         DataValue dateValue = DataValue.FromDate(new DateOnly(2024, 6, 15));
         Assert.Equal("2024-06-15", TableFormatter.FormatValue(dateValue));
 
-        DataValue dateTimeValue = DataValue.FromDateTime(new DateTime(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc));
+        DataValue dateTimeValue = DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 10, 30, 0, TimeSpan.Zero));
         string formatted = TableFormatter.FormatValue(dateTimeValue);
         Assert.Contains("2024-06-15", formatted);
     }

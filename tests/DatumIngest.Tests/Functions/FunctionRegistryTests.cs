@@ -22,6 +22,11 @@ public class FunctionRegistryTests
             "width", "height", "channels", "pixel_count", "dimensions",
             "decode_image",
             "resize", "crop", "grayscale", "rotate", "noise", "blur",
+            "year", "month", "day", "hour", "minute", "second",
+            "quarter", "dayofweek", "dayofyear",
+            "now", "make_date", "make_timestamp",
+            "date_diff", "date_add", "date_trunc", "date_bucket",
+            "strftime", "is_date",
         ];
 
         foreach (string name in expectedNames)

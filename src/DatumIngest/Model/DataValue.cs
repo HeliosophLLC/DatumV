@@ -122,8 +122,8 @@ public sealed class DataValue : IEquatable<DataValue>
     public static DataValue FromDate(DateOnly value) =>
         new(DataKind.Date, value, shape: null, isNull: false);
 
-    /// <summary>Creates a value from a date and time.</summary>
-    public static DataValue FromDateTime(DateTime value) =>
+    /// <summary>Creates a value from a date and time with UTC offset.</summary>
+    public static DataValue FromDateTime(DateTimeOffset value) =>
         new(DataKind.DateTime, value, shape: null, isNull: false);
 
     /// <summary>Creates a value from a raw JSON string.</summary>
@@ -253,12 +253,12 @@ public sealed class DataValue : IEquatable<DataValue>
         return (DateOnly)_payload!;
     }
 
-    /// <summary>Returns the date and time payload.</summary>
+    /// <summary>Returns the date and time payload with UTC offset.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    public DateTime AsDateTime()
+    public DateTimeOffset AsDateTime()
     {
         ThrowIfNullOrWrongKind(DataKind.DateTime);
-        return (DateTime)_payload!;
+        return (DateTimeOffset)_payload!;
     }
 
     /// <summary>Returns the raw JSON string payload.</summary>
@@ -360,7 +360,7 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.UInt8Array => ((byte[])_payload!).AsSpan().SequenceEqual((byte[])other._payload!),
             DataKind.Image => AsImage().AsSpan().SequenceEqual(other.AsImage()),
             DataKind.Date => (DateOnly)_payload! == (DateOnly)other._payload!,
-            DataKind.DateTime => (DateTime)_payload! == (DateTime)other._payload!,
+            DataKind.DateTime => (DateTimeOffset)_payload! == (DateTimeOffset)other._payload!,
             _ => false,
         };
     }
@@ -376,7 +376,7 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.UInt8 => HashCode.Combine(_kind, (byte)_payload!),
             DataKind.String or DataKind.JsonValue => HashCode.Combine(_kind, (string)_payload!),
             DataKind.Date => HashCode.Combine(_kind, (DateOnly)_payload!),
-            DataKind.DateTime => HashCode.Combine(_kind, (DateTime)_payload!),
+            DataKind.DateTime => HashCode.Combine(_kind, (DateTimeOffset)_payload!),
             DataKind.Vector => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Matrix => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Tensor => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
@@ -457,7 +457,7 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.UInt8 => ((byte)_payload!).ToString(),
             DataKind.String => (string)_payload!,
             DataKind.Date => ((DateOnly)_payload!).ToString("yyyy-MM-dd"),
-            DataKind.DateTime => ((DateTime)_payload!).ToString("O"),
+            DataKind.DateTime => ((DateTimeOffset)_payload!).ToString("O"),
             DataKind.JsonValue => (string)_payload!,
             DataKind.Vector => $"Vector[{((float[])_payload!).Length}]",
             DataKind.Matrix => $"Matrix[{_shape![0]}x{_shape[1]}]",

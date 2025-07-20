@@ -92,6 +92,88 @@ SELECT vec_concat(
 FROM data
 ```
 
+## Date/Time — Extraction (9)
+
+Shorthand functions for extracting individual components from Date or DateTime values. Each returns a Scalar.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `year` | `year(date)` | Extract year. |
+| `month` | `month(date)` | Extract month (1–12). |
+| `day` | `day(date)` | Extract day of month (1–31). |
+| `hour` | `hour(date)` | Extract hour (0–23). Returns 0 for Date inputs. |
+| `minute` | `minute(date)` | Extract minute (0–59). Returns 0 for Date inputs. |
+| `second` | `second(date)` | Extract second (0–59). Returns 0 for Date inputs. |
+| `quarter` | `quarter(date)` | Extract quarter (1–4). |
+| `dayofweek` | `dayofweek(date)` | ISO 8601 day of week: 1 (Monday) through 7 (Sunday). |
+| `dayofyear` | `dayofyear(date)` | Day of year (1–366). |
+
+> **Note:** `dayofweek()` uses ISO 8601 convention (1=Monday, 7=Sunday). The older `date_part('day_of_week', ...)` uses .NET convention (0=Sunday, 6=Saturday). Prefer `dayofweek()` for new code.
+
+## Date/Time — Construction & Arithmetic (7)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `now` | `now()` | Current UTC timestamp as DateTime. |
+| `make_date` | `make_date(year, month, day)` | Construct a Date from components (all Scalar). |
+| `make_timestamp` | `make_timestamp(y, m, d, h, min, s)` | Construct a DateTime (UTC) from components (all Scalar). |
+| `date_diff` | `date_diff(part, start, end)` | Count of part boundaries crossed between two dates. Returns Scalar. |
+| `date_add` | `date_add(part, amount, date)` | Add amount of the specified part to a date. Preserves input kind. |
+| `date_trunc` | `date_trunc(part, date)` | Truncate to the specified precision. Week uses ISO 8601 (Monday start). Preserves input kind. |
+| `date_bucket` | `date_bucket(part, width, date [, origin])` | Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind. |
+
+### Supported date parts
+
+All date part arguments accept these names (case-insensitive) with aliases:
+
+| Part | Aliases |
+|------|---------|
+| `year` | `years`, `y` |
+| `quarter` | `quarters`, `q` |
+| `month` | `months`, `m` |
+| `week` | `weeks`, `w` |
+| `day` | `days`, `d` |
+| `hour` | `hours`, `h` |
+| `minute` | `minutes`, `min` |
+| `second` | `seconds`, `s` |
+| `millisecond` | `milliseconds`, `ms` |
+
+## Date/Time — Formatting & Probing (2)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `strftime` | `strftime(date, format)` | Format a Date or DateTime as a String using .NET format strings (e.g., `"yyyy-MM-dd"`). |
+| `is_date` | `is_date(expr)` | Returns 1 if the value is or can be parsed as a date, 0 otherwise. Accepts String, Date, DateTime. |
+
+### Date/Time examples
+
+```sql
+-- Shorthand extraction
+SELECT year(order_date) AS y, month(order_date) AS m, day(order_date) AS d FROM orders
+
+-- ISO day of week (1=Monday)
+SELECT dayofweek(event_date) AS dow FROM events
+
+-- Date arithmetic
+SELECT date_add('month', 3, start_date) AS extended FROM contracts
+SELECT date_diff('day', hire_date, now()) AS tenure_days FROM employees
+
+-- Truncation for grouping
+SELECT date_trunc('month', sale_date) AS period, SUM(amount) FROM sales GROUP BY period
+
+-- 15-minute bucketing
+SELECT date_bucket('minute', 15, event_time) AS bucket, COUNT(*) FROM logs GROUP BY bucket
+
+-- Construct dates from components
+SELECT make_date(year_col, month_col, 1) AS first_of_month FROM data
+
+-- Format for display
+SELECT strftime(created_at, 'yyyy-MM-dd HH:mm') AS formatted FROM records
+
+-- Data quality checks
+SELECT * FROM raw_data WHERE is_date(date_column) = 0
+```
+
 ## Table-Valued Functions
 
 | Function | Signature | Description |

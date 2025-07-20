@@ -287,7 +287,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             DataKind.Scalar => ConvertToScalar(value),
             DataKind.String => DataValue.FromString(value.ToString() ?? string.Empty),
             DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(value)),
-            DataKind.DateTime => DataValue.FromDateTime(Convert.ToDateTime(value)),
+            DataKind.DateTime => DataValue.FromDateTime(ConvertToDateTimeOffset(value)),
             DataKind.Date => value is DateOnly dateOnly
                 ? DataValue.FromDate(dateOnly)
                 : DataValue.FromDate(DateOnly.FromDateTime(Convert.ToDateTime(value))),
@@ -481,11 +481,24 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(element)),
             DataKind.String => DataValue.FromString(element.ToString() ?? string.Empty),
             DataKind.UInt8Array => DataValue.FromUInt8Array((byte[])element),
-            DataKind.DateTime => DataValue.FromDateTime(Convert.ToDateTime(element)),
+            DataKind.DateTime => DataValue.FromDateTime(ConvertToDateTimeOffset(element)),
             DataKind.Date => DataValue.FromDate(element is DateOnly dateOnly
                 ? dateOnly
                 : DateOnly.FromDateTime(Convert.ToDateTime(element))),
             _ => DataValue.FromString(element.ToString() ?? string.Empty)
+        };
+    }
+
+    /// <summary>
+    /// Converts a CLR DateTime or DateTimeOffset value to <see cref="DateTimeOffset"/>.
+    /// </summary>
+    private static DateTimeOffset ConvertToDateTimeOffset(object value)
+    {
+        return value switch
+        {
+            DateTimeOffset dto => dto,
+            DateTime dt => new DateTimeOffset(dt, TimeSpan.Zero),
+            _ => new DateTimeOffset(Convert.ToDateTime(value), TimeSpan.Zero),
         };
     }
 

@@ -72,14 +72,14 @@ public class CastFunctionTests
             DataValue.FromDate(date),
             DataValue.FromString("DateTime")
         ]);
-        Assert.Equal(new DateTime(2024, 1, 15), result.AsDateTime());
+        Assert.Equal(new DateTimeOffset(2024, 1, 15, 0, 0, 0, TimeSpan.Zero), result.AsDateTime());
     }
 
     [Fact]
     public void Cast_DateTimeToDate()
     {
         DataValue result = _function.Execute([
-            DataValue.FromDateTime(new DateTime(2024, 6, 15, 10, 30, 0)),
+            DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 10, 30, 0, TimeSpan.Zero)),
             DataValue.FromString("Date")
         ]);
         Assert.Equal(new DateOnly(2024, 6, 15), result.AsDate());
@@ -193,7 +193,7 @@ public class CastFunctionTests
     {
         // 2000-01-01T00:00:00Z is 946684800 seconds after Unix epoch.
         DataValue result = _function.Execute([
-            DataValue.FromDateTime(new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+            DataValue.FromDateTime(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)),
             DataValue.FromString("Scalar")
         ]);
         Assert.Equal(946684800f, result.AsScalar());

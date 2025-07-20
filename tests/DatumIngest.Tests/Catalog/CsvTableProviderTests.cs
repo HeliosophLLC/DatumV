@@ -374,4 +374,43 @@ public sealed class CsvTableProviderTests
         Assert.Equal(39f, rows[0]["col_0"].AsScalar());
         Assert.Equal(13f, rows[0]["col_2"].AsScalar());
     }
+
+    // ───────────────────── ISO 8601 date auto-detection ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_DetectsDateColumns()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(Descriptor("dates.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);   // id
+        Assert.Equal(DataKind.Date, schema.Columns[1].Kind);     // event_date (no time component)
+        Assert.Equal(DataKind.DateTime, schema.Columns[2].Kind); // event_time (has time component)
+        Assert.Equal(DataKind.String, schema.Columns[3].Kind);   // label
+    }
+
+    [Fact]
+    public async Task Open_ParsesDateValues()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("dates.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(new DateOnly(2024, 1, 15), rows[0]["event_date"].AsDate());
+        Assert.Equal(new DateOnly(2024, 6, 20), rows[1]["event_date"].AsDate());
+        Assert.Equal(new DateOnly(2024, 12, 1), rows[2]["event_date"].AsDate());
+    }
+
+    [Fact]
+    public async Task Open_ParsesDateTimeValues()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("dates.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.False(rows[0]["event_time"].IsNull);
+        Assert.Equal(DataKind.DateTime, rows[0]["event_time"].Kind);
+    }
 }

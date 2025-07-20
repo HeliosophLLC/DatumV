@@ -78,11 +78,11 @@ public sealed class CastFunction : IScalarFunction
 
             // Date -> DateTime
             (DataKind.Date, DataKind.DateTime) => DataValue.FromDateTime(
-                input.AsDate().ToDateTime(TimeOnly.MinValue)),
+                new DateTimeOffset(input.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
 
             // DateTime -> Date
             (DataKind.DateTime, DataKind.Date) => DataValue.FromDate(
-                DateOnly.FromDateTime(input.AsDateTime())),
+                DateOnly.FromDateTime(input.AsDateTime().DateTime)),
 
             // String -> Date
             (DataKind.String, DataKind.Date) => DataValue.FromDate(
@@ -90,7 +90,7 @@ public sealed class CastFunction : IScalarFunction
 
             // String -> DateTime
             (DataKind.String, DataKind.DateTime) => DataValue.FromDateTime(
-                System.DateTime.Parse(input.AsString(), CultureInfo.InvariantCulture)),
+                DateTimeOffset.Parse(input.AsString(), CultureInfo.InvariantCulture)),
 
             // Date -> String
             (DataKind.Date, DataKind.String) => DataValue.FromString(
@@ -102,11 +102,11 @@ public sealed class CastFunction : IScalarFunction
 
             // Date -> Scalar (epoch days since 1970-01-01)
             (DataKind.Date, DataKind.Scalar) => DataValue.FromScalar(
-                input.AsDate().DayNumber - DateOnly.FromDateTime(System.DateTime.UnixEpoch).DayNumber),
+                input.AsDate().DayNumber - DateOnly.FromDateTime(DateTimeOffset.UnixEpoch.DateTime).DayNumber),
 
             // DateTime -> Scalar (epoch seconds since 1970-01-01T00:00:00Z)
             (DataKind.DateTime, DataKind.Scalar) => DataValue.FromScalar(
-                (float)(input.AsDateTime().ToUniversalTime() - System.DateTime.UnixEpoch).TotalSeconds),
+                (float)(input.AsDateTime().ToUniversalTime() - DateTimeOffset.UnixEpoch).TotalSeconds),
 
             // String -> JsonValue
             (DataKind.String, DataKind.JsonValue) => DataValue.FromJsonValue(input.AsString()),

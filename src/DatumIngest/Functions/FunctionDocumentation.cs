@@ -148,6 +148,87 @@ public static class FunctionDocumentation
             Description = "Encodes a cyclic value as a [sin, cos] pair for ML features."
         });
 
+        // ── Date/Time — Extraction ──
+
+        RegisterDateExtraction("year", "Extracts the year from a Date or DateTime.");
+        RegisterDateExtraction("month", "Extracts the month (1–12) from a Date or DateTime.");
+        RegisterDateExtraction("day", "Extracts the day of the month (1–31) from a Date or DateTime.");
+        RegisterDateExtraction("hour", "Extracts the hour (0–23) from a DateTime. Returns 0 for Date inputs.");
+        RegisterDateExtraction("minute", "Extracts the minute (0–59) from a DateTime. Returns 0 for Date inputs.");
+        RegisterDateExtraction("second", "Extracts the second (0–59) from a DateTime. Returns 0 for Date inputs.");
+        RegisterDateExtraction("quarter", "Extracts the quarter (1–4) from a Date or DateTime.");
+        RegisterDateExtraction("dayofweek", "Returns the ISO day of week (1=Monday, 7=Sunday) from a Date or DateTime.");
+        RegisterDateExtraction("dayofyear", "Returns the day of the year (1–366) from a Date or DateTime.");
+
+        // ── Date/Time — Construction & Arithmetic ──
+
+        Register(new FunctionSignature
+        {
+            Name = "now",
+            Parameters = [],
+            ReturnType = "DateTime",
+            Description = "Returns the current UTC timestamp."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "make_date",
+            Parameters = [Parameter("year", "Scalar"), Parameter("month", "Scalar"), Parameter("day", "Scalar")],
+            ReturnType = "Date",
+            Description = "Constructs a Date from year, month, and day components."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "make_timestamp",
+            Parameters = [Parameter("year", "Scalar"), Parameter("month", "Scalar"), Parameter("day", "Scalar"), Parameter("hour", "Scalar"), Parameter("minute", "Scalar"), Parameter("second", "Scalar")],
+            ReturnType = "DateTime",
+            Description = "Constructs a UTC DateTime from year, month, day, hour, minute, and second components."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "date_diff",
+            Parameters = [Parameter("part", "String"), Parameter("start", "DateTime"), Parameter("end", "DateTime")],
+            ReturnType = "Scalar",
+            Description = "Returns the number of date part boundaries between start and end."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "date_add",
+            Parameters = [Parameter("part", "String"), Parameter("number", "Scalar"), Parameter("date", "DateTime")],
+            ReturnType = "DateTime",
+            Description = "Adds the specified number of date part units to a date."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "date_trunc",
+            Parameters = [Parameter("part", "String"), Parameter("date", "DateTime")],
+            ReturnType = "DateTime",
+            Description = "Truncates a date to the specified precision (e.g., month → first of month)."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "date_bucket",
+            Parameters = [Parameter("part", "String"), Parameter("width", "Scalar"), Parameter("date", "DateTime"), Parameter("origin", "DateTime", isOptional: true)],
+            ReturnType = "DateTime",
+            Description = "Buckets a date into fixed-width intervals of the specified date part."
+        });
+
+        // ── Date/Time — Formatting & Probing ──
+
+        Register(new FunctionSignature
+        {
+            Name = "strftime",
+            Parameters = [Parameter("date", "DateTime"), Parameter("format", "String")],
+            ReturnType = "String",
+            Description = "Formats a Date or DateTime as a string using a .NET format string."
+        });
+        Register(new FunctionSignature
+        {
+            Name = "is_date",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Scalar",
+            Description = "Returns 1 if the string can be parsed as a date, 0 otherwise."
+        });
+
         // ── JSON ──
 
         Register(new FunctionSignature
@@ -705,6 +786,18 @@ public static class FunctionDocumentation
             Name = name,
             Parameters = [Parameter("image", "Image")],
             ReturnType = "Image",
+            Description = description
+        });
+    }
+
+    /// <summary>Registers a date/time extraction function (Date/DateTime → Scalar).</summary>
+    private static void RegisterDateExtraction(string name, string description)
+    {
+        Register(new FunctionSignature
+        {
+            Name = name,
+            Parameters = [Parameter("date", "DateTime")],
+            ReturnType = "Scalar",
             Description = description
         });
     }
