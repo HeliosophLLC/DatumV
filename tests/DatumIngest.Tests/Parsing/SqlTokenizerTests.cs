@@ -303,4 +303,26 @@ public class SqlTokenizerTests
              SqlToken.Comma, SqlToken.NumberLiteral, SqlToken.RightParen],
             kinds);
     }
+
+    // ───────────────────── Quoted identifiers ─────────────────────
+
+    [Fact]
+    public void DoubleQuotedIdentifierIsRecognized()
+    {
+        AssertSingleToken("\"adult.data\"", SqlToken.Identifier);
+    }
+
+    [Fact]
+    public void BracketQuotedIdentifierWithDotIsRecognized()
+    {
+        AssertSingleToken("[adult.data]", SqlToken.Identifier);
+    }
+
+    [Fact]
+    public void DoubleQuotedIdentifierWithEscapedQuoteIsRecognized()
+    {
+        Token<SqlToken>[] tokens = Tokenize("\"col\"\"name\"");
+        Assert.Single(tokens);
+        Assert.Equal(SqlToken.Identifier, tokens[0].Kind);
+    }
 }

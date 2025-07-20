@@ -33,6 +33,18 @@ public static class SqlTokenizer
         select Unit.Value;
 
     /// <summary>
+    /// Recognizes a double-quoted identifier such as <c>"My Column"</c>,
+    /// with <c>""</c> as the escape sequence for an embedded double-quote.
+    /// </summary>
+    private static readonly TextParser<Unit> DoubleQuotedIdentifierToken =
+        from open in Character.EqualTo('"')
+        from content in Span.EqualTo("\"\"").Value(Unit.Value).Try()
+            .Or(Character.Except('"').Value(Unit.Value))
+            .IgnoreMany()
+        from close in Character.EqualTo('"')
+        select Unit.Value;
+
+    /// <summary>
     /// Recognizes an integer or floating-point number (without leading sign).
     /// The sign is a separate Minus token, handled by the parser.
     /// </summary>
@@ -77,6 +89,9 @@ public static class SqlTokenizer
 
             // Bracket-quoted identifiers (before keywords)
             .Match(BracketQuotedIdentifierToken, SqlToken.Identifier)
+
+            // Double-quoted identifiers (before keywords)
+            .Match(DoubleQuotedIdentifierToken, SqlToken.Identifier)
 
             // Keywords — case-insensitive, with delimiter checks to prevent
             // partial matches (e.g. INNER does not match as IN + NER).

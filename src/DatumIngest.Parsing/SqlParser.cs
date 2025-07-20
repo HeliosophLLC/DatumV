@@ -18,10 +18,29 @@ public static class SqlParser
 {
     // ───────────────────── Helpers ─────────────────────
 
-    /// <summary>Extracts the text content from a token span.</summary>
+    /// <summary>
+    /// Extracts the text content from a token span, stripping surrounding
+    /// delimiters from bracket-quoted, double-quoted, and single-quoted tokens.
+    /// </summary>
     private static string GetTokenText(Token<SqlToken> token)
     {
-        return token.ToStringValue();
+        string text = token.ToStringValue();
+
+        if (token.Kind == SqlToken.Identifier && text.Length >= 2)
+        {
+            if (text[0] == '[' && text[^1] == ']')
+                return text[1..^1];
+            if (text[0] == '"' && text[^1] == '"')
+                return text[1..^1].Replace("\"\"", "\"");
+        }
+
+        if (token.Kind == SqlToken.StringLiteral && text.Length >= 2
+            && text[0] == '\'' && text[^1] == '\'')
+        {
+            return text[1..^1].Replace("''", "'");
+        }
+
+        return text;
     }
 
     /// <summary>Creates a <see cref="SourceSpan"/> from a single token.</summary>
@@ -342,6 +361,7 @@ public static class SqlParser
     /// <summary>A table reference with optional alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> TableReferenceParser =
         from name in Token.EqualTo(SqlToken.Identifier)
+            .Or(Token.EqualTo(SqlToken.StringLiteral))
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
             from aliasName in Token.EqualTo(SqlToken.Identifier)

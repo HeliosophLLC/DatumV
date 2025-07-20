@@ -716,4 +716,43 @@ public class SqlParserTests
         LiteralExpression falseVal = Assert.IsType<LiteralExpression>(result.Columns[1].Expression);
         Assert.Equal(false, falseVal.Value);
     }
+
+    // ───────────────────── Quoted table names ─────────────────────
+
+    [Fact]
+    public void SelectFromBracketQuotedTableName()
+    {
+        SelectStatement result = Parse("SELECT * FROM [adult.data]");
+
+        TableReference table = Assert.IsType<TableReference>(result.From.Source);
+        Assert.Equal("adult.data", table.Name);
+    }
+
+    [Fact]
+    public void SelectFromDoubleQuotedTableName()
+    {
+        SelectStatement result = Parse("SELECT * FROM \"adult.data\"");
+
+        TableReference table = Assert.IsType<TableReference>(result.From.Source);
+        Assert.Equal("adult.data", table.Name);
+    }
+
+    [Fact]
+    public void SelectFromSingleQuotedTableName()
+    {
+        SelectStatement result = Parse("SELECT * FROM 'adult.data'");
+
+        TableReference table = Assert.IsType<TableReference>(result.From.Source);
+        Assert.Equal("adult.data", table.Name);
+    }
+
+    [Fact]
+    public void SelectFromBracketQuotedTableNameWithAlias()
+    {
+        SelectStatement result = Parse("SELECT a.x FROM [adult.data] AS a");
+
+        TableReference table = Assert.IsType<TableReference>(result.From.Source);
+        Assert.Equal("adult.data", table.Name);
+        Assert.Equal("a", table.Alias);
+    }
 }
