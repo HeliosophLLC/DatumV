@@ -173,7 +173,10 @@ public sealed class CommandDispatcher
             return CommandResult.Error("Permission denied: you are not authorized to inspect schemas.");
         }
 
-        List<string> tables = session.Catalog.TableNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        List<string> tables = session.Catalog.TableNames
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Select(DatumIngest.Parsing.Tokens.SqlIdentifier.QuoteIfNeeded)
+            .ToList();
         return CommandResult.ListResult(tables);
     }
 
@@ -190,7 +193,9 @@ public sealed class CommandDispatcher
             return CommandResult.Error("Usage: .schema <table_name>");
         }
 
-        Schema schema = await session.Catalog.GetSchemaAsync(tableName, cancellationToken).ConfigureAwait(false);
+        // Accept bracket/quote-delimited names so users can copy from .tables output.
+        string resolvedName = DatumIngest.Parsing.Tokens.SqlIdentifier.Unquote(tableName);
+        Schema schema = await session.Catalog.GetSchemaAsync(resolvedName, cancellationToken).ConfigureAwait(false);
         return CommandResult.SchemaResult(schema);
     }
 

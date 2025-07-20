@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Functions;
+using DatumIngest.Parsing.Tokens;
 using RadLine;
 
 namespace DatumIngest.Cli.Shell;
@@ -61,7 +62,8 @@ internal sealed class ShellCompletionHandler : ITextCompletion
             EndsWithKeyword(trimmedPrefix, "JOIN"))
         {
             return _catalog.TableNames
-                .Where(name => name.StartsWith(word, StringComparison.OrdinalIgnoreCase));
+                .Where(name => name.StartsWith(word, StringComparison.OrdinalIgnoreCase))
+                .Select(SqlIdentifier.QuoteIfNeeded);
         }
 
         // Function names: if the character after the word is '(' in suffix, or word looks like a function call.
@@ -73,7 +75,8 @@ internal sealed class ShellCompletionHandler : ITextCompletion
 
         // Table names.
         candidates.AddRange(_catalog.TableNames
-            .Where(name => name.StartsWith(word, StringComparison.OrdinalIgnoreCase)));
+            .Where(name => name.StartsWith(word, StringComparison.OrdinalIgnoreCase))
+            .Select(SqlIdentifier.QuoteIfNeeded));
 
         // Function names.
         candidates.AddRange(_functionRegistry.ScalarFunctionNames

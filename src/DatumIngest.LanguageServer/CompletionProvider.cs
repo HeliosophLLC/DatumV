@@ -1,6 +1,7 @@
 namespace DatumIngest.LanguageServer;
 
 using DatumIngest.Manifest;
+using DatumIngest.Parsing.Tokens;
 
 /// <summary>
 /// Generates context-aware completion items from a <see cref="LanguageServerManifest"/>
@@ -103,11 +104,13 @@ public sealed class CompletionProvider
             string columnSummary = string.Join(", ", table.Columns.Select(
                 column => $"{column.Name}: {column.Kind}"));
 
+            string insertText = SqlIdentifier.QuoteIfNeeded(table.Name);
             items.Add(new CompletionItem
             {
                 Label = table.Name,
                 Kind = CompletionItemKind.Table,
                 Detail = $"Table ({table.Columns.Count} columns)",
+                InsertText = insertText != table.Name ? insertText : null,
                 Documentation = columnSummary,
                 SortOrder = 0,
             });

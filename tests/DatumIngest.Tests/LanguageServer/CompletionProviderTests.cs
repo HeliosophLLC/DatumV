@@ -247,4 +247,43 @@ public sealed class CompletionProviderTests
         Assert.NotNull(absItem);
         Assert.Equal("abs(", absItem.InsertText);
     }
+
+    // ───────────────────── Quoted table name insert text ─────────────────────
+
+    [Fact]
+    public void GetCompletions_TableWithDot_HasBracketQuotedInsertText()
+    {
+        LanguageServerManifest manifest = new()
+        {
+            Tables =
+            [
+                new TableSchemaEntry
+                {
+                    Name = "adult.data",
+                    Columns = [new TableColumnEntry { Name = "age", Kind = "Scalar", Nullable = false }],
+                },
+            ],
+            Functions = [],
+            Keywords = ["SELECT", "FROM"],
+        };
+        CompletionProvider provider = new(manifest);
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM ", 14);
+
+        CompletionItem? tableItem = Array.Find(items, item => item.Label == "adult.data");
+        Assert.NotNull(tableItem);
+        Assert.Equal("[adult.data]", tableItem.InsertText);
+    }
+
+    [Fact]
+    public void GetCompletions_SafeTableName_HasNullInsertText()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM ", 14);
+
+        CompletionItem? usersItem = Array.Find(items, item => item.Label == "users");
+        Assert.NotNull(usersItem);
+        Assert.Null(usersItem.InsertText);
+    }
 }
