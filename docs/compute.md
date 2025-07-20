@@ -220,15 +220,59 @@ Returns the column schema of a registered table.
 
 **Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, and `nullable`.
 
-#### ListTables / ListProviders / ListFunctions
+#### ListTables / ListProviders
 
-Returns string lists of registered tables, format providers, or available functions.
+Returns string lists of registered tables or format providers.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID. |
 
 **Returns:** `repeated string items`.
+
+#### ListFunctions
+
+Returns all available functions with parameter metadata.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+
+**Response (`ListFunctionsResponse`):** `repeated FunctionInfoMessage functions`.
+
+**`FunctionInfoMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | The SQL function name. |
+| `parameters` | `repeated ParameterInfoMessage` | Ordered parameter list. |
+| `return_type` | `string` | Return type name (e.g. `"Scalar"`), empty if context-dependent. |
+| `is_table_valued` | `bool` | Whether this is a table-valued function (used in `FROM`/`JOIN`). |
+
+**`ParameterInfoMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Parameter name (e.g. `"value"`, `"start"`). |
+| `kind` | `ParameterKindValue` | Expected data kind for this parameter. |
+| `required` | `bool` | Whether this parameter is required. |
+
+**`ParameterKindValue` enum:**
+
+| Value | Meaning |
+|-------|---------|
+| `PARAMETER_KIND_ANY` (0) | Accepts any type (polymorphic parameter). |
+| `PARAMETER_KIND_UINT8` (1) | `UInt8` |
+| `PARAMETER_KIND_SCALAR` (2) | `Scalar` |
+| `PARAMETER_KIND_VECTOR` (3) | `Vector` |
+| `PARAMETER_KIND_MATRIX` (4) | `Matrix` |
+| `PARAMETER_KIND_TENSOR` (5) | `Tensor` |
+| `PARAMETER_KIND_UINT8_ARRAY` (6) | `UInt8Array` |
+| `PARAMETER_KIND_IMAGE` (7) | `Image` |
+| `PARAMETER_KIND_STRING` (8) | `String` |
+| `PARAMETER_KIND_DATE` (9) | `Date` |
+| `PARAMETER_KIND_DATE_TIME` (10) | `DateTime` |
+| `PARAMETER_KIND_JSON_VALUE` (11) | `JsonValue` |
 
 ### Source Management
 

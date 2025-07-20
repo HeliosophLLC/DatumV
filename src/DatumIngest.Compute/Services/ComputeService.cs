@@ -1,4 +1,5 @@
 using DatumIngest.Compute.Grpc;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Server;
 using Grpc.Core;
@@ -169,14 +170,46 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     }
 
     /// <inheritdoc />
-    public override async Task<ListResponse> ListFunctions(
+    public override async Task<ListFunctionsResponse> ListFunctions(
         ListFunctionsRequest request, ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
         CommandResult result = await _dispatcher.DispatchAsync(
             session, ".functions", context.CancellationToken).ConfigureAwait(false);
 
-        return ToListResponse(result);
+        if (!result.IsSuccess)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "List functions failed."));
+        }
+
+        ListFunctionsResponse response = new();
+
+        if (result.Functions is not null)
+        {
+            foreach (FunctionSignature function in result.Functions)
+            {
+                FunctionInfoMessage info = new()
+                {
+                    Name = function.Name,
+                    ReturnType = function.ReturnType ?? "",
+                    IsTableValued = function.IsTableValued,
+                };
+
+                foreach (ParameterSignature parameter in function.Parameters)
+                {
+                    info.Parameters.Add(new ParameterInfoMessage
+                    {
+                        Name = parameter.Name,
+                        Kind = ToParameterKind(parameter.Kind),
+                        Required = !parameter.IsOptional,
+                    });
+                }
+
+                response.Functions.Add(info);
+            }
+        }
+
+        return response;
     }
 
     /// <inheritdoc />
@@ -325,5 +358,28 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Maps a <see cref="ParameterSignature.Kind"/> string to the
+    /// corresponding <see cref="ParameterKindValue"/> enum value.
+    /// </summary>
+    private static ParameterKindValue ToParameterKind(string kind)
+    {
+        return kind switch
+        {
+            "UInt8" => ParameterKindValue.ParameterKindUint8,
+            "Scalar" => ParameterKindValue.ParameterKindScalar,
+            "Vector" => ParameterKindValue.ParameterKindVector,
+            "Matrix" => ParameterKindValue.ParameterKindMatrix,
+            "Tensor" => ParameterKindValue.ParameterKindTensor,
+            "UInt8Array" => ParameterKindValue.ParameterKindUint8Array,
+            "Image" => ParameterKindValue.ParameterKindImage,
+            "String" => ParameterKindValue.ParameterKindString,
+            "Date" => ParameterKindValue.ParameterKindDate,
+            "DateTime" => ParameterKindValue.ParameterKindDateTime,
+            "JsonValue" => ParameterKindValue.ParameterKindJsonValue,
+            _ => ParameterKindValue.ParameterKindAny,
+        };
     }
 }

@@ -1,3 +1,4 @@
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Server;
@@ -31,6 +32,9 @@ public sealed class CommandResult
     /// <summary>Gets the string list for list-style results (tables, functions, providers, etc.).</summary>
     public IReadOnlyList<string>? Items { get; private init; }
 
+    /// <summary>Gets function signatures for <see cref="CommandResultKind.FunctionList"/> results.</summary>
+    public IReadOnlyList<FunctionSignature>? Functions { get; private init; }
+
     /// <summary>Gets session information for <see cref="CommandResultKind.SessionList"/> results.</summary>
     public IReadOnlyList<SessionInfo>? Sessions { get; private init; }
 
@@ -56,10 +60,16 @@ public sealed class CommandResult
     /// <returns>A schema result.</returns>
     public static CommandResult SchemaResult(Schema schema) => new(CommandResultKind.SchemaResult) { Schema = schema };
 
-    /// <summary>Creates a list result (table names, function names, provider names, etc.).</summary>
+    /// <summary>Creates a list result (table names, provider names, etc.).</summary>
     /// <param name="items">The items to display.</param>
     /// <returns>A list result.</returns>
     public static CommandResult ListResult(IReadOnlyList<string> items) => new(CommandResultKind.ListResult) { Items = items };
+
+    /// <summary>Creates a function list result with full signature metadata.</summary>
+    /// <param name="functions">The function signatures to display.</param>
+    /// <returns>A function list result.</returns>
+    public static CommandResult FunctionList(IReadOnlyList<FunctionSignature> functions) =>
+        new(CommandResultKind.FunctionList) { Functions = functions };
 
     /// <summary>Creates a session list result.</summary>
     /// <param name="sessions">Session information snapshots.</param>
@@ -87,6 +97,9 @@ public enum CommandResultKind
 
     /// <summary>A list of named items; check <see cref="CommandResult.Items"/>.</summary>
     ListResult,
+
+    /// <summary>A list of function signatures; check <see cref="CommandResult.Functions"/>.</summary>
+    FunctionList,
 
     /// <summary>A list of active sessions; check <see cref="CommandResult.Sessions"/>.</summary>
     SessionList,

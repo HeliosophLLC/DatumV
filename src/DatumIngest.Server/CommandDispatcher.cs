@@ -1,5 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
+using DatumIngest.Functions;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
@@ -211,11 +213,25 @@ public sealed class CommandDispatcher
             return CommandResult.Error("Permission denied: you are not authorized to inspect schemas.");
         }
 
-        List<string> functions = session.FunctionRegistry.ScalarFunctionNames
+        List<string> functionNames = session.FunctionRegistry.ScalarFunctionNames
             .Concat(session.FunctionRegistry.TableValuedFunctionNames)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        return CommandResult.ListResult(functions);
+
+        List<FunctionSignature> signatures = new(functionNames.Count);
+
+        foreach (string name in functionNames)
+        {
+            FunctionSignature? signature = FunctionDocumentation.TryGet(name);
+
+            signatures.Add(signature ?? new FunctionSignature
+            {
+                Name = name,
+                Parameters = [],
+            });
+        }
+
+        return CommandResult.FunctionList(signatures);
     }
 
     private static CommandResult HandleAddSource(Session session, string definition)

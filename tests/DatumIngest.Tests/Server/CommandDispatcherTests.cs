@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Functions;
+using DatumIngest.Manifest;
 using DatumIngest.Server;
 
 namespace DatumIngest.Tests.Server;
@@ -100,15 +101,20 @@ public sealed class CommandDispatcherTests : IDisposable
     }
 
     /// <summary>
-    /// .functions returns scalar and table-valued function names.
+    /// .functions returns function signatures with parameter metadata.
     /// </summary>
     [Fact]
-    public async Task DispatchAsync_Functions_ReturnsListResult()
+    public async Task DispatchAsync_Functions_ReturnsFunctionList()
     {
         CommandResult result = await _dispatcher.DispatchAsync(
             _adminSession, ".functions", CancellationToken.None);
-        Assert.Equal(CommandResultKind.ListResult, result.Kind);
-        Assert.True(result.Items!.Count > 0);
+        Assert.Equal(CommandResultKind.FunctionList, result.Kind);
+        Assert.True(result.Functions!.Count > 0);
+
+        FunctionSignature? abs = result.Functions!.FirstOrDefault(f => f.Name == "abs");
+        Assert.NotNull(abs);
+        Assert.Single(abs.Parameters);
+        Assert.Equal("value", abs.Parameters[0].Name);
     }
 
     /// <summary>

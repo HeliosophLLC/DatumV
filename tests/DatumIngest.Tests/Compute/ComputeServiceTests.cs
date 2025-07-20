@@ -229,7 +229,7 @@ public sealed class ComputeServiceTests : IDisposable
     // ─────────────────── ListFunctions ───────────────────
 
     /// <summary>
-    /// ListFunctions returns available scalar and table-valued functions.
+    /// ListFunctions returns available functions with parameter metadata.
     /// </summary>
     [Fact]
     public async Task ListFunctions_ReturnsFunctions()
@@ -238,9 +238,15 @@ public sealed class ComputeServiceTests : IDisposable
 
         ListFunctionsRequest request = new() { SessionId = session.SessionId.ToString() };
 
-        ListResponse response = await _service.ListFunctions(request, TestCallContext.Create());
+        ListFunctionsResponse response = await _service.ListFunctions(request, TestCallContext.Create());
 
-        Assert.True(response.Items.Count > 0);
+        Assert.True(response.Functions.Count > 0);
+
+        FunctionInfoMessage clamp = Assert.Single(response.Functions, f => f.Name == "clamp");
+        Assert.Equal(3, clamp.Parameters.Count);
+        Assert.Equal("value", clamp.Parameters[0].Name);
+        Assert.Equal(ParameterKindValue.ParameterKindScalar, clamp.Parameters[0].Kind);
+        Assert.True(clamp.Parameters[0].Required);
     }
 
     // ─────────────────── Explain ───────────────────

@@ -26,8 +26,8 @@ service DatumCompute {
   // Lists all registered format providers.
   rpc ListProviders (ListProvidersRequest) returns (ListResponse);
 
-  // Lists all available functions.
-  rpc ListFunctions (ListFunctionsRequest) returns (ListResponse);
+  // Lists all available functions with argument metadata.
+  rpc ListFunctions (ListFunctionsRequest) returns (ListFunctionsResponse);
 
   // Returns the execution plan for a SQL query.
   rpc Explain (ExplainRequest) returns (ExplainResponse);
@@ -102,6 +102,52 @@ message ListProvidersRequest {
 
 message ListFunctionsRequest {
   string session_id = 1;
+}
+
+message ListFunctionsResponse {
+  repeated FunctionInfoMessage functions = 1;
+}
+
+message FunctionInfoMessage {
+  // The SQL function name.
+  string name = 1;
+
+  // Ordered parameter list.
+  repeated ParameterInfoMessage parameters = 2;
+
+  // The return type name (e.g. "Scalar", "String"), empty if context-dependent.
+  string return_type = 3;
+
+  // Whether this is a table-valued function used in FROM/JOIN.
+  bool is_table_valued = 4;
+}
+
+message ParameterInfoMessage {
+  // Parameter name (e.g. "value", "start").
+  string name = 1;
+
+  // Expected data kind for this parameter.
+  ParameterKindValue kind = 2;
+
+  // Whether this parameter is required.
+  bool required = 3;
+}
+
+// Parameter type constraint. Mirrors DataKindValue where applicable,
+// with an additional ANY variant for polymorphic parameters.
+enum ParameterKindValue {
+  PARAMETER_KIND_ANY = 0;
+  PARAMETER_KIND_UINT8 = 1;
+  PARAMETER_KIND_SCALAR = 2;
+  PARAMETER_KIND_VECTOR = 3;
+  PARAMETER_KIND_MATRIX = 4;
+  PARAMETER_KIND_TENSOR = 5;
+  PARAMETER_KIND_UINT8_ARRAY = 6;
+  PARAMETER_KIND_IMAGE = 7;
+  PARAMETER_KIND_STRING = 8;
+  PARAMETER_KIND_DATE = 9;
+  PARAMETER_KIND_DATE_TIME = 10;
+  PARAMETER_KIND_JSON_VALUE = 11;
 }
 
 message ListResponse {

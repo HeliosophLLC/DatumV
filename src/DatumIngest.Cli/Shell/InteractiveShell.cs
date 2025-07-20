@@ -1,6 +1,7 @@
 using System.Text;
 using DatumIngest.Catalog;
 using DatumIngest.Functions;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Server;
 using RadLine;
@@ -208,6 +209,10 @@ internal sealed class InteractiveShell
                 RenderList(result.Items!);
                 break;
 
+            case CommandResultKind.FunctionList:
+                RenderFunctions(result.Functions!);
+                break;
+
             case CommandResultKind.SessionList:
                 RenderSessionList(result.Sessions!);
                 break;
@@ -253,6 +258,57 @@ internal sealed class InteractiveShell
         }
 
         AnsiConsole.MarkupLine($"\n[grey]({items.Count} item(s))[/]");
+    }
+
+    private static void RenderFunctions(IReadOnlyList<FunctionSignature> functions)
+    {
+        foreach (FunctionSignature function in functions)
+        {
+            StringBuilder signature = new();
+            signature.Append(function.Name);
+            signature.Append('(');
+
+            for (int i = 0; i < function.Parameters.Count; i++)
+            {
+                if (i > 0)
+                {
+                    signature.Append(", ");
+                }
+
+                ParameterSignature parameter = function.Parameters[i];
+
+                if (parameter.IsOptional)
+                {
+                    signature.Append('[');
+                }
+
+                signature.Append(parameter.Name);
+                signature.Append(" : ");
+                signature.Append(parameter.Kind);
+
+                if (parameter.IsOptional)
+                {
+                    signature.Append(']');
+                }
+            }
+
+            signature.Append(')');
+
+            if (function.ReturnType is not null)
+            {
+                signature.Append(" -> ");
+                signature.Append(function.ReturnType);
+            }
+
+            if (function.IsTableValued)
+            {
+                signature.Append("  [TVF]");
+            }
+
+            AnsiConsole.WriteLine(signature.ToString());
+        }
+
+        AnsiConsole.MarkupLine($"\n[grey]({functions.Count} function(s))[/]");
     }
 
     private static void RenderSessionList(IReadOnlyList<SessionInfo> sessions)
