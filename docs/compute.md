@@ -296,48 +296,50 @@ The `DataValueMessage` uses a `oneof` discriminated union to carry typed values:
 
 Null values set `is_null = true` with no `oneof` field populated.
 
-## .NET Client Example
+## .NET Client Package
+
+The `DatumIngest.Compute.Client` package provides a generated gRPC client and a convenience `DatumComputeConnection` wrapper. It depends only on `Grpc.Net.Client` — no ASP.NET Core or server-side dependencies required.
+
+```bash
+dotnet add package DatumIngest.Compute.Client
+```
+
+### Using DatumComputeConnection
+
+`DatumComputeConnection` handles channel creation and optional API key header injection:
 
 ```csharp
-using Grpc.Net.Client;
-using Grpc.Core;
+using DatumIngest.Compute.Client;
 using DatumIngest.Compute.Grpc;
 
-// Connect to the server.
-GrpcChannel channel = GrpcChannel.ForAddress("http://localhost:5050");
-DatumCompute.DatumComputeClient client = new(channel);
-
-// Attach the API key to all calls.
-Metadata headers = new() { { "x-api-key", "my-secret-key" } };
-CallOptions callOptions = new(headers: headers);
+using DatumComputeConnection connection = new("http://localhost:5050", apiKey: "my-secret-key");
 
 // Create a session.
-CreateSessionResponse session = await client.CreateSessionAsync(
-    new CreateSessionRequest { Role = "admin" }, callOptions);
+CreateSessionResponse session = await connection.Client.CreateSessionAsync(
+    new CreateSessionRequest { Role = "admin" });
 
 string sessionId = session.SessionId;
 
 // Add a CSV source.
-await client.AddSourceAsync(
+await connection.Client.AddSourceAsync(
     new AddSourceRequest
     {
         SessionId = sessionId,
         SourceDefinition = "csv:wine=winequality-red.csv",
-    }, callOptions);
+    });
 
 // Stream query results.
-using AsyncServerStreamingCall<QueryRow> stream = client.Query(
+using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
     new QueryRequest
     {
         SessionId = sessionId,
         Sql = "SELECT alcohol, quality FROM wine WHERE quality > 6 LIMIT 10",
-    }, callOptions);
+    });
 
 SchemaMessage? schema = null;
 
 await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
 {
-    // Schema is attached to the first row only.
     if (row.Schema is not null)
     {
         schema = row.Schema;
@@ -350,8 +352,8 @@ await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
 }
 
 // Clean up.
-await client.DestroySessionAsync(
-    new DestroySessionRequest { SessionId = sessionId }, callOptions);
+await connection.Client.DestroySessionAsync(
+    new DestroySessionRequest { SessionId = sessionId });
 
 static string FormatValue(DataValueMessage value)
 {
@@ -360,6 +362,25 @@ static string FormatValue(DataValueMessage value)
     if (value.HasUint8Value) return value.Uint8Value.ToString();
     return value.ToString();
 }
+```
+
+### Using the Generated Client Directly
+
+For advanced scenarios (custom channel options, dependency injection, interceptors), use `DatumCompute.DatumComputeClient` directly with your own `GrpcChannel`:
+
+```csharp
+using Grpc.Net.Client;
+using Grpc.Core;
+using DatumIngest.Compute.Grpc;
+
+GrpcChannel channel = GrpcChannel.ForAddress("http://localhost:5050");
+DatumCompute.DatumComputeClient client = new(channel);
+
+Metadata headers = new() { { "x-api-key", "my-secret-key" } };
+CallOptions callOptions = new(headers: headers);
+
+CreateSessionResponse session = await client.CreateSessionAsync(
+    new CreateSessionRequest { Role = "user" }, callOptions);
 ```
 
 ## Python Client Example

@@ -214,6 +214,14 @@ dotnet add package DatumIngest.Compute
 
 See [docs/compute.md](docs/compute.md) for embedding in an ASP.NET host.
 
+### As a gRPC client
+
+```bash
+dotnet add package DatumIngest.Compute.Client
+```
+
+See [docs/compute.md](docs/compute.md#net-client-package) for connecting to a running compute backend.
+
 ### As a CLI tool
 
 ```bash
