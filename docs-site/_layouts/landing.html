@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title | default: site.title }}</title>
+  <meta name="description" content="{{ site.description }}">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="{{ page.title | default: site.title }}">
+  <meta property="og:description" content="{{ site.description }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ site.url }}{{ site.baseurl }}/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ page.title | default: site.title }}">
+  <meta name="twitter:description" content="{{ site.description }}">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="{{ '/assets/img/favicon.svg' | relative_url }}">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ '/assets/css/landing.css' | relative_url }}">
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════
+       HERO SECTION — full viewport, canvas animation behind content
+       ═══════════════════════════════════════════════════════════════════ -->
+  <section class="hero" id="hero">
+    <canvas id="hero-canvas"></canvas>
+
+    <div class="hero-content">
+      <h1 class="hero-title">
+        <span class="hero-title-datum">Datum</span><span class="hero-title-ingest">Ingest</span><span class="hero-title-tm">™</span>
+      </h1>
+      <p class="hero-tagline">High-performance ML dataset query engine for .NET</p>
+      <p class="hero-sub">Replace fragile dataset scripts with SQL. Query CSV, JSON, HDF5, Parquet, ZIP, and IDX simultaneously — join, transform, and output to ML-ready formats.</p>
+
+      <div class="hero-cta">
+        <a href="{{ '/docs/sql-reference/' | relative_url }}" class="btn btn-primary">Get Started</a>
+        <a href="https://github.com/heliosoph/DatumIngest" class="btn btn-ghost" target="_blank" rel="noopener">
+          <svg class="btn-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+    </div>
+
+    <div class="hero-scroll-hint" aria-hidden="true">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       FEATURE CARDS
+       ═══════════════════════════════════════════════════════════════════ -->
+  <section class="features" id="features">
+    <h2 class="section-title">Why DatumIngest?</h2>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </div>
+        <h3>SQL Over 7 Formats</h3>
+        <p>Query CSV, JSON, JSONL, ZIP, HDF5, Parquet, and IDX files simultaneously. JOIN across formats in a single query.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        </div>
+        <h3>ML-Native Types</h3>
+        <p>Vector, Matrix, Tensor, and Image are first-class column types with dedicated functions like <code>softmax</code>, <code>cosine_similarity</code>, and <code>normalize</code>.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 8h20M8 2v20"/></svg>
+        </div>
+        <h3>Fused Image Pipeline</h3>
+        <p>Chain <code>resize</code>, <code>crop</code>, <code>grayscale</code>, <code>elastic_deform</code> and more. DatumIngest fuses the chain — one decode, one encode.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <h3>Source Indexes</h3>
+        <p>Build <code>.datum-index</code> sidecars with chunk statistics, bloom filters, and sorted value indexes for sub-millisecond predicate pruning.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20V10M6 20V4M18 20v-4"/></svg>
+        </div>
+        <h3>100+ Functions</h3>
+        <p>Math, string, JSON, temporal, ML activations, vector reductions, distance metrics, image transforms — all built in.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
+        <h3>Dataset Manifests</h3>
+        <p>One command generates a JSON manifest with per-column statistics, histograms, quantiles, and pairwise column interactions.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       QUICK START CODE
+       ═══════════════════════════════════════════════════════════════════ -->
+  <section class="quickstart" id="quickstart">
+    <h2 class="section-title">Quick Start</h2>
+
+    <div class="code-examples">
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-label">Query a CSV file</span>
+        </div>
+        <pre><code>datum-ingest explore "SELECT name, score FROM data WHERE score > 90" \
+  --source "data=./iris.csv"</code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-label">Join ZIP + JSON, transform images, output to HDF5</span>
+        </div>
+        <pre><code>datum-ingest query "
+  SELECT resize_and_crop(load_image(img.file_bytes), 224, 224, 'center') AS image,
+         cap.caption
+  FROM images AS img
+  INNER JOIN captions AS cap ON cap.file_name = GET_FILENAME(img.file_name)
+  WHERE len(cap.caption) > 20
+  INTO 'dataset.h5'
+" --source "images=./train2017.zip" --source "captions=./captions.json"</code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-label">Sharded ETL with checkpointing</span>
+        </div>
+        <pre><code>datum-ingest query "
+  SELECT id, normalize(value) AS norm_value, category
+  FROM data
+  INTO 'output/result.csv' SHARD ON sample_count 10000
+" --source "data=./large_dataset.csv" --checkpoint</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       DOCUMENTATION INDEX
+       ═══════════════════════════════════════════════════════════════════ -->
+  <section class="docs-index" id="docs-index">
+    <h2 class="section-title">Documentation</h2>
+    <div class="docs-grid">
+      <a href="{{ '/docs/sql-reference/' | relative_url }}" class="doc-link">
+        <strong>SQL Reference</strong>
+        <span>Dialect, type system, EXPLAIN, schema introspection</span>
+      </a>
+      <a href="{{ '/docs/data-providers/' | relative_url }}" class="doc-link">
+        <strong>Data Providers</strong>
+        <span>CSV, JSON, JSONL, ZIP, HDF5, Parquet, IDX</span>
+      </a>
+      <a href="{{ '/docs/functions-reference/' | relative_url }}" class="doc-link">
+        <strong>Functions</strong>
+        <span>100+ built-in: math, string, image, ML, vector</span>
+      </a>
+      <a href="{{ '/docs/architecture/' | relative_url }}" class="doc-link">
+        <strong>Architecture</strong>
+        <span>Streaming pipelines, pushdown, lazy evaluation</span>
+      </a>
+      <a href="{{ '/docs/source-indexes/' | relative_url }}" class="doc-link">
+        <strong>Source Indexes</strong>
+        <span>Bloom filters, sorted indexes, statistics pruning</span>
+      </a>
+      <a href="{{ '/docs/statistics-and-manifests/' | relative_url }}" class="doc-link">
+        <strong>Statistics &amp; Manifests</strong>
+        <span>30+ metrics, interactions, JSON manifests</span>
+      </a>
+      <a href="{{ '/docs/programmatic-api/' | relative_url }}" class="doc-link">
+        <strong>Programmatic API</strong>
+        <span>C# API: manifest, EXPLAIN, schema, checkpointing</span>
+      </a>
+      <a href="{{ '/docs/compute-service/' | relative_url }}" class="doc-link">
+        <strong>Compute Service</strong>
+        <span>gRPC embedding, sessions, streaming queries</span>
+      </a>
+      <a href="{{ '/docs/language-server/' | relative_url }}" class="doc-link">
+        <strong>Language Server</strong>
+        <span>Autocomplete, diagnostics, hover, WASM</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       INSTALL
+       ═══════════════════════════════════════════════════════════════════ -->
+  <section class="install" id="install">
+    <h2 class="section-title">Installation</h2>
+    <div class="install-grid">
+      <div class="install-option">
+        <h3>.NET Library</h3>
+        <pre><code>dotnet add package DatumIngest</code></pre>
+      </div>
+      <div class="install-option">
+        <h3>gRPC Compute Service</h3>
+        <pre><code>dotnet add package DatumIngest.Compute</code></pre>
+      </div>
+      <div class="install-option">
+        <h3>CLI Tool</h3>
+        <pre><code>dotnet tool install --global DatumIngest.Cli</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       FOOTER
+       ═══════════════════════════════════════════════════════════════════ -->
+  <footer class="site-footer">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <span class="footer-logo">✦</span>
+        <span class="footer-company">Heliosoph</span>
+        <span class="footer-motto">Wisdom through Illumination</span>
+      </div>
+      <div class="footer-links">
+        <a href="{{ '/docs/sql-reference/' | relative_url }}">Docs</a>
+        <a href="{{ '/benchmarks/' | relative_url }}">Benchmarks</a>
+        <a href="{{ '/roadmap/' | relative_url }}">Roadmap</a>
+        <a href="https://github.com/heliosoph/DatumIngest" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <p class="footer-legal">&copy; 2026 Heliosoph LLC. DatumIngest&trade; is a trademark of Heliosoph LLC.</p>
+    </div>
+  </footer>
+
+  <script src="{{ '/assets/js/hero-animation.js' | relative_url }}"></script>
+</body>
+</html>

@@ -3,3 +3,10 @@
 .vs/
 /BenchmarkDotNet.Artifacts/**
 /Nuget.Config
+
+# Jekyll (docs-site)
+docs-site/_site/
+docs-site/.jekyll-cache/
+docs-site/.jekyll-metadata
+docs-site/.sass-cache/
+docs-site/docs/

@@ -17,6 +17,81 @@
 				"$msCompile"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Docs Site: Build & Serve (Docker)",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"build",
+				"-f", "docs-site/Dockerfile",
+				"-t", "datumingest-docs",
+				"."
+			],
+			"problemMatcher": [],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "Docs Site: Run (Docker)",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"run",
+				"--rm",
+				"-p", "4000:4000",
+				"-p", "35729:35729",
+				"--name", "datumingest-docs",
+				"datumingest-docs"
+			],
+			"dependsOn": "Docs Site: Build & Serve (Docker)",
+			"problemMatcher": [],
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "Docs Site: Rebuild & Run (Docker)",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"rm", "-f", "datumingest-docs"
+			],
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "silent"
+			},
+			"dependsOrder": "sequence",
+			"dependsOn": [],
+			"hide": true
+		},
+		{
+			"label": "Docs Site: Start",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"Docs Site: Rebuild & Run (Docker)",
+				"Docs Site: Run (Docker)"
+			],
+			"problemMatcher": [],
+			"group": "build",
+			"presentation": {
+				"reveal": "always"
+			}
+		},
+		{
+			"label": "Docs Site: Stop",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"rm", "-f", "datumingest-docs"
+			],
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }

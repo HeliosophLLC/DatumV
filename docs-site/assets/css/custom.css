@@ -1,0 +1,204 @@
+/* ═══════════════════════════════════════════════════════════════════
+   DatumIngest™ — just-the-docs dark theme overrides
+   Ensures every surface is dark gray/purple. The SCSS color scheme
+   handles variables but some elements need direct CSS overrides.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── Global surfaces ───────────────────────────────────────────── */
+body,
+.main-content-wrap,
+.side-bar {
+  background-color: #0d0d1a;
+  color: #d0cee8;
+}
+
+.side-bar {
+  background-color: #12122a;
+  border-right: 1px solid #2d2b55;
+}
+
+.main-content {
+  background-color: #0d0d1a;
+}
+
+/* ─── Text ──────────────────────────────────────────────────────── */
+body,
+p,
+li,
+td,
+.main-content {
+  color: #d0cee8;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: #e8e4ff;
+}
+
+/* ─── Navigation ────────────────────────────────────────────────── */
+.site-title {
+  color: #fff !important;
+  font-weight: 800 !important;
+}
+
+.nav-list-link {
+  color: #b0aed0 !important;
+}
+
+.nav-list-link:hover,
+.nav-list-link.active {
+  color: #e8e4ff !important;
+  background-color: rgba(139, 92, 246, 0.08);
+}
+
+.nav-list-item .nav-list-link.active {
+  border-left-color: #7c3aed;
+}
+
+.breadcrumb-nav-list-item a {
+  color: #8886a8;
+}
+
+/* ─── Links ─────────────────────────────────────────────────────── */
+a {
+  color: #b794f6;
+}
+
+a:hover {
+  color: #d4bcff;
+}
+
+/* ─── Code ──────────────────────────────────────────────────────── */
+code {
+  background: #16162a;
+  color: #c9b8ff;
+  border: 1px solid #2d2b55;
+}
+
+.highlight pre,
+pre.highlight,
+pre {
+  background: #111127 !important;
+  border: 1px solid rgba(139, 92, 246, 0.12);
+}
+
+.highlight pre code,
+pre code {
+  background: transparent;
+  border: none;
+  color: #d0cee8;
+}
+
+code.language-plaintext {
+  background: #16162a;
+  color: #c9b8ff;
+}
+
+/* ─── Tables ────────────────────────────────────────────────────── */
+table {
+  border-color: #2d2b55;
+}
+
+th {
+  background: rgba(124, 58, 237, 0.1);
+  color: #c9b8ff;
+  border-color: #2d2b55;
+}
+
+td {
+  border-color: #2d2b55;
+  background-color: #0d0d1a;
+}
+
+tr:nth-child(even) td {
+  background-color: #111127;
+}
+
+/* ─── Search ────────────────────────────────────────────────────── */
+.search-input {
+  background: #16162a;
+  border-color: #2d2b55;
+  color: #e0dff0;
+}
+
+.search-input:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+
+.search-input::placeholder {
+  color: #6d6a8a;
+}
+
+.search-results {
+  background: #16162a;
+  border-color: #2d2b55;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.search-result {
+  border-color: #2d2b55;
+}
+
+.search-result-title {
+  color: #e8e4ff;
+}
+
+.search-result-doc-title {
+  color: #b794f6;
+}
+
+.search-result-preview {
+  color: #b0aed0;
+}
+
+.search-result:hover,
+.search-result-rel-url {
+  color: #8886a8;
+}
+
+/* ─── Buttons & misc ────────────────────────────────────────────── */
+.btn {
+  background-color: #1a1a2e;
+  color: #b794f6;
+  border-color: #2d2b55;
+}
+
+/* Aux link (GitHub) */
+.aux-nav .aux-nav-list-item a {
+  color: #b794f6;
+}
+.aux-nav .aux-nav-list-item a:hover {
+  color: #d4bcff;
+}
+
+/* Edit link at bottom of pages */
+.page-edit-link {
+  color: #8886a8;
+}
+.page-edit-link:hover {
+  color: #b794f6;
+}
+
+/* Footer */
+.site-footer {
+  background-color: #0d0d1a;
+  border-top-color: #2d2b55;
+  color: #6d6a8a;
+}
+
+/* Horizontal rules */
+hr {
+  border-color: #2d2b55;
+}
+
+/* Blockquotes */
+blockquote {
+  border-left-color: #7c3aed;
+  color: #b0aed0;
+}
+
+/* Label / badge overrides */
+.label {
+  background-color: rgba(124, 58, 237, 0.15);
+  color: #c9b8ff;
+}
