@@ -46,7 +46,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **100+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
-- **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, subqueries
+- **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, subqueries, quoted identifiers
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI)
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics

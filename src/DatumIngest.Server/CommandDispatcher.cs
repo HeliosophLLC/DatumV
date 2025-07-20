@@ -274,7 +274,7 @@ public sealed class CommandDispatcher
         IQueryOperator plan = await planner.PlanAsync(statement, cancellationToken).ConfigureAwait(false);
 
         ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
-        return CommandResult.Success(explainPlan.Render());
+        return CommandResult.ExplainResult(explainPlan.Render(), explainPlan);
     }
 
     private CommandResult HandleListSessions(Session session)

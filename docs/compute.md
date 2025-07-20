@@ -204,8 +204,36 @@ Returns the execution plan for a SQL query without running it.
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID. |
 | `sql` | `string` | SQL query to explain. |
+| `analyze` | `bool` | Reserved for future use. When `true`, the query will be executed and runtime metrics (row counts, timing) will be collected. Not yet implemented. |
 
-**Returns:** `plan_text` — the rendered query execution plan tree.
+**Response fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `plan_text` | `string` | Human-readable rendered plan tree (always populated). |
+| `root` | `ExplainPlanNodeMessage` | Structured plan tree root for programmatic inspection. |
+
+**`ExplainPlanNodeMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `operator_name` | `string` | Operator type (e.g. `Scan`, `Filter`, `INNER Join`, `Sort`). |
+| `details` | `string` | Operator-specific configuration (table name, predicate, columns). |
+| `children` | `repeated ExplainPlanNodeMessage` | Child operator subtrees. |
+| `child_label` | `string` | Edge label from parent (e.g. `probe`, `build` for hash joins). |
+| `warnings` | `repeated string` | Performance warnings (e.g. `CROSS JOIN`, `LIKE forces full scan`). |
+| `annotations` | `repeated string` | Static plan annotations (e.g. `bounded top-N sort (N=100)`). |
+| `runtime` | `ExplainRuntimeMetrics` | Runtime metrics — populated only when `analyze = true`. |
+
+**`ExplainRuntimeMetrics`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rows_produced` | `int64` | Rows produced by this operator. |
+| `rows_consumed` | `int64` | Rows consumed from child operators. |
+| `self_time_us` | `int64` | Self time in microseconds (excludes children). |
+| `total_time_us` | `int64` | Total time in microseconds (includes children). |
+| `runtime_annotations` | `repeated string` | Runtime-only annotations (e.g. Parquet row group pruning stats). |
 
 ### Catalog Inspection
 

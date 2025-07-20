@@ -271,6 +271,37 @@ public sealed class ComputeServiceTests : IDisposable
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
     }
 
+    /// <summary>
+    /// Explain with valid SQL returns both plan text and a structured plan tree.
+    /// </summary>
+    [Fact]
+    public async Task Explain_ValidSql_ReturnsStructuredPlan()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        ExplainRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT name FROM data WHERE age > 30",
+        };
+
+        ExplainResponse response = await _service.Explain(request, TestCallContext.Create());
+
+        // plan_text is populated for backward compatibility.
+        Assert.False(string.IsNullOrEmpty(response.PlanText));
+
+        // Structured root is populated.
+        Assert.NotNull(response.Root);
+        Assert.False(string.IsNullOrEmpty(response.Root.OperatorName));
+
+        // The plan should have at least one child (scan under filter/project).
+        Assert.NotEmpty(response.Root.Children);
+    }
+
     // ─────────────────── AddSource ───────────────────
 
     /// <summary>

@@ -159,10 +159,61 @@ message ListResponse {
 message ExplainRequest {
   string session_id = 1;
   string sql = 2;
+
+  // When true, the plan is executed to collect runtime metrics
+  // (row counts, timings). Not yet implemented — reserved for future use.
+  bool analyze = 3;
 }
 
 message ExplainResponse {
+  // Human-readable plan text (always populated for backward compatibility).
   string plan_text = 1;
+
+  // Structured plan tree. Root node of the operator hierarchy.
+  ExplainPlanNodeMessage root = 2;
+}
+
+// A single node in the execution plan tree.
+message ExplainPlanNodeMessage {
+  // Operator name (e.g. "Scan", "Filter", "INNER Join", "Sort").
+  string operator_name = 1;
+
+  // Operator-specific detail string (e.g. table name, predicate, columns).
+  string details = 2;
+
+  // Child operator nodes forming the plan subtree.
+  repeated ExplainPlanNodeMessage children = 3;
+
+  // Edge label from parent (e.g. "probe", "build" for hash joins).
+  string child_label = 4;
+
+  // Static plan warnings (e.g. "CROSS JOIN", "LIKE forces full scan").
+  repeated string warnings = 5;
+
+  // Static plan annotations (e.g. "bounded top-N sort (N=100)").
+  repeated string annotations = 6;
+
+  // Runtime metrics — populated only when analyze = true.
+  ExplainRuntimeMetrics runtime = 7;
+}
+
+// Runtime execution metrics for a single plan node.
+// Populated only by EXPLAIN ANALYZE.
+message ExplainRuntimeMetrics {
+  // Number of rows produced by this operator.
+  int64 rows_produced = 1;
+
+  // Number of rows consumed from child operators.
+  int64 rows_consumed = 2;
+
+  // Self time in microseconds (excludes children).
+  int64 self_time_us = 3;
+
+  // Total time in microseconds (includes children).
+  int64 total_time_us = 4;
+
+  // Runtime-only annotations (e.g. Parquet row group pruning stats).
+  repeated string runtime_annotations = 5;
 }
 
 // ───────────────────── Source Management ─────────────────────

@@ -98,7 +98,7 @@ The completion engine classifies the cursor position using tokenizer-only analys
 |------|---------|-------------|
 | `StatementStart` | Empty input | `SELECT` |
 | `AfterSelect` | After `SELECT` | Columns, scalar functions, `FROM`, `AS`, `CAST` |
-| `AfterFrom` / `AfterJoin` | After `FROM` or `JOIN` | Tables, table-valued functions |
+| `AfterFrom` / `AfterJoin` | After `FROM` or `JOIN` | Tables, table-valued functions. Table names that require quoting (contain dots, spaces, hyphens, or collide with keywords) are automatically bracket-quoted in the inserted text. |
 | `AfterWhere` / `AfterOn` | After `WHERE` or `ON` | Columns, functions, `AND`, `OR`, `NOT`, etc. |
 | `AfterOrderBy` | After `ORDER BY` | Columns, `ASC`, `DESC` |
 | `AfterDot` | After `alias.` | Columns from the qualified table |

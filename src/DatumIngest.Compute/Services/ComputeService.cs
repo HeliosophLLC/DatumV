@@ -1,4 +1,5 @@
 using DatumIngest.Compute.Grpc;
+using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Server;
@@ -226,7 +227,50 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Explain failed."));
         }
 
-        return new ExplainResponse { PlanText = result.Message ?? "" };
+        ExplainResponse response = new() { PlanText = result.Message ?? "" };
+
+        if (result.ExplainPlan is not null)
+        {
+            response.Root = ToProto(result.ExplainPlan);
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Recursively maps an <see cref="ExplainPlanNode"/> tree to its protobuf representation.
+    /// </summary>
+    private static ExplainPlanNodeMessage ToProto(ExplainPlanNode node)
+    {
+        ExplainPlanNodeMessage message = new()
+        {
+            OperatorName = node.OperatorName,
+            Details = node.Details,
+            ChildLabel = node.ChildLabel ?? "",
+        };
+
+        message.Warnings.AddRange(node.Warnings);
+        message.Annotations.AddRange(node.Annotations);
+
+        foreach (ExplainPlanNode child in node.Children)
+        {
+            message.Children.Add(ToProto(child));
+        }
+
+        if (node.RowsProduced.HasValue || node.SelfTime.HasValue)
+        {
+            ExplainRuntimeMetrics runtime = new()
+            {
+                RowsProduced = node.RowsProduced ?? 0,
+                RowsConsumed = node.RowsConsumed ?? 0,
+                SelfTimeUs = node.SelfTime.HasValue ? (long)node.SelfTime.Value.TotalMicroseconds : 0,
+                TotalTimeUs = node.TotalTime.HasValue ? (long)node.TotalTime.Value.TotalMicroseconds : 0,
+            };
+            runtime.RuntimeAnnotations.AddRange(node.RuntimeAnnotations);
+            message.Runtime = runtime;
+        }
+
+        return message;
     }
 
     /// <inheritdoc />

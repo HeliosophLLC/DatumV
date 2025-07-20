@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
@@ -38,6 +39,9 @@ public sealed class CommandResult
     /// <summary>Gets session information for <see cref="CommandResultKind.SessionList"/> results.</summary>
     public IReadOnlyList<SessionInfo>? Sessions { get; private init; }
 
+    /// <summary>Gets the structured explain plan tree for <see cref="CommandResultKind.Success"/> explain results.</summary>
+    public ExplainPlanNode? ExplainPlan { get; private init; }
+
     /// <summary>Creates a success result with a message.</summary>
     /// <param name="message">Human-readable success message.</param>
     /// <returns>A success result.</returns>
@@ -76,6 +80,13 @@ public sealed class CommandResult
     /// <returns>A session list result.</returns>
     public static CommandResult SessionList(IReadOnlyList<SessionInfo> sessions) =>
         new(CommandResultKind.SessionList) { Sessions = sessions };
+
+    /// <summary>Creates a success result that also carries a structured explain plan.</summary>
+    /// <param name="planText">Human-readable rendered plan text.</param>
+    /// <param name="explainPlan">The structured explain plan tree.</param>
+    /// <returns>A success result with the explain plan attached.</returns>
+    public static CommandResult ExplainResult(string planText, ExplainPlanNode explainPlan) =>
+        new(CommandResultKind.Success) { Message = planText, ExplainPlan = explainPlan };
 }
 
 /// <summary>

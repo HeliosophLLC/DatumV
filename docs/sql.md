@@ -23,6 +23,23 @@ FROM (SELECT ... FROM ...) AS subquery
 FROM RANGE(0, 360) AS r
 ```
 
+### Quoted table names
+
+Table names that contain dots, spaces, hyphens, start with a digit, or collide with SQL keywords must be quoted. Three quoting styles are supported:
+
+```sql
+-- Bracket-quoted (recommended)
+SELECT * FROM [adult.data]
+
+-- Double-quoted
+SELECT * FROM "adult.data"
+
+-- Single-quoted
+SELECT * FROM 'adult.data'
+```
+
+The `.tables` command and tab completion automatically bracket-quote names that need it, so you can copy them directly into your SQL.
+
 Table-valued functions can be used as data sources in FROM and JOIN clauses:
 
 ```sql
@@ -252,7 +269,7 @@ The explain plan emits warnings about potential performance issues:
 
 ## Schema Introspection
 
-The `schema` command resolves column metadata from all table sources in a query's FROM and JOIN clauses without executing the query. This is designed for editor integration (Monaco, VS Code) where column names, types, and source tables are needed for autocomplete.
+The `schema` command resolves column metadata from all table sources in a query's FROM and JOIN clauses without executing the query. This is designed for editor integration (Monaco, VS Code) where column names, types, and source tables are needed for autocomplete. Table names in the query can use any of the quoted identifier styles described in the [FROM](#from) section.
 
 ### CLI usage
 

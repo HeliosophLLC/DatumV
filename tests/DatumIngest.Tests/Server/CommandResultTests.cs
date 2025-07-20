@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Server;
 
@@ -83,6 +84,24 @@ public sealed class CommandResultTests
         CommandResult result = CommandResult.SessionList(sessions);
         Assert.Equal(CommandResultKind.SessionList, result.Kind);
         Assert.Single(result.Sessions!);
+    }
+
+    /// <summary>
+    /// ExplainResult carries both the rendered text and the structured plan tree.
+    /// </summary>
+    [Fact]
+    public void ExplainResult_SetsMessageAndPlan()
+    {
+        ExplainPlanNode plan = new()
+        {
+            OperatorName = "Scan",
+            Details = "table: t",
+        };
+        CommandResult result = CommandResult.ExplainResult("rendered text", plan);
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("rendered text", result.Message);
+        Assert.Same(plan, result.ExplainPlan);
     }
 
     private static async IAsyncEnumerable<Row> EmptyRows()
