@@ -16,19 +16,22 @@ public sealed class Session : IDisposable
     private readonly object _lock = new();
 
     /// <summary>
-    /// Initializes a new session with the specified role, dataset, catalog, and function registry.
+    /// Initializes a new session with the specified role, dataset, catalog, function registry,
+    /// and resource governance limits.
     /// </summary>
     /// <param name="role">Authorization level for this session.</param>
     /// <param name="datasetId">Identifier of the dataset this session is serving, or <see langword="null"/> for local/shell sessions.</param>
     /// <param name="catalog">Isolated table catalog for this session's data.</param>
     /// <param name="functionRegistry">Shared function registry (immutable, safe to share across sessions).</param>
-    internal Session(SessionRole role, string? datasetId, TableCatalog catalog, FunctionRegistry functionRegistry)
+    /// <param name="governor">Resource governance limits for this session, or <see langword="null"/> for unlimited.</param>
+    internal Session(SessionRole role, string? datasetId, TableCatalog catalog, FunctionRegistry functionRegistry, QueryGovernor? governor = null)
     {
         SessionId = Guid.NewGuid();
         Role = role;
         DatasetId = datasetId;
         Catalog = catalog;
         FunctionRegistry = functionRegistry;
+        Governor = governor ?? QueryGovernor.Unlimited;
         CreatedAt = DateTimeOffset.UtcNow;
         LastActivityAt = CreatedAt;
     }
@@ -47,6 +50,9 @@ public sealed class Session : IDisposable
 
     /// <summary>Gets the shared function registry.</summary>
     public FunctionRegistry FunctionRegistry { get; }
+
+    /// <summary>Gets the resource governance limits for this session.</summary>
+    public QueryGovernor Governor { get; }
 
     /// <summary>Gets the timestamp when this session was created.</summary>
     public DateTimeOffset CreatedAt { get; }

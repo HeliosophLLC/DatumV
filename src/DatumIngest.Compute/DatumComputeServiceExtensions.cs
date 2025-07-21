@@ -52,6 +52,12 @@ public static class DatumComputeServiceExtensions
         DatumComputeOptions options = new();
         configure?.Invoke(options);
 
+        // Register the server-default governor built from configuration.
+        services.TryAddSingleton(new QueryGovernor(
+            options.QueryTimeoutSeconds,
+            options.MaxOutputRows,
+            options.ThrottleDelayMilliseconds));
+
         // Wire ApiKeyOptions from the new unified options object.
         services.Configure<ApiKeyOptions>(apiKeyOptions =>
         {

@@ -15,16 +15,20 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 {
     private readonly SessionManager _sessionManager;
     private readonly CommandDispatcher _dispatcher;
+    private readonly QueryGovernor _serverDefaults;
 
     /// <summary>
-    /// Initializes the gRPC service with the shared session manager and command dispatcher.
+    /// Initializes the gRPC service with the shared session manager, command dispatcher,
+    /// and server-wide governance defaults.
     /// </summary>
     /// <param name="sessionManager">Session manager for session lifecycle.</param>
     /// <param name="dispatcher">Command dispatcher for query execution.</param>
-    public ComputeService(SessionManager sessionManager, CommandDispatcher dispatcher)
+    /// <param name="serverDefaults">Server-wide default resource governance limits.</param>
+    public ComputeService(SessionManager sessionManager, CommandDispatcher dispatcher, QueryGovernor serverDefaults)
     {
         _sessionManager = sessionManager;
         _dispatcher = dispatcher;
+        _serverDefaults = serverDefaults;
     }
 
     /// <inheritdoc />
@@ -32,12 +36,17 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         CreateSessionRequest request, ServerCallContext context)
     {
         SessionRole role = ParseRole(request.Role);
+        QueryGovernor governor = QueryGovernor.Merge(
+            _serverDefaults,
+            request.QueryTimeoutSeconds,
+            request.MaxOutputRows,
+            request.ThrottleDelayMs);
 
         Session session;
 
         if (string.IsNullOrEmpty(request.DatasetId))
         {
-            session = _sessionManager.CreateLocalSession(role, new DatumIngest.Catalog.TableCatalog());
+            session = _sessionManager.CreateLocalSession(role, new DatumIngest.Catalog.TableCatalog(), governor);
         }
         else
         {
@@ -47,7 +56,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     role,
                     request.DatasetId,
                     DatasetCatalogFactory.Create,
-                    context.CancellationToken).ConfigureAwait(false);
+                    context.CancellationToken,
+                    governor).ConfigureAwait(false);
             }
             catch (InvalidOperationException)
             {
@@ -91,6 +101,13 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             context.CancellationToken, session.CancellationToken);
         CancellationToken cancellationToken = linkedTokenSource.Token;
 
+        // Apply query deadline if the session governor specifies one.
+        QueryGovernor governor = session.Governor;
+        if (governor.QueryTimeoutSeconds.HasValue)
+        {
+            linkedTokenSource.CancelAfter(TimeSpan.FromSeconds(governor.QueryTimeoutSeconds.Value));
+        }
+
         CommandResult result = await _dispatcher.DispatchAsync(
             session, request.Sql, cancellationToken).ConfigureAwait(false);
 
@@ -105,24 +122,57 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
 
         bool schemaWritten = false;
+        long rowCount = 0;
+        long? maxRows = governor.MaxOutputRows;
+        int? throttleMilliseconds = governor.ThrottleDelayMilliseconds;
 
-        await foreach (Row row in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
+        try
         {
-            QueryRow queryRow = new();
-
-            // Attach schema to the first row only.
-            if (!schemaWritten)
+            await foreach (Row row in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                queryRow.Schema = ProtoConverter.ToProto(result.Schema);
-                schemaWritten = true;
+                rowCount++;
+
+                if (maxRows.HasValue && rowCount > maxRows.Value)
+                {
+                    throw new RpcException(new Status(
+                        StatusCode.ResourceExhausted,
+                        $"Row budget exceeded (limit: {maxRows.Value})."));
+                }
+
+                QueryRow queryRow = new();
+
+                // Attach schema to the first row only.
+                if (!schemaWritten)
+                {
+                    queryRow.Schema = ProtoConverter.ToProto(result.Schema);
+                    schemaWritten = true;
+                }
+
+                for (int i = 0; i < row.FieldCount; i++)
+                {
+                    queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
+                }
+
+                await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
+
+                if (throttleMilliseconds.HasValue && rowCount % QueryGovernor.ThrottleBatchSize == 0)
+                {
+                    await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
+        {
+            // The gRPC call was not cancelled by the client. If a deadline was
+            // configured, report DeadlineExceeded; otherwise it was a KillQuery.
+            if (governor.QueryTimeoutSeconds.HasValue)
+            {
+                throw new RpcException(new Status(
+                    StatusCode.DeadlineExceeded,
+                    $"Query exceeded the {governor.QueryTimeoutSeconds.Value}s deadline."));
             }
 
-            for (int i = 0; i < row.FieldCount; i++)
-            {
-                queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
-            }
-
-            await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
+            throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
         }
     }
 

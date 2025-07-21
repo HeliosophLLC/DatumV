@@ -98,6 +98,9 @@ builder.Services.AddDatumCompute(options => options.ApiKey = "key");
 | `ApiKey` | `string` | `""` | API key clients must send in `x-api-key` header. Empty disables auth. |
 | `MaxReceiveMessageSize` | `int` | `67108864` (64 MB) | Maximum inbound gRPC message size in bytes. |
 | `MaxSendMessageSize` | `int` | `67108864` (64 MB) | Maximum outbound gRPC message size in bytes. |
+| `QueryTimeoutSeconds` | `int?` | `null` | Server-wide default query deadline in seconds. `null` = no deadline. |
+| `MaxOutputRows` | `long?` | `null` | Server-wide default maximum rows per query. `null` = no limit. |
+| `ThrottleDelayMilliseconds` | `int?` | `null` | Server-wide default throttle delay in ms. `null` = no throttle. |
 
 ## Calling with grpcurl
 
@@ -157,6 +160,9 @@ Creates a new session on the compute backend.
 |-------|------|-------------|
 | `role` | `string` | `"user"` or `"admin"`. Defaults to `user` if empty. |
 | `dataset_id` | `string` | Dataset to load via `IDatasetStore`. Empty for local sessions where sources are added at runtime via `AddSource`. |
+| `query_timeout_seconds` | `int32` | Per-session query deadline override. `0` = server default, positive = override, negative = disable. |
+| `max_output_rows` | `int64` | Per-session row budget override. `0` = server default, positive = override, negative = disable. |
+| `throttle_delay_ms` | `int32` | Per-session throttle delay override. `0` = server default, positive = override, negative = disable. |
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
@@ -200,6 +206,8 @@ Executes a SQL query and streams result rows back. The first `QueryRow` message 
 
 1. **Client disconnect** — disposing the streaming call (`stream.Dispose()`) triggers gRPC call cancellation on the server.
 2. **Admin kill** — another session calls `KillQuery` with this session as the target. The server links both the gRPC call token and the session token, so either cancellation source stops the row stream immediately.
+
+**Governance enforcement:** The query streaming loop enforces the session's resource governance limits (see [Resource Governance](#resource-governance) below). A deadline triggers `DeadlineExceeded`, a row budget triggers `ResourceExhausted`, and a throttle delay injects periodic pauses.
 
 Returns the execution plan for a SQL query without running it.
 
@@ -544,6 +552,54 @@ python -m grpc_tools.protoc \
   datum_compute.proto
 ```
 
+## Resource Governance
+
+Sessions can be configured with resource limits to protect multi-tenant deployments. Limits are set server-wide via `DatumComputeOptions` and can be overridden per-session through `CreateSessionRequest` fields.
+
+### Override Semantics
+
+Each governance field in `CreateSessionRequest` follows three-state semantics:
+
+| Request value | Behavior |
+|---------------|----------|
+| `0` | Use the server default (from `DatumComputeOptions`). |
+| Positive | Override with this value. |
+| Negative | Explicitly disable (no limit), even if a server default is set. |
+
+### Mechanisms
+
+**Query deadline (`query_timeout_seconds`):** A wall-clock timeout applied to the query streaming loop. When the deadline fires, the server cancels the query and returns `DeadlineExceeded`. The deadline covers both query planning and row streaming.
+
+**Row budget (`max_output_rows`):** The maximum number of rows the server will stream for a single query. When the budget is exceeded, the server stops streaming and returns `ResourceExhausted`. Rows already sent are not retracted — the client receives a partial result set followed by the error status.
+
+**Throttle delay (`throttle_delay_ms`):** An artificial pause (in milliseconds) injected every 100 rows during streaming, yielding CPU time to other sessions. Designed for batch export workloads where deadline and row budget are not appropriate. The throttle does not produce an error — it simply slows the stream.
+
+### Configuration Example
+
+```csharp
+builder.Services.AddDatumCompute(options =>
+{
+    options.ApiKey = "secret";
+    options.QueryTimeoutSeconds = 300;     // 5-minute default deadline.
+    options.MaxOutputRows = 100_000;       // 100k row budget by default.
+    // ThrottleDelayMilliseconds left null — no throttle by default.
+});
+```
+
+A batch export client can then override per-session:
+
+```csharp
+// Disable deadline and row budget, enable throttle for CPU yielding.
+CreateSessionResponse session = await connection.Client.CreateSessionAsync(
+    new CreateSessionRequest
+    {
+        Role = "user",
+        QueryTimeoutSeconds = -1,
+        MaxOutputRows = -1,
+        ThrottleDelayMs = 10,
+    });
+```
+
 ## Error Codes
 
 | gRPC Status Code | When |
@@ -552,6 +608,9 @@ python -m grpc_tools.protoc \
 | `InvalidArgument` | Malformed session ID, bad SQL syntax, invalid source definition |
 | `NotFound` | Session ID not found, table not found |
 | `PermissionDenied` | User-role session attempting admin operation |
+| `ResourceExhausted` | Row budget exceeded during query streaming |
+| `DeadlineExceeded` | Query deadline fired during execution |
+| `Cancelled` | Query cancelled by KillQuery or session cancellation |
 | `Internal` | Unexpected server error |
 
 ## Message Size Limits

@@ -26,7 +26,7 @@ public sealed class ComputeServiceTests : IDisposable
     {
         _sessionManager = new SessionManager(_functionRegistry);
         _dispatcher = new CommandDispatcher(_sessionManager);
-        _service = new ComputeService(_sessionManager, _dispatcher);
+        _service = new ComputeService(_sessionManager, _dispatcher, QueryGovernor.Unlimited);
     }
 
     // ─────────────────── CreateSession ───────────────────
@@ -112,7 +112,7 @@ public sealed class ComputeServiceTests : IDisposable
             IDatasetStore store = new InMemoryDatasetStore(tempDirectory);
             SessionManager sessionManager = new(_functionRegistry, store);
             CommandDispatcher dispatcher = new(sessionManager);
-            ComputeService service = new(sessionManager, dispatcher);
+            ComputeService service = new(sessionManager, dispatcher, QueryGovernor.Unlimited);
 
             CreateSessionRequest request = new() { Role = "admin", DatasetId = "test-ds" };
 
@@ -480,7 +480,8 @@ public sealed class ComputeServiceTests : IDisposable
 
     /// <summary>
     /// When the session token is cancelled during row streaming, the linked
-    /// token causes the row enumeration to throw <see cref="OperationCanceledException"/>.
+    /// token causes the row enumeration to stop and the server returns
+    /// a <see cref="StatusCode.Cancelled"/> gRPC status.
     /// </summary>
     [Fact]
     public async Task Query_SessionCancelledDuringStreaming_StopsStream()
@@ -501,8 +502,11 @@ public sealed class ComputeServiceTests : IDisposable
         // simulating a mid-stream KillQuery from another session.
         CancellingStreamWriter<QueryRow> writer = new(session, cancelAfterRow: 1);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
             () => _service.Query(request, writer, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.Cancelled, exception.StatusCode);
+        Assert.Contains("cancelled", exception.Status.Detail, StringComparison.OrdinalIgnoreCase);
 
         // At least one row was written before cancellation.
         Assert.True(writer.Messages.Count >= 1);
@@ -528,6 +532,148 @@ public sealed class ComputeServiceTests : IDisposable
             () => _service.GetSchema(request, TestCallContext.Create()));
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+    }
+
+    // ─────────────────── Resource Governance ───────────────────
+
+    /// <summary>
+    /// When the session has a row budget, the stream throws ResourceExhausted
+    /// once the budget is exceeded.
+    /// </summary>
+    [Fact]
+    public async Task Query_RowBudgetExceeded_ThrowsResourceExhausted()
+    {
+        QueryGovernor governor = new(QueryTimeoutSeconds: null, MaxOutputRows: 2, ThrottleDelayMilliseconds: null);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.Query(request, writer, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.ResourceExhausted, exception.StatusCode);
+        Assert.Contains("Row budget exceeded", exception.Status.Detail);
+
+        // Exactly the budget number of rows should have been streamed.
+        Assert.Equal(2, writer.Messages.Count);
+    }
+
+    /// <summary>
+    /// When the row budget is larger than the result set, all rows are
+    /// streamed normally with no error.
+    /// </summary>
+    [Fact]
+    public async Task Query_RowBudgetNotExceeded_StreamsAllRows()
+    {
+        QueryGovernor governor = new(QueryTimeoutSeconds: null, MaxOutputRows: 100, ThrottleDelayMilliseconds: null);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+        await _service.Query(request, writer, TestCallContext.Create());
+
+        Assert.True(writer.Messages.Count > 0);
+    }
+
+    /// <summary>
+    /// When a deadline is set and the query does not exceed it, all rows
+    /// are streamed normally.
+    /// </summary>
+    [Fact]
+    public async Task Query_DeadlineNotExceeded_StreamsAllRows()
+    {
+        QueryGovernor governor = new(QueryTimeoutSeconds: 60, MaxOutputRows: null, ThrottleDelayMilliseconds: null);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+        await _service.Query(request, writer, TestCallContext.Create());
+
+        Assert.True(writer.Messages.Count > 0);
+    }
+
+    /// <summary>
+    /// CreateSession merges governance fields from the proto request with
+    /// server defaults into the session's governor.
+    /// </summary>
+    [Fact]
+    public async Task CreateSession_GovernorFieldsMerged_WithServerDefaults()
+    {
+        QueryGovernor serverDefaults = new(QueryTimeoutSeconds: 300, MaxOutputRows: 10_000, ThrottleDelayMilliseconds: null);
+        SessionManager sessionManager = new(_functionRegistry);
+        CommandDispatcher dispatcher = new(sessionManager);
+        ComputeService service = new(sessionManager, dispatcher, serverDefaults);
+
+        // Override timeout, use server default for rows, disable throttle.
+        CreateSessionRequest request = new()
+        {
+            Role = "user",
+            QueryTimeoutSeconds = 60,
+            MaxOutputRows = 0,
+            ThrottleDelayMs = -1,
+        };
+
+        CreateSessionResponse response = await service.CreateSession(request, TestCallContext.Create());
+
+        Session? session = sessionManager.GetSession(Guid.Parse(response.SessionId));
+        Assert.NotNull(session);
+        Assert.Equal(60, session.Governor.QueryTimeoutSeconds);
+        Assert.Equal(10_000, session.Governor.MaxOutputRows);
+        Assert.Null(session.Governor.ThrottleDelayMilliseconds);
+    }
+
+    /// <summary>
+    /// When the session has a throttle delay, the execution completes without
+    /// errors (verifies the delay path doesn't throw).
+    /// </summary>
+    [Fact]
+    public async Task Query_ThrottleDelay_StreamsAllRows()
+    {
+        QueryGovernor governor = new(QueryTimeoutSeconds: null, MaxOutputRows: null, ThrottleDelayMilliseconds: 1);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+        await _service.Query(request, writer, TestCallContext.Create());
+
+        Assert.True(writer.Messages.Count > 0);
     }
 
     /// <inheritdoc/>

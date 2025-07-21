@@ -40,13 +40,15 @@ public sealed class SessionManager
     /// Factory that builds a <see cref="TableCatalog"/> from the local dataset path.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="governor">Resource governance limits, or <see langword="null"/> for unlimited.</param>
     /// <returns>The newly created session.</returns>
     /// <exception cref="InvalidOperationException">Thrown when no dataset store is configured.</exception>
     public async Task<Session> CreateSessionAsync(
         SessionRole role,
         string datasetId,
         Func<string, TableCatalog> catalogFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        QueryGovernor? governor = null)
     {
         if (_datasetStore is null)
         {
@@ -58,7 +60,7 @@ public sealed class SessionManager
         string localPath = await _datasetStore.PullAsync(datasetId, cancellationToken).ConfigureAwait(false);
         TableCatalog catalog = catalogFactory(localPath);
 
-        Session session = new(role, datasetId, catalog, _functionRegistry);
+        Session session = new(role, datasetId, catalog, _functionRegistry, governor);
         _sessions[session.SessionId] = session;
         _datasetLastAccess[datasetId] = DateTimeOffset.UtcNow;
 
@@ -71,10 +73,11 @@ public sealed class SessionManager
     /// </summary>
     /// <param name="role">Authorization level for the new session.</param>
     /// <param name="catalog">Pre-built table catalog.</param>
+    /// <param name="governor">Resource governance limits, or <see langword="null"/> for unlimited.</param>
     /// <returns>The newly created session.</returns>
-    public Session CreateLocalSession(SessionRole role, TableCatalog catalog)
+    public Session CreateLocalSession(SessionRole role, TableCatalog catalog, QueryGovernor? governor = null)
     {
-        Session session = new(role, datasetId: null, catalog, _functionRegistry);
+        Session session = new(role, datasetId: null, catalog, _functionRegistry, governor);
         _sessions[session.SessionId] = session;
         return session;
     }

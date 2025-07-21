@@ -54,6 +54,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with optional runtime metrics
+- **Resource governance** — per-session query deadlines, row budgets, and throttle delays for multi-tenant gRPC deployments
 
 ## Why Not DuckDB / Pandas?
 
@@ -195,7 +196,7 @@ parquet:labels=./labels.parquet
 | [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
 | [docs/language-server.md](docs/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
 | [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |
-| [docs/compute.md](docs/compute.md) | gRPC compute library: embedding, remote sessions, streaming queries, admin operations |
+| [docs/compute.md](docs/compute.md) | gRPC compute library: embedding, remote sessions, streaming queries, admin operations, resource governance |
 | [ROADMAP.md](ROADMAP.md) | Deferred features for future releases |
 
 ## Installation

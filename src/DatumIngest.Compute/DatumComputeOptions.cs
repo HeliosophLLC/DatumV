@@ -26,4 +26,27 @@ public sealed class DatumComputeOptions
     /// Defaults to 64 MB.
     /// </summary>
     public int MaxSendMessageSize { get; set; } = 64 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the server-wide default maximum query execution time
+    /// in seconds. Set to <see langword="null"/> (the default) to impose
+    /// no deadline. Clients may override per-session via <c>CreateSession</c>.
+    /// </summary>
+    public int? QueryTimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// Gets or sets the server-wide default maximum number of rows the
+    /// server will stream back for a single query. Set to
+    /// <see langword="null"/> (the default) for no limit. Clients may
+    /// override per-session via <c>CreateSession</c>.
+    /// </summary>
+    public long? MaxOutputRows { get; set; }
+
+    /// <summary>
+    /// Gets or sets the server-wide default throttle delay in milliseconds,
+    /// injected periodically during row streaming to yield CPU to other
+    /// sessions. Set to <see langword="null"/> (the default) for no
+    /// throttle. Clients may override per-session via <c>CreateSession</c>.
+    /// </summary>
+    public int? ThrottleDelayMilliseconds { get; set; }
 }

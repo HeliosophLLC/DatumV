@@ -50,6 +50,18 @@ message CreateSessionRequest {
 
   // Dataset identifier to load. Empty for local sessions.
   string dataset_id = 2;
+
+  // Maximum query execution time in seconds.
+  // 0 = use server default, positive = override, negative = disable.
+  int32 query_timeout_seconds = 3;
+
+  // Maximum number of rows returned by a single query.
+  // 0 = use server default, positive = override, negative = disable.
+  int64 max_output_rows = 4;
+
+  // Throttle delay in milliseconds injected periodically during streaming.
+  // 0 = use server default, positive = override, negative = disable.
+  int32 throttle_delay_ms = 5;
 }
 
 message CreateSessionResponse {
