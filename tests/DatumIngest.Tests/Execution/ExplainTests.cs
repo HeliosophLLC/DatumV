@@ -3,6 +3,7 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
@@ -1370,5 +1371,349 @@ public class ExplainTests
 
         // Even without a child estimate, LIMIT can still produce an estimate.
         Assert.Equal(100, node.EstimatedRows);
+    }
+
+    // ──────────────── Manifest-aware cardinality estimation ────────────────
+
+    private static ScanOperator CreateScanWithManifest(
+        string tableName, long rowCount, string columnName, long ndv, double? nullRatio = 0.0)
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", tableName, $"{tableName}.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = rowCount;
+
+        NumericFeatureManifest feature = new()
+        {
+            Name = columnName,
+            Kind = DataKind.Scalar,
+            Count = rowCount,
+            NullCount = nullRatio.HasValue ? (long)(rowCount * nullRatio.Value) : 0,
+            ValidCount = rowCount - (nullRatio.HasValue ? (long)(rowCount * nullRatio.Value) : 0),
+            EstimatedDistinctCount = ndv,
+            TopKValues = [],
+            NullRatio = nullRatio,
+            Min = 0,
+            Max = 100,
+            Mean = 50,
+            Variance = 25,
+            StandardDeviation = 5,
+            Skewness = 0,
+            Kurtosis = 0,
+            Histogram = new HistogramData([0, 100], [rowCount]),
+            Quantiles = null,
+            ZeroCount = 0,
+            ZeroRatio = 0,
+            OutlierCount = 0,
+            OutlierRatio = 0,
+            IntegerValued = true,
+        };
+
+        scan.ColumnStatistics = new Dictionary<string, FeatureManifest>(StringComparer.OrdinalIgnoreCase)
+        {
+            [columnName] = feature,
+        };
+
+        return scan;
+    }
+
+    [Fact]
+    public void Explain_EqualityWithNdv_UsesOneOverNdv()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "status", ndv: 5);
+
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("status"),
+            BinaryOperator.Equal,
+            new LiteralExpression("active"));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // NDV=5: selectivity = 1/5 = 0.20, so 10,000 * 0.20 = 2,000
+        Assert.Equal(2_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_EqualityWithHighNdv_ProducesLowEstimate()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "user_id", ndv: 10_000);
+
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("user_id"),
+            BinaryOperator.Equal,
+            new LiteralExpression(42));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // NDV=10,000: selectivity = 1/10,000 = 0.0001, so 10,000 * 0.0001 = 1
+        Assert.Equal(1, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_NotEqualWithNdv_UsesOneMinusOneOverNdv()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "status", ndv: 5);
+
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("status"),
+            BinaryOperator.NotEqual,
+            new LiteralExpression("active"));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // NDV=5: selectivity = 1 - 1/5 = 0.80, so 10,000 * 0.80 = 8,000
+        Assert.Equal(8_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_IsNullWithNullRatio_UsesActualRatio()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "email", ndv: 5, nullRatio: 0.30);
+
+        Expression predicate = new IsNullExpression(new ColumnReference("email"), Negated: false);
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // NullRatio=0.30, so 10,000 * 0.30 = 3,000
+        Assert.Equal(3_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_IsNotNullWithNullRatio_UsesComplement()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "email", ndv: 5, nullRatio: 0.30);
+
+        Expression predicate = new IsNullExpression(new ColumnReference("email"), Negated: true);
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // IS NOT NULL: 1 - 0.30 = 0.70, so 10,000 * 0.70 = 7,000
+        Assert.Equal(7_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_InExpressionWithNdv_UsesNdvBasedPerValue()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "status", ndv: 100);
+
+        Expression predicate = new InExpression(
+            new ColumnReference("status"),
+            [
+                new LiteralExpression("active"),
+                new LiteralExpression("pending"),
+                new LiteralExpression("closed"),
+            ],
+            Negated: false);
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // NDV=100, 3 values: 3 * (1/100) = 0.03, so 10,000 * 0.03 = 300
+        Assert.Equal(300, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_CompoundAndWithNdv_MultipliesNdvSelectivities()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "data.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        NumericFeatureManifest statusFeature = new()
+        {
+            Name = "status",
+            Kind = DataKind.Scalar,
+            Count = 10_000,
+            NullCount = 0,
+            ValidCount = 10_000,
+            EstimatedDistinctCount = 5,
+            TopKValues = [],
+            NullRatio = 0.0,
+            Min = 0, Max = 4, Mean = 2, Variance = 1, StandardDeviation = 1,
+            Skewness = 0, Kurtosis = 0,
+            Histogram = new HistogramData([0, 4], [10_000]),
+            ZeroCount = 0, ZeroRatio = 0, OutlierCount = 0, OutlierRatio = 0, IntegerValued = true,
+        };
+
+        NumericFeatureManifest categoryFeature = new()
+        {
+            Name = "category",
+            Kind = DataKind.Scalar,
+            Count = 10_000,
+            NullCount = 0,
+            ValidCount = 10_000,
+            EstimatedDistinctCount = 10,
+            TopKValues = [],
+            NullRatio = 0.0,
+            Min = 0, Max = 9, Mean = 4, Variance = 2, StandardDeviation = 1.4,
+            Skewness = 0, Kurtosis = 0,
+            Histogram = new HistogramData([0, 9], [10_000]),
+            ZeroCount = 0, ZeroRatio = 0, OutlierCount = 0, OutlierRatio = 0, IntegerValued = true,
+        };
+
+        scan.ColumnStatistics = new Dictionary<string, FeatureManifest>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["status"] = statusFeature,
+            ["category"] = categoryFeature,
+        };
+
+        // status = 'x' AND category = 'y' → (1/5) * (1/10) = 0.02, so 10,000 * 0.02 = 200
+        Expression predicate = new BinaryExpression(
+            new BinaryExpression(
+                new ColumnReference("status"), BinaryOperator.Equal, new LiteralExpression("x")),
+            BinaryOperator.And,
+            new BinaryExpression(
+                new ColumnReference("category"), BinaryOperator.Equal, new LiteralExpression("y")));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        Assert.Equal(200, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_WithoutManifest_FallsBackToDefaultSelectivity()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "data.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+        // No ColumnStatistics set.
+
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("status"),
+            BinaryOperator.Equal,
+            new LiteralExpression("active"));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // Default equality selectivity is 0.10, so 10,000 * 0.10 = 1,000
+        Assert.Equal(1_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_AliasedTableWithNdv_ResolvesQualifiedColumn()
+    {
+        ScanOperator scan = CreateScanWithManifest("data", rowCount: 10_000, columnName: "status", ndv: 5);
+        AliasOperator alias = new(scan, "d");
+
+        // Predicate uses qualified name: d.status = 'active'
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("d", "status"),
+            BinaryOperator.Equal,
+            new LiteralExpression("active"));
+
+        FilterOperator filter = new(alias, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        // NDV=5: selectivity = 1/5 = 0.20, so 10,000 * 0.20 = 2,000
+        Assert.Equal(2_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_ManifestRowCount_OverridesProviderCapabilities()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+
+        // Register a manifest — this should override the null row count from CSV.
+        QueryResultsManifest manifest = new()
+        {
+            RowCount = 50_000,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Features = [],
+        };
+        catalog.RegisterManifest("data", manifest);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // CSV returns null for EstimatedRowCount, but manifest overrides with 50,000.
+        Assert.Equal("Scan", node.OperatorName);
+        Assert.Equal(50_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_ManifestWithColumnStats_UsedInPlannerPipeline()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+
+        NumericFeatureManifest statusFeature = new()
+        {
+            Name = "status",
+            Kind = DataKind.Scalar,
+            Count = 1_000,
+            NullCount = 0,
+            ValidCount = 1_000,
+            EstimatedDistinctCount = 4,
+            TopKValues = [],
+            NullRatio = 0.0,
+            Min = 0, Max = 3, Mean = 1.5, Variance = 1, StandardDeviation = 1,
+            Skewness = 0, Kurtosis = 0,
+            Histogram = new HistogramData([0, 3], [1_000]),
+            ZeroCount = 0, ZeroRatio = 0, OutlierCount = 0, OutlierRatio = 0, IntegerValued = true,
+        };
+
+        QueryResultsManifest manifest = new()
+        {
+            RowCount = 1_000,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Features = [statusFeature],
+        };
+        catalog.RegisterManifest("data", manifest);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("status"),
+                BinaryOperator.Equal,
+                new LiteralExpression("active")));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // Scan should have 1,000 rows (from manifest).
+        // Filter with NDV=4: selectivity = 1/4 = 0.25, so 1,000 * 0.25 = 250
+        ExplainPlanNode filterNode = node.OperatorName == "Project" ? node.Children[0] : node;
+        Assert.Equal("Filter", filterNode.OperatorName);
+        Assert.Equal(250, filterNode.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_EquiJoinWithNdv_UsesOneOverMaxNdv()
+    {
+        ScanOperator leftScan = CreateScanWithManifest("users", rowCount: 1_000, columnName: "id", ndv: 1_000);
+        ScanOperator rightScan = CreateScanWithManifest("orders", rowCount: 5_000, columnName: "id", ndv: 800);
+
+        // Rename right column to "user_id" to avoid collision — but NDV lookup
+        // goes through join key expressions, not column names.
+        // The join ON users.id = orders.id — both columns named "id".
+        JoinOperator join = new(
+            leftScan,
+            rightScan,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("users", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("orders", "id")));
+
+        ExplainPlanNode node = QueryExplainer.Explain(join);
+
+        // max(NDV_left=1000, NDV_right=800) = 1000
+        // 1000 * 5000 / 1000 = 5000
+        Assert.Equal(5_000, node.EstimatedRows);
     }
 }

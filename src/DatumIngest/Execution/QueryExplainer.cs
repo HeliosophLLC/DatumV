@@ -1,5 +1,6 @@
 using System.Text;
 using DatumIngest.Execution.Operators;
+using DatumIngest.Manifest;
 using DatumIngest.Parsing.Ast;
 
 namespace DatumIngest.Execution;
@@ -23,23 +24,24 @@ public static class QueryExplainer
     /// <returns>An explain plan node tree describing the plan.</returns>
     public static ExplainPlanNode Explain(IQueryOperator root)
     {
-        return BuildNode(root);
+        IReadOnlyDictionary<string, FeatureManifest>? stats = CollectColumnStatistics(root);
+        return BuildNode(root, stats);
     }
 
-    private static ExplainPlanNode BuildNode(IQueryOperator op)
+    private static ExplainPlanNode BuildNode(IQueryOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         return op switch
         {
-            InstrumentedOperator instrumented => BuildNode(instrumented.Inner),
+            InstrumentedOperator instrumented => BuildNode(instrumented.Inner, stats),
             ScanOperator scan => BuildScanNode(scan),
-            FilterOperator filter => BuildFilterNode(filter),
-            ProjectOperator project => BuildProjectNode(project),
-            JoinOperator join => BuildJoinNode(join),
-            OrderByOperator orderBy => BuildOrderByNode(orderBy),
-            LimitOperator limit => BuildLimitNode(limit),
-            AliasOperator alias => BuildAliasNode(alias),
-            SubqueryOperator subquery => BuildSubqueryNode(subquery),
-            LateMaterializationOperator lateMat => BuildLateMaterializationNode(lateMat),
+            FilterOperator filter => BuildFilterNode(filter, stats),
+            ProjectOperator project => BuildProjectNode(project, stats),
+            JoinOperator join => BuildJoinNode(join, stats),
+            OrderByOperator orderBy => BuildOrderByNode(orderBy, stats),
+            LimitOperator limit => BuildLimitNode(limit, stats),
+            AliasOperator alias => BuildAliasNode(alias, stats),
+            SubqueryOperator subquery => BuildSubqueryNode(subquery, stats),
+            LateMaterializationOperator lateMat => BuildLateMaterializationNode(lateMat, stats),
             _ => new ExplainPlanNode
             {
                 OperatorName = op.GetType().Name,
@@ -71,16 +73,16 @@ public static class QueryExplainer
         };
     }
 
-    private static ExplainPlanNode BuildFilterNode(FilterOperator filter)
+    private static ExplainPlanNode BuildFilterNode(FilterOperator filter, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
-        ExplainPlanNode child = BuildNode(filter.Source);
+        ExplainPlanNode child = BuildNode(filter.Source, stats);
 
         ExplainPlanNode node = new()
         {
             OperatorName = "Filter",
             Details = $"predicate: {FormatExpression(filter.Predicate)}",
             Children = { child },
-            EstimatedRows = EstimateFilterRows(child.EstimatedRows, filter.Predicate),
+            EstimatedRows = EstimateFilterRows(child.EstimatedRows, filter.Predicate, stats),
         };
 
         // Warn about LIKE predicates (no index, full scan).
@@ -92,7 +94,7 @@ public static class QueryExplainer
         return node;
     }
 
-    private static ExplainPlanNode BuildProjectNode(ProjectOperator project)
+    private static ExplainPlanNode BuildProjectNode(ProjectOperator project, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         List<string> columnNames = [];
         foreach (SelectColumn column in project.Columns)
@@ -107,7 +109,7 @@ public static class QueryExplainer
             }
         }
 
-        ExplainPlanNode child = BuildNode(project.Source);
+        ExplainPlanNode child = BuildNode(project.Source, stats);
 
         return new ExplainPlanNode
         {
@@ -118,7 +120,7 @@ public static class QueryExplainer
         };
     }
 
-    private static ExplainPlanNode BuildJoinNode(JoinOperator join)
+    private static ExplainPlanNode BuildJoinNode(JoinOperator join, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         string joinType = join.Type switch
         {
@@ -154,10 +156,10 @@ public static class QueryExplainer
             }
         }
 
-        ExplainPlanNode leftChild = BuildNode(join.Left);
+        ExplainPlanNode leftChild = BuildNode(join.Left, stats);
         leftChild.ChildLabel = "probe";
 
-        ExplainPlanNode rightChild = BuildNode(join.Right);
+        ExplainPlanNode rightChild = BuildNode(join.Right, stats);
         rightChild.ChildLabel = "build";
 
         ExplainPlanNode node = new()
@@ -166,7 +168,7 @@ public static class QueryExplainer
             Details = $"strategy: {strategy}{condition}",
             Children = { leftChild, rightChild },
             EstimatedRows = EstimateJoinRows(
-                join.Type, leftChild.EstimatedRows, rightChild.EstimatedRows, extraction),
+                join.Type, leftChild.EstimatedRows, rightChild.EstimatedRows, extraction, stats),
         };
 
         // Warn about cross joins (can produce very large output).
@@ -191,7 +193,7 @@ public static class QueryExplainer
         return node;
     }
 
-    private static ExplainPlanNode BuildOrderByNode(OrderByOperator orderBy)
+    private static ExplainPlanNode BuildOrderByNode(OrderByOperator orderBy, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         List<string> items = [];
         foreach (OrderByItem item in orderBy.OrderByItems)
@@ -200,7 +202,7 @@ public static class QueryExplainer
             items.Add($"{FormatExpression(item.Expression)} {direction}");
         }
 
-        ExplainPlanNode child = BuildNode(orderBy.Source);
+        ExplainPlanNode child = BuildNode(orderBy.Source, stats);
 
         ExplainPlanNode node = new()
         {
@@ -222,13 +224,13 @@ public static class QueryExplainer
         return node;
     }
 
-    private static ExplainPlanNode BuildLimitNode(LimitOperator limit)
+    private static ExplainPlanNode BuildLimitNode(LimitOperator limit, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         string details = limit.Offset > 0
             ? $"limit: {limit.Limit}, offset: {limit.Offset}"
             : $"limit: {limit.Limit}";
 
-        ExplainPlanNode child = BuildNode(limit.Source);
+        ExplainPlanNode child = BuildNode(limit.Source, stats);
         long effectiveLimit = limit.Limit + limit.Offset;
 
         return new ExplainPlanNode
@@ -242,9 +244,9 @@ public static class QueryExplainer
         };
     }
 
-    private static ExplainPlanNode BuildAliasNode(AliasOperator alias)
+    private static ExplainPlanNode BuildAliasNode(AliasOperator alias, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
-        ExplainPlanNode child = BuildNode(alias.Source);
+        ExplainPlanNode child = BuildNode(alias.Source, stats);
 
         return new ExplainPlanNode
         {
@@ -255,9 +257,9 @@ public static class QueryExplainer
         };
     }
 
-    private static ExplainPlanNode BuildSubqueryNode(SubqueryOperator subquery)
+    private static ExplainPlanNode BuildSubqueryNode(SubqueryOperator subquery, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
-        ExplainPlanNode child = BuildNode(subquery.InnerOperator);
+        ExplainPlanNode child = BuildNode(subquery.InnerOperator, stats);
 
         return new ExplainPlanNode
         {
@@ -268,14 +270,14 @@ public static class QueryExplainer
         };
     }
 
-    private static ExplainPlanNode BuildLateMaterializationNode(LateMaterializationOperator lateMat)
+    private static ExplainPlanNode BuildLateMaterializationNode(LateMaterializationOperator lateMat, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         string columns = string.Join(", ", lateMat.DeferredColumns);
         string source = lateMat.Alias is not null
             ? $"{lateMat.Alias} ({lateMat.Descriptor.Provider})"
             : lateMat.Descriptor.Name;
 
-        ExplainPlanNode child = BuildNode(lateMat.Child);
+        ExplainPlanNode child = BuildNode(lateMat.Child, stats);
 
         return new ExplainPlanNode
         {
@@ -290,52 +292,211 @@ public static class QueryExplainer
 
     /// <summary>
     /// Estimates the number of rows surviving a filter predicate.
-    /// Uses a fixed default selectivity when no column statistics are available.
-    /// IS NULL, IS NOT NULL, and equality comparisons use tailored defaults;
-    /// AND/OR compound predicates propagate multiplicatively.
+    /// When per-column statistics are available from a manifest, uses NDV-based
+    /// selectivity for equality predicates and actual null ratios for IS NULL.
+    /// Falls back to fixed default selectivities when no statistics are available.
     /// </summary>
-    private static long? EstimateFilterRows(long? inputRows, Expression predicate)
+    private static long? EstimateFilterRows(
+        long? inputRows, Expression predicate, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         if (inputRows is null)
         {
             return null;
         }
 
-        double selectivity = EstimateSelectivity(predicate);
+        double selectivity = EstimateSelectivity(predicate, stats);
         long estimate = Math.Max(1, (long)(inputRows.Value * selectivity));
         return estimate;
     }
 
-    private static double EstimateSelectivity(Expression predicate)
+    private static double EstimateSelectivity(
+        Expression predicate, IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         return predicate switch
         {
             BinaryExpression { Operator: BinaryOperator.And } bin
-                => EstimateSelectivity(bin.Left) * EstimateSelectivity(bin.Right),
+                => EstimateSelectivity(bin.Left, stats) * EstimateSelectivity(bin.Right, stats),
             BinaryExpression { Operator: BinaryOperator.Or } bin
-                => Math.Min(1.0, EstimateSelectivity(bin.Left) + EstimateSelectivity(bin.Right)),
-            BinaryExpression { Operator: BinaryOperator.Equal } => 0.10,
-            BinaryExpression { Operator: BinaryOperator.NotEqual } => 0.90,
+                => Math.Min(1.0, EstimateSelectivity(bin.Left, stats) + EstimateSelectivity(bin.Right, stats)),
+            BinaryExpression { Operator: BinaryOperator.Equal } eq
+                => EstimateEqualitySelectivity(eq, stats),
+            BinaryExpression { Operator: BinaryOperator.NotEqual } neq
+                => 1.0 - EstimateEqualitySelectivity(neq, stats),
             BinaryExpression { Operator: BinaryOperator.Like } => 0.25,
-            IsNullExpression { Negated: true } => 0.90,
-            IsNullExpression { Negated: false } => 0.10,
-            InExpression inExpr => Math.Min(1.0, inExpr.Values.Count * 0.10),
+            IsNullExpression isNull => EstimateIsNullSelectivity(isNull, stats),
+            InExpression inExpr => EstimateInSelectivity(inExpr, stats),
             BetweenExpression => 0.25,
             UnaryExpression { Operator: UnaryOperator.Not } unary
-                => 1.0 - EstimateSelectivity(unary.Operand),
+                => 1.0 - EstimateSelectivity(unary.Operand, stats),
             _ => DefaultFilterSelectivity,
         };
     }
 
+    private static double EstimateEqualitySelectivity(
+        BinaryExpression expression, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        if (stats is not null)
+        {
+            FeatureManifest? feature =
+                FindColumnStatistics(expression.Left, stats) ??
+                FindColumnStatistics(expression.Right, stats);
+
+            if (feature is not null && feature.EstimatedDistinctCount > 0)
+            {
+                return 1.0 / feature.EstimatedDistinctCount;
+            }
+        }
+
+        return 0.10;
+    }
+
+    private static double EstimateIsNullSelectivity(
+        IsNullExpression expression, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        if (stats is not null)
+        {
+            FeatureManifest? feature = FindColumnStatistics(expression.Expression, stats);
+
+            if (feature is not null && feature.NullRatio.HasValue)
+            {
+                return expression.Negated ? 1.0 - feature.NullRatio.Value : feature.NullRatio.Value;
+            }
+        }
+
+        return expression.Negated ? 0.90 : 0.10;
+    }
+
+    private static double EstimateInSelectivity(
+        InExpression expression, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        double perValue = 0.10;
+
+        if (stats is not null)
+        {
+            FeatureManifest? feature = FindColumnStatistics(expression.Expression, stats);
+
+            if (feature is not null && feature.EstimatedDistinctCount > 0)
+            {
+                perValue = 1.0 / feature.EstimatedDistinctCount;
+            }
+        }
+
+        return Math.Min(1.0, expression.Values.Count * perValue);
+    }
+
+    /// <summary>
+    /// Extracts a <see cref="FeatureManifest"/> for the column referenced by the expression,
+    /// or <c>null</c> if the expression is not a column reference or no statistics exist.
+    /// </summary>
+    private static FeatureManifest? FindColumnStatistics(
+        Expression expression, IReadOnlyDictionary<string, FeatureManifest> stats)
+    {
+        if (expression is not ColumnReference column)
+        {
+            return null;
+        }
+
+        // Try qualified lookup first (e.g. "t.age"), then bare column name.
+        if (column.TableName is not null)
+        {
+            string qualified = $"{column.TableName}.{column.ColumnName}";
+            if (stats.TryGetValue(qualified, out FeatureManifest? feature))
+            {
+                return feature;
+            }
+        }
+
+        stats.TryGetValue(column.ColumnName, out FeatureManifest? bareFeature);
+        return bareFeature;
+    }
+
+    // ──────────────── Column statistics collection ────────────────
+
+    /// <summary>
+    /// Walks the operator tree and collects per-column <see cref="FeatureManifest"/>
+    /// entries from all scan operators. Column names are registered both bare and
+    /// alias-qualified so that predicates like <c>t.age = 30</c> resolve correctly.
+    /// </summary>
+    private static IReadOnlyDictionary<string, FeatureManifest>? CollectColumnStatistics(IQueryOperator root)
+    {
+        Dictionary<string, FeatureManifest>? result = null;
+        CollectColumnStatisticsCore(root, alias: null, ref result);
+        return result;
+    }
+
+    private static void CollectColumnStatisticsCore(
+        IQueryOperator op, string? alias, ref Dictionary<string, FeatureManifest>? result)
+    {
+        switch (op)
+        {
+            case InstrumentedOperator instrumented:
+                CollectColumnStatisticsCore(instrumented.Inner, alias, ref result);
+                break;
+
+            case ScanOperator scan:
+                if (scan.ColumnStatistics is null)
+                {
+                    break;
+                }
+
+                result ??= new(StringComparer.OrdinalIgnoreCase);
+                foreach (KeyValuePair<string, FeatureManifest> entry in scan.ColumnStatistics)
+                {
+                    result.TryAdd(entry.Key, entry.Value);
+                    if (alias is not null)
+                    {
+                        result.TryAdd($"{alias}.{entry.Key}", entry.Value);
+                    }
+                }
+
+                break;
+
+            case AliasOperator aliasOperator:
+                CollectColumnStatisticsCore(aliasOperator.Source, aliasOperator.Alias, ref result);
+                break;
+
+            case FilterOperator filter:
+                CollectColumnStatisticsCore(filter.Source, alias, ref result);
+                break;
+
+            case ProjectOperator project:
+                CollectColumnStatisticsCore(project.Source, alias, ref result);
+                break;
+
+            case JoinOperator join:
+                CollectColumnStatisticsCore(join.Left, alias, ref result);
+                CollectColumnStatisticsCore(join.Right, alias, ref result);
+                break;
+
+            case OrderByOperator orderBy:
+                CollectColumnStatisticsCore(orderBy.Source, alias, ref result);
+                break;
+
+            case LimitOperator limit:
+                CollectColumnStatisticsCore(limit.Source, alias, ref result);
+                break;
+
+            case SubqueryOperator subquery:
+                CollectColumnStatisticsCore(subquery.InnerOperator, alias, ref result);
+                break;
+
+            case LateMaterializationOperator lateMaterialization:
+                CollectColumnStatisticsCore(lateMaterialization.Child, alias, ref result);
+                break;
+        }
+    }
+
     /// <summary>
     /// Estimates the number of rows produced by a join.
-    /// Cross joins return left × right. Equi-joins use a fixed selectivity factor.
+    /// Cross joins return left × right. Equi-joins use NDV-based estimation when
+    /// column statistics are available, falling back to a fixed selectivity factor.
     /// </summary>
     private static long? EstimateJoinRows(
         JoinType joinType,
         long? leftRows,
         long? rightRows,
-        JoinKeyExtractionResult? extraction)
+        JoinKeyExtractionResult? extraction,
+        IReadOnlyDictionary<string, FeatureManifest>? stats)
     {
         if (leftRows is null || rightRows is null)
         {
@@ -352,8 +513,27 @@ public static class QueryExplainer
 
         if (extraction is not null)
         {
-            // Equi-join: assume each row matches ~10% of the other side.
-            long estimate = Math.Max(1, (long)(left * right * DefaultEquiJoinSelectivity));
+            // When NDV statistics are available for the join key, use
+            // left * right / max(NDV_left, NDV_right) which models
+            // a uniform key distribution across both sides.
+            double joinSelectivity = DefaultEquiJoinSelectivity;
+
+            if (stats is not null && extraction.KeyPairs.Count > 0)
+            {
+                FeatureManifest? leftFeature = FindColumnStatistics(extraction.KeyPairs[0].Left, stats);
+                FeatureManifest? rightFeature = FindColumnStatistics(extraction.KeyPairs[0].Right, stats);
+
+                long maxNdv = Math.Max(
+                    leftFeature?.EstimatedDistinctCount ?? 0,
+                    rightFeature?.EstimatedDistinctCount ?? 0);
+
+                if (maxNdv > 0)
+                {
+                    joinSelectivity = 1.0 / maxNdv;
+                }
+            }
+
+            long estimate = Math.Max(1, (long)(left * right * joinSelectivity));
 
             // For outer joins, the minimum is the preserved side.
             return joinType switch

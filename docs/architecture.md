@@ -49,6 +49,12 @@ For any format, `.datum-index` sidecar files extend this capability to chunk-lev
 
 Supported predicate shapes include comparisons, BETWEEN, IN, IS NULL/IS NOT NULL, and AND/OR compositions. EXPLAIN shows the filter hint on the scan node; EXPLAIN ANALYZE reports how many chunks or row groups were pruned.
 
+## Cardinality estimation
+
+The `QueryExplainer` produces estimated row counts for each operator in the plan tree. Base estimates come from provider capabilities (Parquet, HDF5, IDX report row counts from metadata). When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate — enabling accurate row counts for CSV, JSON, JSONL, and ZIP sources.
+
+Per-column statistics from the manifest (estimated distinct count via HyperLogLog, null ratio) drive data-aware selectivity estimation for equality, IN, IS NULL, and equi-join predicates. Without a manifest, the cost model falls back to fixed heuristics (10% equality, 33% range, etc.). See [Statistics & Manifest — Planning Integration](statistics.md#planning-integration) for the full selectivity table.
+
 ## Join implementation
 
 Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:

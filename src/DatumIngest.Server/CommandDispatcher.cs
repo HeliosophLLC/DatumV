@@ -253,6 +253,20 @@ public sealed class CommandDispatcher
 
         TableDescriptor descriptor = ParseSourceDefinition(definition);
         session.Catalog.Register(descriptor);
+
+        // Auto-discover sidecar manifest for statistics-driven cardinality estimation.
+        string manifestPath = descriptor.FilePath + ".datum-manifest";
+        if (File.Exists(manifestPath))
+        {
+            string json = File.ReadAllText(manifestPath);
+            QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+
+            if (manifest is not null)
+            {
+                session.Catalog.RegisterManifest(descriptor.Name, manifest);
+            }
+        }
+
         return CommandResult.Success($"Source '{descriptor.Name}' registered ({descriptor.Provider}).");
     }
 

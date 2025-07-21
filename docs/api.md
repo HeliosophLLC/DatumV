@@ -6,6 +6,8 @@ DatumIngest exposes a C# API for embedding query execution, schema resolution, m
 
 ## Manifest
 
+### Generation
+
 ```csharp
 StatisticsCollector collector = new();
 ColumnInteractionCollector interactionCollector = new();
@@ -19,6 +21,25 @@ QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount, in
 string json = ManifestSerializer.Serialize(manifest);
 await ManifestSerializer.WriteToFileAsync(manifest, "manifest.json");
 ```
+
+### Loading & Registration
+
+Manifests can be deserialized from JSON and registered in the `TableCatalog` for use by the query planner and cost model:
+
+```csharp
+string json = await File.ReadAllTextAsync("data.csv.datum-manifest");
+QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+if (manifest is not null)
+    catalog.RegisterManifest("data", manifest);
+```
+
+When a manifest is registered, the query planner uses it to:
+- Override the scan operator's estimated row count with the manifest's authoritative `RowCount` (useful for CSV, JSON, JSONL, and ZIP sources that cannot report row counts from metadata alone).
+- Attach per-column `FeatureManifest` statistics to the `ScanOperator` for downstream cardinality estimation.
+
+### Sidecar Auto-Discovery
+
+Both the CLI and the gRPC compute backend automatically discover `.datum-manifest` sidecar files (named `{source-file}.datum-manifest`) alongside registered sources. The `.source` interactive command also checks for a sidecar manifest when adding a source at runtime.
 
 ## EXPLAIN
 
@@ -38,7 +59,23 @@ InstrumentedOperator.PopulateMetrics(explainPlan, instrumented);
 Console.WriteLine(explainPlan.Render());
 ```
 
-Estimated rows are available on any `ExplainPlanNode` via `node.EstimatedRows`. Providers that report row counts (Parquet, HDF5, IDX) produce estimates; CSV, JSON, JSONL, and ZIP return `null`. The estimates propagate through filter, join, sort, limit, and projection operators using fixed selectivity heuristics.
+Estimated rows are available on any `ExplainPlanNode` via `node.EstimatedRows`. Providers that report row counts (Parquet, HDF5, IDX) produce base estimates directly; CSV, JSON, JSONL, and ZIP return `null` by default. When a `.datum-manifest` sidecar file is available, its `RowCount` overrides the provider's estimate — giving accurate base counts for all formats.
+
+The estimates propagate through filter, join, sort, limit, and projection operators. When manifest column statistics are available, the cost model uses them for data-driven selectivity:
+
+| Predicate | With Manifest | Default Heuristic |
+|-----------|---------------|-------------------|
+| `column = value` | 1 / NDV | 10% |
+| `column != value` | 1 − 1/NDV | 90% |
+| `column IS NULL` | actual null ratio | 10% |
+| `column IS NOT NULL` | 1 − null ratio | 90% |
+| `column IN (a, b, c)` | count × 1/NDV | count × 10% |
+| equi-join `a.x = b.x` | left × right / max(NDV_left, NDV_right) | left × right × 10% |
+| `<`, `>`, `BETWEEN`, `LIKE` | 33% (default) | 33% |
+| `AND` | product of child selectivities | product of child selectivities |
+| `OR` | s₁ + s₂ − s₁×s₂ | s₁ + s₂ − s₁×s₂ |
+
+NDV is the estimated distinct count from the manifest's HyperLogLog sketch (±2% accuracy).
 
 ## Schema Introspection
 

@@ -166,7 +166,7 @@ Creates a new session on the compute backend.
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
-When `dataset_id` is provided, the backend pulls the dataset to local storage and auto-discovers all supported files (CSV, JSON, JSONL, Parquet, HDF5, ZIP, IDX) in the resulting directory. Each file becomes a table named after its filename without extension. If no `IDatasetStore` is registered, passing a non-empty `dataset_id` returns `FailedPrecondition`.
+When `dataset_id` is provided, the backend pulls the dataset to local storage and auto-discovers all supported files (CSV, JSON, JSONL, Parquet, HDF5, ZIP, IDX) in the resulting directory. Each file becomes a table named after its filename without extension. Sidecar `.datum-index` and `.datum-manifest` files are also discovered automatically, enabling chunk pruning and manifest-driven cardinality estimation for all sessions created from the dataset. If no `IDatasetStore` is registered, passing a non-empty `dataset_id` returns `FailedPrecondition`.
 
 **Roles:**
 - **User** — can run queries, inspect schemas, list tables/providers/functions, and view explain plans.
@@ -235,7 +235,7 @@ Returns the execution plan for a SQL query without running it.
 | `warnings` | `repeated string` | Performance warnings (e.g. `CROSS JOIN`, `LIKE forces full scan`). |
 | `annotations` | `repeated string` | Static plan annotations (e.g. `bounded top-N sort (N=100)`). |
 | `runtime` | `ExplainRuntimeMetrics` | Runtime metrics — populated only when `analyze = true`. |
-| `estimated_rows` | `int64` | Estimated row count from the cost model (0 when unknown). |
+| `estimated_rows` | `int64` | Estimated row count from the cost model (0 when unknown). When a `.datum-manifest` sidecar is available, estimates use manifest row counts and NDV-based selectivity instead of fixed heuristics. |
 | `has_estimated_rows` | `bool` | Whether `estimated_rows` was populated (distinguishes 0 from unknown). |
 
 **`ExplainRuntimeMetrics`:**

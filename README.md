@@ -48,12 +48,12 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
 - **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, subqueries, quoted identifiers
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
-- **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI)
+- **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
 - **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, sorted value indexes for equality/range predicates, and ORDER BY elimination via index scan
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
-- **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with optional runtime metrics
+- **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with manifest-driven cardinality estimation (NDV-based selectivity) and optional runtime metrics
 - **Resource governance** — per-session query deadlines, row budgets, and throttle delays for multi-tenant gRPC deployments
 
 ## Why Not DuckDB / Pandas?
@@ -63,7 +63,7 @@ DuckDB and Pandas are excellent general-purpose tools. DatumIngest is purpose-bu
 - **Image transforms in SQL** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more, with automatic decode/encode fusion across chained transforms. DuckDB and Pandas have no image pipeline.
 - **ZIP archives as tables** — `FROM images` where `images` is a ZIP file. Each entry becomes a row with lazy decompression. No extract step.
 - **ML-native types** — Vector, Matrix, Tensor, and Image are first-class column types with dedicated functions (`softmax`, `cosine_similarity`, `cyclical_encode`, `normalize`).
-- **Dataset manifests** — one command generates a JSON manifest with per-column statistics, histograms, quantiles, and pairwise column interactions (Pearson, Spearman, Cramér's V, ANOVA F, Mutual Information).
+- **Dataset manifests** — one command generates a JSON manifest with per-column statistics, histograms, quantiles, and pairwise column interactions. Sidecar `.datum-manifest` files are auto-discovered and feed back into the query planner for data-driven cardinality estimation.
 - **Sharded output with checkpointing** — write to sharded CSV/Parquet/HDF5 and resume from the last completed shard after a crash.
 
 If you need GROUP BY, window functions, or billion-row analytics, use DuckDB. If you need to join a ZIP of images with a JSON annotation file, resize everything to 224×224, and write sharded HDF5 — that's DatumIngest.

@@ -147,6 +147,9 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
 
     // Auto-discover sidecar index files for registered tables.
     DiscoverSidecarIndexes(catalog, reader);
+
+    // Auto-discover sidecar manifest files for registered tables.
+    DiscoverSidecarManifests(catalog);
 }
 
 static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
@@ -170,6 +173,34 @@ static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
         using FileStream stream = File.OpenRead(sidecarPath);
         SourceIndex index = reader.Read(stream);
         catalog.RegisterIndex(tableName, index);
+    }
+}
+
+static void DiscoverSidecarManifests(TableCatalog catalog)
+{
+    foreach (string tableName in catalog.TableNames)
+    {
+        // Skip tables that already have a manifest (e.g. from explicit load).
+        if (catalog.TryGetManifest(tableName, out _))
+        {
+            continue;
+        }
+
+        TableDescriptor descriptor = catalog.Resolve(tableName);
+        string sidecarPath = descriptor.FilePath + ".datum-manifest";
+
+        if (!File.Exists(sidecarPath))
+        {
+            continue;
+        }
+
+        string json = File.ReadAllText(sidecarPath);
+        QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+
+        if (manifest is not null)
+        {
+            catalog.RegisterManifest(tableName, manifest);
+        }
     }
 }
 

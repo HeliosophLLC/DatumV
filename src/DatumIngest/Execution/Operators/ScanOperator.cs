@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -50,6 +51,12 @@ public sealed class ScanOperator : IQueryOperator
     /// <c>null</c> when the provider cannot report a row count.
     /// </summary>
     public long? EstimatedRowCount { get; set; }
+
+    /// <summary>
+    /// Per-column statistics from a <see cref="QueryResultsManifest"/>, set at plan time.
+    /// <c>null</c> when no manifest is available for this table.
+    /// </summary>
+    public IReadOnlyDictionary<string, FeatureManifest>? ColumnStatistics { get; set; }
 
     /// <summary>The source index for chunk-based pruning, or <c>null</c> if none is available.</summary>
     public SourceIndex? SourceIndex => _sourceIndex;

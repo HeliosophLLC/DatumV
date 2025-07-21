@@ -270,3 +270,29 @@ Pass `null` (the default) to disable suggestions entirely — no `suggestions` f
   ]
 }
 ```
+
+## Planning Integration
+
+Manifests are not just for external consumption — they feed back into the query planner for data-driven cardinality estimation.
+
+### Sidecar Discovery
+
+When a source is registered, the CLI, gRPC compute backend, and `.source` interactive command all check for a `.datum-manifest` sidecar file alongside the source file (e.g., `data.csv.datum-manifest`). If found, the manifest is deserialized and registered in the `TableCatalog`.
+
+### Cost Model
+
+When planning a query, the `QueryPlanner` checks for a registered manifest:
+
+1. **Row count override** — The manifest's `RowCount` replaces the provider's estimate. This is especially valuable for CSV, JSON, JSONL, and ZIP providers that cannot report row counts from metadata alone.
+2. **Column statistics attachment** — Per-column `FeatureManifest` entries are attached to the `ScanOperator`, making `estimatedDistinctCount` (NDV) and `nullRatio` available to the cost model.
+
+The `QueryExplainer` then uses these statistics for selectivity estimation instead of fixed heuristics:
+
+- **Equality** (`column = value`): selectivity = 1/NDV
+- **Not-equal** (`column != value`): selectivity = 1 − 1/NDV
+- **IS NULL**: selectivity = actual null ratio from the manifest
+- **IS NOT NULL**: selectivity = 1 − null ratio
+- **IN**: selectivity = count × 1/NDV
+- **Equi-join** (`a.x = b.x`): rows = left × right / max(NDV_left, NDV_right)
+
+When no manifest is available, the cost model falls back to the same fixed heuristics used before (10% for equality, 33% for range predicates, etc.).

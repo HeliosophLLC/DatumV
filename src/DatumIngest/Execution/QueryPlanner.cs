@@ -552,6 +552,23 @@ public sealed class QueryPlanner
             .GetResult();
         ((ScanOperator)scanOperator).EstimatedRowCount = capabilities.EstimatedRowCount;
 
+        // Override row count and attach per-column statistics from manifest if available.
+        if (_catalog.TryGetManifest(descriptor.Name, out Manifest.QueryResultsManifest? manifest) && manifest is not null)
+        {
+            // Manifest row count is authoritative — it comes from a full-data scan
+            // and is available even for providers that cannot report row counts.
+            ((ScanOperator)scanOperator).EstimatedRowCount = manifest.RowCount;
+
+            // Build column-name → FeatureManifest lookup for selectivity estimation.
+            Dictionary<string, Manifest.FeatureManifest> columnStatistics = new(StringComparer.OrdinalIgnoreCase);
+            foreach (Manifest.FeatureManifest feature in manifest.Features)
+            {
+                columnStatistics[feature.Name] = feature;
+            }
+
+            ((ScanOperator)scanOperator).ColumnStatistics = columnStatistics;
+        }
+
         // Attach source index for chunk-based pruning if one is registered.
         if (_catalog.TryGetIndex(descriptor.Name, out Indexing.SourceIndex? sourceIndex))
         {

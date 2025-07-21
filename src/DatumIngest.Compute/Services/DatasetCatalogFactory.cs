@@ -1,5 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Indexing;
+using DatumIngest.Manifest;
 
 namespace DatumIngest.Compute.Services;
 
@@ -54,7 +56,60 @@ internal static class DatasetCatalogFactory
             }
         }
 
+        DiscoverSidecarIndexes(catalog);
+        DiscoverSidecarManifests(catalog);
+
         return catalog;
+    }
+
+    /// <summary>
+    /// Auto-discovers <c>.datum-index</c> sidecar files for all registered tables
+    /// and attaches them to the catalog for chunk-based pruning.
+    /// </summary>
+    private static void DiscoverSidecarIndexes(TableCatalog catalog)
+    {
+        IndexReader reader = new();
+
+        foreach (string tableName in catalog.TableNames)
+        {
+            TableDescriptor descriptor = catalog.Resolve(tableName);
+            string sidecarPath = descriptor.FilePath + ".datum-index";
+
+            if (!File.Exists(sidecarPath))
+            {
+                continue;
+            }
+
+            using FileStream stream = File.OpenRead(sidecarPath);
+            SourceIndex index = reader.Read(stream);
+            catalog.RegisterIndex(tableName, index);
+        }
+    }
+
+    /// <summary>
+    /// Auto-discovers <c>.datum-manifest</c> sidecar files for all registered tables
+    /// and attaches them to the catalog for statistics-driven cardinality estimation.
+    /// </summary>
+    private static void DiscoverSidecarManifests(TableCatalog catalog)
+    {
+        foreach (string tableName in catalog.TableNames)
+        {
+            TableDescriptor descriptor = catalog.Resolve(tableName);
+            string sidecarPath = descriptor.FilePath + ".datum-manifest";
+
+            if (!File.Exists(sidecarPath))
+            {
+                continue;
+            }
+
+            string json = File.ReadAllText(sidecarPath);
+            QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+
+            if (manifest is not null)
+            {
+                catalog.RegisterManifest(tableName, manifest);
+            }
+        }
     }
 
     /// <summary>

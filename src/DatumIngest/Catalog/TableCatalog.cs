@@ -1,4 +1,5 @@
 using DatumIngest.Indexing;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog;
@@ -14,6 +15,7 @@ public sealed class TableCatalog
     private readonly Dictionary<string, TableDescriptor> _descriptors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Func<ITableProvider>> _providerFactories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, QueryResultsManifest> _manifests = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Registers a provider factory for a given provider identifier.
@@ -169,5 +171,27 @@ public sealed class TableCatalog
     public bool TryGetIndex(string tableName, out SourceIndex? index)
     {
         return _indexes.TryGetValue(tableName, out index);
+    }
+
+    /// <summary>
+    /// Registers a pre-computed <see cref="QueryResultsManifest"/> for a table,
+    /// enabling statistics-driven cardinality estimation in the query planner.
+    /// </summary>
+    /// <param name="tableName">Logical table name matching a registered descriptor.</param>
+    /// <param name="manifest">The manifest containing per-column statistics.</param>
+    public void RegisterManifest(string tableName, QueryResultsManifest manifest)
+    {
+        _manifests[tableName] = manifest;
+    }
+
+    /// <summary>
+    /// Attempts to retrieve a <see cref="QueryResultsManifest"/> for the given table name.
+    /// </summary>
+    /// <param name="tableName">Logical table name.</param>
+    /// <param name="manifest">The manifest, or <c>null</c> if none is registered.</param>
+    /// <returns><c>true</c> if a manifest was found; otherwise <c>false</c>.</returns>
+    public bool TryGetManifest(string tableName, out QueryResultsManifest? manifest)
+    {
+        return _manifests.TryGetValue(tableName, out manifest);
     }
 }
