@@ -26,6 +26,11 @@ public sealed class ExplainPlanNode
     /// <summary>Optional label for this child edge (e.g. "probe", "build").</summary>
     public string? ChildLabel { get; set; }
 
+    // ── Cost estimates (populated by static EXPLAIN) ──
+
+    /// <summary>Estimated number of rows this operator will produce, or <c>null</c> if unknown.</summary>
+    public long? EstimatedRows { get; set; }
+
     // ── Runtime metrics (populated only by EXPLAIN ANALYZE) ──
 
     /// <summary>Total number of rows produced by this operator.</summary>
@@ -68,6 +73,12 @@ public sealed class ExplainPlanNode
             builder.Append(" (");
             builder.Append(Details);
             builder.Append(')');
+        }
+
+        // Append estimated rows if available (from static EXPLAIN).
+        if (EstimatedRows.HasValue)
+        {
+            builder.Append($"  ~{EstimatedRows.Value:N0} rows");
         }
 
         // Append runtime metrics on the same line if available.

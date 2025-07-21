@@ -195,6 +195,12 @@ message ExplainPlanNodeMessage {
 
   // Runtime metrics — populated only when analyze = true.
   ExplainRuntimeMetrics runtime = 7;
+
+  // Estimated row count from cost model (0 if unknown).
+  int64 estimated_rows = 8;
+
+  // Whether the estimated_rows field was populated (distinguishes 0 from unknown).
+  bool has_estimated_rows = 9;
 }
 
 // Runtime execution metrics for a single plan node.

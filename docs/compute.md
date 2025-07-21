@@ -227,6 +227,8 @@ Returns the execution plan for a SQL query without running it.
 | `warnings` | `repeated string` | Performance warnings (e.g. `CROSS JOIN`, `LIKE forces full scan`). |
 | `annotations` | `repeated string` | Static plan annotations (e.g. `bounded top-N sort (N=100)`). |
 | `runtime` | `ExplainRuntimeMetrics` | Runtime metrics — populated only when `analyze = true`. |
+| `estimated_rows` | `int64` | Estimated row count from the cost model (0 when unknown). |
+| `has_estimated_rows` | `bool` | Whether `estimated_rows` was populated (distinguishes 0 from unknown). |
 
 **`ExplainRuntimeMetrics`:**
 

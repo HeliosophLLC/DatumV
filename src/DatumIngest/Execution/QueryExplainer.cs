@@ -11,6 +11,11 @@ namespace DatumIngest.Execution;
 /// </summary>
 public static class QueryExplainer
 {
+    // Default selectivity when no statistics are available.
+    // These are intentionally conservative heuristics, not data-driven.
+    private const double DefaultFilterSelectivity = 0.33;
+    private const double DefaultEquiJoinSelectivity = 0.10;
+
     /// <summary>
     /// Builds an explain plan tree from the root operator.
     /// </summary>
@@ -62,16 +67,20 @@ public static class QueryExplainer
         {
             OperatorName = "Scan",
             Details = details,
+            EstimatedRows = scan.EstimatedRowCount,
         };
     }
 
     private static ExplainPlanNode BuildFilterNode(FilterOperator filter)
     {
+        ExplainPlanNode child = BuildNode(filter.Source);
+
         ExplainPlanNode node = new()
         {
             OperatorName = "Filter",
             Details = $"predicate: {FormatExpression(filter.Predicate)}",
-            Children = { BuildNode(filter.Source) },
+            Children = { child },
+            EstimatedRows = EstimateFilterRows(child.EstimatedRows, filter.Predicate),
         };
 
         // Warn about LIKE predicates (no index, full scan).
@@ -98,11 +107,14 @@ public static class QueryExplainer
             }
         }
 
+        ExplainPlanNode child = BuildNode(project.Source);
+
         return new ExplainPlanNode
         {
             OperatorName = "Project",
             Details = string.Join(", ", columnNames),
-            Children = { BuildNode(project.Source) },
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
         };
     }
 
@@ -124,13 +136,14 @@ public static class QueryExplainer
 
         // Determine the actual join strategy using JoinKeyExtractor.
         string strategy;
+        JoinKeyExtractionResult? extraction = null;
         if (join.Type == JoinType.Cross)
         {
             strategy = "nested-loop";
         }
         else
         {
-            JoinKeyExtractionResult? extraction = JoinKeyExtractor.TryExtract(join.OnCondition);
+            extraction = JoinKeyExtractor.TryExtract(join.OnCondition);
             if (extraction is not null)
             {
                 strategy = extraction.Residual is not null ? "hash+filter" : "hash";
@@ -152,6 +165,8 @@ public static class QueryExplainer
             OperatorName = $"{joinType} Join",
             Details = $"strategy: {strategy}{condition}",
             Children = { leftChild, rightChild },
+            EstimatedRows = EstimateJoinRows(
+                join.Type, leftChild.EstimatedRows, rightChild.EstimatedRows, extraction),
         };
 
         // Warn about cross joins (can produce very large output).
@@ -185,11 +200,14 @@ public static class QueryExplainer
             items.Add($"{FormatExpression(item.Expression)} {direction}");
         }
 
+        ExplainPlanNode child = BuildNode(orderBy.Source);
+
         ExplainPlanNode node = new()
         {
             OperatorName = "Sort",
             Details = string.Join(", ", items),
-            Children = { BuildNode(orderBy.Source) },
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
         };
 
         if (orderBy.TopNRows is int topN)
@@ -210,31 +228,43 @@ public static class QueryExplainer
             ? $"limit: {limit.Limit}, offset: {limit.Offset}"
             : $"limit: {limit.Limit}";
 
+        ExplainPlanNode child = BuildNode(limit.Source);
+        long effectiveLimit = limit.Limit + limit.Offset;
+
         return new ExplainPlanNode
         {
             OperatorName = "Limit",
             Details = details,
-            Children = { BuildNode(limit.Source) },
+            Children = { child },
+            EstimatedRows = child.EstimatedRows.HasValue
+                ? Math.Min(effectiveLimit, child.EstimatedRows.Value)
+                : effectiveLimit,
         };
     }
 
     private static ExplainPlanNode BuildAliasNode(AliasOperator alias)
     {
+        ExplainPlanNode child = BuildNode(alias.Source);
+
         return new ExplainPlanNode
         {
             OperatorName = "Alias",
             Details = $"as: {alias.Alias}",
-            Children = { BuildNode(alias.Source) },
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
         };
     }
 
     private static ExplainPlanNode BuildSubqueryNode(SubqueryOperator subquery)
     {
+        ExplainPlanNode child = BuildNode(subquery.InnerOperator);
+
         return new ExplainPlanNode
         {
             OperatorName = "Subquery",
             Details = $"alias: {subquery.Alias}",
-            Children = { BuildNode(subquery.InnerOperator) },
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
         };
     }
 
@@ -245,12 +275,98 @@ public static class QueryExplainer
             ? $"{lateMat.Alias} ({lateMat.Descriptor.Provider})"
             : lateMat.Descriptor.Name;
 
+        ExplainPlanNode child = BuildNode(lateMat.Child);
+
         return new ExplainPlanNode
         {
             OperatorName = "Late Materialize",
             Details = $"source: {source}, key: {lateMat.KeyColumn}, fetch: [{columns}]",
-            Children = { BuildNode(lateMat.Child) },
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
         };
+    }
+
+    // ──────────────── Cardinality estimation ────────────────
+
+    /// <summary>
+    /// Estimates the number of rows surviving a filter predicate.
+    /// Uses a fixed default selectivity when no column statistics are available.
+    /// IS NULL, IS NOT NULL, and equality comparisons use tailored defaults;
+    /// AND/OR compound predicates propagate multiplicatively.
+    /// </summary>
+    private static long? EstimateFilterRows(long? inputRows, Expression predicate)
+    {
+        if (inputRows is null)
+        {
+            return null;
+        }
+
+        double selectivity = EstimateSelectivity(predicate);
+        long estimate = Math.Max(1, (long)(inputRows.Value * selectivity));
+        return estimate;
+    }
+
+    private static double EstimateSelectivity(Expression predicate)
+    {
+        return predicate switch
+        {
+            BinaryExpression { Operator: BinaryOperator.And } bin
+                => EstimateSelectivity(bin.Left) * EstimateSelectivity(bin.Right),
+            BinaryExpression { Operator: BinaryOperator.Or } bin
+                => Math.Min(1.0, EstimateSelectivity(bin.Left) + EstimateSelectivity(bin.Right)),
+            BinaryExpression { Operator: BinaryOperator.Equal } => 0.10,
+            BinaryExpression { Operator: BinaryOperator.NotEqual } => 0.90,
+            BinaryExpression { Operator: BinaryOperator.Like } => 0.25,
+            IsNullExpression { Negated: true } => 0.90,
+            IsNullExpression { Negated: false } => 0.10,
+            InExpression inExpr => Math.Min(1.0, inExpr.Values.Count * 0.10),
+            BetweenExpression => 0.25,
+            UnaryExpression { Operator: UnaryOperator.Not } unary
+                => 1.0 - EstimateSelectivity(unary.Operand),
+            _ => DefaultFilterSelectivity,
+        };
+    }
+
+    /// <summary>
+    /// Estimates the number of rows produced by a join.
+    /// Cross joins return left × right. Equi-joins use a fixed selectivity factor.
+    /// </summary>
+    private static long? EstimateJoinRows(
+        JoinType joinType,
+        long? leftRows,
+        long? rightRows,
+        JoinKeyExtractionResult? extraction)
+    {
+        if (leftRows is null || rightRows is null)
+        {
+            return null;
+        }
+
+        long left = leftRows.Value;
+        long right = rightRows.Value;
+
+        if (joinType == JoinType.Cross)
+        {
+            return left * right;
+        }
+
+        if (extraction is not null)
+        {
+            // Equi-join: assume each row matches ~10% of the other side.
+            long estimate = Math.Max(1, (long)(left * right * DefaultEquiJoinSelectivity));
+
+            // For outer joins, the minimum is the preserved side.
+            return joinType switch
+            {
+                JoinType.Left => Math.Max(left, estimate),
+                JoinType.Right => Math.Max(right, estimate),
+                JoinType.FullOuter => Math.Max(Math.Max(left, right), estimate),
+                _ => estimate,
+            };
+        }
+
+        // Nested-loop non-equi join — assume the same selectivity as a filter.
+        return Math.Max(1, (long)(left * right * DefaultFilterSelectivity));
     }
 
     // ──────────────── Expression formatting ────────────────

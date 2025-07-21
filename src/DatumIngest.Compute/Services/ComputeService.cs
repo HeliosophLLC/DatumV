@@ -259,6 +259,12 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         message.Warnings.AddRange(node.Warnings);
         message.Annotations.AddRange(node.Annotations);
 
+        if (node.EstimatedRows.HasValue)
+        {
+            message.EstimatedRows = node.EstimatedRows.Value;
+            message.HasEstimatedRows = true;
+        }
+
         foreach (ExplainPlanNode child in node.Children)
         {
             message.Children.Add(ToProto(child));

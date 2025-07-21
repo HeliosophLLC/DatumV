@@ -23,17 +23,22 @@ await ManifestSerializer.WriteToFileAsync(manifest, "manifest.json");
 ## EXPLAIN
 
 ```csharp
-// Static explain
+// Static explain (includes estimated row counts when provider reports them)
 IQueryOperator plan = planner.Plan(statement);
 ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
 Console.WriteLine(explainPlan.Render());
+// Output includes ~N rows annotations per operator node, e.g.:
+//   Filter (predicate: x > 5)  ~3,300 rows
+//     └─ Scan (table: data, provider: parquet, columns: [x])  ~10,000 rows
 
-// EXPLAIN ANALYZE
+// EXPLAIN ANALYZE (adds actual row counts and timing)
 InstrumentedOperator instrumented = InstrumentedOperator.InstrumentTree(plan);
 await foreach (Row row in instrumented.ExecuteAsync(context)) { }
 InstrumentedOperator.PopulateMetrics(explainPlan, instrumented);
 Console.WriteLine(explainPlan.Render());
 ```
+
+Estimated rows are available on any `ExplainPlanNode` via `node.EstimatedRows`. Providers that report row counts (Parquet, HDF5, IDX) produce estimates; CSV, JSON, JSONL, and ZIP return `null`. The estimates propagate through filter, join, sort, limit, and projection operators using fixed selectivity heuristics.
 
 ## Schema Introspection
 

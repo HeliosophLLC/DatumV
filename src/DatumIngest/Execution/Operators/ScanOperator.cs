@@ -45,6 +45,12 @@ public sealed class ScanOperator : IQueryOperator
     /// <summary>The advisory filter hint passed to filterable providers, or <c>null</c>.</summary>
     public Expression? FilterHint => _filterHint;
 
+    /// <summary>
+    /// Estimated row count from <see cref="ProviderCapabilities"/>, set at plan time.
+    /// <c>null</c> when the provider cannot report a row count.
+    /// </summary>
+    public long? EstimatedRowCount { get; set; }
+
     /// <summary>The source index for chunk-based pruning, or <c>null</c> if none is available.</summary>
     public SourceIndex? SourceIndex => _sourceIndex;
 

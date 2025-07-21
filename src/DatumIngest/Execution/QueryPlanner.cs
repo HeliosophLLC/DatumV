@@ -543,6 +543,15 @@ public sealed class QueryPlanner
 
         IQueryOperator scanOperator = new ScanOperator(descriptor, requiredColumns);
 
+        // Populate estimated row count from provider capabilities for cost annotations.
+        // GetCapabilitiesAsync returns Task.FromResult for most providers.
+        ITableProvider provider = _catalog.CreateProvider(descriptor);
+        ProviderCapabilities capabilities = provider
+            .GetCapabilitiesAsync(descriptor, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        ((ScanOperator)scanOperator).EstimatedRowCount = capabilities.EstimatedRowCount;
+
         // Attach source index for chunk-based pruning if one is registered.
         if (_catalog.TryGetIndex(descriptor.Name, out Indexing.SourceIndex? sourceIndex))
         {

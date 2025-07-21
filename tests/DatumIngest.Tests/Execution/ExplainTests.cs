@@ -988,4 +988,387 @@ public class ExplainTests
         Assert.Contains("hash", node.Details);
         Assert.DoesNotContain("nested-loop", node.Details);
     }
+
+    // ──────────────── Cardinality estimation ────────────────
+
+    [Fact]
+    public void Explain_ScanFromCsv_EstimatedRowsIsNull()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Equal("Scan", node.OperatorName);
+        Assert.Null(node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_FilterPropagatesEstimatedRowsFromChild()
+    {
+        ExplainPlanNode scanNode = new()
+        {
+            OperatorName = "Scan",
+            Details = "table: data",
+            EstimatedRows = 10_000,
+        };
+
+        // Build a filter manually to test propagation.
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("x"),
+            BinaryOperator.GreaterThan,
+            new LiteralExpression(5.0));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        Assert.Equal("Filter", node.OperatorName);
+        Assert.NotNull(node.EstimatedRows);
+        Assert.True(node.EstimatedRows!.Value > 0);
+        Assert.True(node.EstimatedRows.Value < 10_000);
+
+        // Child scan should have the original estimate.
+        Assert.Equal(10_000, node.Children[0].EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_FilterEqualitySelectivity_LowerThanDefault()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        // Equality: selectivity = 0.10
+        Expression equalPredicate = new BinaryExpression(
+            new ColumnReference("status"),
+            BinaryOperator.Equal,
+            new LiteralExpression("active"));
+
+        // Range: selectivity = 0.33
+        Expression rangePredicate = new BinaryExpression(
+            new ColumnReference("x"),
+            BinaryOperator.GreaterThan,
+            new LiteralExpression(5.0));
+
+        FilterOperator equalFilter = new(scan, equalPredicate);
+        FilterOperator rangeFilter = new(scan, rangePredicate);
+
+        ExplainPlanNode equalNode = QueryExplainer.Explain(equalFilter);
+        ExplainPlanNode rangeNode = QueryExplainer.Explain(rangeFilter);
+
+        // Equality should produce fewer estimated rows than range.
+        Assert.True(equalNode.EstimatedRows!.Value < rangeNode.EstimatedRows!.Value);
+    }
+
+    [Fact]
+    public void Explain_FilterAndCompound_MultipliesSelectivities()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        // Single equality: 0.10 → 1000
+        Expression single = new BinaryExpression(
+            new ColumnReference("x"),
+            BinaryOperator.Equal,
+            new LiteralExpression(5.0));
+
+        // Two equalities with AND: 0.10 * 0.10 → 100
+        Expression compound = new BinaryExpression(
+            single,
+            BinaryOperator.And,
+            new BinaryExpression(
+                new ColumnReference("y"),
+                BinaryOperator.Equal,
+                new LiteralExpression(10.0)));
+
+        FilterOperator singleFilter = new(scan, single);
+        FilterOperator compoundFilter = new(scan, compound);
+
+        ExplainPlanNode singleNode = QueryExplainer.Explain(singleFilter);
+        ExplainPlanNode compoundNode = QueryExplainer.Explain(compoundFilter);
+
+        Assert.True(compoundNode.EstimatedRows!.Value < singleNode.EstimatedRows!.Value);
+    }
+
+    [Fact]
+    public void Explain_ProjectPassthroughEstimate()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 5_000;
+
+        ProjectOperator project = new(scan,
+            [new SelectColumn(new ColumnReference("x"))]);
+
+        ExplainPlanNode node = QueryExplainer.Explain(project);
+
+        Assert.Equal("Project", node.OperatorName);
+        Assert.Equal(5_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_LimitCapsEstimate()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        LimitOperator limit = new(scan, limit: 50);
+        ExplainPlanNode node = QueryExplainer.Explain(limit);
+
+        Assert.Equal("Limit", node.OperatorName);
+        Assert.Equal(50, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_LimitWithOffset_IncludesOffsetInEstimate()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        LimitOperator limit = new(scan, limit: 50, offset: 10);
+        ExplainPlanNode node = QueryExplainer.Explain(limit);
+
+        // Limit + offset = 60, capped by child estimate 10,000.
+        Assert.Equal(60, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_LimitLargerThanChild_CappedByChild()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 100;
+
+        LimitOperator limit = new(scan, limit: 500);
+        ExplainPlanNode node = QueryExplainer.Explain(limit);
+
+        Assert.Equal(100, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_EquiJoinEstimate_UsesSelectivityFactor()
+    {
+        ScanOperator leftScan = new(
+            new TableDescriptor("csv", "left", "l.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        leftScan.EstimatedRowCount = 1_000;
+
+        ScanOperator rightScan = new(
+            new TableDescriptor("csv", "right", "r.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        rightScan.EstimatedRowCount = 500;
+
+        JoinOperator join = new(
+            leftScan,
+            rightScan,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("left", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("right", "id")));
+
+        ExplainPlanNode node = QueryExplainer.Explain(join);
+
+        Assert.Equal("INNER Join", node.OperatorName);
+        Assert.NotNull(node.EstimatedRows);
+        // 1000 * 500 * 0.10 = 50,000
+        Assert.Equal(50_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_CrossJoinEstimate_IsCartesianProduct()
+    {
+        ScanOperator leftScan = new(
+            new TableDescriptor("csv", "a", "a.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        leftScan.EstimatedRowCount = 100;
+
+        ScanOperator rightScan = new(
+            new TableDescriptor("csv", "b", "b.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        rightScan.EstimatedRowCount = 200;
+
+        JoinOperator join = new(
+            leftScan, rightScan, JoinType.Cross, onCondition: null);
+
+        ExplainPlanNode node = QueryExplainer.Explain(join);
+
+        Assert.Equal(20_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_LeftJoinEstimate_AtLeastLeftSide()
+    {
+        ScanOperator leftScan = new(
+            new TableDescriptor("csv", "left", "l.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        leftScan.EstimatedRowCount = 1_000;
+
+        ScanOperator rightScan = new(
+            new TableDescriptor("csv", "right", "r.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        rightScan.EstimatedRowCount = 10;
+
+        JoinOperator join = new(
+            leftScan,
+            rightScan,
+            JoinType.Left,
+            new BinaryExpression(
+                new ColumnReference("left", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("right", "id")));
+
+        ExplainPlanNode node = QueryExplainer.Explain(join);
+
+        // 1000 * 10 * 0.10 = 1000, but LEFT JOIN preserves left side → max(1000, 1000) = 1000
+        Assert.True(node.EstimatedRows!.Value >= 1_000);
+    }
+
+    [Fact]
+    public void Explain_JoinWithNullEstimates_ReturnsNull()
+    {
+        // CSV providers return null for EstimatedRowCount.
+        TableCatalog catalog = CreateCatalogWithCsv("left", "l.csv");
+        catalog.Register(new TableDescriptor("csv", "right", "r.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("left")),
+            Joins: [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("right"),
+                    new BinaryExpression(
+                        new ColumnReference("left", "id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("right", "id")))
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // With CSV (null row counts), all estimates should be null.
+        Assert.Null(node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_SortPassthroughEstimate()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 8_000;
+
+        OrderByOperator sort = new(
+            scan,
+            [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]);
+
+        ExplainPlanNode node = QueryExplainer.Explain(sort);
+
+        Assert.Equal("Sort", node.OperatorName);
+        Assert.Equal(8_000, node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Render_WithEstimatedRows_ShowsTilde()
+    {
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Scan",
+            Details = "table: data",
+            EstimatedRows = 10_000,
+        };
+
+        string output = node.Render();
+
+        Assert.Contains("~10,000 rows", output);
+    }
+
+    [Fact]
+    public void Render_WithoutEstimatedRows_OmitsTilde()
+    {
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Scan",
+            Details = "table: data",
+        };
+
+        string output = node.Render();
+
+        Assert.DoesNotContain("~", output);
+        Assert.DoesNotContain("rows", output);
+    }
+
+    [Fact]
+    public void Render_EstimatedRowsWithRuntime_ShowsBoth()
+    {
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Scan",
+            Details = "table: data",
+            EstimatedRows = 10_000,
+            RowsProduced = 9_500,
+            SelfTime = TimeSpan.FromMilliseconds(3.0),
+            TotalTime = TimeSpan.FromMilliseconds(3.0),
+        };
+
+        string output = node.Render();
+
+        Assert.Contains("~10,000 rows", output);
+        Assert.Contains("rows: 9,500", output);
+    }
+
+    [Fact]
+    public void Explain_FilterNullChildEstimate_ProducesNullEstimate()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        // Don't set EstimatedRowCount — defaults to null.
+
+        Expression predicate = new BinaryExpression(
+            new ColumnReference("x"),
+            BinaryOperator.GreaterThan,
+            new LiteralExpression(5.0));
+
+        FilterOperator filter = new(scan, predicate);
+        ExplainPlanNode node = QueryExplainer.Explain(filter);
+
+        Assert.Null(node.EstimatedRows);
+    }
+
+    [Fact]
+    public void Explain_LimitWithNullChildEstimate_UsesLimitAsEstimate()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "test.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+
+        LimitOperator limit = new(scan, limit: 100);
+        ExplainPlanNode node = QueryExplainer.Explain(limit);
+
+        // Even without a child estimate, LIMIT can still produce an estimate.
+        Assert.Equal(100, node.EstimatedRows);
+    }
 }
