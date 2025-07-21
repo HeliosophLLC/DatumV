@@ -1,5 +1,7 @@
 namespace DatumIngest.Manifest;
 
+using DatumIngest.Manifest.Insights;
+
 /// <summary>
 /// Top-level manifest describing a query result set, containing one <see cref="FeatureManifest"/>
 /// per column with kind-specific statistics.
@@ -17,4 +19,27 @@ public sealed class QueryResultsManifest
 
     /// <summary>Gets the pairwise column interaction statistics, or null if not computed.</summary>
     public IReadOnlyList<ColumnInteraction>? Interactions { get; init; }
+
+    /// <summary>Gets the dataset insights derived from manifest analysis, or null if not computed.</summary>
+    public IReadOnlyList<DatasetInsight>? Insights { get; init; }
+
+    /// <summary>
+    /// Gets the recommended DatumIngest SQL query containing only actions from insights
+    /// with <see cref="ApplyMode.AutoSafe"/> or <see cref="ApplyMode.Suggest"/> apply modes.
+    /// Null when no actionable insights exist.
+    /// </summary>
+    public string? RecommendedQuery { get; init; }
+
+    /// <summary>
+    /// Gets the full suggested query containing all actions (including <see cref="ApplyMode.ManualOnly"/>
+    /// proposed actions). Intended for human review — not auto-applicable.
+    /// Null when no actionable insights exist.
+    /// </summary>
+    public string? FullSuggestedQuery { get; init; }
+
+    /// <summary>
+    /// Gets annotations mapping each transformed column in the synthesized queries back to
+    /// the insight that produced it. Null when no queries are synthesized.
+    /// </summary>
+    public IReadOnlyList<QueryAnnotation>? QueryAnnotations { get; init; }
 }

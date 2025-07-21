@@ -1,5 +1,6 @@
 namespace DatumIngest.Manifest;
 
+using DatumIngest.Manifest.Insights;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
@@ -20,28 +21,30 @@ public static class ManifestBuilder
     /// <param name="rowCount">Total number of rows in the result set.</param>
     /// <param name="interactions">Optional pairwise column interaction results.</param>
     /// <param name="suggestionThresholds">Optional thresholds for heuristic suggestion tags. Pass null to disable suggestions.</param>
+    /// <param name="insightThresholds">Optional thresholds for the insight analysis engine. Pass null to disable insights.</param>
     public static QueryResultsManifest Build(
         IReadOnlyDictionary<string, ColumnStatistics> statistics,
         IReadOnlyDictionary<string, DataKind> columnKinds,
         long rowCount,
         IReadOnlyList<ColumnInteractionResult>? interactions = null,
-        SuggestionThresholds? suggestionThresholds = null)
+        SuggestionThresholds? suggestionThresholds = null,
+        InsightThresholds? insightThresholds = null)
     {
         List<FeatureManifest> features = new();
 
         foreach (KeyValuePair<string, ColumnStatistics> entry in statistics)
         {
             DataKind kind = columnKinds.TryGetValue(entry.Key, out DataKind k) ? k : DataKind.String;
-            FeatureManifest manifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
+            FeatureManifest featureManifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
 
             if (suggestionThresholds is not null)
             {
                 IReadOnlyList<string>? suggestions = SuggestionEngine.Suggest(
-                    manifest, rowCount, suggestionThresholds);
-                manifest.Suggestions = suggestions;
+                    featureManifest, rowCount, suggestionThresholds);
+                featureManifest.Suggestions = suggestions;
             }
 
-            features.Add(manifest);
+            features.Add(featureManifest);
         }
 
         List<ColumnInteraction>? mappedInteractions = null;
@@ -68,13 +71,42 @@ public static class ManifestBuilder
             }
         }
 
-        return new QueryResultsManifest
+        QueryResultsManifest manifest = new()
         {
             RowCount = rowCount,
             GeneratedAtUtc = DateTime.UtcNow,
             Features = features,
             Interactions = mappedInteractions
         };
+
+        if (insightThresholds is not null)
+        {
+            IReadOnlyList<DatasetInsight> insights = InsightAnalyzer.Analyze(manifest, insightThresholds);
+
+            List<string> originalColumns = new(features.Count);
+
+            foreach (FeatureManifest feature in features)
+            {
+                originalColumns.Add(feature.Name);
+            }
+
+            QuerySynthesisOptions synthesisOptions = new();
+            IReadOnlyList<QueryAnnotation> annotations = QuerySynthesizer.GenerateAnnotations(insights);
+
+            manifest = new QueryResultsManifest
+            {
+                RowCount = manifest.RowCount,
+                GeneratedAtUtc = manifest.GeneratedAtUtc,
+                Features = manifest.Features,
+                Interactions = manifest.Interactions,
+                Insights = insights.Count > 0 ? insights : null,
+                RecommendedQuery = QuerySynthesizer.SynthesizeRecommended(insights, originalColumns, synthesisOptions),
+                FullSuggestedQuery = QuerySynthesizer.SynthesizeFull(insights, originalColumns, synthesisOptions),
+                QueryAnnotations = annotations.Count > 0 ? annotations : null
+            };
+        }
+
+        return manifest;
     }
 
     private static FeatureManifest BuildFeature(string name, DataKind kind, ColumnStatistics stats, long rowCount)
@@ -149,7 +181,15 @@ public static class ManifestBuilder
             ZeroRatio = numericResult.ZeroRatio,
             OutlierCount = numericResult.OutlierCount,
             OutlierRatio = numericResult.OutlierRatio,
-            IntegerValued = histogramResult.IntegerValued
+            IntegerValued = histogramResult.IntegerValued,
+            NonzeroCount = numericResult.ZeroRatio > 0.1 && numericResult.NonzeroCount > 0
+                ? numericResult.NonzeroCount : null,
+            NonzeroMean = numericResult.ZeroRatio > 0.1 && numericResult.NonzeroCount > 0
+                ? numericResult.NonzeroMean : null,
+            NonzeroVariance = numericResult.ZeroRatio > 0.1 && numericResult.NonzeroCount > 0
+                ? numericResult.NonzeroVariance : null,
+            NonzeroStandardDeviation = numericResult.ZeroRatio > 0.1 && numericResult.NonzeroCount > 0
+                ? numericResult.NonzeroStandardDeviation : null
         };
     }
 

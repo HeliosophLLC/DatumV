@@ -38,7 +38,10 @@ public sealed class CsvChunkMeasurementTests : IDisposable
 
     private static TableDescriptor CreateDescriptor(string filePath)
     {
-        return new TableDescriptor("csv", "test", filePath, new Dictionary<string, string>());
+        return new TableDescriptor("csv", "test", filePath, new Dictionary<string, string>
+        {
+            ["header"] = "true"
+        });
     }
 
     // ───────────────────── Basic measurement ─────────────────────

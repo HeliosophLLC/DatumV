@@ -18,6 +18,12 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     private double _m3; // Third central moment accumulator (for skewness)
     private double _m4; // Fourth central moment accumulator (for kurtosis)
 
+    // Parallel Welford accumulators for nonzero values only.
+    // Populated alongside the main accumulators with negligible overhead.
+    private long _nonzeroCount;
+    private double _nonzeroMean;
+    private double _nonzeroM2;
+
     /// <summary>Gets the number of numeric values observed.</summary>
     public long Count => _count;
 
@@ -67,6 +73,15 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         if (numericValue == 0.0)
         {
             _zeroCount++;
+        }
+        else
+        {
+            // Welford's for the nonzero subset
+            _nonzeroCount++;
+            double nonzeroDelta = numericValue - _nonzeroMean;
+            double nonzeroDeltaN = nonzeroDelta / _nonzeroCount;
+            _nonzeroM2 += nonzeroDelta * nonzeroDeltaN * (_nonzeroCount - 1);
+            _nonzeroMean += nonzeroDeltaN;
         }
 
         if (numericValue < _min)
@@ -125,6 +140,9 @@ public sealed class NumericAccumulator : IStatisticAccumulator
             _m2 = otherNumeric._m2;
             _m3 = otherNumeric._m3;
             _m4 = otherNumeric._m4;
+            _nonzeroCount = otherNumeric._nonzeroCount;
+            _nonzeroMean = otherNumeric._nonzeroMean;
+            _nonzeroM2 = otherNumeric._nonzeroM2;
             return;
         }
 
@@ -159,6 +177,26 @@ public sealed class NumericAccumulator : IStatisticAccumulator
         _outlierCount += otherNumeric._outlierCount;
         _min = Math.Min(_min, otherNumeric._min);
         _max = Math.Max(_max, otherNumeric._max);
+
+        // Parallel merge for nonzero subset (Pébay 2008, mean + M2 only)
+        if (otherNumeric._nonzeroCount > 0)
+        {
+            if (_nonzeroCount == 0)
+            {
+                _nonzeroCount = otherNumeric._nonzeroCount;
+                _nonzeroMean = otherNumeric._nonzeroMean;
+                _nonzeroM2 = otherNumeric._nonzeroM2;
+            }
+            else
+            {
+                long combinedNonzero = _nonzeroCount + otherNumeric._nonzeroCount;
+                double nzDelta = otherNumeric._nonzeroMean - _nonzeroMean;
+                _nonzeroM2 += otherNumeric._nonzeroM2
+                    + nzDelta * nzDelta * _nonzeroCount * otherNumeric._nonzeroCount / combinedNonzero;
+                _nonzeroMean += nzDelta * otherNumeric._nonzeroCount / combinedNonzero;
+                _nonzeroCount = combinedNonzero;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -166,9 +204,15 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     {
         double zeroRatio = _count > 0 ? (double)_zeroCount / _count : 0.0;
         double outlierRatio = _count > 0 ? (double)_outlierCount / _count : 0.0;
+        double nonzeroVariance = _nonzeroCount > 1 ? _nonzeroM2 / _nonzeroCount :
+            _nonzeroCount == 1 ? 0.0 : double.NaN;
         return new StatisticResult("numeric", new NumericResult(
             _count, Min, Max, Mean, Variance, StandardDeviation, Skewness, Kurtosis,
-            _zeroCount, zeroRatio, _outlierCount, outlierRatio));
+            _zeroCount, zeroRatio, _outlierCount, outlierRatio,
+            _nonzeroCount,
+            _nonzeroCount > 0 ? _nonzeroMean : double.NaN,
+            nonzeroVariance,
+            Math.Sqrt(nonzeroVariance)));
     }
 }
 
@@ -187,8 +231,18 @@ public sealed class NumericAccumulator : IStatisticAccumulator
 /// <param name="ZeroRatio">Ratio of zero values to total count.</param>
 /// <param name="OutlierCount">Number of values with Z-score greater than 3.</param>
 /// <param name="OutlierRatio">Ratio of outlier values to total count.</param>
-public sealed record NumericResult(long Count, double Min, double Max, double Mean, double Variance, double StandardDeviation, double Skewness, double Kurtosis, long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio)
+/// <param name="NonzeroCount">Number of nonzero values observed.</param>
+/// <param name="NonzeroMean">Mean of nonzero values, or NaN if none.</param>
+/// <param name="NonzeroVariance">Population variance of nonzero values.</param>
+/// <param name="NonzeroStandardDeviation">Population standard deviation of nonzero values.</param>
+public sealed record NumericResult(
+    long Count, double Min, double Max, double Mean,
+    double Variance, double StandardDeviation, double Skewness, double Kurtosis,
+    long ZeroCount, double ZeroRatio, long OutlierCount, double OutlierRatio,
+    long NonzeroCount, double NonzeroMean, double NonzeroVariance, double NonzeroStandardDeviation)
 {
     /// <summary>An empty result with zero counts and NaN for all numeric fields.</summary>
-    public static NumericResult Empty { get; } = new(0, double.NaN, double.NaN, double.NaN, 0, 0, 0, 0, 0, 0, 0, 0);
+    public static NumericResult Empty { get; } = new(
+        0, double.NaN, double.NaN, double.NaN, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, double.NaN, 0, 0);
 }

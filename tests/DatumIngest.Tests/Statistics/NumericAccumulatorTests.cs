@@ -618,4 +618,127 @@ public sealed class NumericAccumulatorTests
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(1.7, result.Kurtosis, 1e-10);
     }
+
+    [Fact]
+    public void Add_WithZeros_NonzeroStatsTrackNonzeroSubset()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(4.0f));
+        accumulator.Add(DataValue.FromScalar(6.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(3, result.NonzeroCount);
+        Assert.Equal(4.0, result.NonzeroMean, 1e-10);
+
+        // Population variance of [2, 4, 6] = ((2-4)^2 + (4-4)^2 + (6-4)^2) / 3 = 8/3
+        double expectedVariance = 8.0 / 3.0;
+        Assert.Equal(expectedVariance, result.NonzeroVariance, 1e-10);
+        Assert.Equal(Math.Sqrt(expectedVariance), result.NonzeroStandardDeviation, 1e-10);
+    }
+
+    [Fact]
+    public void Add_NoZeros_NonzeroStatsMatchOverall()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromScalar(3.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(result.Count, result.NonzeroCount);
+        Assert.Equal(result.Mean, result.NonzeroMean, 1e-10);
+        Assert.Equal(result.Variance, result.NonzeroVariance, 1e-10);
+    }
+
+    [Fact]
+    public void Add_AllZeros_NonzeroCountIsZero()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(0.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.NonzeroCount);
+        Assert.True(double.IsNaN(result.NonzeroMean));
+        Assert.True(double.IsNaN(result.NonzeroVariance));
+        Assert.True(double.IsNaN(result.NonzeroStandardDeviation));
+    }
+
+    [Fact]
+    public void Add_NoValues_NonzeroStatsDefault()
+    {
+        NumericAccumulator accumulator = new();
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(0, result.NonzeroCount);
+        Assert.True(double.IsNaN(result.NonzeroMean));
+    }
+
+    [Fact]
+    public void Add_SingleNonzeroValue_NonzeroStatsCorrect()
+    {
+        NumericAccumulator accumulator = new();
+
+        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromScalar(7.0f));
+        accumulator.Add(DataValue.FromScalar(0.0f));
+
+        NumericResult result = (NumericResult)accumulator.GetResult().Value!;
+        Assert.Equal(1, result.NonzeroCount);
+        Assert.Equal(7.0, result.NonzeroMean, 1e-10);
+        Assert.Equal(0.0, result.NonzeroVariance, 1e-10);
+    }
+
+    [Fact]
+    public void Merge_CombinesNonzeroStats()
+    {
+        // Single pass with all values
+        NumericAccumulator combined = new();
+        combined.Add(DataValue.FromScalar(0.0f));
+        combined.Add(DataValue.FromScalar(2.0f));
+        combined.Add(DataValue.FromScalar(4.0f));
+        combined.Add(DataValue.FromScalar(0.0f));
+        combined.Add(DataValue.FromScalar(6.0f));
+
+        // Split into two accumulators
+        NumericAccumulator first = new();
+        first.Add(DataValue.FromScalar(0.0f));
+        first.Add(DataValue.FromScalar(2.0f));
+
+        NumericAccumulator second = new();
+        second.Add(DataValue.FromScalar(4.0f));
+        second.Add(DataValue.FromScalar(0.0f));
+        second.Add(DataValue.FromScalar(6.0f));
+
+        first.Merge(second);
+
+        NumericResult combinedResult = (NumericResult)combined.GetResult().Value!;
+        NumericResult mergedResult = (NumericResult)first.GetResult().Value!;
+
+        Assert.Equal(combinedResult.NonzeroCount, mergedResult.NonzeroCount);
+        Assert.Equal(combinedResult.NonzeroMean, mergedResult.NonzeroMean, 1e-10);
+        Assert.Equal(combinedResult.NonzeroVariance, mergedResult.NonzeroVariance, 1e-10);
+        Assert.Equal(combinedResult.NonzeroStandardDeviation, mergedResult.NonzeroStandardDeviation, 1e-10);
+    }
+
+    [Fact]
+    public void Merge_NonzeroWithEmpty_PreservesStats()
+    {
+        NumericAccumulator first = new();
+        first.Add(DataValue.FromScalar(0.0f));
+        first.Add(DataValue.FromScalar(5.0f));
+
+        NumericAccumulator empty = new();
+        first.Merge(empty);
+
+        NumericResult result = (NumericResult)first.GetResult().Value!;
+        Assert.Equal(1, result.NonzeroCount);
+        Assert.Equal(5.0, result.NonzeroMean, 1e-10);
+    }
 }

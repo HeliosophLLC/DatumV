@@ -28,3 +28,42 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Language server — multi-error diagnostics**: Error-recovering parser for multiple parse errors per document~~ ✅
 - **Language server — semantic diagnostics**: ~~Unknown table/column warnings~~, type mismatch detection ✅ (partial)
 - ~~**Language server — WASM size optimization**: Extract `DatumIngest.Parsing` with manifest POCOs to eliminate all transitive heavy dependencies from LanguageServer/Wasm~~ ✅
+
+---
+
+## Cross-Manifest Analysis (V2 — needs design)
+
+**Status**: Deferred. The single-manifest insights pipeline (InsightAnalyzer → InsightClusterer → QuerySynthesizer) shipped in V1. Cross-manifest is a distinct product surface that deserves its own design pass.
+
+**The need is real.** Join candidate detection was attempted in consuming software with underwhelming results. Users working with multiple datasets need to know which columns correspond across tables, whether a join is feasible, and what the expected join quality would be. This is a genuine workflow gap, not a speculative feature.
+
+### What exists today
+
+- Per-column feature manifests with TopK, histograms, quantiles, entropy, cardinality estimates
+- Pairwise within-manifest interactions (Pearson, Spearman, Cramér's V, ANOVA, MI, Theil's U, missingness correlation)
+- Catalog can hold multiple named tables with optional manifests — infrastructure for multi-source is present
+- QueryExplainer uses single-side statistics for join cost estimation
+
+### What's needed (8 types sketched, design incomplete)
+
+`CrossManifestAnalyzer`, `CrossManifestResult`, `JoinCandidate`, `JoinEvidence`, `CrossManifestThresholds`, `ManifestWithName`, `CrossManifestQueryBuilder`, `ColumnAliasMap`
+
+### Open design questions
+
+1. **Discovery vs. declaration.** If the user declares column equivalences (country ↔ native_country), ColumnAliasMap is a trivial dictionary. If the system *infers* them, we need fuzzy name matching, value-set intersection, type compatibility — a real schema matching pipeline. Probably both: allow user declarations, attempt inference for the rest.
+
+2. **Evidence scoring.** The V1 plan listed "Schema + TopK + histogram IoU + cardinality" as signals. TopK Jaccard is fragile for numerics (two `age` columns from different populations overlap without being joinable). TopK Jaccard works for categorical join keys but ID columns with millions of distinct values have near-zero TopK overlap despite being perfect keys. Histogram IoU only applies to continuous numerics, not categorical keys. We need a signal ensemble with weights tuned by column type, not a one-size-fits-all similarity score.
+
+3. **Output contract.** Single-manifest QuerySynthesizer rewrites SELECT projections. Cross-manifest QueryBuilder produces JOINs — fundamentally different SQL shape. What dialect? What FROM sources? What if the join is many-to-many (bad)? The output needs join-quality metrics (expected fanout, null-key ratio, cardinality ratio) alongside the generated SQL.
+
+4. **Integration point.** The single-manifest pipeline lives inside ManifestBuilder.Build(). Cross-manifest takes *multiple* manifests — it sits above the single-manifest pipeline. Who calls it? CLI command? Server endpoint? A new top-level analyzer?
+
+5. **What constitutes a "good" join?** Need clear definitions: key uniqueness on at least one side, acceptable null-key ratio, cardinality ratio bounds, value overlap threshold. These are domain-dependent — a star-schema fact→dimension join has very different expectations than a one-to-one entity merge.
+
+### Possible approach
+
+- Phase A: `ManifestWithName` wrapper, `ColumnAliasMap` (user-declared + fuzzy name inference), `CrossManifestThresholds`
+- Phase B: `JoinEvidence` with per-signal scores (name similarity, type compatibility, NDV ratio, TopK Jaccard for categoricals, key uniqueness, null-key ratio, value-range overlap for numerics), composite confidence
+- Phase C: `JoinCandidate` selection (above composite threshold), `CrossManifestResult` aggregation
+- Phase D: `CrossManifestQueryBuilder` — generate JOIN SQL with quality annotations
+- Phase E: Integration into CLI (`datum cross-manifest a.json b.json`) and server

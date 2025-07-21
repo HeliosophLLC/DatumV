@@ -2,6 +2,7 @@ namespace DatumIngest.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DatumIngest.Manifest.Insights;
 
 /// <summary>
 /// Serializes and deserializes <see cref="QueryResultsManifest"/> using System.Text.Json
@@ -61,6 +62,11 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(NumericSummaryData))]
 [JsonSerializable(typeof(ColumnInteraction))]
 [JsonSerializable(typeof(QuantileData))]
+[JsonSerializable(typeof(DatasetInsight))]
+[JsonSerializable(typeof(InsightAction))]
+[JsonSerializable(typeof(QueryAnnotation))]
+[JsonSerializable(typeof(InsightThresholds))]
+[JsonSerializable(typeof(QuerySynthesisOptions))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,

@@ -129,6 +129,18 @@ public sealed class NumericFeatureManifest : FeatureManifest
 
     /// <summary>Gets whether all observed values are integers (no fractional part).</summary>
     public required bool IntegerValued { get; init; }
+
+    /// <summary>Gets the number of nonzero values, or null when not applicable (low zero ratio).</summary>
+    public long? NonzeroCount { get; init; }
+
+    /// <summary>Gets the mean of nonzero values, or null when not applicable.</summary>
+    public double? NonzeroMean { get; init; }
+
+    /// <summary>Gets the population variance of nonzero values, or null when not applicable.</summary>
+    public double? NonzeroVariance { get; init; }
+
+    /// <summary>Gets the population standard deviation of nonzero values, or null when not applicable.</summary>
+    public double? NonzeroStandardDeviation { get; init; }
 }
 
 /// <summary>
