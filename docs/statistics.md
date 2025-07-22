@@ -157,7 +157,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 | UInt8Array | `BinaryFeatureManifest` | sizeStats (byte-length distribution) |
 | Date, DateTime | `TemporalFeatureManifest` | earliest, latest (ISO 8601) |
 
-All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `estimatedDistinctCount`, `isConstant`, `isNearConstant`, `topKValues`, `dominantValueRatio`, `nullRatio`, `missingRuns`, `entropy`, `entropyApproximate`, `suggestions`.
+All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `estimatedDistinctCount`, `isConstant`, `isNearConstant`, `topKValues`, `dominantValueRatio`, `nullRatio`, `missingRuns`, `entropy`, `entropyApproximate`.
 
 | Derived Flag | Definition | Purpose |
 |--------------|------------|--------|
@@ -168,39 +168,7 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
 
 `NumericFeatureManifest` includes an `integerValued` boolean that is `true` when every observed value has no fractional part. This fact is deterministic (not heuristic) and is the foundation for distinguishing continuous numeric columns from discrete/ordinal ones. The detection is performed during histogram binning via reservoir sampling.
 
-### Suggestions
 
-When `SuggestionThresholds` are provided to `ManifestBuilder.Build()`, each feature manifest receives an advisory `suggestions` array of heuristic tags derived from existing statistics. These are hints, not definitive classifications.
-
-| Suggestion | Condition | Applies To |
-|------------|-----------|------------|
-| `zero-inflated` | `zeroRatio > 0.5` | Numeric |
-| `possible-ordinal` | `integerValued && estimatedDistinctCount ≤ 30` | Numeric |
-| `possible-identifier` | `distinctRatio > 0.9 && topKCoverage < 0.05` | All |
-| `high-cardinality` | `distinctRatio > 0.5` | All |
-| `low-cardinality` | `estimatedDistinctCount ≤ 20` | All |
-| `right-skewed` | `skewness > 2.0` | Numeric |
-| `left-skewed` | `skewness < −2.0` | Numeric |
-| `heavy-tailed` | `kurtosis > 7.0` | Numeric |
-| `high-missingness` | `nullRatio > 0.3` | All |
-
-All thresholds are configurable via `SuggestionThresholds`. The defaults are intentionally conservative — obvious cases trigger, borderline ones do not.
-
-#### Programmatic API
-
-```csharp
-SuggestionThresholds thresholds = new()
-{
-    ZeroInflatedMinRatio = 0.8,        // stricter than default 0.5
-    PossibleOrdinalMaxDistinct = 10    // stricter than default 30
-};
-
-QueryResultsManifest manifest = ManifestBuilder.Build(
-    stats, columnKinds, rowCount,
-    suggestionThresholds: thresholds);
-```
-
-Pass `null` (the default) to disable suggestions entirely — no `suggestions` field will appear in the JSON output.
 
 ### Example output
 
@@ -231,7 +199,6 @@ Pass `null` (the default) to disable suggestions entirely — no `suggestions` f
       "isNearConstant": false,
       "dominantValueRatio": 0.0002,
       "topKValues": [],
-      "suggestions": ["high-cardinality", "possible-identifier"]
     },
     {
       "type": "image",

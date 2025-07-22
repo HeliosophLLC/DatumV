@@ -73,13 +73,7 @@ public abstract class FeatureManifest
     /// <summary>Gets whether the entropy value is an approximate lower bound due to frequency map capping.</summary>
     public bool? EntropyApproximate { get; init; }
 
-    /// <summary>
-    /// Gets advisory suggestions about the column's statistical profile.
-    /// These are heuristic labels derived from the computed statistics using configurable
-    /// thresholds in <see cref="SuggestionThresholds"/>. Consumers should treat them as
-    /// hints, not definitive classifications.
-    /// </summary>
-    public IReadOnlyList<string>? Suggestions { get; set; }
+
 }
 
 /// <summary>

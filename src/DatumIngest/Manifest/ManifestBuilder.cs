@@ -20,14 +20,12 @@ public static class ManifestBuilder
     /// <param name="columnKinds">Map of column name to <see cref="DataKind"/>, used to select the correct manifest subclass.</param>
     /// <param name="rowCount">Total number of rows in the result set.</param>
     /// <param name="interactions">Optional pairwise column interaction results.</param>
-    /// <param name="suggestionThresholds">Optional thresholds for heuristic suggestion tags. Pass null to disable suggestions.</param>
     /// <param name="insightThresholds">Optional thresholds for the insight analysis engine. Pass null to disable insights.</param>
     public static QueryResultsManifest Build(
         IReadOnlyDictionary<string, ColumnStatistics> statistics,
         IReadOnlyDictionary<string, DataKind> columnKinds,
         long rowCount,
         IReadOnlyList<ColumnInteractionResult>? interactions = null,
-        SuggestionThresholds? suggestionThresholds = null,
         InsightThresholds? insightThresholds = null)
     {
         List<FeatureManifest> features = new();
@@ -36,14 +34,6 @@ public static class ManifestBuilder
         {
             DataKind kind = columnKinds.TryGetValue(entry.Key, out DataKind k) ? k : DataKind.String;
             FeatureManifest featureManifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
-
-            if (suggestionThresholds is not null)
-            {
-                IReadOnlyList<string>? suggestions = SuggestionEngine.Suggest(
-                    featureManifest, rowCount, suggestionThresholds);
-                featureManifest.Suggestions = suggestions;
-            }
-
             features.Add(featureManifest);
         }
 
