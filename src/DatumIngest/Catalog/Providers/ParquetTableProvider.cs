@@ -455,7 +455,12 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             return DataKind.Date;
         }
 
-        // Booleans, enums, and other types → String representation
+        if (underlyingType == typeof(bool))
+        {
+            return DataKind.Boolean;
+        }
+
+        // Enums and other types → String representation
         return DataKind.String;
     }
 
@@ -485,6 +490,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             DataKind.Date => DataValue.FromDate(element is DateOnly dateOnly
                 ? dateOnly
                 : DateOnly.FromDateTime(Convert.ToDateTime(element))),
+            DataKind.Boolean => DataValue.FromBoolean(Convert.ToBoolean(element)),
             _ => DataValue.FromString(element.ToString() ?? string.Empty)
         };
     }

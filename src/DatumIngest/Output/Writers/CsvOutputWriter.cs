@@ -136,6 +136,8 @@ public sealed class CsvOutputWriter : IOutputWriter
             DataKind.DateTime => value.AsDateTime().ToString("O"),
             DataKind.JsonValue => value.AsJsonValue(),
             DataKind.Vector => FormatVector(value.AsVector()),
+            DataKind.Uuid => value.AsUuid().ToString("D"),
+            DataKind.Boolean => value.AsBoolean() ? "true" : "false",
             _ => value.ToString() ?? ""
         };
     }

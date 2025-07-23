@@ -262,6 +262,8 @@ public sealed class ParquetOutputWriter : IOutputWriter
                 DataKind.JsonValue => new DataField<string>(column.Name),
                 DataKind.Date => new DataField<string>(column.Name),
                 DataKind.DateTime => new DataField<string>(column.Name),
+                DataKind.Uuid => new DataField<string>(column.Name),
+                DataKind.Boolean => new DataField<bool>(column.Name),
                 _ => new DataField<string>(column.Name)
             };
         }
@@ -285,6 +287,8 @@ public sealed class ParquetOutputWriter : IOutputWriter
             DataKind.JsonValue => BuildJsonColumn(field, column.Name, rowCount),
             DataKind.Date => BuildDateColumn(field, column.Name, rowCount),
             DataKind.DateTime => BuildDateTimeColumn(field, column.Name, rowCount),
+            DataKind.Uuid => BuildUuidColumn(field, column.Name, rowCount),
+            DataKind.Boolean => BuildBooleanColumn(field, column.Name, rowCount),
             _ => BuildFallbackStringColumn(field, column.Name, rowCount)
         };
     }
@@ -406,6 +410,30 @@ public sealed class ParquetOutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = value.IsNull ? "" : (value.ToString() ?? "");
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildUuidColumn(DataField field, string columnName, int rowCount)
+    {
+        string[] data = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? "" : value.AsUuid().ToString("D");
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildBooleanColumn(DataField field, string columnName, int rowCount)
+    {
+        bool[] data = new bool[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = !value.IsNull && value.AsBoolean();
         }
 
         return new DataColumn(field, data);

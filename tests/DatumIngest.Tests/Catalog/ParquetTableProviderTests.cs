@@ -288,15 +288,14 @@ public sealed class ParquetTableProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSchema_MapsBoolToString()
+    public async Task GetSchema_MapsBoolToBoolean()
     {
         string path = await CreateBooleanFixtureAsync();
         ParquetTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
 
         ColumnInfo activeColumn = schema.Columns.Single(c => c.Name == "active");
-        // Booleans mapped to String ("True"/"False") since DataKind has no Boolean type
-        Assert.Equal(DataKind.String, activeColumn.Kind);
+        Assert.Equal(DataKind.Boolean, activeColumn.Kind);
     }
 
     [Fact]
@@ -404,15 +403,15 @@ public sealed class ParquetTableProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task Open_ReadsBooleanAsString()
+    public async Task Open_ReadsBooleanAsBoolean()
     {
         string path = await CreateBooleanFixtureAsync();
         ParquetTableProvider provider = new();
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
-        Assert.Equal("True", rows[0]["active"].AsString());
-        Assert.Equal("False", rows[1]["active"].AsString());
+        Assert.True(rows[0]["active"].AsBoolean());
+        Assert.False(rows[1]["active"].AsBoolean());
     }
 
     [Fact]

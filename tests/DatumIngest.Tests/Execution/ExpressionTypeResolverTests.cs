@@ -28,7 +28,7 @@ public sealed class ExpressionTypeResolverTests
     [InlineData(42L, DataKind.Scalar)]
     [InlineData(3.14f, DataKind.Scalar)]
     [InlineData(3.14, DataKind.Scalar)]
-    [InlineData(true, DataKind.Scalar)]
+    [InlineData(true, DataKind.Boolean)]
     public void ResolveLiteral_NumericOrBool_ReturnsScalar(object value, DataKind expected)
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(

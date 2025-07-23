@@ -31,6 +31,24 @@ The following features are architecturally accounted for but deferred from V1:
 
 ---
 
+## Type System Extensions (Deferred)
+
+**Status**: Under consideration. These types have clear use cases in OLAP analytics and ML pipelines but are not blocking V1 workflows. The current type system (Scalar, UInt8, Vector, Matrix, Tensor, UInt8Array, Image, String, Date, DateTime, JsonValue, UUID, Boolean) covers the primary ML and analytics needs.
+
+### Time-of-day type (`DataKind.Time`)
+
+A standalone time without a date component. Common in OLAP engines (ClickHouse `Time`, DuckDB `TIME`, PostgreSQL `time`). Currently, time components are extractable via `hour()`, `minute()`, `second()` but there is no way to represent a first-class Time column. Would require a new `DataValue` factory (`FromTime(TimeOnly)`), CAST paths (String↔Time, DateTime→Time), and output format mappings.
+
+### Interval / Duration type (`DataKind.Duration`)
+
+Represents elapsed time spans (days, hours, minutes, seconds). Would allow `date_diff` to return a typed duration instead of a Scalar. Useful for temporal aggregation and arithmetic (`date_add` could accept Duration directly). The current Scalar representation for durations works for ML consumption (models see numbers) but loses semantic information. Parquet has no native interval type; HDF5 would need a custom convention.
+
+### Enum / Categorical type (`DataKind.Categorical`)
+
+ML-relevant for one-hot and label encoding. Could be represented as String with a fixed domain constraint (known set of valid values). Natural fit with the planned data validation feature (CHECK constraints / VALIDATE clause). Would enable: automatic one-hot encoding, label encoding with stable integer mapping, domain validation on ingest. DuckDB and Polars both support this pattern.
+
+---
+
 ## Cross-Manifest Analysis (V2 — needs design)
 
 **Status**: Deferred. The single-manifest insights pipeline (InsightAnalyzer → InsightClusterer → QuerySynthesizer) shipped in V1. Cross-manifest is a distinct product surface that deserves its own design pass.

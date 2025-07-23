@@ -43,6 +43,12 @@ public sealed class DataValue : IEquatable<DataValue>
     /// <summary>Cached null scalar — the most common null kind in expression evaluation.</summary>
     private static readonly DataValue NullScalar = new(DataKind.Scalar, payload: null, shape: null, isNull: true);
 
+    /// <summary>Cached boolean true — avoids per-evaluation allocation for boolean results.</summary>
+    private static readonly DataValue BooleanTrue = new(DataKind.Boolean, true, shape: null, isNull: false);
+
+    /// <summary>Cached boolean false — avoids per-evaluation allocation for boolean results.</summary>
+    private static readonly DataValue BooleanFalse = new(DataKind.Boolean, false, shape: null, isNull: false);
+
     // ───────────────────────── Factory methods ─────────────────────────
 
     /// <summary>Creates a scalar value from a 32-bit float.</summary>
@@ -129,6 +135,14 @@ public sealed class DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from a raw JSON string.</summary>
     public static DataValue FromJsonValue(string value) =>
         new(DataKind.JsonValue, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
+    public static DataValue FromUuid(Guid value) =>
+        new(DataKind.Uuid, value, shape: null, isNull: false);
+
+    /// <summary>Creates a boolean value.</summary>
+    public static DataValue FromBoolean(bool value) =>
+        value ? BooleanTrue : BooleanFalse;
 
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
@@ -269,6 +283,22 @@ public sealed class DataValue : IEquatable<DataValue>
         return (string)_payload!;
     }
 
+    /// <summary>Returns the UUID payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public Guid AsUuid()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Uuid);
+        return (Guid)_payload!;
+    }
+
+    /// <summary>Returns the boolean payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public bool AsBoolean()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Boolean);
+        return (bool)_payload!;
+    }
+
     // ───────────────────── Zero-copy conversions ──────────────────────
 
     /// <summary>
@@ -361,6 +391,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Image => AsImage().AsSpan().SequenceEqual(other.AsImage()),
             DataKind.Date => (DateOnly)_payload! == (DateOnly)other._payload!,
             DataKind.DateTime => (DateTimeOffset)_payload! == (DateTimeOffset)other._payload!,
+            DataKind.Uuid => (Guid)_payload! == (Guid)other._payload!,
+            DataKind.Boolean => (bool)_payload! == (bool)other._payload!,
             _ => false,
         };
     }
@@ -377,6 +409,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.String or DataKind.JsonValue => HashCode.Combine(_kind, (string)_payload!),
             DataKind.Date => HashCode.Combine(_kind, (DateOnly)_payload!),
             DataKind.DateTime => HashCode.Combine(_kind, (DateTimeOffset)_payload!),
+            DataKind.Uuid => HashCode.Combine(_kind, (Guid)_payload!),
+            DataKind.Boolean => HashCode.Combine(_kind, (bool)_payload!),
             DataKind.Vector => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Matrix => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Tensor => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
@@ -459,6 +493,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Date => ((DateOnly)_payload!).ToString("yyyy-MM-dd"),
             DataKind.DateTime => ((DateTimeOffset)_payload!).ToString("O"),
             DataKind.JsonValue => (string)_payload!,
+            DataKind.Uuid => ((Guid)_payload!).ToString("D"),
+            DataKind.Boolean => (bool)_payload! ? "true" : "false",
             DataKind.Vector => $"Vector[{((float[])_payload!).Length}]",
             DataKind.Matrix => $"Matrix[{_shape![0]}x{_shape[1]}]",
             DataKind.Tensor => $"Tensor[{string.Join("x", _shape!)}]",

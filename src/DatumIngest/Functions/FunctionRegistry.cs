@@ -83,6 +83,23 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.GetFilenameFunction());
         registry.RegisterScalar(new Scalar.GetFileExtensionFunction());
         registry.RegisterScalar(new Scalar.GetPathFunction());
+        registry.RegisterScalar(new Scalar.UpperFunction());
+        registry.RegisterScalar(new Scalar.LowerFunction());
+        registry.RegisterScalar(new Scalar.TrimFunction());
+        registry.RegisterScalar(new Scalar.LtrimFunction());
+        registry.RegisterScalar(new Scalar.RtrimFunction());
+        registry.RegisterScalar(new Scalar.ContainsFunction());
+        registry.RegisterScalar(new Scalar.StartsWithFunction());
+        registry.RegisterScalar(new Scalar.EndsWithFunction());
+        registry.RegisterScalar(new Scalar.PositionFunction());
+        registry.RegisterScalar(new Scalar.ReplaceFunction());
+        registry.RegisterScalar(new Scalar.ConcatFunction());
+        registry.RegisterScalar(new Scalar.RepeatFunction());
+        registry.RegisterScalar(new Scalar.ReverseFunction());
+        registry.RegisterScalar(new Scalar.LeftFunction());
+        registry.RegisterScalar(new Scalar.RightFunction());
+        registry.RegisterScalar(new Scalar.LpadFunction());
+        registry.RegisterScalar(new Scalar.RpadFunction());
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());
@@ -114,11 +131,37 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.StrftimeFunction());
         registry.RegisterScalar(new Scalar.IsDateFunction());
 
+        // UUID
+        registry.RegisterScalar(new Scalar.Uuid4Function());
+        registry.RegisterScalar(new Scalar.Uuid7Function());
+        registry.RegisterScalar(new Scalar.IsUuidFunction());
+        registry.RegisterScalar(new Scalar.UuidStrFunction());
+        registry.RegisterScalar(new Scalar.UuidBytesFunction());
+        registry.RegisterScalar(new Scalar.UuidVersionFunction());
+        registry.RegisterScalar(new Scalar.UuidTimestampFunction());
+
         // JSON
         registry.RegisterScalar(new Scalar.JsonValueFunction());
         registry.RegisterScalar(new Scalar.JsonQueryFunction());
         registry.RegisterScalar(new Scalar.JsonExistsFunction());
         registry.RegisterScalar(new Scalar.JsonArrayLengthFunction());
+
+        // Byte Array
+        registry.RegisterScalar(new Scalar.BytesConcatFunction());
+        registry.RegisterScalar(new Scalar.BytesSliceFunction());
+        registry.RegisterScalar(new Scalar.BytesFunction());
+
+        // Hashing
+        registry.RegisterScalar(new Scalar.Md5Function());
+        registry.RegisterScalar(new Scalar.Sha256Function());
+        registry.RegisterScalar(new Scalar.Sha512Function());
+        registry.RegisterScalar(new Scalar.Crc32Function());
+
+        // Encoding
+        registry.RegisterScalar(new Scalar.Base64EncodeFunction());
+        registry.RegisterScalar(new Scalar.Base64DecodeFunction());
+        registry.RegisterScalar(new Scalar.HexEncodeFunction());
+        registry.RegisterScalar(new Scalar.HexDecodeFunction());
 
         // Math — Arithmetic
         registry.RegisterScalar(new Math.AbsFunction());

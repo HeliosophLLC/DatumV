@@ -112,6 +112,8 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             DataKind.Matrix => BuildMatrixDataset(column.Name, rowCount),
             DataKind.UInt8Array or DataKind.Image => BuildBinaryDataset(column),
             DataKind.Date or DataKind.DateTime => BuildDateStringDataset(column),
+            DataKind.Uuid => BuildUuidStringDataset(column.Name, rowCount),
+            DataKind.Boolean => BuildBooleanDataset(column.Name, rowCount),
             _ => BuildStringDataset(column)
         };
     }
@@ -277,5 +279,29 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         }
 
         return new H5Dataset(flatData, fileDims: [(ulong)rowCount, (ulong)matrixRows, (ulong)matrixCols]);
+    }
+
+    private string[] BuildUuidStringDataset(string columnName, int rowCount)
+    {
+        string[] data = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? "" : value.AsUuid().ToString("D");
+        }
+
+        return data;
+    }
+
+    private byte[] BuildBooleanDataset(string columnName, int rowCount)
+    {
+        byte[] data = new byte[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = (!value.IsNull && value.AsBoolean()) ? (byte)1 : (byte)0;
+        }
+
+        return data;
     }
 }

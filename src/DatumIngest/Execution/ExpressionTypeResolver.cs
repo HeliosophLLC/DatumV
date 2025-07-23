@@ -49,7 +49,7 @@ public static class ExpressionTypeResolver
         {
             int or long or float or double => DataKind.Scalar,
             string => DataKind.String,
-            bool => DataKind.Scalar,
+            bool => DataKind.Boolean,
             _ => null,
         };
     }
@@ -150,6 +150,12 @@ public static class ExpressionTypeResolver
         if (Enum.TryParse<DataKind>(cast.TargetType, ignoreCase: true, out DataKind targetKind))
         {
             return targetKind;
+        }
+
+        // Accept common aliases that don't match enum names.
+        if (string.Equals(cast.TargetType, "bool", StringComparison.OrdinalIgnoreCase))
+        {
+            return DataKind.Boolean;
         }
 
         return null;

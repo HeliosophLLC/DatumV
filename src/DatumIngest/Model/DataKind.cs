@@ -38,4 +38,10 @@ public enum DataKind
 
     /// <summary>A raw JSON string for deferred parsing.</summary>
     JsonValue = 10,
+
+    /// <summary>A 128-bit universally unique identifier (RFC 9562).</summary>
+    Uuid = 11,
+
+    /// <summary>A boolean value (true or false).</summary>
+    Boolean = 12,
 }

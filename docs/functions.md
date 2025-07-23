@@ -20,6 +20,23 @@ DatumIngest provides a comprehensive function library for data transformation, M
 | `len` | `len(val)` | Length of string or collection. |
 | `mid` | `mid(str, start, length)` | Extract substring by position and length (0-based). |
 | `substring` | `substring(str, start, [length])` | Extract substring from start position (0-based). |
+| `upper` | `upper(str)` | Convert to uppercase (invariant). |
+| `lower` | `lower(str)` | Convert to lowercase (invariant). |
+| `trim` | `trim(str)` | Remove whitespace from both sides. |
+| `ltrim` | `ltrim(str)` | Remove leading whitespace. |
+| `rtrim` | `rtrim(str)` | Remove trailing whitespace. |
+| `contains` | `contains(str, sub)` | Returns Boolean — whether str contains sub (ordinal). |
+| `starts_with` | `starts_with(str, prefix)` | Returns Boolean — whether str starts with prefix (ordinal). |
+| `ends_with` | `ends_with(str, suffix)` | Returns Boolean — whether str ends with suffix (ordinal). |
+| `position` | `position(str, sub)` | 0-based index of first occurrence, or -1. |
+| `replace` | `replace(str, old, new)` | Replace all occurrences of old with new (ordinal). |
+| `concat` | `concat(a, b, ...)` | Concatenate two or more strings. Null args treated as empty. |
+| `repeat` | `repeat(str, count)` | Repeat string count times. |
+| `reverse` | `reverse(str)` | Reverse character order. |
+| `left` | `left(str, n)` | First n characters. |
+| `right` | `right(str, n)` | Last n characters. |
+| `lpad` | `lpad(str, len, fill)` | Pad on the left to target length with fill string. |
+| `rpad` | `rpad(str, len, fill)` | Pad on the right to target length with fill string. |
 | `get_filename` | `get_filename(path)` | Return file name with extension from path. |
 | `get_file_extension` | `get_file_extension(path)` | Return extension (with dot) from path. |
 | `get_path` | `get_path(path)` | Return directory portion of path. |
@@ -37,8 +54,62 @@ DatumIngest provides a comprehensive function library for data transformation, M
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Scalar yields epoch days; DateTime→Scalar yields epoch seconds. |
+| `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Scalar yields epoch days; DateTime→Scalar yields epoch seconds. Supports "uuid" and "bool" target types. |
 | `to_epoch` | `to_epoch(val)` | Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Scalar. |
+
+## UUID
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `uuid4` | `uuid4()` | Generate a random version 4 UUID. |
+| `uuid7` | `uuid7()` | Generate a time-ordered version 7 UUID (monotonically increasing). |
+| `is_uuid` | `is_uuid(str)` | Returns Boolean — whether the string is a valid UUID. |
+| `uuid_str` | `uuid_str(uuid)` | Format UUID as lowercase hyphenated string. |
+| `uuid_bytes` | `uuid_bytes(uuid)` | Extract UUID as 16-byte UInt8Array (big-endian). |
+| `uuid_version` | `uuid_version(uuid)` | Extract version number as Scalar (4 for random, 7 for time-ordered). |
+| `uuid_timestamp` | `uuid_timestamp(uuid)` | Extract embedded timestamp from v7 UUID as DateTime. Returns null for non-v7. |
+
+### UUID examples
+
+```sql
+-- Generate identifiers
+SELECT uuid4() AS random_id, uuid7() AS time_ordered_id FROM data
+
+-- Parse UUID strings from source data
+SELECT CAST(id_column AS Uuid) AS id FROM raw_data WHERE is_uuid(id_column)
+
+-- Extract timestamp from v7 UUIDs for temporal analysis
+SELECT uuid_timestamp(event_id) AS created_at FROM events
+
+-- Hash composite keys using UUID bytes
+SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash FROM joins
+```
+
+## Byte Array
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `bytes_concat` | `bytes_concat(a, b, ...)` | Concatenate two or more byte arrays. Null args treated as empty. |
+| `bytes_slice` | `bytes_slice(bytes, start, len)` | Extract sub-array by position and length (0-based, clamped). |
+| `bytes` | `bytes(a, b, ...)` | Construct a byte array from Scalar values (each 0–255). |
+
+## Hashing
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `md5` | `md5(val)` | MD5 hex digest. Accepts String (UTF-8) or UInt8Array. |
+| `sha256` | `sha256(val)` | SHA-256 hex digest. Accepts String (UTF-8) or UInt8Array. |
+| `sha512` | `sha512(val)` | SHA-512 hex digest. Accepts String (UTF-8) or UInt8Array. |
+| `crc32` | `crc32(val)` | CRC-32 checksum as Scalar. Accepts String (UTF-8) or UInt8Array. |
+
+## Encoding
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `base64_encode` | `base64_encode(bytes)` | Encode byte array as Base64 string. |
+| `base64_decode` | `base64_decode(str)` | Decode Base64 string to byte array. |
+| `hex_encode` | `hex_encode(bytes)` | Encode byte array as lowercase hex string. |
+| `hex_decode` | `hex_decode(str)` | Decode hex string to byte array. |
 
 ## Temporal Feature Extraction
 

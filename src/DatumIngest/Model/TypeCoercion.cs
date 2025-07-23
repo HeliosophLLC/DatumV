@@ -82,6 +82,7 @@ public static class TypeCoercion
     {
         return kind switch
         {
+            DataKind.Boolean => DataKind.Scalar,
             DataKind.UInt8 => DataKind.Scalar,
             DataKind.Scalar => DataKind.Vector,
             DataKind.Vector => DataKind.Tensor,
@@ -97,6 +98,7 @@ public static class TypeCoercion
     {
         return value.Kind switch
         {
+            DataKind.Boolean => DataValue.FromScalar(value.AsBoolean() ? 1f : 0f),
             DataKind.UInt8 => DataValue.FromScalar(value.AsUInt8()),
             DataKind.Scalar => DataValue.FromVector([value.AsScalar()]),
             DataKind.Vector => value.ToTensor(),

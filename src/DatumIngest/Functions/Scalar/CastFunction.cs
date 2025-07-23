@@ -38,7 +38,15 @@ public sealed class CastFunction : IScalarFunction
 
         if (!Enum.TryParse<DataKind>(targetKindName, ignoreCase: true, out DataKind targetKind))
         {
-            throw new ArgumentException($"Unknown target kind '{targetKindName}'.");
+            // Accept common aliases that don't match enum names.
+            if (string.Equals(targetKindName, "bool", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Boolean;
+            }
+            else
+            {
+                throw new ArgumentException($"Unknown target kind '{targetKindName}'.");
+            }
         }
 
         if (input.IsNull)
@@ -120,8 +128,57 @@ public sealed class CastFunction : IScalarFunction
             // Image -> UInt8Array (reinterpret image as bytes)
             (DataKind.Image, DataKind.UInt8Array) => DataValue.FromUInt8Array(input.AsImage()),
 
+            // String -> Uuid
+            (DataKind.String, DataKind.Uuid) => DataValue.FromUuid(
+                Guid.Parse(input.AsString())),
+
+            // Uuid -> String
+            (DataKind.Uuid, DataKind.String) => DataValue.FromString(
+                input.AsUuid().ToString("D")),
+
+            // String -> Boolean
+            (DataKind.String, DataKind.Boolean) => ParseStringToBoolean(input.AsString()),
+
+            // Boolean -> String
+            (DataKind.Boolean, DataKind.String) => DataValue.FromString(
+                input.AsBoolean() ? "true" : "false"),
+
+            // Boolean -> Scalar (true=1, false=0)
+            (DataKind.Boolean, DataKind.Scalar) => DataValue.FromScalar(
+                input.AsBoolean() ? 1f : 0f),
+
+            // Scalar -> Boolean (nonzero=true)
+            (DataKind.Scalar, DataKind.Boolean) => DataValue.FromBoolean(
+                input.AsScalar() != 0f),
+
+            // Boolean -> UInt8 (true=1, false=0)
+            (DataKind.Boolean, DataKind.UInt8) => DataValue.FromUInt8(
+                (byte)(input.AsBoolean() ? 1 : 0)),
+
+            // UInt8 -> Boolean (nonzero=true)
+            (DataKind.UInt8, DataKind.Boolean) => DataValue.FromBoolean(
+                input.AsUInt8() != 0),
+
             _ => throw new InvalidOperationException(
                 $"cast() does not support conversion from {input.Kind} to {targetKind}."),
         };
+    }
+
+    private static DataValue ParseStringToBoolean(string value)
+    {
+        if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || value == "1")
+        {
+            return DataValue.FromBoolean(true);
+        }
+
+        if (string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)
+            || value == "0")
+        {
+            return DataValue.FromBoolean(false);
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot convert string '{value}' to Boolean. Expected 'true', 'false', '1', or '0'.");
     }
 }

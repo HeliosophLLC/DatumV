@@ -53,7 +53,7 @@ public class ExpressionEvaluatorTests
     public void Literal_Bool_True()
     {
         DataValue result = _evaluator.Evaluate(new LiteralExpression(true), MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.True(result.AsBoolean());
     }
 
     // ─────────────── Column references ───────────────

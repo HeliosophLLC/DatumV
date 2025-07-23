@@ -136,7 +136,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new TemporalRangeAccumulator());
         }
 
-        if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime)
+        if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime or DataKind.Uuid or DataKind.Boolean)
         {
             accumulators.Add(new EntropyAccumulator());
             accumulators.Add(new CategoricalDiagnosticsAccumulator(_topK));

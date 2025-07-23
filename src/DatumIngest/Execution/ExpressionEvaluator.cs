@@ -71,6 +71,7 @@ public sealed class ExpressionEvaluator
 
         return result.Kind switch
         {
+            DataKind.Boolean => result.AsBoolean(),
             DataKind.Scalar => result.AsScalar() != 0f,
             DataKind.UInt8 => result.AsUInt8() != 0,
             DataKind.String => !string.IsNullOrEmpty(result.AsString()),
@@ -92,7 +93,7 @@ public sealed class ExpressionEvaluator
             float floatValue => DataValue.FromScalar(floatValue),
             double doubleValue => DataValue.FromScalar((float)doubleValue),
             string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromScalar(boolValue ? 1f : 0f),
+            bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type: {literal.Value.GetType().Name}."),
         };
@@ -386,6 +387,7 @@ public sealed class ExpressionEvaluator
         {
             DataKind.Scalar => value.AsScalar(),
             DataKind.UInt8 => value.AsUInt8(),
+            DataKind.Boolean => value.AsBoolean() ? 1f : 0f,
             DataKind.String => float.TryParse(value.AsString(), NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
                 ? parsed
                 : throw new InvalidOperationException($"Cannot convert string '{value.AsString()}' to number."),
@@ -436,6 +438,18 @@ public sealed class ExpressionEvaluator
         if (left.Kind == DataKind.DateTime && right.Kind == DataKind.DateTime)
         {
             return left.AsDateTime().CompareTo(right.AsDateTime());
+        }
+
+        // Compare UUIDs.
+        if (left.Kind == DataKind.Uuid && right.Kind == DataKind.Uuid)
+        {
+            return left.AsUuid().CompareTo(right.AsUuid());
+        }
+
+        // Compare booleans (false < true).
+        if (left.Kind == DataKind.Boolean && right.Kind == DataKind.Boolean)
+        {
+            return left.AsBoolean().CompareTo(right.AsBoolean());
         }
 
         // Otherwise compare as floats.
