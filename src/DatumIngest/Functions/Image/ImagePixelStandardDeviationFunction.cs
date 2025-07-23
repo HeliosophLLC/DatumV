@@ -16,6 +16,9 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction
     public string Name => "image_pixel_std";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (1 or 2))

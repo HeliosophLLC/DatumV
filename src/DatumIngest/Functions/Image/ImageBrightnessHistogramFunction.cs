@@ -22,6 +22,9 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction
     public string Name => "image_brightness_histogram";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

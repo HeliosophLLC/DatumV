@@ -10,6 +10,9 @@ public sealed class VecSumFunction : IScalarFunction
     public string Name => "vec_sum";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -35,6 +38,9 @@ public sealed class VecMeanFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_mean";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -65,6 +71,9 @@ public sealed class VecMinFunction : IScalarFunction
     public string Name => "vec_min";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -91,6 +100,9 @@ public sealed class VecMaxFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_max";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -121,6 +133,9 @@ public sealed class VecStdFunction : IScalarFunction
     public string Name => "vec_std";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -147,6 +162,9 @@ public sealed class VecVarFunction : IScalarFunction
     public string Name => "vec_var";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -171,6 +189,9 @@ public sealed class VecMedianFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_median";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -206,6 +227,9 @@ public sealed class VecArgminFunction : IScalarFunction
     public string Name => "vec_argmin";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -235,6 +259,9 @@ public sealed class VecArgmaxFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_argmax";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -269,6 +296,9 @@ public sealed class VecNormFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_norm";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -321,6 +351,9 @@ public sealed class VecCountNonzeroFunction : IScalarFunction
     public string Name => "vec_count_nonzero";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -349,6 +382,9 @@ public sealed class VecAnyFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_any";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -380,6 +416,9 @@ public sealed class VecAllFunction : IScalarFunction
     public string Name => "vec_all";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -407,6 +446,9 @@ public sealed class VecProductFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_product";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

@@ -29,6 +29,9 @@ public sealed class PerceptualHashFunction : IScalarFunction
     public string Name => "perceptual_hash";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

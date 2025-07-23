@@ -22,6 +22,9 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction
     public string Name => "compression_artifact_score";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

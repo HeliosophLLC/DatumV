@@ -16,6 +16,9 @@ public sealed class ElasticDeformFunction : IScalarFunction
     public string Name => "elastic_deform";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (3 or 4))

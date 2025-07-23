@@ -14,6 +14,9 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
     public string Name => "json_array_length";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 5;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length < 1 || argumentKinds.Length > 2)

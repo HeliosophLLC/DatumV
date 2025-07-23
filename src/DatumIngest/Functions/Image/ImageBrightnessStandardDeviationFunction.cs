@@ -19,6 +19,9 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction
     public string Name => "image_brightness_std";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

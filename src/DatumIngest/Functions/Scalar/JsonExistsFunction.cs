@@ -13,6 +13,9 @@ public sealed class JsonExistsFunction : IScalarFunction
     public string Name => "json_exists";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 5;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

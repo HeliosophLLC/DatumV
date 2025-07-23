@@ -16,6 +16,9 @@ public sealed class BlurImageFunction : IScalarFunction
     public string Name => "blur";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (2 or 3))

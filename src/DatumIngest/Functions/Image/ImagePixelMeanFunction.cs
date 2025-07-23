@@ -16,6 +16,9 @@ public sealed class ImagePixelMeanFunction : IScalarFunction
     public string Name => "image_pixel_mean";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (1 or 2))

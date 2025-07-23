@@ -16,6 +16,9 @@ public sealed class CropImageFunction : IScalarFunction
     public string Name => "crop";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (5 or 6))

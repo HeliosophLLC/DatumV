@@ -25,4 +25,11 @@ public interface IScalarFunction
     /// <param name="arguments">The argument values.</param>
     /// <returns>The computed result.</returns>
     DataValue Execute(ReadOnlySpan<DataValue> arguments);
+
+    /// <summary>
+    /// The cost weight of a single invocation of this function, measured in Query Units (QU).
+    /// Used for billing, governance budgets, and pre-execution cost estimation.
+    /// Higher values indicate more expensive operations (e.g. image transforms vs scalar math).
+    /// </summary>
+    int QueryUnitCost => 1;
 }

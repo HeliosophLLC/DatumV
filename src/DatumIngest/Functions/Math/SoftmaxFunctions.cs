@@ -13,6 +13,9 @@ public sealed class SoftmaxFunction : IScalarFunction
     public string Name => "softmax";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -73,6 +76,9 @@ public sealed class LogSoftmaxFunction : IScalarFunction
     public string Name => "log_softmax";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -130,6 +136,9 @@ public sealed class L2NormalizeFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "l2_normalize";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

@@ -21,6 +21,9 @@ public sealed class DetectBlurFunction : IScalarFunction
     public string Name => "detect_blur";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 10;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

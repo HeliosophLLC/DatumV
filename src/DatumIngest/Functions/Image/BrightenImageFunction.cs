@@ -16,6 +16,9 @@ public sealed class BrightenImageFunction : IScalarFunction
     public string Name => "brighten";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (2 or 3))

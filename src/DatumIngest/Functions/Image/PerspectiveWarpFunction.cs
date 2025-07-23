@@ -20,6 +20,9 @@ public sealed class PerspectiveWarpFunction : IScalarFunction
     public string Name => "perspective_warp";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         // 2 args: img, intensity

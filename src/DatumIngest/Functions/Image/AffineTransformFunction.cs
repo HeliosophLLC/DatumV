@@ -16,6 +16,9 @@ public sealed class AffineTransformFunction : IScalarFunction
     public string Name => "affine_transform";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (6 or 7))

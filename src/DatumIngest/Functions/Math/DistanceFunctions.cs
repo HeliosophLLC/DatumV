@@ -12,6 +12,9 @@ public sealed class CosineSimilarityFunction : IScalarFunction
     public string Name => "cosine_similarity";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)
@@ -51,6 +54,9 @@ public sealed class EuclideanDistanceFunction : IScalarFunction
     public string Name => "euclidean_distance";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)
@@ -86,6 +92,9 @@ public sealed class ManhattanDistanceFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "manhattan_distance";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -124,6 +133,9 @@ public sealed class DotFunction : IScalarFunction
     public string Name => "dot";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)
@@ -159,6 +171,9 @@ public sealed class HammingDistanceFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "hamming_distance";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

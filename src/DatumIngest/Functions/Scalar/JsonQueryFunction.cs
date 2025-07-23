@@ -14,6 +14,9 @@ public sealed class JsonQueryFunction : IScalarFunction
     public string Name => "json_query";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 5;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

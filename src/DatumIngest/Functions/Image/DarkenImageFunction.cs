@@ -16,6 +16,9 @@ public sealed class DarkenImageFunction : IScalarFunction
     public string Name => "darken";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 50;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length is not (2 or 3))

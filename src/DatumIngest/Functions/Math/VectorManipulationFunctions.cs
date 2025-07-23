@@ -12,6 +12,9 @@ public sealed class VecSliceFunction : IScalarFunction
     public string Name => "vec_slice";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 3)
@@ -50,6 +53,9 @@ public sealed class VecFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -106,6 +112,9 @@ public sealed class TensorFunction : IScalarFunction
     public string Name => "tensor";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length < 2)
@@ -153,6 +162,9 @@ public sealed class VecConcatFunction : IScalarFunction
     public string Name => "vec_concat";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length < 2)
@@ -195,6 +207,9 @@ public sealed class VecReverseFunction : IScalarFunction
     public string Name => "vec_reverse";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -225,6 +240,9 @@ public sealed class VecSortFunction : IScalarFunction
     public string Name => "vec_sort";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -251,6 +269,9 @@ public sealed class VecUniqueFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_unique";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -287,6 +308,9 @@ public sealed class VecFlattenFunction : IScalarFunction
     public string Name => "vec_flatten";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)
@@ -321,6 +345,9 @@ public sealed class VecPadFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "vec_pad";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -370,6 +397,9 @@ public sealed class VecRepeatFunction : IScalarFunction
     public string Name => "vec_repeat";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)
@@ -405,6 +435,9 @@ public sealed class LinspaceFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "linspace";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -448,6 +481,9 @@ public sealed class ArangeFunction : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "arange";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)

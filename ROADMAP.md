@@ -17,6 +17,9 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Seekable HDF5 provider**: Implement `ISeekableTableProvider` on HDF5 using PureHDF `HyperslabSelection` for partial dataset reads~~ ✅
 - ~~**Index + manifest co-generation**: Single-pass `index-manifest` command producing both `.datum-index` and `.datum-manifest` with opt-in pairwise interactions~~ ✅
 - **Cost-based optimizer**: Replace greedy join heuristic with cost model
+- **Data-dependent function costs**: Replace fixed per-invocation QU with `ComputeCost(DataKind[])` so vector/tensor operations scale with dimensionality
+- **Resolution-aware image costs**: Post-execution cost reporting from image transforms based on actual decoded resolution
+- **Query metering system**: `QueryMeter` integrated into `ExecutionContext` for per-query QU accumulation across functions and operators, with `GetUsage` RPC for billing
 - ~~**Statistics-based partition pruning**: Skip row groups whose min/max statistics prove a predicate unsatisfiable~~ ✅
 - ~~**Bloom filter acceleration**: Use Parquet bloom filters to skip partitions for equality predicates~~ ✅
 - **Remote data sources**: HTTP/S3/Azure Blob providers
