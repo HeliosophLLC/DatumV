@@ -11,6 +11,8 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
     private DateOnly _maxDate = DateOnly.MinValue;
     private DateTimeOffset _minDateTime = DateTimeOffset.MaxValue;
     private DateTimeOffset _maxDateTime = DateTimeOffset.MinValue;
+    private TimeOnly _minTime = TimeOnly.MaxValue;
+    private TimeOnly _maxTime = TimeOnly.MinValue;
     private long _count;
     private DataKind _observedKind;
 
@@ -54,6 +56,22 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
                 _maxDateTime = dateTime;
             }
         }
+        else if (value.Kind == DataKind.Time)
+        {
+            TimeOnly time = value.AsTime();
+            _count++;
+            _observedKind = DataKind.Time;
+
+            if (time < _minTime)
+            {
+                _minTime = time;
+            }
+
+            if (time > _maxTime)
+            {
+                _maxTime = time;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -72,6 +90,8 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
             _maxDate = otherTemporal._maxDate;
             _minDateTime = otherTemporal._minDateTime;
             _maxDateTime = otherTemporal._maxDateTime;
+            _minTime = otherTemporal._minTime;
+            _maxTime = otherTemporal._maxTime;
             return;
         }
 
@@ -96,6 +116,16 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
         {
             _maxDateTime = otherTemporal._maxDateTime;
         }
+
+        if (_minTime > otherTemporal._minTime)
+        {
+            _minTime = otherTemporal._minTime;
+        }
+
+        if (_maxTime < otherTemporal._maxTime)
+        {
+            _maxTime = otherTemporal._maxTime;
+        }
     }
 
     /// <inheritdoc />
@@ -111,6 +141,13 @@ public sealed class TemporalRangeAccumulator : IStatisticAccumulator
             return new StatisticResult("temporal_range", new TemporalRangeResult(
                 _minDate.ToString("O"),
                 _maxDate.ToString("O")));
+        }
+
+        if (_observedKind == DataKind.Time)
+        {
+            return new StatisticResult("temporal_range", new TemporalRangeResult(
+                _minTime.ToString("HH:mm:ss.FFFFFFF"),
+                _maxTime.ToString("HH:mm:ss.FFFFFFF")));
         }
 
         return new StatisticResult("temporal_range", new TemporalRangeResult(

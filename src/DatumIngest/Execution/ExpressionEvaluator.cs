@@ -174,6 +174,10 @@ public sealed class ExpressionEvaluator
 
             return binary.Operator switch
             {
+                BinaryOperator.Add when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
+                    => DataValue.FromDuration(left.AsDuration() + right.AsDuration()),
+                BinaryOperator.Subtract when left.Kind == DataKind.Duration && right.Kind == DataKind.Duration
+                    => DataValue.FromDuration(left.AsDuration() - right.AsDuration()),
                 BinaryOperator.Add => ArithmeticOp(left, right, static (a, b) => a + b),
                 BinaryOperator.Subtract => ArithmeticOp(left, right, static (a, b) => a - b),
                 BinaryOperator.Multiply => ArithmeticOp(left, right, static (a, b) => a * b),
@@ -396,6 +400,8 @@ public sealed class ExpressionEvaluator
             DataKind.Scalar => value.AsScalar(),
             DataKind.UInt8 => value.AsUInt8(),
             DataKind.Boolean => value.AsBoolean() ? 1f : 0f,
+            DataKind.Duration => (float)value.AsDuration().TotalSeconds,
+            DataKind.Time => (float)(value.AsTime().Hour * 3600 + value.AsTime().Minute * 60 + value.AsTime().Second + value.AsTime().Millisecond / 1000.0),
             DataKind.String => float.TryParse(value.AsString(), NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
                 ? parsed
                 : throw new InvalidOperationException($"Cannot convert string '{value.AsString()}' to number."),
@@ -458,6 +464,18 @@ public sealed class ExpressionEvaluator
         if (left.Kind == DataKind.Boolean && right.Kind == DataKind.Boolean)
         {
             return left.AsBoolean().CompareTo(right.AsBoolean());
+        }
+
+        // Compare times.
+        if (left.Kind == DataKind.Time && right.Kind == DataKind.Time)
+        {
+            return left.AsTime().CompareTo(right.AsTime());
+        }
+
+        // Compare durations.
+        if (left.Kind == DataKind.Duration && right.Kind == DataKind.Duration)
+        {
+            return left.AsDuration().CompareTo(right.AsDuration());
         }
 
         // Otherwise compare as floats.

@@ -44,4 +44,10 @@ public enum DataKind
 
     /// <summary>A boolean value (true or false).</summary>
     Boolean = 12,
+
+    /// <summary>A time-of-day without a date component.</summary>
+    Time = 13,
+
+    /// <summary>A duration (elapsed time span).</summary>
+    Duration = 14,
 }

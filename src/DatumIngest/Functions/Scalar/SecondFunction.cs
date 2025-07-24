@@ -3,7 +3,7 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
-/// Extracts the second (0–59) from a DateTime value as a Scalar.
+/// Extracts the second (0–59) from a DateTime or Time value as a Scalar.
 /// For Date inputs, always returns 0.
 /// </summary>
 public sealed class SecondFunction : IScalarFunction
@@ -19,9 +19,9 @@ public sealed class SecondFunction : IScalarFunction
             throw new ArgumentException("second() requires exactly 1 argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Date or DataKind.DateTime))
+        if (argumentKinds[0] is not (DataKind.Date or DataKind.DateTime or DataKind.Time))
         {
-            throw new ArgumentException($"second() requires a Date or DateTime argument, got {argumentKinds[0]}.");
+            throw new ArgumentException($"second() requires a Date, DateTime, or Time argument, got {argumentKinds[0]}.");
         }
 
         return DataKind.Scalar;
@@ -37,9 +37,12 @@ public sealed class SecondFunction : IScalarFunction
             return DataValue.Null(DataKind.Scalar);
         }
 
-        int second = input.Kind == DataKind.Date
-            ? 0
-            : input.AsDateTime().Second;
+        int second = input.Kind switch
+        {
+            DataKind.Date => 0,
+            DataKind.Time => input.AsTime().Second,
+            _ => input.AsDateTime().Second,
+        };
 
         return DataValue.FromScalar(second);
     }

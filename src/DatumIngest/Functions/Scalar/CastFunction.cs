@@ -43,6 +43,14 @@ public sealed class CastFunction : IScalarFunction
             {
                 targetKind = DataKind.Boolean;
             }
+            else if (string.Equals(targetKindName, "time", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Time;
+            }
+            else if (string.Equals(targetKindName, "duration", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Duration;
+            }
             else
             {
                 throw new ArgumentException($"Unknown target kind '{targetKindName}'.");
@@ -158,6 +166,42 @@ public sealed class CastFunction : IScalarFunction
             // UInt8 -> Boolean (nonzero=true)
             (DataKind.UInt8, DataKind.Boolean) => DataValue.FromBoolean(
                 input.AsUInt8() != 0),
+
+            // String -> Time
+            (DataKind.String, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.Parse(input.AsString(), CultureInfo.InvariantCulture)),
+
+            // Time -> String
+            (DataKind.Time, DataKind.String) => DataValue.FromString(
+                input.AsTime().ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture)),
+
+            // DateTime -> Time (extract time component)
+            (DataKind.DateTime, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.FromTimeSpan(input.AsDateTime().TimeOfDay)),
+
+            // Time -> Scalar (seconds since midnight)
+            (DataKind.Time, DataKind.Scalar) => DataValue.FromScalar(
+                (float)(input.AsTime().Hour * 3600 + input.AsTime().Minute * 60 + input.AsTime().Second + input.AsTime().Millisecond / 1000.0)),
+
+            // Scalar -> Time (seconds since midnight)
+            (DataKind.Scalar, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(input.AsScalar()))),
+
+            // String -> Duration
+            (DataKind.String, DataKind.Duration) => DataValue.FromDuration(
+                TimeSpan.Parse(input.AsString(), CultureInfo.InvariantCulture)),
+
+            // Duration -> String
+            (DataKind.Duration, DataKind.String) => DataValue.FromString(
+                input.AsDuration().ToString("c")),
+
+            // Duration -> Scalar (total seconds)
+            (DataKind.Duration, DataKind.Scalar) => DataValue.FromScalar(
+                (float)input.AsDuration().TotalSeconds),
+
+            // Scalar -> Duration (seconds)
+            (DataKind.Scalar, DataKind.Duration) => DataValue.FromDuration(
+                TimeSpan.FromSeconds(input.AsScalar())),
 
             _ => throw new InvalidOperationException(
                 $"cast() does not support conversion from {input.Kind} to {targetKind}."),

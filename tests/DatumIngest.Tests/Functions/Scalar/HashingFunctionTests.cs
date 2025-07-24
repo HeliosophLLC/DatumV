@@ -16,7 +16,10 @@ public class HashingFunctionTests
     {
         Md5Function function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
-        Assert.Equal("5d41402abc4b2a76b9719d911017c592", result.AsString());
+        Assert.Equal(DataKind.UInt8Array, result.Kind);
+        HexEncodeFunction hexEncode = new();
+        DataValue hex = hexEncode.Execute([result]);
+        Assert.Equal("5d41402abc4b2a76b9719d911017c592", hex.AsString());
     }
 
     [Fact]
@@ -25,7 +28,10 @@ public class HashingFunctionTests
         Md5Function function = new();
         byte[] inputBytes = [104, 101, 108, 108, 111]; // "hello" in UTF-8
         DataValue result = function.Execute([DataValue.FromUInt8Array(inputBytes)]);
-        Assert.Equal("5d41402abc4b2a76b9719d911017c592", result.AsString());
+        Assert.Equal(DataKind.UInt8Array, result.Kind);
+        HexEncodeFunction hexEncode = new();
+        DataValue hex = hexEncode.Execute([result]);
+        Assert.Equal("5d41402abc4b2a76b9719d911017c592", hex.AsString());
     }
 
     [Fact]
@@ -43,7 +49,10 @@ public class HashingFunctionTests
     {
         Sha256Function function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
-        Assert.Equal("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", result.AsString());
+        Assert.Equal(DataKind.UInt8Array, result.Kind);
+        HexEncodeFunction hexEncode = new();
+        DataValue hex = hexEncode.Execute([result]);
+        Assert.Equal("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", hex.AsString());
     }
 
     [Fact]
@@ -61,7 +70,10 @@ public class HashingFunctionTests
     {
         Sha512Function function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
-        string digest = result.AsString();
+        Assert.Equal(DataKind.UInt8Array, result.Kind);
+        HexEncodeFunction hexEncode = new();
+        DataValue hex = hexEncode.Execute([result]);
+        string digest = hex.AsString();
         // Known SHA-512 digest of "hello" — verify the first 32 hex characters.
         Assert.StartsWith("9b71d224bd62f3785d96d46ad3ea3d73", digest);
         Assert.Equal(128, digest.Length);

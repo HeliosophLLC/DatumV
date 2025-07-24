@@ -144,6 +144,14 @@ public sealed class DataValue : IEquatable<DataValue>
     public static DataValue FromBoolean(bool value) =>
         value ? BooleanTrue : BooleanFalse;
 
+    /// <summary>Creates a value from a time-of-day.</summary>
+    public static DataValue FromTime(TimeOnly value) =>
+        new(DataKind.Time, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a duration (elapsed time span).</summary>
+    public static DataValue FromDuration(TimeSpan value) =>
+        new(DataKind.Duration, value, shape: null, isNull: false);
+
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
     {
@@ -299,6 +307,22 @@ public sealed class DataValue : IEquatable<DataValue>
         return (bool)_payload!;
     }
 
+    /// <summary>Returns the time-of-day payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public TimeOnly AsTime()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Time);
+        return (TimeOnly)_payload!;
+    }
+
+    /// <summary>Returns the duration payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public TimeSpan AsDuration()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Duration);
+        return (TimeSpan)_payload!;
+    }
+
     // ───────────────────── Zero-copy conversions ──────────────────────
 
     /// <summary>
@@ -393,6 +417,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.DateTime => (DateTimeOffset)_payload! == (DateTimeOffset)other._payload!,
             DataKind.Uuid => (Guid)_payload! == (Guid)other._payload!,
             DataKind.Boolean => (bool)_payload! == (bool)other._payload!,
+            DataKind.Time => (TimeOnly)_payload! == (TimeOnly)other._payload!,
+            DataKind.Duration => (TimeSpan)_payload! == (TimeSpan)other._payload!,
             _ => false,
         };
     }
@@ -411,6 +437,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.DateTime => HashCode.Combine(_kind, (DateTimeOffset)_payload!),
             DataKind.Uuid => HashCode.Combine(_kind, (Guid)_payload!),
             DataKind.Boolean => HashCode.Combine(_kind, (bool)_payload!),
+            DataKind.Time => HashCode.Combine(_kind, (TimeOnly)_payload!),
+            DataKind.Duration => HashCode.Combine(_kind, (TimeSpan)_payload!),
             DataKind.Vector => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Matrix => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.Tensor => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
@@ -495,6 +523,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.JsonValue => (string)_payload!,
             DataKind.Uuid => ((Guid)_payload!).ToString("D"),
             DataKind.Boolean => (bool)_payload! ? "true" : "false",
+            DataKind.Time => ((TimeOnly)_payload!).ToString("HH:mm:ss.FFFFFFF"),
+            DataKind.Duration => ((TimeSpan)_payload!).ToString("c"),
             DataKind.Vector => $"Vector[{((float[])_payload!).Length}]",
             DataKind.Matrix => $"Matrix[{_shape![0]}x{_shape[1]}]",
             DataKind.Tensor => $"Tensor[{string.Join("x", _shape!)}]",

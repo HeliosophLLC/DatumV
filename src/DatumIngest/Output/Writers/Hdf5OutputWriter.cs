@@ -114,6 +114,8 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             DataKind.Date or DataKind.DateTime => BuildDateStringDataset(column),
             DataKind.Uuid => BuildUuidStringDataset(column.Name, rowCount),
             DataKind.Boolean => BuildBooleanDataset(column.Name, rowCount),
+            DataKind.Time => BuildTimeStringDataset(column.Name, rowCount),
+            DataKind.Duration => BuildDurationDoubleDataset(column.Name, rowCount),
             _ => BuildStringDataset(column)
         };
     }
@@ -300,6 +302,30 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = (!value.IsNull && value.AsBoolean()) ? (byte)1 : (byte)0;
+        }
+
+        return data;
+    }
+
+    private string[] BuildTimeStringDataset(string columnName, int rowCount)
+    {
+        string[] data = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? "" : value.AsTime().ToString("HH:mm:ss.FFFFFFF");
+        }
+
+        return data;
+    }
+
+    private double[] BuildDurationDoubleDataset(string columnName, int rowCount)
+    {
+        double[] data = new double[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? double.NaN : value.AsDuration().TotalSeconds;
         }
 
         return data;

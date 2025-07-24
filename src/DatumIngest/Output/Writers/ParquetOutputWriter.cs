@@ -264,6 +264,8 @@ public sealed class ParquetOutputWriter : IOutputWriter
                 DataKind.DateTime => new DataField<string>(column.Name),
                 DataKind.Uuid => new DataField<string>(column.Name),
                 DataKind.Boolean => new DataField<bool>(column.Name),
+                DataKind.Time => new DataField<string>(column.Name),
+                DataKind.Duration => new DataField<double>(column.Name),
                 _ => new DataField<string>(column.Name)
             };
         }
@@ -289,6 +291,8 @@ public sealed class ParquetOutputWriter : IOutputWriter
             DataKind.DateTime => BuildDateTimeColumn(field, column.Name, rowCount),
             DataKind.Uuid => BuildUuidColumn(field, column.Name, rowCount),
             DataKind.Boolean => BuildBooleanColumn(field, column.Name, rowCount),
+            DataKind.Time => BuildTimeColumn(field, column.Name, rowCount),
+            DataKind.Duration => BuildDurationColumn(field, column.Name, rowCount),
             _ => BuildFallbackStringColumn(field, column.Name, rowCount)
         };
     }
@@ -434,6 +438,30 @@ public sealed class ParquetOutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = !value.IsNull && value.AsBoolean();
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildTimeColumn(DataField field, string columnName, int rowCount)
+    {
+        string[] data = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? "" : value.AsTime().ToString("HH:mm:ss.FFFFFFF");
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildDurationColumn(DataField field, string columnName, int rowCount)
+    {
+        double[] data = new double[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? double.NaN : value.AsDuration().TotalSeconds;
         }
 
         return new DataColumn(field, data);

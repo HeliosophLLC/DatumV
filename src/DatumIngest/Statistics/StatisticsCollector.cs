@@ -131,12 +131,19 @@ public sealed class StatisticsCollector
             accumulators.Add(new BinarySizeAccumulator());
         }
 
-        if (kind is DataKind.Date or DataKind.DateTime)
+        if (kind is DataKind.Date or DataKind.DateTime or DataKind.Time)
         {
             accumulators.Add(new TemporalRangeAccumulator());
         }
 
-        if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime or DataKind.Uuid or DataKind.Boolean)
+        if (kind is DataKind.Duration)
+        {
+            accumulators.Add(new NumericAccumulator());
+            accumulators.Add(new HistogramAccumulator());
+            accumulators.Add(new QuantileAccumulator());
+        }
+
+        if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime or DataKind.Uuid or DataKind.Boolean or DataKind.Time or DataKind.Duration)
         {
             accumulators.Add(new EntropyAccumulator());
             accumulators.Add(new CategoricalDiagnosticsAccumulator(_topK));

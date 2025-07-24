@@ -88,6 +88,13 @@ public static class ExpressionTypeResolver
             return leftKind ?? rightKind;
         }
 
+        // Duration ± Duration preserves Duration (do not widen to Scalar).
+        if (leftKind.Value == DataKind.Duration && rightKind.Value == DataKind.Duration
+            && binary.Operator is BinaryOperator.Add or BinaryOperator.Subtract)
+        {
+            return DataKind.Duration;
+        }
+
         return TypeCoercion.FindCommonKind(leftKind.Value, rightKind.Value) ?? DataKind.Scalar;
     }
 
@@ -156,6 +163,16 @@ public static class ExpressionTypeResolver
         if (string.Equals(cast.TargetType, "bool", StringComparison.OrdinalIgnoreCase))
         {
             return DataKind.Boolean;
+        }
+
+        if (string.Equals(cast.TargetType, "time", StringComparison.OrdinalIgnoreCase))
+        {
+            return DataKind.Time;
+        }
+
+        if (string.Equals(cast.TargetType, "duration", StringComparison.OrdinalIgnoreCase))
+        {
+            return DataKind.Duration;
         }
 
         return null;

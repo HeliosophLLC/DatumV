@@ -101,10 +101,10 @@ SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash 
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `md5` | `md5(val)` | MD5 hex digest. Accepts String (UTF-8) or UInt8Array. | 1 |
-| `sha256` | `sha256(val)` | SHA-256 hex digest. Accepts String (UTF-8) or UInt8Array. | 1 |
-| `sha512` | `sha512(val)` | SHA-512 hex digest. Accepts String (UTF-8) or UInt8Array. | 1 |
-| `crc32` | `crc32(val)` | CRC-32 checksum as Scalar. Accepts String (UTF-8) or UInt8Array. | 1 |
+| `md5` | `md5(val)` | MD5 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
+| `sha256` | `sha256(val)` | SHA-256 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
+| `sha512` | `sha512(val)` | SHA-512 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
+| `crc32` | `crc32(val)` | CRC-32 checksum as Scalar. Accepts String (UTF-8) or UInt8Array. | 2 |
 
 ## Encoding
 
@@ -169,23 +169,23 @@ FROM data
 
 ## Date/Time — Extraction (9)
 
-Shorthand functions for extracting individual components from Date or DateTime values. Each returns a Scalar.
+Shorthand functions for extracting individual components from Date, DateTime, or Time values. Each returns a Scalar.
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
 | `year` | `year(date)` | Extract year. | 1 |
 | `month` | `month(date)` | Extract month (1–12). | 1 |
 | `day` | `day(date)` | Extract day of month (1–31). | 1 |
-| `hour` | `hour(date)` | Extract hour (0–23). Returns 0 for Date inputs. | 1 |
-| `minute` | `minute(date)` | Extract minute (0–59). Returns 0 for Date inputs. | 1 |
-| `second` | `second(date)` | Extract second (0–59). Returns 0 for Date inputs. | 1 |
+| `hour` | `hour(date)` | Extract hour (0–23). Accepts Date, DateTime, or Time. Returns 0 for Date inputs. | 1 |
+| `minute` | `minute(date)` | Extract minute (0–59). Accepts Date, DateTime, or Time. Returns 0 for Date inputs. | 1 |
+| `second` | `second(date)` | Extract second (0–59). Accepts Date, DateTime, or Time. Returns 0 for Date inputs. | 1 |
 | `quarter` | `quarter(date)` | Extract quarter (1–4). | 1 |
 | `dayofweek` | `dayofweek(date)` | ISO 8601 day of week: 1 (Monday) through 7 (Sunday). | 1 |
 | `dayofyear` | `dayofyear(date)` | Day of year (1–366). | 1 |
 
 > **Note:** `dayofweek()` uses ISO 8601 convention (1=Monday, 7=Sunday). The older `date_part('day_of_week', ...)` uses .NET convention (0=Sunday, 6=Saturday). Prefer `dayofweek()` for new code.
 
-## Date/Time — Construction & Arithmetic (7)
+## Date/Time — Construction & Arithmetic (12)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
@@ -196,6 +196,11 @@ Shorthand functions for extracting individual components from Date or DateTime v
 | `date_add` | `date_add(part, amount, date)` | Add amount of the specified part to a date. Preserves input kind. | 1 |
 | `date_trunc` | `date_trunc(part, date)` | Truncate to the specified precision. Week uses ISO 8601 (Monday start). Preserves input kind. | 1 |
 | `date_bucket` | `date_bucket(part, width, date [, origin])` | Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind. | 1 |
+| `make_time` | `make_time(hour, minute, second)` | Construct a Time from components (all Scalar). | 1 |
+| `current_time` | `current_time()` | Current UTC time of day as Time. | 1 |
+| `date_span` | `date_span(start, end)` | Elapsed Duration between two Date or DateTime values. | 1 |
+| `date_offset` | `date_offset(date, duration)` | Add a Duration to a Date, DateTime, or Time. Returns DateTime for Date/DateTime, Time for Time. | 1 |
+| `time_diff` | `time_diff(start, end)` | Duration between two Time values (wraps forward through midnight). | 1 |
 
 ### Supported date parts
 
@@ -212,6 +217,16 @@ All date part arguments accept these names (case-insensitive) with aliases:
 | `minute` | `minutes`, `min` |
 | `second` | `seconds`, `s` |
 | `millisecond` | `milliseconds`, `ms` |
+
+## Duration (5)
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `make_duration` | `make_duration(days, hours, minutes, seconds)` | Construct a Duration from components (all Scalar). | 1 |
+| `duration_seconds` | `duration_seconds(dur)` | Total seconds in a Duration as Scalar. | 1 |
+| `duration_minutes` | `duration_minutes(dur)` | Total minutes in a Duration as Scalar (fractional). | 1 |
+| `duration_hours` | `duration_hours(dur)` | Total hours in a Duration as Scalar (fractional). | 1 |
+| `duration_days` | `duration_days(dur)` | Total days in a Duration as Scalar (fractional). | 1 |
 
 ## Date/Time — Formatting & Probing (2)
 
@@ -247,6 +262,28 @@ SELECT strftime(created_at, 'yyyy-MM-dd HH:mm') AS formatted FROM records
 
 -- Data quality checks
 SELECT * FROM raw_data WHERE is_date(date_column) = 0
+
+-- Time construction and extraction
+SELECT make_time(14, 30, 0) AS meeting_time FROM data
+SELECT hour(time_col) AS h, minute(time_col) AS m FROM schedule
+SELECT current_time() AS now_time
+
+-- Duration arithmetic
+SELECT date_span(start_date, end_date) AS elapsed FROM projects
+SELECT duration_days(date_span(hire_date, now())) AS tenure FROM employees
+SELECT date_offset(ship_date, make_duration(3, 0, 0, 0)) AS delivery_date FROM orders
+
+-- Time + Duration
+SELECT date_offset(shift_start, make_duration(0, 8, 0, 0)) AS shift_end FROM schedule
+
+-- Duration arithmetic (preserves Duration type)
+SELECT date_span(start_date, end_date) + make_duration(1, 0, 0, 0) AS extended FROM projects
+
+-- Hash functions return raw bytes; compose with hex_encode for digest
+SELECT hex_encode(sha256(name)) AS name_hash FROM users
+
+-- Time difference (wraps through midnight)
+SELECT time_diff(shift_start, shift_end) AS shift_length FROM shifts
 ```
 
 ## Table-Valued Functions

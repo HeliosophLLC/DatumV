@@ -14,6 +14,9 @@ public sealed class Crc32Function : IScalarFunction
     public string Name => "crc32";
 
     /// <inheritdoc />
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

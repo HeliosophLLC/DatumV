@@ -138,6 +138,8 @@ public sealed class CsvOutputWriter : IOutputWriter
             DataKind.Vector => FormatVector(value.AsVector()),
             DataKind.Uuid => value.AsUuid().ToString("D"),
             DataKind.Boolean => value.AsBoolean() ? "true" : "false",
+            DataKind.Time => value.AsTime().ToString("HH:mm:ss"),
+            DataKind.Duration => value.AsDuration().ToString("c"),
             _ => value.ToString() ?? ""
         };
     }

@@ -5,13 +5,16 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
-/// Computes the MD5 hash of a string or byte array and returns the lowercase hex digest.
-/// <c>md5(input)</c> — accepts a String or UInt8Array argument.
+/// Computes the MD5 hash of a string or byte array and returns the raw hash bytes.
+/// <c>md5(input)</c> — accepts a String or UInt8Array argument. Returns UInt8Array.
 /// </summary>
 public sealed class Md5Function : IScalarFunction
 {
     /// <inheritdoc />
     public string Name => "md5";
+
+    /// <inheritdoc />
+    public int QueryUnitCost => 2;
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
@@ -26,7 +29,7 @@ public sealed class Md5Function : IScalarFunction
             throw new ArgumentException($"md5() argument must be String or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.String;
+        return DataKind.UInt8Array;
     }
 
     /// <inheritdoc />
@@ -36,7 +39,7 @@ public sealed class Md5Function : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.String);
+            return DataValue.Null(DataKind.UInt8Array);
         }
 
         byte[] inputBytes;
@@ -50,6 +53,6 @@ public sealed class Md5Function : IScalarFunction
         }
 
         byte[] hash = MD5.HashData(inputBytes);
-        return DataValue.FromString(Convert.ToHexStringLower(hash));
+        return DataValue.FromUInt8Array(hash);
     }
 }

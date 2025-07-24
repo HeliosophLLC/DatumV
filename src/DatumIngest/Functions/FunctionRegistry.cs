@@ -122,10 +122,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.NowFunction());
         registry.RegisterScalar(new Scalar.MakeDateFunction());
         registry.RegisterScalar(new Scalar.MakeTimestampFunction());
+        registry.RegisterScalar(new Scalar.MakeTimeFunction());
+        registry.RegisterScalar(new Scalar.CurrentTimeFunction());
         registry.RegisterScalar(new Scalar.DateDiffFunction());
         registry.RegisterScalar(new Scalar.DateAddFunction());
         registry.RegisterScalar(new Scalar.DateTruncFunction());
         registry.RegisterScalar(new Scalar.DateBucketFunction());
+        registry.RegisterScalar(new Scalar.DateSpanFunction());
+        registry.RegisterScalar(new Scalar.DateOffsetFunction());
+        registry.RegisterScalar(new Scalar.TimeDiffFunction());
 
         // Date/Time — Formatting & Probing
         registry.RegisterScalar(new Scalar.StrftimeFunction());
@@ -162,6 +167,13 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.Base64DecodeFunction());
         registry.RegisterScalar(new Scalar.HexEncodeFunction());
         registry.RegisterScalar(new Scalar.HexDecodeFunction());
+
+        // Duration
+        registry.RegisterScalar(new Scalar.MakeDurationFunction());
+        registry.RegisterScalar(new Scalar.DurationSecondsFunction());
+        registry.RegisterScalar(new Scalar.DurationMinutesFunction());
+        registry.RegisterScalar(new Scalar.DurationHoursFunction());
+        registry.RegisterScalar(new Scalar.DurationDaysFunction());
 
         // Math — Arithmetic
         registry.RegisterScalar(new Math.AbsFunction());

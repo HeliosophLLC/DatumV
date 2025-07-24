@@ -84,6 +84,7 @@ public static class TypeCoercion
         {
             DataKind.Boolean => DataKind.Scalar,
             DataKind.UInt8 => DataKind.Scalar,
+            DataKind.Duration => DataKind.Scalar,
             DataKind.Scalar => DataKind.Vector,
             DataKind.Vector => DataKind.Tensor,
             DataKind.Matrix => DataKind.Tensor,
@@ -100,6 +101,7 @@ public static class TypeCoercion
         {
             DataKind.Boolean => DataValue.FromScalar(value.AsBoolean() ? 1f : 0f),
             DataKind.UInt8 => DataValue.FromScalar(value.AsUInt8()),
+            DataKind.Duration => DataValue.FromScalar((float)value.AsDuration().TotalSeconds),
             DataKind.Scalar => DataValue.FromVector([value.AsScalar()]),
             DataKind.Vector => value.ToTensor(),
             DataKind.Matrix => value.ToTensor(),

@@ -669,4 +669,79 @@ public class ExpressionEvaluatorTests
             row);
         Assert.Equal(1f, result.AsScalar());
     }
+
+    // ─────────────── Duration arithmetic ───────────────
+
+    [Fact]
+    public void DurationAdd_ReturnsDuration()
+    {
+        Row row = MakeRow(
+            ("a", DataValue.FromDuration(TimeSpan.FromHours(1))),
+            ("b", DataValue.FromDuration(TimeSpan.FromMinutes(30))));
+
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new ColumnReference("a"),
+                BinaryOperator.Add,
+                new ColumnReference("b")),
+            row);
+
+        Assert.Equal(DataKind.Duration, result.Kind);
+        Assert.Equal(TimeSpan.FromMinutes(90), result.AsDuration());
+    }
+
+    [Fact]
+    public void DurationSubtract_ReturnsDuration()
+    {
+        Row row = MakeRow(
+            ("a", DataValue.FromDuration(TimeSpan.FromHours(2))),
+            ("b", DataValue.FromDuration(TimeSpan.FromMinutes(30))));
+
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new ColumnReference("a"),
+                BinaryOperator.Subtract,
+                new ColumnReference("b")),
+            row);
+
+        Assert.Equal(DataKind.Duration, result.Kind);
+        Assert.Equal(TimeSpan.FromMinutes(90), result.AsDuration());
+    }
+
+    [Fact]
+    public void DurationSubtract_NegativeResult()
+    {
+        Row row = MakeRow(
+            ("a", DataValue.FromDuration(TimeSpan.FromMinutes(10))),
+            ("b", DataValue.FromDuration(TimeSpan.FromHours(1))));
+
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new ColumnReference("a"),
+                BinaryOperator.Subtract,
+                new ColumnReference("b")),
+            row);
+
+        Assert.Equal(DataKind.Duration, result.Kind);
+        Assert.Equal(TimeSpan.FromMinutes(-50), result.AsDuration());
+    }
+
+    [Fact]
+    public void DurationMultiply_WidensToScalar()
+    {
+        // Duration * Scalar is not a Duration operation — widens both to float.
+        Row row = MakeRow(
+            ("d", DataValue.FromDuration(TimeSpan.FromHours(1))),
+            ("n", DataValue.FromScalar(2)));
+
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new ColumnReference("d"),
+                BinaryOperator.Multiply,
+                new ColumnReference("n")),
+            row);
+
+        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(7200f, result.AsScalar());
+    }
 }
