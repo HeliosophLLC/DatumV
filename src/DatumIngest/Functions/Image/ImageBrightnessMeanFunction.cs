@@ -8,7 +8,7 @@ using SkiaSharp;
 /// Computes the mean brightness (luminance) of an image using BT.601 weights.
 /// <c>image_brightness_mean(img)</c> returns a scalar in the range 0–255.
 /// </summary>
-public sealed class ImageBrightnessMeanFunction : IScalarFunction
+public sealed class ImageBrightnessMeanFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights (same as GrayscaleImageFunction)
     private const float RedWeight = 0.2126f;
@@ -85,4 +85,8 @@ public sealed class ImageBrightnessMeanFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

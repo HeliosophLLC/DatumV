@@ -41,7 +41,7 @@ public sealed class QueryMeter
     /// Records the cost of a function invocation. Thread-safe.
     /// </summary>
     /// <param name="cost">The Query Unit cost to add.</param>
-    public void Add(int cost)
+    public void Add(long cost)
     {
         Interlocked.Add(ref _functionQueryUnits, cost);
     }

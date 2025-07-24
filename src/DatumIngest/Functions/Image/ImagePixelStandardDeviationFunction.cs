@@ -10,7 +10,7 @@ using SkiaSharp;
 /// <c>image_pixel_std(img, channels)</c> returns per-channel standard deviations as a vector,
 /// where <c>channels</c> is a vector of channel indices (0=R, 1=G, 2=B, 3=A).
 /// </summary>
-public sealed class ImagePixelStandardDeviationFunction : IScalarFunction
+public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "image_pixel_std";
@@ -167,4 +167,8 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

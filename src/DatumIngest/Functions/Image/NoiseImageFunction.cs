@@ -11,7 +11,7 @@ using SkiaSharp;
 /// Type <c>'salt_pepper'</c>: randomly sets <c>val</c> ratio of pixels to black or white.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class NoiseImageFunction : IScalarFunction
+public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "noise";
@@ -163,4 +163,8 @@ public sealed class NoiseImageFunction : IScalarFunction
 
         return (byte)value;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

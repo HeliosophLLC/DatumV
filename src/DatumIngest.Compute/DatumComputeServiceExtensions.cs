@@ -56,7 +56,8 @@ public static class DatumComputeServiceExtensions
         services.TryAddSingleton(new QueryGovernor(
             options.QueryTimeoutSeconds,
             options.MaxOutputRows,
-            options.ThrottleDelayMilliseconds));
+            options.ThrottleDelayMilliseconds,
+            options.MaxQueryUnits));
 
         // Wire ApiKeyOptions from the new unified options object.
         services.Configure<ApiKeyOptions>(apiKeyOptions =>

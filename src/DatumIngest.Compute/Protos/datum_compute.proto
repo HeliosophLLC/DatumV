@@ -143,6 +143,10 @@ message FunctionInfoMessage {
 
   // Whether this is a table-valued function used in FROM/JOIN.
   bool is_table_valued = 4;
+
+  // Base Query Unit cost per invocation. Image functions may incur additional
+  // resolution-dependent costs at runtime (see Resource Governance docs).
+  int32 query_unit_cost = 5;
 }
 
 message ParameterInfoMessage {

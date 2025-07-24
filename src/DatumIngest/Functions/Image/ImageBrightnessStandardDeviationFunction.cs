@@ -8,7 +8,7 @@ using SkiaSharp;
 /// Computes the standard deviation of brightness (luminance) across all pixels
 /// using BT.601 weights. <c>image_brightness_std(img)</c> returns a scalar.
 /// </summary>
-public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction
+public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights (same as GrayscaleImageFunction)
     private const float RedWeight = 0.2126f;
@@ -100,4 +100,8 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -10,7 +10,7 @@ using SkiaSharp;
 /// <c>resize_and_crop(img, w, h, gravity)</c> or <c>resize_and_crop(img, w, h, gravity, format)</c>.
 /// Supported gravity values: <c>'center'</c>, <c>'top'</c>, <c>'bottom'</c>, <c>'left'</c>, <c>'right'</c>.
 /// </summary>
-public sealed class ResizeAndCropImageFunction : IScalarFunction
+public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "resize_and_crop";
@@ -109,4 +109,8 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction
                 $"resize_and_crop() unknown gravity '{gravity}'. Supported: center, top, bottom, left, right.")
         };
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

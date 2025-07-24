@@ -10,7 +10,7 @@ using SkiaSharp;
 /// The <c>intensity</c> value is added to every pixel's R, G, and B channels (clamped 0–255).
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class BrightenImageFunction : IScalarFunction
+public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "brighten";
@@ -81,4 +81,8 @@ public sealed class BrightenImageFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(brightened, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

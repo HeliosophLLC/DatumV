@@ -10,7 +10,7 @@ using SkiaSharp;
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// When omitted, the original format is preserved.
 /// </summary>
-public sealed class ResizeImageFunction : IScalarFunction
+public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "resize";
@@ -68,4 +68,8 @@ public sealed class ResizeImageFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

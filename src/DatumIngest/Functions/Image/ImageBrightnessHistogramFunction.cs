@@ -9,7 +9,7 @@ using SkiaSharp;
 /// <c>image_brightness_histogram(img)</c> returns a 256-element vector where each element
 /// is the count of pixels whose luminance falls into that bin (0–255).
 /// </summary>
-public sealed class ImageBrightnessHistogramFunction : IScalarFunction
+public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights (same as GrayscaleImageFunction)
     private const float RedWeight = 0.2126f;
@@ -93,4 +93,8 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

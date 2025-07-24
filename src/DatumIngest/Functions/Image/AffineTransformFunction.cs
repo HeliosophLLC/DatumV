@@ -10,7 +10,7 @@ using SkiaSharp;
 /// The <c>angle</c> is in degrees, <c>scale_x</c>/<c>scale_y</c> are scale factors,
 /// and <c>shear_x</c>/<c>shear_y</c> are shear coefficients.
 /// </summary>
-public sealed class AffineTransformFunction : IScalarFunction
+public sealed class AffineTransformFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "affine_transform";
@@ -99,4 +99,8 @@ public sealed class AffineTransformFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(transformed, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

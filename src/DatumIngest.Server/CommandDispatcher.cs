@@ -229,12 +229,17 @@ public sealed class CommandDispatcher
 
         foreach (string name in functionNames)
         {
-            FunctionSignature? signature = FunctionDocumentation.TryGet(name);
+            FunctionSignature? documentation = FunctionDocumentation.TryGet(name);
+            IScalarFunction? scalarFunction = session.FunctionRegistry.TryGetScalar(name);
 
-            signatures.Add(signature ?? new FunctionSignature
+            signatures.Add(new FunctionSignature
             {
-                Name = name,
-                Parameters = [],
+                Name = documentation?.Name ?? name,
+                Parameters = documentation?.Parameters ?? [],
+                ReturnType = documentation?.ReturnType,
+                Description = documentation?.Description,
+                IsTableValued = documentation?.IsTableValued ?? false,
+                QueryUnitCost = scalarFunction?.QueryUnitCost ?? 0,
             });
         }
 

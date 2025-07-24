@@ -14,7 +14,7 @@ using SkiaSharp;
 ///     — explicit corner offsets (normalized 0–1 coordinates for each destination corner).</item>
 /// </list>
 /// </summary>
-public sealed class PerspectiveWarpFunction : IScalarFunction
+public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "perspective_warp";
@@ -260,4 +260,8 @@ public sealed class PerspectiveWarpFunction : IScalarFunction
 
         return result;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -8,7 +8,7 @@ using SkiaSharp;
 /// Decodes encoded image bytes into a Tensor of pixel values with shape [height, width, 4] (RGBA).
 /// <c>decode_image(img)</c> accepts Image or UInt8Array. Pixel values are floats in the 0–255 range.
 /// </summary>
-public sealed class DecodeImageFunction : IScalarFunction
+public sealed class DecodeImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "decode_image";
@@ -81,4 +81,8 @@ public sealed class DecodeImageFunction : IScalarFunction
 
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

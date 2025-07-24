@@ -14,7 +14,7 @@ using SkiaSharp;
 /// Uses the difference hash (dHash) algorithm: resize to 9×8 grayscale,
 /// compare horizontally adjacent pixels to produce a 64-bit hash.
 /// </remarks>
-public sealed class PerceptualHashFunction : IScalarFunction
+public sealed class PerceptualHashFunction : IScalarFunction, ICostAwareFunction
 {
     private const int HashWidth = 9;
     private const int HashHeight = 8;
@@ -113,4 +113,8 @@ public sealed class PerceptualHashFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -234,7 +234,10 @@ public sealed class ExpressionEvaluator
             DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
 
             _meter?.Add(scalarFunction.QueryUnitCost);
-
+        if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
+        {
+            _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
+        }
             // Dispose consumed ImageHandle arguments whose bitmaps are no longer needed.
             // The result carries its own ImageHandle (if any), so we only dispose handles
             // that are not the same instance as the result's handle.

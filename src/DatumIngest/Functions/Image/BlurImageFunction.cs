@@ -10,7 +10,7 @@ using SkiaSharp;
 /// The <c>radius</c> controls blur strength (sigma in both X and Y directions).
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class BlurImageFunction : IScalarFunction
+public sealed class BlurImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "blur";
@@ -68,4 +68,8 @@ public sealed class BlurImageFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(blurred, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

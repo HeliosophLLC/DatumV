@@ -10,7 +10,7 @@ using SkiaSharp;
 /// Converts to grayscale, applies 3×3 Sobel kernels for horizontal and vertical
 /// gradients, and outputs the edge magnitude image (grayscale).
 /// </summary>
-public sealed class SobelImageFunction : IScalarFunction
+public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights for grayscale conversion
     private const float RedWeight = 0.2126f;
@@ -150,4 +150,8 @@ public sealed class SobelImageFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

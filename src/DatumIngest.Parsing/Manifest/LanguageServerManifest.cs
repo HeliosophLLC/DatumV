@@ -65,6 +65,9 @@ public sealed class FunctionSignature
 
     /// <summary>Whether this is a table-valued function (used in FROM/JOIN) rather than a scalar function.</summary>
     public bool IsTableValued { get; init; }
+
+    /// <summary>The base query-unit cost per invocation, as reported by the function implementation.</summary>
+    public int QueryUnitCost { get; init; }
 }
 
 /// <summary>

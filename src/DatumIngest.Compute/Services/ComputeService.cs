@@ -268,6 +268,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     Name = function.Name,
                     ReturnType = function.ReturnType ?? "",
                     IsTableValued = function.IsTableValued,
+                    QueryUnitCost = function.QueryUnitCost,
                 };
 
                 foreach (ParameterSignature parameter in function.Parameters)

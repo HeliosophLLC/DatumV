@@ -10,7 +10,7 @@ using SkiaSharp;
 /// For non-90°-multiple rotations the canvas expands to avoid clipping.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class RotateImageFunction : IScalarFunction
+public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "rotate";
@@ -78,4 +78,8 @@ public sealed class RotateImageFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(rotated, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

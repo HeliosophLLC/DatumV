@@ -10,7 +10,7 @@ using SkiaSharp;
 /// the Laplacian-filtered image. Higher values indicate sharper images;
 /// lower values indicate blurrier images.
 /// </summary>
-public sealed class DetectBlurFunction : IScalarFunction
+public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights for grayscale conversion
     private const float RedWeight = 0.2126f;
@@ -117,4 +117,8 @@ public sealed class DetectBlurFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -4,7 +4,9 @@
 
 DatumIngest provides a comprehensive function library for data transformation, ML feature engineering, and image processing. All functions can be composed in SQL expressions.
 
-> **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode.
+> **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
+>
+> **Resolution-aware image costs:** Image analysis (Tier 4) and transform (Tier 5) functions incur a supplemental cost that scales with the input image resolution: `floor(width × height / 100,000)` additional QU per invocation. A 224×224 image adds 0 QU; a 1920×1080 image adds 20 QU; a 4K image adds 82 QU. The QU column in the tables below shows base cost only — actual cost equals base + supplemental.
 
 ## Numeric / Array
 

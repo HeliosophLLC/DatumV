@@ -101,6 +101,7 @@ builder.Services.AddDatumCompute(options => options.ApiKey = "key");
 | `QueryTimeoutSeconds` | `int?` | `null` | Server-wide default query deadline in seconds. `null` = no deadline. |
 | `MaxOutputRows` | `long?` | `null` | Server-wide default maximum rows per query. `null` = no limit. |
 | `ThrottleDelayMilliseconds` | `int?` | `null` | Server-wide default throttle delay in ms. `null` = no throttle. |
+| `MaxQueryUnits` | `long?` | `null` | Server-wide default QU budget per query. `null` = no limit. |
 
 ## Calling with grpcurl
 
@@ -163,6 +164,7 @@ Creates a new session on the compute backend.
 | `query_timeout_seconds` | `int32` | Per-session query deadline override. `0` = server default, positive = override, negative = disable. |
 | `max_output_rows` | `int64` | Per-session row budget override. `0` = server default, positive = override, negative = disable. |
 | `throttle_delay_ms` | `int32` | Per-session throttle delay override. `0` = server default, positive = override, negative = disable. |
+| `max_query_units` | `int64` | Per-session QU budget override. `0` = server default, positive = override, negative = disable. |
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
@@ -199,6 +201,7 @@ Executes a SQL query and streams result rows back. The first `QueryRow` message 
 |-------|------|-------------|
 | `schema` | `SchemaMessage` | Set on the first row only. Column names, kinds, and nullability. |
 | `values` | `repeated DataValueMessage` | One value per column, in schema order. |
+| `query_units` | `int64` | Running total of Query Units consumed by function invocations. The value on the last row is the definitive cost for the query. |
 
 **Errors:** `InvalidArgument` on syntax errors or query failures; `NotFound` if the session does not exist.
 
@@ -289,6 +292,7 @@ Returns all available functions with parameter metadata.
 | `parameters` | `repeated ParameterInfoMessage` | Ordered parameter list. |
 | `return_type` | `string` | Return type name (e.g. `"Scalar"`), empty if context-dependent. |
 | `is_table_valued` | `bool` | Whether this is a table-valued function (used in `FROM`/`JOIN`). |
+| `query_unit_cost` | `int32` | Base query-unit cost per invocation. Image functions may incur additional resolution-dependent cost (see [Functions Reference](functions.md)). |
 
 **`ParameterInfoMessage`:**
 
@@ -346,7 +350,7 @@ Lists all active sessions on the server.
 |-------|------|-------------|
 | `session_id` | `string` | Calling session GUID (must be admin). |
 
-**Returns:** `repeated SessionInfoMessage` with `session_id`, `role`, `dataset_id`, `created_at`, `last_activity_at`, `query_count`.
+**Returns:** `repeated SessionInfoMessage` with `session_id`, `role`, `dataset_id`, `created_at`, `last_activity_at`, `query_count`, `total_query_units`.
 
 **Errors:** `PermissionDenied` if the calling session is not admin.
 
@@ -362,6 +366,22 @@ Cancels a running query on another session. The target session's cancellation to
 **Returns:** `message` — confirmation text (e.g. `"Cancelled active query on session '...'"`). The target session remains open and can run new queries.
 
 **Errors:** `InvalidArgument` if the target session is not found or the GUID is malformed.
+
+#### GetUsage
+
+Returns accumulated usage metrics for a session. Unlike `ListSessions`, this does not require admin privileges — any session can query its own usage.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID to query. |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Echo of the requested session ID. |
+| `total_query_units` | `int64` | Cumulative Query Units consumed across all queries in this session. |
+| `query_count` | `int32` | Number of queries executed in this session. |
 
 ## Data Types
 
@@ -465,6 +485,13 @@ To cancel another session's query (requires admin):
 ```csharp
 string message = await connection.CancelQueryAsync(
     adminSessionId, targetSessionId);
+```
+
+To query accumulated usage for a session:
+
+```csharp
+GetUsageResponse usage = await connection.GetUsageAsync(sessionId);
+Console.WriteLine($"Queries: {usage.QueryCount}, Total QU: {usage.TotalQueryUnits}");
 ```
 
 static string FormatValue(DataValueMessage value)
@@ -574,6 +601,8 @@ Each governance field in `CreateSessionRequest` follows three-state semantics:
 
 **Throttle delay (`throttle_delay_ms`):** An artificial pause (in milliseconds) injected every 100 rows during streaming, yielding CPU time to other sessions. Designed for batch export workloads where deadline and row budget are not appropriate. The throttle does not produce an error — it simply slows the stream.
 
+**Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from scalar function invocations. Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-row cost via the `query_units` field on `QueryRow`, and query cumulative session cost via `GetUsage`.
+
 ### Configuration Example
 
 ```csharp
@@ -582,6 +611,7 @@ builder.Services.AddDatumCompute(options =>
     options.ApiKey = "secret";
     options.QueryTimeoutSeconds = 300;     // 5-minute default deadline.
     options.MaxOutputRows = 100_000;       // 100k row budget by default.
+    options.MaxQueryUnits = 1_000_000;      // 1M QU budget by default.
     // ThrottleDelayMilliseconds left null — no throttle by default.
 });
 ```
@@ -608,7 +638,7 @@ CreateSessionResponse session = await connection.Client.CreateSessionAsync(
 | `InvalidArgument` | Malformed session ID, bad SQL syntax, invalid source definition |
 | `NotFound` | Session ID not found, table not found |
 | `PermissionDenied` | User-role session attempting admin operation |
-| `ResourceExhausted` | Row budget exceeded during query streaming |
+| `ResourceExhausted` | Row budget or Query Unit budget exceeded during query streaming |
 | `DeadlineExceeded` | Query deadline fired during execution |
 | `Cancelled` | Query cancelled by KillQuery or session cancellation |
 | `Internal` | Unexpected server error |

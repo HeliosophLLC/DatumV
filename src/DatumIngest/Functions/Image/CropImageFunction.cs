@@ -10,7 +10,7 @@ using SkiaSharp;
 /// Coordinates are in pixels with the origin at the top-left corner.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class CropImageFunction : IScalarFunction
+public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "crop";
@@ -75,4 +75,8 @@ public sealed class CropImageFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

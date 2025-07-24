@@ -49,4 +49,12 @@ public sealed class DatumComputeOptions
     /// throttle. Clients may override per-session via <c>CreateSession</c>.
     /// </summary>
     public int? ThrottleDelayMilliseconds { get; set; }
+
+    /// <summary>
+    /// Gets or sets the server-wide default maximum Query Units a single
+    /// query may accumulate from function invocations. Set to
+    /// <see langword="null"/> (the default) for no limit. Clients may
+    /// override per-session via <c>CreateSession</c>.
+    /// </summary>
+    public long? MaxQueryUnits { get; set; }
 }

@@ -10,7 +10,7 @@ using SkiaSharp;
 /// Generates a random displacement field, smooths it with a Gaussian kernel of radius
 /// <c>sigma</c>, and scales by <c>alpha</c>. Uses bilinear interpolation for sub-pixel sampling.
 /// </summary>
-public sealed class ElasticDeformFunction : IScalarFunction
+public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
     public string Name => "elastic_deform";
@@ -227,4 +227,8 @@ public sealed class ElasticDeformFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

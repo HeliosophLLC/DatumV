@@ -9,7 +9,7 @@ using SkiaSharp;
 /// boundaries. <c>compression_artifact_score(img)</c> returns a scalar where higher
 /// values indicate more severe compression artifacts (blockiness).
 /// </summary>
-public sealed class CompressionArtifactScoreFunction : IScalarFunction
+public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights for grayscale conversion
     private const float RedWeight = 0.2126f;
@@ -167,4 +167,8 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction
         canvas.DrawBitmap(source, 0, 0);
         return converted;
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }

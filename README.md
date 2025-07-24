@@ -54,7 +54,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with manifest-driven cardinality estimation (NDV-based selectivity) and optional runtime metrics
-- **Resource governance** — per-session query deadlines, row budgets, and throttle delays for multi-tenant gRPC deployments
+- **Resource governance** — per-session query deadlines, row budgets, Query Unit metering, and throttle delays for multi-tenant gRPC deployments
 
 ## Why Not DuckDB / Pandas?
 

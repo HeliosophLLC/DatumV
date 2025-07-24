@@ -9,7 +9,7 @@ using SkiaSharp;
 /// <c>grayscale(img)</c> or <c>grayscale(img, format)</c>.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
 /// </summary>
-public sealed class GrayscaleImageFunction : IScalarFunction
+public sealed class GrayscaleImageFunction : IScalarFunction, ICostAwareFunction
 {
     // ITU-R BT.601 luminance weights
     private const float RedWeight = 0.2126f;
@@ -80,4 +80,8 @@ public sealed class GrayscaleImageFunction : IScalarFunction
 
         return DataValue.FromImageHandle(new ImageHandle(grayscaled, outputFormat));
     }
+
+    /// <inheritdoc />
+    public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
+        ImageCostHelper.ComputeSupplementalCost(arguments);
 }
