@@ -14,6 +14,7 @@ public sealed class Session : IDisposable
     private CancellationTokenSource _cancellationTokenSource = new();
     private readonly List<string> _queryHistory = new();
     private readonly object _lock = new();
+    private long _totalQueryUnits;
 
     /// <summary>
     /// Initializes a new session with the specified role, dataset, catalog, function registry,
@@ -53,6 +54,11 @@ public sealed class Session : IDisposable
 
     /// <summary>Gets the resource governance limits for this session.</summary>
     public QueryGovernor Governor { get; }
+
+    /// <summary>
+    /// Gets the total Query Units accumulated across all queries in this session.
+    /// </summary>
+    public long TotalQueryUnits => Interlocked.Read(ref _totalQueryUnits);
 
     /// <summary>Gets the timestamp when this session was created.</summary>
     public DateTimeOffset CreatedAt { get; }
@@ -103,6 +109,16 @@ public sealed class Session : IDisposable
         {
             _queryHistory.Add(query);
         }
+    }
+
+    /// <summary>
+    /// Adds the specified Query Units to the session's cumulative total.
+    /// Thread-safe.
+    /// </summary>
+    /// <param name="units">The number of Query Units to add.</param>
+    public void AddQueryUnits(long units)
+    {
+        Interlocked.Add(ref _totalQueryUnits, units);
     }
 
     /// <summary>

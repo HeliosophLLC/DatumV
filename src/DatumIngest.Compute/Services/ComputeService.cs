@@ -40,7 +40,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             _serverDefaults,
             request.QueryTimeoutSeconds,
             request.MaxOutputRows,
-            request.ThrottleDelayMs);
+            request.ThrottleDelayMs,
+            request.MaxQueryUnits);
 
         Session session;
 
@@ -108,8 +109,11 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             linkedTokenSource.CancelAfter(TimeSpan.FromSeconds(governor.QueryTimeoutSeconds.Value));
         }
 
+        // Create a per-query meter for QU cost tracking.
+        QueryMeter meter = new(governor.MaxQueryUnits);
+
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, request.Sql, cancellationToken).ConfigureAwait(false);
+            session, request.Sql, cancellationToken, meter).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -139,6 +143,13 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                         $"Row budget exceeded (limit: {maxRows.Value})."));
                 }
 
+                if (meter.IsBudgetExceeded)
+                {
+                    throw new RpcException(new Status(
+                        StatusCode.ResourceExhausted,
+                        $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.FunctionQueryUnits})."));
+                }
+
                 QueryRow queryRow = new();
 
                 // Attach schema to the first row only.
@@ -152,6 +163,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 {
                     queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
                 }
+
+                queryRow.QueryUnits = meter.FunctionQueryUnits;
 
                 await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
 
@@ -173,6 +186,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             }
 
             throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
+        }
+        finally
+        {
+            session.AddQueryUnits(meter.FunctionQueryUnits);
         }
     }
 
@@ -381,6 +398,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     CreatedAt = info.CreatedAt.ToString("O"),
                     LastActivityAt = info.LastActivityAt.ToString("O"),
                     QueryCount = info.QueryCount,
+                    TotalQueryUnits = info.TotalQueryUnits,
                 });
             }
         }
@@ -403,6 +421,22 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
 
         return new KillQueryResponse { Message = result.Message ?? "Query cancelled." };
+    }
+
+    /// <inheritdoc />
+    public override Task<GetUsageResponse> GetUsage(
+        GetUsageRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+
+        GetUsageResponse response = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            TotalQueryUnits = session.TotalQueryUnits,
+            QueryCount = session.QueryHistory.Count,
+        };
+
+        return Task.FromResult(response);
     }
 
     /// <summary>

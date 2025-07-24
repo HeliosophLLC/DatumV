@@ -78,6 +78,25 @@ public sealed class DatumComputeConnection : IDisposable
         return response.Message;
     }
 
+    /// <summary>
+    /// Returns usage statistics for the specified session.
+    /// </summary>
+    /// <param name="sessionId">The session to query usage for.</param>
+    /// <param name="cancellationToken">Cancellation token for this RPC call.</param>
+    /// <returns>The usage response containing accumulated Query Units and query count.</returns>
+    public async Task<GetUsageResponse> GetUsageAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        GetUsageRequest request = new()
+        {
+            SessionId = sessionId,
+        };
+
+        return await Client.GetUsageAsync(
+            request, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

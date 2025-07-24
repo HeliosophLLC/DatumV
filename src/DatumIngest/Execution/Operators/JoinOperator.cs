@@ -86,7 +86,7 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<Row> ExecuteHashJoinAsync(
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
 
@@ -246,7 +246,7 @@ public sealed class JoinOperator : IQueryOperator
 
     private async IAsyncEnumerable<Row> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
 
         // Materialize right side.
         List<Row> rightRows = new();

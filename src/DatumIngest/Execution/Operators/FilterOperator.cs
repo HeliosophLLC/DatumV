@@ -32,7 +32,7 @@ public sealed class FilterOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {

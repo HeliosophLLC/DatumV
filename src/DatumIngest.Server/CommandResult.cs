@@ -125,10 +125,12 @@ public enum CommandResultKind
 /// <param name="CreatedAt">When the session was created.</param>
 /// <param name="LastActivityAt">When the session last executed a command.</param>
 /// <param name="QueryCount">Number of queries executed in this session.</param>
+/// <param name="TotalQueryUnits">Cumulative Query Units consumed across all queries.</param>
 public sealed record SessionInfo(
     Guid SessionId,
     SessionRole Role,
     string? DatasetId,
     DateTimeOffset CreatedAt,
     DateTimeOffset LastActivityAt,
-    int QueryCount);
+    int QueryCount,
+    long TotalQueryUnits);

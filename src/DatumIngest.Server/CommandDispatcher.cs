@@ -34,8 +34,10 @@ public sealed class CommandDispatcher
     /// <param name="session">The session issuing the command.</param>
     /// <param name="input">The raw command text (SQL or dot-command).</param>
     /// <param name="cancellationToken">Cancellation token for this operation.</param>
+    /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
     /// <returns>The result of the command execution.</returns>
-    public async Task<CommandResult> DispatchAsync(Session session, string input, CancellationToken cancellationToken)
+    public async Task<CommandResult> DispatchAsync(
+        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter = null)
     {
         session.TouchActivity();
 
@@ -58,7 +60,7 @@ public sealed class CommandDispatcher
                 return await DispatchMetaCommandAsync(session, trimmed, cancellationToken).ConfigureAwait(false);
             }
 
-            return await DispatchSqlAsync(session, trimmed, cancellationToken).ConfigureAwait(false);
+            return await DispatchSqlAsync(session, trimmed, cancellationToken, queryMeter).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -102,7 +104,7 @@ public sealed class CommandDispatcher
     }
 
     private async Task<CommandResult> DispatchSqlAsync(
-        Session session, string input, CancellationToken cancellationToken)
+        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter)
     {
         if (!session.IsAuthorized(ServerOperation.Query))
         {
@@ -118,7 +120,7 @@ public sealed class CommandDispatcher
 
         // Resolve schema from the first row's structure. We create the context
         // and wrap execution so the schema can be captured.
-        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog);
+        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, queryMeter);
         IAsyncEnumerable<Row> rows = plan.ExecuteAsync(context);
 
         // We need the schema before streaming. Peek at the plan to get column metadata.
@@ -308,7 +310,8 @@ public sealed class CommandDispatcher
                 s.DatasetId,
                 s.CreatedAt,
                 s.LastActivityAt,
-                s.QueryHistory.Count));
+                s.QueryHistory.Count,
+                s.TotalQueryUnits));
         }
 
         return CommandResult.SessionList(infos);

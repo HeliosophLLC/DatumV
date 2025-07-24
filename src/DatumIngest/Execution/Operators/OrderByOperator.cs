@@ -48,7 +48,7 @@ public sealed class OrderByOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
 
         List<Row> rows;
 

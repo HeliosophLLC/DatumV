@@ -16,10 +16,15 @@ namespace DatumIngest.Server;
 /// Artificial delay injected every <see cref="ThrottleBatchSize"/> rows to
 /// yield CPU to other sessions, or <see langword="null"/> for no throttle.
 /// </param>
+/// <param name="MaxQueryUnits">
+/// Maximum Query Units a single query may accumulate before the server
+/// rejects it, or <see langword="null"/> for no limit.
+/// </param>
 public sealed record QueryGovernor(
     int? QueryTimeoutSeconds,
     long? MaxOutputRows,
-    int? ThrottleDelayMilliseconds)
+    int? ThrottleDelayMilliseconds,
+    long? MaxQueryUnits = null)
 {
     /// <summary>
     /// Number of rows between throttle delays. When <see cref="ThrottleDelayMilliseconds"/>
@@ -45,17 +50,20 @@ public sealed record QueryGovernor(
     /// <param name="requestTimeoutSeconds">Timeout override from the client request.</param>
     /// <param name="requestMaxOutputRows">Row budget override from the client request.</param>
     /// <param name="requestThrottleDelayMilliseconds">Throttle override from the client request.</param>
+    /// <param name="requestMaxQueryUnits">Query Unit budget override from the client request.</param>
     /// <returns>A merged governor reflecting the effective limits for the session.</returns>
     public static QueryGovernor Merge(
         QueryGovernor serverDefaults,
         int requestTimeoutSeconds,
         long requestMaxOutputRows,
-        int requestThrottleDelayMilliseconds)
+        int requestThrottleDelayMilliseconds,
+        long requestMaxQueryUnits = 0)
     {
         return new QueryGovernor(
             ResolveInt(requestTimeoutSeconds, serverDefaults.QueryTimeoutSeconds),
             ResolveLong(requestMaxOutputRows, serverDefaults.MaxOutputRows),
-            ResolveInt(requestThrottleDelayMilliseconds, serverDefaults.ThrottleDelayMilliseconds));
+            ResolveInt(requestThrottleDelayMilliseconds, serverDefaults.ThrottleDelayMilliseconds),
+            ResolveLong(requestMaxQueryUnits, serverDefaults.MaxQueryUnits));
     }
 
     /// <summary>

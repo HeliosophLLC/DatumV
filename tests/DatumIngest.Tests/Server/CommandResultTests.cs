@@ -79,7 +79,7 @@ public sealed class CommandResultTests
     {
         List<SessionInfo> sessions = new()
         {
-            new SessionInfo(Guid.NewGuid(), SessionRole.Admin, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 5)
+            new SessionInfo(Guid.NewGuid(), SessionRole.Admin, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 5, 0)
         };
         CommandResult result = CommandResult.SessionList(sessions);
         Assert.Equal(CommandResultKind.SessionList, result.Kind);

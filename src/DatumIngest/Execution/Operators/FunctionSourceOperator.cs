@@ -33,7 +33,7 @@ public sealed class FunctionSourceOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
         Row emptyRow = new([], []);
 
         DataValue[] evaluatedArguments = new DataValue[_arguments.Count];

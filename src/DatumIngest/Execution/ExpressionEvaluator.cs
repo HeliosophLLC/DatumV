@@ -16,6 +16,7 @@ namespace DatumIngest.Execution;
 public sealed class ExpressionEvaluator
 {
     private readonly FunctionRegistry _functions;
+    private readonly QueryMeter? _meter;
 
     /// <summary>
     /// Compiled regex cache for LIKE patterns. Avoids recompiling
@@ -27,9 +28,11 @@ public sealed class ExpressionEvaluator
     /// Creates an evaluator that can resolve function calls.
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
-    public ExpressionEvaluator(FunctionRegistry functions)
+    /// <param name="meter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
+    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null)
     {
         _functions = functions;
+        _meter = meter;
     }
 
     /// <summary>
@@ -229,6 +232,8 @@ public sealed class ExpressionEvaluator
             }
 
             DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
+
+            _meter?.Add(scalarFunction.QueryUnitCost);
 
             // Dispose consumed ImageHandle arguments whose bitmaps are no longer needed.
             // The result carries its own ImageHandle (if any), so we only dispose handles

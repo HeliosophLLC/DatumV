@@ -40,6 +40,9 @@ service DatumCompute {
 
   // Cancels a running query on another session (admin only).
   rpc KillQuery (KillQueryRequest) returns (KillQueryResponse);
+
+  // Returns accumulated usage metrics for a session.
+  rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
 }
 
 // ───────────────────── Session Management ─────────────────────
@@ -62,6 +65,10 @@ message CreateSessionRequest {
   // Throttle delay in milliseconds injected periodically during streaming.
   // 0 = use server default, positive = override, negative = disable.
   int32 throttle_delay_ms = 5;
+
+  // Maximum Query Units a single query may accumulate.
+  // 0 = use server default, positive = override, negative = disable.
+  int64 max_query_units = 6;
 }
 
 message CreateSessionResponse {
@@ -91,6 +98,10 @@ message QueryRow {
 
   // One value per column, in schema order.
   repeated DataValueMessage values = 2;
+
+  // Running total of Query Units consumed so far. The value on the
+  // last row of the stream is the definitive cost for the query.
+  int64 query_units = 3;
 }
 
 // ───────────────────── Schema & Catalog ─────────────────────
@@ -266,6 +277,16 @@ message KillQueryResponse {
   string message = 1;
 }
 
+message GetUsageRequest {
+  string session_id = 1;
+}
+
+message GetUsageResponse {
+  string session_id = 1;
+  int64 total_query_units = 2;
+  int32 query_count = 3;
+}
+
 // ───────────────────── Shared Types ─────────────────────
 
 message SchemaMessage {
@@ -335,4 +356,5 @@ message SessionInfoMessage {
   string created_at = 4;
   string last_activity_at = 5;
   int32 query_count = 6;
+  int64 total_query_units = 7;
 }
