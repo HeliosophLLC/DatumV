@@ -109,6 +109,22 @@ internal static class ProtoConverter
                 tensor.Values.AddRange(tensorData);
                 message.TensorValue = tensor;
                 break;
+
+            case DataKind.Uuid:
+                message.UuidValue = value.AsUuid().ToString();
+                break;
+
+            case DataKind.Boolean:
+                message.BooleanValue = value.AsBoolean();
+                break;
+
+            case DataKind.Time:
+                message.TimeValue = value.AsTime().ToString("HH:mm:ss.FFFFFFF");
+                break;
+
+            case DataKind.Duration:
+                message.DurationValue = value.AsDuration().TotalSeconds;
+                break;
         }
 
         return message;
@@ -132,6 +148,10 @@ internal static class ProtoConverter
             DataKind.Date => DataKindValue.DataKindDate,
             DataKind.DateTime => DataKindValue.DataKindDateTime,
             DataKind.JsonValue => DataKindValue.DataKindJsonValue,
+            DataKind.Uuid => DataKindValue.DataKindUuid,
+            DataKind.Boolean => DataKindValue.DataKindBoolean,
+            DataKind.Time => DataKindValue.DataKindTime,
+            DataKind.Duration => DataKindValue.DataKindDuration,
             _ => DataKindValue.DataKindString,
         };
     }

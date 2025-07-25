@@ -178,6 +178,10 @@ enum ParameterKindValue {
   PARAMETER_KIND_DATE = 9;
   PARAMETER_KIND_DATE_TIME = 10;
   PARAMETER_KIND_JSON_VALUE = 11;
+  PARAMETER_KIND_UUID = 12;
+  PARAMETER_KIND_BOOLEAN = 13;
+  PARAMETER_KIND_TIME = 14;
+  PARAMETER_KIND_DURATION = 15;
 }
 
 // Classifies a function by its operational domain.
@@ -334,6 +338,10 @@ enum DataKindValue {
   DATA_KIND_DATE = 8;
   DATA_KIND_DATE_TIME = 9;
   DATA_KIND_JSON_VALUE = 10;
+  DATA_KIND_UUID = 11;
+  DATA_KIND_BOOLEAN = 12;
+  DATA_KIND_TIME = 13;
+  DATA_KIND_DURATION = 14;
 }
 
 // Discriminated value type transported over the wire.
@@ -353,6 +361,10 @@ message DataValueMessage {
     VectorMessage vector_value = 10;
     MatrixMessage matrix_value = 11;
     TensorMessage tensor_value = 12;
+    string uuid_value = 13;      // UUID string (RFC 9562)
+    bool boolean_value = 14;
+    string time_value = 15;      // HH:mm:ss.FFFFFFF time string
+    double duration_value = 16;  // Total seconds as double
   }
 }
 

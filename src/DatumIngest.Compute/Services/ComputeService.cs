@@ -537,6 +537,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             "Date" => ParameterKindValue.ParameterKindDate,
             "DateTime" => ParameterKindValue.ParameterKindDateTime,
             "JsonValue" => ParameterKindValue.ParameterKindJsonValue,
+            "Uuid" => ParameterKindValue.ParameterKindUuid,
+            "Boolean" => ParameterKindValue.ParameterKindBoolean,
+            "Time" => ParameterKindValue.ParameterKindTime,
+            "Duration" => ParameterKindValue.ParameterKindDuration,
             _ => ParameterKindValue.ParameterKindAny,
         };
     }
