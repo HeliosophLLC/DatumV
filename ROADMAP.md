@@ -31,6 +31,7 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Language server — multi-error diagnostics**: Error-recovering parser for multiple parse errors per document~~ ✅
 - **Language server — semantic diagnostics**: ~~Unknown table/column warnings~~, type mismatch detection ✅ (partial)
 - ~~**Language server — WASM size optimization**: Extract `DatumIngest.Parsing` with manifest POCOs to eliminate all transitive heavy dependencies from LanguageServer/Wasm~~ ✅
+- **CASE / WHEN expressions**: Searched CASE (`CASE expr WHEN ... THEN ... ELSE ... END`) and simple CASE (`CASE WHEN cond THEN ... END`). Requires new lexer tokens, AST nodes, and evaluator support. `iif()` provides basic inline conditional as a function today.
 
 ---
 
@@ -49,6 +50,42 @@ The following features are architecturally accounted for but deferred from V1:
 ### Enum / Categorical type (`DataKind.Categorical`)
 
 ML-relevant for one-hot and label encoding. Could be represented as String with a fixed domain constraint (known set of valid values). Natural fit with the planned data validation feature (CHECK constraints / VALIDATE clause). Would enable: automatic one-hot encoding, label encoding with stable integer mapping, domain validation on ingest. DuckDB and Polars both support this pattern.
+
+**V1 status**: Explicit-domain encoding functions (`one_hot`, `label_encode`, variants) and stateless feature hashing (`hash_encode`) shipped without a dedicated `DataKind.Categorical`. These cover low-to-high cardinality encoding via SQL functions operating on String columns. A first-class Categorical type remains under consideration for automatic encoding and validation scenarios.
+
+---
+
+## Manifest-Derived Categorical Encoding (V3 — needs design)
+
+**Status**: Deferred. V1 encoding functions use explicit inline domains. V3 would derive domains from the manifest’s TopK vocabulary, removing the need to embed labels in queries.
+
+### Motivation
+
+- **Interpretability**: Exact encoding gives a known, reversible mapping (0=cat, 1=dog). Feature hashing is a one-way black box.
+- **Medium cardinality**: Columns with hundreds to thousands of distinct values (ZIP codes, product categories) are too many for inline variadic arguments but perfectly encodable without collisions.
+- **Cross-dataset reproducibility**: The manifest vocabulary is the contract that guarantees identical encoding between train and score datasets.
+- **Downstream model constraints**: Embedding layers need exact vocabulary indices; target encoding needs per-category statistics.
+
+### Open design questions
+
+1. **Vocabulary artifact format.** The current `.datum-manifest` stores TopK (default 10 values) as JSON. Full vocabularies (50K+ entries) shouldn’t bloat the stats manifest. Options: separate `.datum-vocabulary` file, vocabulary section within manifest with lazy loading, or external reference.
+2. **`IManifestAwareFunction` interface.** Functions are currently stateless singletons. Manifest-derived functions need bound vocabularies — requires a clone-per-use or factory pattern to inject domain context.
+3. **TopK insufficiency.** TopK truncates at K entries. Full-domain encoding needs the complete distinct value set, which may require a vocabulary-collection pass or raising K to full cardinality.
+4. **Coverage semantics.** What happens when the vocabulary covers 95% of values? Should encoding auto-inject an UNK bucket? Should coverage ratio be reported?
+
+---
+
+## Output Manifest Generation (V3 — needs design)
+
+**Status**: Deferred. Currently `query` writes output data but no manifest; `manifest` collects statistics but doesn’t write data. These are decoupled.
+
+### V3a — Output sidecar manifest
+
+Generate a `.datum-manifest` alongside query output that describes the derived projection. Same `QueryResultsManifest` format, computed from output data. Enables chained pipelines: raw data → transform → manifest → downstream transform.
+
+### V3b — Encoding provenance extension
+
+Extend the output manifest with encoding provenance: which source column was encoded, what encoding type was applied, and what domain was used. This is metadata about the transformation, not just statistics about the result. Enables round-trip understanding of feature pipelines.
 
 ---
 

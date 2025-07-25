@@ -290,7 +290,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.IsNanFunction());
         registry.RegisterScalar(new Math.IsFiniteFunction());
         registry.RegisterScalar(new Math.IfNullFunction());
+        registry.RegisterScalar(new Math.IifFunction());
         registry.RegisterScalar(new Math.RandomFunction());
+
+        // Categorical Encoding
+        registry.RegisterScalar(new Scalar.OneHotFunction());
+        registry.RegisterScalar(new Scalar.OneHotUnknownFunction());
+        registry.RegisterScalar(new Scalar.LabelEncodeFunction());
+        registry.RegisterScalar(new Scalar.LabelEncodeUnknownFunction());
+        registry.RegisterScalar(new Scalar.HashEncodeFunction());
 
         // Image — Metadata
         registry.RegisterScalar(new Image.ImageWidthFunction());

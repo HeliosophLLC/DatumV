@@ -17,6 +17,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Vector** | Vector and tensor operations: reductions, manipulation, distance, similarity, and introspection. |
 | **Image** | Image metadata, loading, transforms, analysis, and perceptual hashing. |
 | **Encoding** | UUID generation/inspection, cryptographic hashing (MD5/SHA/CRC), and base64/hex encoding. |
+| **Categorical** | Categorical encoding: one-hot, label encoding (explicit domain), and feature hashing. |
 | **Json** | JSON path access, existence testing, and array inspection. |
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
@@ -132,6 +133,40 @@ SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash 
 | `base64_decode` | `base64_decode(str)` | Decode Base64 string to byte array. | 1 |
 | `hex_encode` | `hex_encode(bytes)` | Encode byte array as lowercase hex string. | 1 |
 | `hex_decode` | `hex_decode(str)` | Decode hex string to byte array. | 1 |
+
+## Categorical Encoding (5)
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|  
+| `one_hot` | `one_hot(value, label1, label2, ...)` | One-hot encode against an explicit domain. Returns Vector[K] with 1.0 at matching index; zero vector for unknown values. | 1 |
+| `one_hot_unk` | `one_hot_unk(value, label1, label2, ...)` | One-hot encode with unknown bucket. Returns Vector[K+1]; unknown values activate the last dimension. | 1 |
+| `label_encode` | `label_encode(value, label1, label2, ...)` | Label-encode against an explicit domain. Returns the zero-based Scalar index; -1 for unknown values. | 1 |
+| `label_encode_unk` | `label_encode_unk(value, label1, label2, ...)` | Label-encode with unknown bucket. Returns the zero-based Scalar index; K (domain size) for unknown values. | 1 |
+| `hash_encode` | `hash_encode(value, num_buckets)` | Feature-hash a string into a fixed-size one-hot Vector. Uses XxHash32 modulo num_buckets. Handles any cardinality without an explicit domain. | 2 |
+
+### Categorical encoding examples
+
+```sql
+-- Low-cardinality: explicit domain one-hot
+SELECT one_hot(color, 'red', 'green', 'blue') AS color_vec
+FROM products
+
+-- With unknown bucket for unseen categories
+SELECT one_hot_unk(species, 'cat', 'dog', 'bird') AS species_vec
+FROM animals
+
+-- Label encoding for ordinal features
+SELECT label_encode(size, 'S', 'M', 'L', 'XL') AS size_idx
+FROM orders
+
+-- High-cardinality: feature hashing (no vocabulary needed)
+SELECT hash_encode(zip_code, 256) AS zip_features
+FROM addresses
+
+-- Conditional selection with iif
+SELECT iif(age > 18, 'adult', 'minor') AS age_group
+FROM users
+```
 
 ## Temporal Feature Extraction
 
@@ -500,16 +535,16 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `dot` | `dot(a, b)` | Dot product of two vectors. | 2 |
 | `hamming_distance` | `hamming_distance(a, b)` | Hamming distance between two strings. | 2 |
 
-## Math — Utility & Conditional (7)
+## Math — Utility & Conditional (8)
 
 | Function | Signature | Description | QU |
-|----------|-----------|-------------|----|
-| `coalesce` | `coalesce(a, b, ...)` | Returns first non-null argument. | 1 |
+|----------|-----------|-------------|----|| `coalesce` | `coalesce(a, b, ...)` | Returns first non-null argument. | 1 |
 | `greatest` | `greatest(a, b, ...)` | Returns maximum of scalar arguments. | 1 |
 | `least` | `least(a, b, ...)` | Returns minimum of scalar arguments. | 1 |
 | `is_nan` | `is_nan(x)` | Returns 1 if NaN, 0 otherwise. | 1 |
 | `is_finite` | `is_finite(x)` | Returns 1 if finite, 0 if NaN or infinite. | 1 |
 | `if_null` | `if_null(x, default)` | Returns x if not null, otherwise default. | 1 |
+| `iif` | `iif(cond, then, else)` | Returns then when cond is truthy (non-null, non-zero), else otherwise. | 1 |
 | `random` | `random()` | Random float in [0, 1). | 1 |
 
 ## Image — Metadata (5)

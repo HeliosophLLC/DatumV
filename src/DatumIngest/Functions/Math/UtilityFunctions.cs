@@ -182,6 +182,38 @@ public sealed class IfNullFunction : IScalarFunction
 }
 
 /// <summary>
+/// Inline conditional: iif(condition, then_value, else_value).
+/// Returns then_value when condition is truthy, else_value otherwise.
+/// Truthiness follows AND/OR semantics: null and Scalar 0 are falsy, everything else is truthy.
+/// </summary>
+public sealed class IifFunction : IScalarFunction
+{
+    /// <inheritdoc />
+    public string Name => "iif";
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length != 3)
+            throw new ArgumentException("iif() requires exactly 3 arguments (condition, then, else).");
+        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.Boolean))
+            throw new ArgumentException("iif() condition (argument 1) must be Scalar or Boolean.");
+        if (argumentKinds[1] != argumentKinds[2])
+            throw new ArgumentException($"iif() then/else arguments must be the same kind, got {argumentKinds[1]} and {argumentKinds[2]}.");
+        return argumentKinds[1];
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    {
+        DataValue condition = arguments[0];
+        bool truthy = !condition.IsNull &&
+            (condition.Kind == DataKind.Boolean ? condition.AsBoolean() : condition.AsScalar() != 0f);
+        return truthy ? arguments[1] : arguments[2];
+    }
+}
+
+/// <summary>
 /// Returns a pseudo-random float in [0, 1): random().
 /// Uses a thread-safe random number generator.
 /// </summary>
