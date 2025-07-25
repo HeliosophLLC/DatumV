@@ -48,28 +48,32 @@ public static class FunctionDocumentation
             Name = "normalize",
             Parameters = [Parameter("value", "Scalar"), Parameter("min", "Scalar"), Parameter("max", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Normalizes a value to [0, 1] given a known min/max range."
+            Description = "Normalizes a value to [0, 1] given a known min/max range.",
+            Category = FunctionCategory.Numeric,
         });
         Register(new FunctionSignature
         {
             Name = "clamp",
             Parameters = [Parameter("value", "Scalar"), Parameter("min", "Scalar"), Parameter("max", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Clamps a value to the range [min, max]."
+            Description = "Clamps a value to the range [min, max].",
+            Category = FunctionCategory.Numeric,
         });
         Register(new FunctionSignature
         {
             Name = "denormalize",
             Parameters = [Parameter("value", "Scalar"), Parameter("min", "Scalar"), Parameter("max", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Maps a [0, 1] value back to the original [min, max] range."
+            Description = "Maps a [0, 1] value back to the original [min, max] range.",
+            Category = FunctionCategory.Numeric,
         });
         Register(new FunctionSignature
         {
             Name = "reshape",
             Parameters = [Parameter("tensor", "Tensor"), Parameter("dim1", "Scalar"), Parameter("dim2", "Scalar", isOptional: true)],
             ReturnType = "Tensor",
-            Description = "Reinterprets the shape of a tensor without copying data. Element count must match."
+            Description = "Reinterprets the shape of a tensor without copying data. Element count must match.",
+            Category = FunctionCategory.Vector,
         });
 
         // ── String ──
@@ -79,42 +83,48 @@ public static class FunctionDocumentation
             Name = "len",
             Parameters = [Parameter("value", "String")],
             ReturnType = "Scalar",
-            Description = "Returns the character length of a string."
+            Description = "Returns the character length of a string.",
+            Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "mid",
             Parameters = [Parameter("value", "String"), Parameter("start", "Scalar"), Parameter("length", "Scalar")],
             ReturnType = "String",
-            Description = "Extracts a substring starting at the given 1-based position with the specified length."
+            Description = "Extracts a substring starting at the given 1-based position with the specified length.",
+            Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "substring",
             Parameters = [Parameter("value", "String"), Parameter("start", "Scalar"), Parameter("length", "Scalar", isOptional: true)],
             ReturnType = "String",
-            Description = "Extracts a substring from a 0-based start position, optionally with a length."
+            Description = "Extracts a substring from a 0-based start position, optionally with a length.",
+            Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "get_filename",
             Parameters = [Parameter("path", "String")],
             ReturnType = "String",
-            Description = "Extracts the file name (with extension) from a file path."
+            Description = "Extracts the file name (with extension) from a file path.",
+            Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "get_file_extension",
             Parameters = [Parameter("path", "String")],
             ReturnType = "String",
-            Description = "Extracts the file extension (including the dot) from a file path."
+            Description = "Extracts the file extension (including the dot) from a file path.",
+            Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "get_path",
             Parameters = [Parameter("path", "String")],
             ReturnType = "String",
-            Description = "Extracts the directory path from a file path."
+            Description = "Extracts the directory path from a file path.",
+            Category = FunctionCategory.String,
         });
 
         // ── Type Conversion ──
@@ -124,28 +134,32 @@ public static class FunctionDocumentation
             Name = "cast",
             Parameters = [Parameter("value", "Any"), Parameter("target_type", "String")],
             ReturnType = null,
-            Description = "Explicit type conversion between DataKind types. Target type is a DataKind name."
+            Description = "Explicit type conversion between DataKind types. Target type is a DataKind name.",
+            Category = FunctionCategory.Conversion,
         });
         Register(new FunctionSignature
         {
             Name = "to_epoch",
             Parameters = [Parameter("value", "DateTime")],
             ReturnType = "Scalar",
-            Description = "Converts a Date or DateTime to epoch seconds (float)."
+            Description = "Converts a Date or DateTime to epoch seconds (float).",
+            Category = FunctionCategory.Conversion,
         });
         Register(new FunctionSignature
         {
             Name = "date_part",
             Parameters = [Parameter("part", "String"), Parameter("value", "DateTime")],
             ReturnType = "Scalar",
-            Description = "Extracts a component (year, month, day, hour, minute, second) from a Date or DateTime."
+            Description = "Extracts a component (year, month, day, hour, minute, second) from a Date or DateTime.",
+            Category = FunctionCategory.Conversion,
         });
         Register(new FunctionSignature
         {
             Name = "cyclical_encode",
             Parameters = [Parameter("value", "Scalar"), Parameter("period", "Scalar")],
             ReturnType = "Vector",
-            Description = "Encodes a cyclic value as a [sin, cos] pair for ML features."
+            Description = "Encodes a cyclic value as a [sin, cos] pair for ML features.",
+            Category = FunctionCategory.Conversion,
         });
 
         // ── Date/Time — Extraction ──
@@ -167,49 +181,56 @@ public static class FunctionDocumentation
             Name = "now",
             Parameters = [],
             ReturnType = "DateTime",
-            Description = "Returns the current UTC timestamp."
+            Description = "Returns the current UTC timestamp.",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "make_date",
             Parameters = [Parameter("year", "Scalar"), Parameter("month", "Scalar"), Parameter("day", "Scalar")],
             ReturnType = "Date",
-            Description = "Constructs a Date from year, month, and day components."
+            Description = "Constructs a Date from year, month, and day components.",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "make_timestamp",
             Parameters = [Parameter("year", "Scalar"), Parameter("month", "Scalar"), Parameter("day", "Scalar"), Parameter("hour", "Scalar"), Parameter("minute", "Scalar"), Parameter("second", "Scalar")],
             ReturnType = "DateTime",
-            Description = "Constructs a UTC DateTime from year, month, day, hour, minute, and second components."
+            Description = "Constructs a UTC DateTime from year, month, day, hour, minute, and second components.",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "date_diff",
             Parameters = [Parameter("part", "String"), Parameter("start", "DateTime"), Parameter("end", "DateTime")],
             ReturnType = "Scalar",
-            Description = "Returns the number of date part boundaries between start and end."
+            Description = "Returns the number of date part boundaries between start and end.",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "date_add",
             Parameters = [Parameter("part", "String"), Parameter("number", "Scalar"), Parameter("date", "DateTime")],
             ReturnType = "DateTime",
-            Description = "Adds the specified number of date part units to a date."
+            Description = "Adds the specified number of date part units to a date.",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "date_trunc",
             Parameters = [Parameter("part", "String"), Parameter("date", "DateTime")],
             ReturnType = "DateTime",
-            Description = "Truncates a date to the specified precision (e.g., month → first of month)."
+            Description = "Truncates a date to the specified precision (e.g., month → first of month).",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "date_bucket",
             Parameters = [Parameter("part", "String"), Parameter("width", "Scalar"), Parameter("date", "DateTime"), Parameter("origin", "DateTime", isOptional: true)],
             ReturnType = "DateTime",
-            Description = "Buckets a date into fixed-width intervals of the specified date part."
+            Description = "Buckets a date into fixed-width intervals of the specified date part.",
+            Category = FunctionCategory.Temporal,
         });
 
         // ── Date/Time — Formatting & Probing ──
@@ -219,14 +240,16 @@ public static class FunctionDocumentation
             Name = "strftime",
             Parameters = [Parameter("date", "DateTime"), Parameter("format", "String")],
             ReturnType = "String",
-            Description = "Formats a Date or DateTime as a string using a .NET format string."
+            Description = "Formats a Date or DateTime as a string using a .NET format string.",
+            Category = FunctionCategory.Temporal,
         });
         Register(new FunctionSignature
         {
             Name = "is_date",
             Parameters = [Parameter("value", "String")],
             ReturnType = "Scalar",
-            Description = "Returns 1 if the string can be parsed as a date, 0 otherwise."
+            Description = "Returns 1 if the string can be parsed as a date, 0 otherwise.",
+            Category = FunctionCategory.Temporal,
         });
 
         // ── JSON ──
@@ -236,28 +259,32 @@ public static class FunctionDocumentation
             Name = "json_value",
             Parameters = [Parameter("json", "JsonValue"), Parameter("path", "String")],
             ReturnType = "String",
-            Description = "Extracts a scalar value from a JSON document at the specified path."
+            Description = "Extracts a scalar value from a JSON document at the specified path.",
+            Category = FunctionCategory.Json,
         });
         Register(new FunctionSignature
         {
             Name = "json_query",
             Parameters = [Parameter("json", "JsonValue"), Parameter("path", "String")],
             ReturnType = "JsonValue",
-            Description = "Extracts a JSON object or array from a JSON document at the specified path."
+            Description = "Extracts a JSON object or array from a JSON document at the specified path.",
+            Category = FunctionCategory.Json,
         });
         Register(new FunctionSignature
         {
             Name = "json_exists",
             Parameters = [Parameter("json", "JsonValue"), Parameter("path", "String")],
             ReturnType = "Scalar",
-            Description = "Returns 1 if the path exists in the JSON document, 0 otherwise."
+            Description = "Returns 1 if the path exists in the JSON document, 0 otherwise.",
+            Category = FunctionCategory.Json,
         });
         Register(new FunctionSignature
         {
             Name = "json_array_length",
             Parameters = [Parameter("json", "JsonValue")],
             ReturnType = "Scalar",
-            Description = "Returns the number of elements in a JSON array."
+            Description = "Returns the number of elements in a JSON array.",
+            Category = FunctionCategory.Json,
         });
 
         // ── Math — Arithmetic ──
@@ -303,14 +330,16 @@ public static class FunctionDocumentation
             Name = "pi",
             Parameters = [],
             ReturnType = "Scalar",
-            Description = "Returns the constant π (3.14159...)."
+            Description = "Returns the constant π (3.14159...).",
+            Category = FunctionCategory.Numeric,
         });
         Register(new FunctionSignature
         {
             Name = "euler",
             Parameters = [],
             ReturnType = "Scalar",
-            Description = "Returns Euler's number e (2.71828...)."
+            Description = "Returns Euler's number e (2.71828...).",
+            Category = FunctionCategory.Numeric,
         });
 
         // ── Math — Rounding & Quantization ──
@@ -326,34 +355,37 @@ public static class FunctionDocumentation
             Name = "clip",
             Parameters = [Parameter("value", "Scalar"), Parameter("min", "Scalar"), Parameter("max", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Clips a value to the range [min, max]. Alias for clamp."
+            Description = "Clips a value to the range [min, max]. Alias for clamp.",
+            Category = FunctionCategory.Numeric,
         });
 
         // ── Math — ML Activations ──
 
-        RegisterUnary("sigmoid", "Sigmoid activation: σ(x) = 1 / (1 + e⁻ˣ).");
-        RegisterUnary("relu", "Rectified linear unit: relu(x) = max(0, x).");
-        RegisterUnary("selu", "Scaled exponential linear unit.");
-        RegisterUnary("gelu", "Gaussian error linear unit.");
-        RegisterUnary("swish", "Swish activation: swish(x) = x · σ(x).");
-        RegisterUnary("softplus", "Softplus: softplus(x) = ln(1 + eˣ).");
-        RegisterUnary("softsign", "Softsign: softsign(x) = x / (1 + |x|).");
-        RegisterUnary("mish", "Mish activation: mish(x) = x · tanh(softplus(x)).");
-        RegisterUnary("hard_sigmoid", "Piecewise-linear approximation of sigmoid.");
-        RegisterUnary("hard_swish", "Piecewise-linear approximation of swish.");
+        RegisterUnary("sigmoid", "Sigmoid activation: σ(x) = 1 / (1 + e⁻ˣ).", FunctionCategory.Activation);
+        RegisterUnary("relu", "Rectified linear unit: relu(x) = max(0, x).", FunctionCategory.Activation);
+        RegisterUnary("selu", "Scaled exponential linear unit.", FunctionCategory.Activation);
+        RegisterUnary("gelu", "Gaussian error linear unit.", FunctionCategory.Activation);
+        RegisterUnary("swish", "Swish activation: swish(x) = x · σ(x).", FunctionCategory.Activation);
+        RegisterUnary("softplus", "Softplus: softplus(x) = ln(1 + eˣ).", FunctionCategory.Activation);
+        RegisterUnary("softsign", "Softsign: softsign(x) = x / (1 + |x|).", FunctionCategory.Activation);
+        RegisterUnary("mish", "Mish activation: mish(x) = x · tanh(softplus(x)).", FunctionCategory.Activation);
+        RegisterUnary("hard_sigmoid", "Piecewise-linear approximation of sigmoid.", FunctionCategory.Activation);
+        RegisterUnary("hard_swish", "Piecewise-linear approximation of swish.", FunctionCategory.Activation);
         Register(new FunctionSignature
         {
             Name = "leaky_relu",
             Parameters = [Parameter("value", "Scalar"), Parameter("alpha", "Scalar", isOptional: true)],
             ReturnType = "Scalar",
-            Description = "Leaky ReLU with configurable negative slope (default α = 0.01)."
+            Description = "Leaky ReLU with configurable negative slope (default α = 0.01).",
+            Category = FunctionCategory.Activation,
         });
         Register(new FunctionSignature
         {
             Name = "elu",
             Parameters = [Parameter("value", "Scalar"), Parameter("alpha", "Scalar", isOptional: true)],
             ReturnType = "Scalar",
-            Description = "Exponential linear unit with configurable α (default α = 1.0)."
+            Description = "Exponential linear unit with configurable α (default α = 1.0).",
+            Category = FunctionCategory.Activation,
         });
 
         // ── Math — Softmax & Normalization ──
@@ -363,21 +395,24 @@ public static class FunctionDocumentation
             Name = "softmax",
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Vector",
-            Description = "Applies softmax normalization: each element becomes exp(xᵢ) / Σexp(xⱼ)."
+            Description = "Applies softmax normalization: each element becomes exp(xᵢ) / Σexp(xⱼ).",
+            Category = FunctionCategory.Activation,
         });
         Register(new FunctionSignature
         {
             Name = "log_softmax",
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Vector",
-            Description = "Log of softmax: numerically stable version of ln(softmax(x))."
+            Description = "Log of softmax: numerically stable version of ln(softmax(x)).",
+            Category = FunctionCategory.Activation,
         });
         Register(new FunctionSignature
         {
             Name = "l2_normalize",
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Vector",
-            Description = "L2-normalizes a vector to unit length."
+            Description = "L2-normalizes a vector to unit length.",
+            Category = FunctionCategory.Activation,
         });
 
         // ── Math — Vector Reductions ──
@@ -404,21 +439,24 @@ public static class FunctionDocumentation
             Name = "rank",
             Parameters = [Parameter("tensor", "Tensor")],
             ReturnType = "Scalar",
-            Description = "Returns the number of dimensions (rank) of a tensor."
+            Description = "Returns the number of dimensions (rank) of a tensor.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "rdim",
             Parameters = [Parameter("tensor", "Tensor"), Parameter("dimension", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Returns the size of a specific dimension of a tensor."
+            Description = "Returns the size of a specific dimension of a tensor.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "shape",
             Parameters = [Parameter("tensor", "Tensor")],
             ReturnType = "Vector",
-            Description = "Returns the shape of a tensor as a vector of dimension sizes."
+            Description = "Returns the shape of a tensor as a vector of dimension sizes.",
+            Category = FunctionCategory.Vector,
         });
 
         // ── Math — Vector Manipulation ──
@@ -428,84 +466,96 @@ public static class FunctionDocumentation
             Name = "vec",
             Parameters = [Parameter("values", "Scalar")],
             ReturnType = "Vector",
-            Description = "Constructs a vector from scalar arguments: vec(1, 2, 3)."
+            Description = "Constructs a vector from scalar arguments: vec(1, 2, 3).",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "tensor",
             Parameters = [Parameter("values", "Scalar")],
             ReturnType = "Tensor",
-            Description = "Constructs a tensor from scalar arguments."
+            Description = "Constructs a tensor from scalar arguments.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_slice",
             Parameters = [Parameter("vector", "Vector"), Parameter("start", "Scalar"), Parameter("length", "Scalar", isOptional: true)],
             ReturnType = "Vector",
-            Description = "Extracts a contiguous slice from a vector."
+            Description = "Extracts a contiguous slice from a vector.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_concat",
             Parameters = [Parameter("left", "Vector"), Parameter("right", "Vector")],
             ReturnType = "Vector",
-            Description = "Concatenates two vectors into one."
+            Description = "Concatenates two vectors into one.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_reverse",
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Vector",
-            Description = "Reverses the order of elements in a vector."
+            Description = "Reverses the order of elements in a vector.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_sort",
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Vector",
-            Description = "Returns a new vector with elements sorted in ascending order."
+            Description = "Returns a new vector with elements sorted in ascending order.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_unique",
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Vector",
-            Description = "Returns distinct elements of a vector in original order."
+            Description = "Returns distinct elements of a vector in original order.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_flatten",
             Parameters = [Parameter("tensor", "Tensor")],
             ReturnType = "Vector",
-            Description = "Flattens a tensor of any rank into a 1-D vector."
+            Description = "Flattens a tensor of any rank into a 1-D vector.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_pad",
             Parameters = [Parameter("vector", "Vector"), Parameter("length", "Scalar"), Parameter("fill", "Scalar", isOptional: true)],
             ReturnType = "Vector",
-            Description = "Pads a vector to the specified length with a fill value (default 0)."
+            Description = "Pads a vector to the specified length with a fill value (default 0).",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "vec_repeat",
             Parameters = [Parameter("vector", "Vector"), Parameter("count", "Scalar")],
             ReturnType = "Vector",
-            Description = "Repeats a vector the specified number of times."
+            Description = "Repeats a vector the specified number of times.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "linspace",
             Parameters = [Parameter("start", "Scalar"), Parameter("stop", "Scalar"), Parameter("count", "Scalar")],
             ReturnType = "Vector",
-            Description = "Generates a vector of evenly spaced values between start and stop (inclusive)."
+            Description = "Generates a vector of evenly spaced values between start and stop (inclusive).",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "arange",
             Parameters = [Parameter("start", "Scalar"), Parameter("stop", "Scalar"), Parameter("step", "Scalar", isOptional: true)],
             ReturnType = "Vector",
-            Description = "Generates a vector of values from start to stop (exclusive) with a step (default 1)."
+            Description = "Generates a vector of values from start to stop (exclusive) with a step (default 1).",
+            Category = FunctionCategory.Vector,
         });
 
         // ── Math — Distance & Similarity ──
@@ -515,35 +565,40 @@ public static class FunctionDocumentation
             Name = "cosine_similarity",
             Parameters = [Parameter("left", "Vector"), Parameter("right", "Vector")],
             ReturnType = "Scalar",
-            Description = "Cosine similarity between two vectors: dot(a, b) / (‖a‖ · ‖b‖)."
+            Description = "Cosine similarity between two vectors: dot(a, b) / (‖a‖ · ‖b‖).",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "euclidean_distance",
             Parameters = [Parameter("left", "Vector"), Parameter("right", "Vector")],
             ReturnType = "Scalar",
-            Description = "Euclidean (L2) distance between two vectors."
+            Description = "Euclidean (L2) distance between two vectors.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "manhattan_distance",
             Parameters = [Parameter("left", "Vector"), Parameter("right", "Vector")],
             ReturnType = "Scalar",
-            Description = "Manhattan (L1) distance between two vectors."
+            Description = "Manhattan (L1) distance between two vectors.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "dot",
             Parameters = [Parameter("left", "Vector"), Parameter("right", "Vector")],
             ReturnType = "Scalar",
-            Description = "Dot product (inner product) of two vectors."
+            Description = "Dot product (inner product) of two vectors.",
+            Category = FunctionCategory.Vector,
         });
         Register(new FunctionSignature
         {
             Name = "hamming_distance",
             Parameters = [Parameter("left", "Vector"), Parameter("right", "Vector")],
             ReturnType = "Scalar",
-            Description = "Hamming distance: count of positions where elements differ."
+            Description = "Hamming distance: count of positions where elements differ.",
+            Category = FunctionCategory.Vector,
         });
 
         // ── Math — Utility & Conditional ──
@@ -553,37 +608,42 @@ public static class FunctionDocumentation
             Name = "coalesce",
             Parameters = [Parameter("values", "Any")],
             ReturnType = null,
-            Description = "Returns the first non-null argument."
+            Description = "Returns the first non-null argument.",
+            Category = FunctionCategory.Utility,
         });
         Register(new FunctionSignature
         {
             Name = "greatest",
             Parameters = [Parameter("values", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Returns the largest of the arguments."
+            Description = "Returns the largest of the arguments.",
+            Category = FunctionCategory.Utility,
         });
         Register(new FunctionSignature
         {
             Name = "least",
             Parameters = [Parameter("values", "Scalar")],
             ReturnType = "Scalar",
-            Description = "Returns the smallest of the arguments."
+            Description = "Returns the smallest of the arguments.",
+            Category = FunctionCategory.Utility,
         });
-        RegisterUnary("is_nan", "Returns 1 if the value is NaN, 0 otherwise.");
-        RegisterUnary("is_finite", "Returns 1 if the value is finite (not NaN or infinity), 0 otherwise.");
+        RegisterUnary("is_nan", "Returns 1 if the value is NaN, 0 otherwise.", FunctionCategory.Utility);
+        RegisterUnary("is_finite", "Returns 1 if the value is finite (not NaN or infinity), 0 otherwise.", FunctionCategory.Utility);
         Register(new FunctionSignature
         {
             Name = "if_null",
             Parameters = [Parameter("value", "Any"), Parameter("default", "Any")],
             ReturnType = null,
-            Description = "Returns value if non-null, otherwise returns default."
+            Description = "Returns value if non-null, otherwise returns default.",
+            Category = FunctionCategory.Utility,
         });
         Register(new FunctionSignature
         {
             Name = "random",
             Parameters = [],
             ReturnType = "Scalar",
-            Description = "Returns a random float in [0, 1)."
+            Description = "Returns a random float in [0, 1).",
+            Category = FunctionCategory.Utility,
         });
 
         // ── Image — Metadata ──
@@ -601,14 +661,16 @@ public static class FunctionDocumentation
             Name = "load_image",
             Parameters = [Parameter("path", "String")],
             ReturnType = "Image",
-            Description = "Loads an image from a file path."
+            Description = "Loads an image from a file path.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "decode_image",
             Parameters = [Parameter("bytes", "UInt8Array")],
             ReturnType = "Image",
-            Description = "Decodes an image from raw bytes."
+            Description = "Decodes an image from raw bytes.",
+            Category = FunctionCategory.Image,
         });
 
         // ── Image — Analysis ──
@@ -631,14 +693,16 @@ public static class FunctionDocumentation
             Name = "resize",
             Parameters = [Parameter("image", "Image"), Parameter("width", "Scalar"), Parameter("height", "Scalar")],
             ReturnType = "Image",
-            Description = "Resizes an image to the specified width and height."
+            Description = "Resizes an image to the specified width and height.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "crop",
             Parameters = [Parameter("image", "Image"), Parameter("x", "Scalar"), Parameter("y", "Scalar"), Parameter("width", "Scalar"), Parameter("height", "Scalar")],
             ReturnType = "Image",
-            Description = "Crops a rectangular region from an image."
+            Description = "Crops a rectangular region from an image.",
+            Category = FunctionCategory.Image,
         });
         RegisterImageTransform("grayscale", "Converts an image to grayscale.");
         Register(new FunctionSignature
@@ -646,35 +710,40 @@ public static class FunctionDocumentation
             Name = "rotate",
             Parameters = [Parameter("image", "Image"), Parameter("degrees", "Scalar")],
             ReturnType = "Image",
-            Description = "Rotates an image by the specified angle in degrees."
+            Description = "Rotates an image by the specified angle in degrees.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "noise",
             Parameters = [Parameter("image", "Image"), Parameter("amount", "Scalar")],
             ReturnType = "Image",
-            Description = "Adds random noise to an image."
+            Description = "Adds random noise to an image.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "blur",
             Parameters = [Parameter("image", "Image"), Parameter("radius", "Scalar")],
             ReturnType = "Image",
-            Description = "Applies Gaussian blur with the specified radius."
+            Description = "Applies Gaussian blur with the specified radius.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "brighten",
             Parameters = [Parameter("image", "Image"), Parameter("amount", "Scalar")],
             ReturnType = "Image",
-            Description = "Increases image brightness by the specified amount."
+            Description = "Increases image brightness by the specified amount.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "darken",
             Parameters = [Parameter("image", "Image"), Parameter("amount", "Scalar")],
             ReturnType = "Image",
-            Description = "Decreases image brightness by the specified amount."
+            Description = "Decreases image brightness by the specified amount.",
+            Category = FunctionCategory.Image,
         });
         RegisterImageTransform("sobel", "Applies Sobel edge detection filter.");
         Register(new FunctionSignature
@@ -682,33 +751,166 @@ public static class FunctionDocumentation
             Name = "resize_and_crop",
             Parameters = [Parameter("image", "Image"), Parameter("width", "Scalar"), Parameter("height", "Scalar")],
             ReturnType = "Image",
-            Description = "Resizes preserving aspect ratio, then center-crops to target dimensions."
+            Description = "Resizes preserving aspect ratio, then center-crops to target dimensions.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "affine_transform",
             Parameters = [Parameter("image", "Image"), Parameter("matrix", "Vector")],
             ReturnType = "Image",
-            Description = "Applies a 2×3 affine transformation matrix to an image."
+            Description = "Applies a 2×3 affine transformation matrix to an image.",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "elastic_deform",
             Parameters = [Parameter("image", "Image"), Parameter("alpha", "Scalar"), Parameter("sigma", "Scalar")],
             ReturnType = "Image",
-            Description = "Applies elastic deformation with specified intensity (alpha) and smoothness (sigma)."
+            Description = "Applies elastic deformation with specified intensity (alpha) and smoothness (sigma).",
+            Category = FunctionCategory.Image,
         });
         Register(new FunctionSignature
         {
             Name = "perspective_warp",
             Parameters = [Parameter("image", "Image"), Parameter("strength", "Scalar")],
             ReturnType = "Image",
-            Description = "Applies a random perspective warp transformation."
+            Description = "Applies a random perspective warp transformation.",
+            Category = FunctionCategory.Image,
         });
 
         // ── Image — Hashing ──
 
         RegisterImageUnary("perceptual_hash", "UInt8Array", "Computes a perceptual hash for image similarity comparison.");
+
+        // ── Hashing ──
+
+        Register(new FunctionSignature
+        {
+            Name = "md5",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "UInt8Array",
+            Description = "Computes the MD5 hash of the input and returns the raw hash bytes.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "sha256",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "UInt8Array",
+            Description = "Computes the SHA-256 hash of the input and returns the raw hash bytes.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "sha512",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "UInt8Array",
+            Description = "Computes the SHA-512 hash of the input and returns the raw hash bytes.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "crc32",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "Scalar",
+            Description = "Computes the CRC-32 checksum of the input.",
+            Category = FunctionCategory.Encoding,
+        });
+
+        // ── Encoding ──
+
+        Register(new FunctionSignature
+        {
+            Name = "base64_encode",
+            Parameters = [Parameter("input", "UInt8Array")],
+            ReturnType = "String",
+            Description = "Encodes a byte array as a Base64 string.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "base64_decode",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "UInt8Array",
+            Description = "Decodes a Base64-encoded string into a byte array.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "hex_encode",
+            Parameters = [Parameter("input", "UInt8Array")],
+            ReturnType = "String",
+            Description = "Encodes a byte array as a lowercase hexadecimal string.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "hex_decode",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "UInt8Array",
+            Description = "Decodes a hexadecimal string into a byte array.",
+            Category = FunctionCategory.Encoding,
+        });
+
+        // ── UUID ──
+
+        Register(new FunctionSignature
+        {
+            Name = "uuid4",
+            Parameters = [],
+            ReturnType = "Uuid",
+            Description = "Generates a random version-4 UUID (RFC 9562).",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "uuid7",
+            Parameters = [],
+            ReturnType = "Uuid",
+            Description = "Generates a time-ordered version-7 UUID (RFC 9562) with an embedded millisecond timestamp.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "is_uuid",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "Boolean",
+            Description = "Tests whether a string is a valid UUID.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "uuid_str",
+            Parameters = [Parameter("input", "Uuid")],
+            ReturnType = "String",
+            Description = "Formats a UUID as a lowercase hyphenated string.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "uuid_bytes",
+            Parameters = [Parameter("input", "Uuid")],
+            ReturnType = "UInt8Array",
+            Description = "Extracts the raw bytes of a UUID as a 16-element big-endian byte array.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "uuid_version",
+            Parameters = [Parameter("input", "Uuid")],
+            ReturnType = "Scalar",
+            Description = "Extracts the version number from a UUID.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "uuid_timestamp",
+            Parameters = [Parameter("input", "Uuid")],
+            ReturnType = "DateTime",
+            Description = "Extracts the embedded timestamp from a version-7 UUID; returns null for non-v7 UUIDs.",
+            Category = FunctionCategory.Encoding,
+        });
 
         // ── Table-Valued Functions ──
 
@@ -718,7 +920,8 @@ public static class FunctionDocumentation
             Parameters = [Parameter("array_column", "Vector")],
             ReturnType = "Scalar",
             Description = "Expands a vector column into individual rows with a Value column.",
-            IsTableValued = true
+            IsTableValued = true,
+            Category = FunctionCategory.Table,
         });
         Register(new FunctionSignature
         {
@@ -726,31 +929,34 @@ public static class FunctionDocumentation
             Parameters = [Parameter("start", "Scalar"), Parameter("stop", "Scalar"), Parameter("step", "Scalar", isOptional: true)],
             ReturnType = "Scalar",
             Description = "Generates rows with a Value column from start to stop (inclusive) with an optional step.",
-            IsTableValued = true
+            IsTableValued = true,
+            Category = FunctionCategory.Table,
         });
     }
 
     /// <summary>Registers a standard unary numeric function (operates element-wise on Scalar/Vector/Tensor).</summary>
-    private static void RegisterUnary(string name, string description)
+    private static void RegisterUnary(string name, string description, FunctionCategory category = FunctionCategory.Numeric)
     {
         Register(new FunctionSignature
         {
             Name = name,
             Parameters = [Parameter("value", "Scalar")],
             ReturnType = "Scalar",
-            Description = description
+            Description = description,
+            Category = category,
         });
     }
 
     /// <summary>Registers a standard binary numeric function.</summary>
-    private static void RegisterBinary(string name, string leftName, string rightName, string description)
+    private static void RegisterBinary(string name, string leftName, string rightName, string description, FunctionCategory category = FunctionCategory.Numeric)
     {
         Register(new FunctionSignature
         {
             Name = name,
             Parameters = [Parameter(leftName, "Scalar"), Parameter(rightName, "Scalar")],
             ReturnType = "Scalar",
-            Description = description
+            Description = description,
+            Category = category,
         });
     }
 
@@ -762,7 +968,8 @@ public static class FunctionDocumentation
             Name = name,
             Parameters = [Parameter("vector", "Vector")],
             ReturnType = "Scalar",
-            Description = description
+            Description = description,
+            Category = FunctionCategory.Vector,
         });
     }
 
@@ -774,7 +981,8 @@ public static class FunctionDocumentation
             Name = name,
             Parameters = [Parameter("image", "Image")],
             ReturnType = returnType,
-            Description = description
+            Description = description,
+            Category = FunctionCategory.Image,
         });
     }
 
@@ -786,7 +994,8 @@ public static class FunctionDocumentation
             Name = name,
             Parameters = [Parameter("image", "Image")],
             ReturnType = "Image",
-            Description = description
+            Description = description,
+            Category = FunctionCategory.Image,
         });
     }
 
@@ -798,7 +1007,8 @@ public static class FunctionDocumentation
             Name = name,
             Parameters = [Parameter("date", "DateTime")],
             ReturnType = "Scalar",
-            Description = description
+            Description = description,
+            Category = FunctionCategory.Temporal,
         });
     }
 }

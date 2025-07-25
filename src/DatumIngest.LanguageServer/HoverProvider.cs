@@ -121,9 +121,11 @@ public sealed class HoverProvider
             signature = $"*(table-valued)* {signature}";
         }
 
+        string categoryLine = $"*Category: {function.Category}*";
+
         return function.Description is not null
-            ? $"{signature}\n\n{function.Description}"
-            : signature;
+            ? $"{signature}\n\n{categoryLine}\n\n{function.Description}"
+            : $"{signature}\n\n{categoryLine}";
     }
 
     private string? GetTableHover(string name)

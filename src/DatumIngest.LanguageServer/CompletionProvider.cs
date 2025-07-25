@@ -175,7 +175,7 @@ public sealed class CompletionProvider
             {
                 Label = function.Name,
                 Kind = CompletionItemKind.Function,
-                Detail = $"{signature}{returnInfo}",
+                Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
                 Documentation = function.Description,
                 SortOrder = 2,
@@ -199,7 +199,7 @@ public sealed class CompletionProvider
             {
                 Label = function.Name,
                 Kind = CompletionItemKind.Function,
-                Detail = $"Table function: {signature}",
+                Detail = $"[{function.Category}] Table function: {signature}",
                 InsertText = $"{function.Name}(",
                 Documentation = function.Description,
                 SortOrder = 1,

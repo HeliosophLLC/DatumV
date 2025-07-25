@@ -44,6 +44,7 @@ public static class LanguageServerManifestSerializer
 [JsonSerializable(typeof(TableColumnEntry))]
 [JsonSerializable(typeof(FunctionSignature))]
 [JsonSerializable(typeof(ParameterSignature))]
+[JsonSerializable(typeof(FunctionCategory))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,

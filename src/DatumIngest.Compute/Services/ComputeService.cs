@@ -269,6 +269,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     ReturnType = function.ReturnType ?? "",
                     IsTableValued = function.IsTableValued,
                     QueryUnitCost = function.QueryUnitCost,
+                    Category = ToFunctionCategory(function.Category),
                 };
 
                 foreach (ParameterSignature parameter in function.Parameters)
@@ -537,6 +538,25 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             "DateTime" => ParameterKindValue.ParameterKindDateTime,
             "JsonValue" => ParameterKindValue.ParameterKindJsonValue,
             _ => ParameterKindValue.ParameterKindAny,
+        };
+    }
+
+    private static FunctionCategoryValue ToFunctionCategory(FunctionCategory category)
+    {
+        return category switch
+        {
+            FunctionCategory.String => FunctionCategoryValue.FunctionCategoryString,
+            FunctionCategory.Temporal => FunctionCategoryValue.FunctionCategoryTemporal,
+            FunctionCategory.Numeric => FunctionCategoryValue.FunctionCategoryNumeric,
+            FunctionCategory.Activation => FunctionCategoryValue.FunctionCategoryActivation,
+            FunctionCategory.Vector => FunctionCategoryValue.FunctionCategoryVector,
+            FunctionCategory.Image => FunctionCategoryValue.FunctionCategoryImage,
+            FunctionCategory.Encoding => FunctionCategoryValue.FunctionCategoryEncoding,
+            FunctionCategory.Json => FunctionCategoryValue.FunctionCategoryJson,
+            FunctionCategory.Conversion => FunctionCategoryValue.FunctionCategoryConversion,
+            FunctionCategory.Utility => FunctionCategoryValue.FunctionCategoryUtility,
+            FunctionCategory.Table => FunctionCategoryValue.FunctionCategoryTable,
+            _ => FunctionCategoryValue.FunctionCategoryUtility,
         };
     }
 }

@@ -262,8 +262,17 @@ internal sealed class InteractiveShell
 
     private static void RenderFunctions(IReadOnlyList<FunctionSignature> functions)
     {
-        foreach (FunctionSignature function in functions)
+        IOrderedEnumerable<IGrouping<FunctionCategory, FunctionSignature>> groups = functions
+            .GroupBy(function => function.Category)
+            .OrderBy(group => group.Key);
+
+        foreach (IGrouping<FunctionCategory, FunctionSignature> group in groups)
         {
+            AnsiConsole.MarkupLine($"\n[bold underline]{group.Key}[/]");
+            AnsiConsole.WriteLine();
+
+            foreach (FunctionSignature function in group)
+            {
             StringBuilder signature = new();
             signature.Append(function.Name);
             signature.Append('(');
@@ -306,6 +315,7 @@ internal sealed class InteractiveShell
             }
 
             AnsiConsole.WriteLine(signature.ToString());
+            }
         }
 
         AnsiConsole.MarkupLine($"\n[grey]({functions.Count} function(s))[/]");

@@ -147,6 +147,9 @@ message FunctionInfoMessage {
   // Base Query Unit cost per invocation. Image functions may incur additional
   // resolution-dependent costs at runtime (see Resource Governance docs).
   int32 query_unit_cost = 5;
+
+  // Operational domain this function belongs to.
+  FunctionCategoryValue category = 6;
 }
 
 message ParameterInfoMessage {
@@ -175,6 +178,21 @@ enum ParameterKindValue {
   PARAMETER_KIND_DATE = 9;
   PARAMETER_KIND_DATE_TIME = 10;
   PARAMETER_KIND_JSON_VALUE = 11;
+}
+
+// Classifies a function by its operational domain.
+enum FunctionCategoryValue {
+  FUNCTION_CATEGORY_STRING = 0;
+  FUNCTION_CATEGORY_TEMPORAL = 1;
+  FUNCTION_CATEGORY_NUMERIC = 2;
+  FUNCTION_CATEGORY_ACTIVATION = 3;
+  FUNCTION_CATEGORY_VECTOR = 4;
+  FUNCTION_CATEGORY_IMAGE = 5;
+  FUNCTION_CATEGORY_ENCODING = 6;
+  FUNCTION_CATEGORY_JSON = 7;
+  FUNCTION_CATEGORY_CONVERSION = 8;
+  FUNCTION_CATEGORY_UTILITY = 9;
+  FUNCTION_CATEGORY_TABLE = 10;
 }
 
 message ListResponse {

@@ -125,4 +125,53 @@ public sealed class FunctionDocumentationTests
         Assert.NotNull(pi);
         Assert.Empty(pi.Parameters);
     }
+
+    // ───────────────────── Category ─────────────────────
+
+    [Theory]
+    [InlineData("abs", FunctionCategory.Numeric)]
+    [InlineData("sqrt", FunctionCategory.Numeric)]
+    [InlineData("pi", FunctionCategory.Numeric)]
+    [InlineData("len", FunctionCategory.String)]
+    [InlineData("get_filename", FunctionCategory.String)]
+    [InlineData("make_date", FunctionCategory.Temporal)]
+    [InlineData("year", FunctionCategory.Temporal)]
+    [InlineData("strftime", FunctionCategory.Temporal)]
+    [InlineData("sigmoid", FunctionCategory.Activation)]
+    [InlineData("softmax", FunctionCategory.Activation)]
+    [InlineData("l2_normalize", FunctionCategory.Activation)]
+    [InlineData("cosine_similarity", FunctionCategory.Vector)]
+    [InlineData("vec_sum", FunctionCategory.Vector)]
+    [InlineData("reshape", FunctionCategory.Vector)]
+    [InlineData("resize", FunctionCategory.Image)]
+    [InlineData("load_image", FunctionCategory.Image)]
+    [InlineData("perceptual_hash", FunctionCategory.Image)]
+    [InlineData("json_value", FunctionCategory.Json)]
+    [InlineData("sha256", FunctionCategory.Encoding)]
+    [InlineData("base64_encode", FunctionCategory.Encoding)]
+    [InlineData("uuid4", FunctionCategory.Encoding)]
+    [InlineData("cast", FunctionCategory.Conversion)]
+    [InlineData("coalesce", FunctionCategory.Utility)]
+    [InlineData("unnest", FunctionCategory.Table)]
+    [InlineData("range", FunctionCategory.Table)]
+    public void KnownFunction_HasExpectedCategory(string functionName, FunctionCategory expectedCategory)
+    {
+        FunctionSignature? signature = FunctionDocumentation.TryGet(functionName);
+
+        Assert.NotNull(signature);
+        Assert.Equal(expectedCategory, signature.Category);
+    }
+
+    [Fact]
+    public void AllCategories_AreRepresented()
+    {
+        HashSet<FunctionCategory> categoriesPresent = FunctionDocumentation.All
+            .Select(function => function.Category)
+            .ToHashSet();
+
+        foreach (FunctionCategory category in Enum.GetValues<FunctionCategory>())
+        {
+            Assert.Contains(category, categoriesPresent);
+        }
+    }
 }

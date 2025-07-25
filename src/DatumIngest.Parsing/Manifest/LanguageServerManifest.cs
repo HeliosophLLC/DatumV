@@ -63,6 +63,9 @@ public sealed class FunctionSignature
     /// <summary>A human-readable description of what the function does.</summary>
     public string? Description { get; init; }
 
+    /// <summary>The operational domain this function belongs to (e.g. Temporal, Image, Vector).</summary>
+    public FunctionCategory Category { get; init; }
+
     /// <summary>Whether this is a table-valued function (used in FROM/JOIN) rather than a scalar function.</summary>
     public bool IsTableValued { get; init; }
 

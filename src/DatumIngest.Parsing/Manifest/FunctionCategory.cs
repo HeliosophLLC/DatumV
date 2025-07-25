@@ -1,0 +1,42 @@
+namespace DatumIngest.Manifest;
+
+/// <summary>
+/// Classifies a built-in function by its operational domain, enabling
+/// grouped display in the REPL, structured filtering in gRPC clients,
+/// and categorized autocomplete in the language server.
+/// </summary>
+public enum FunctionCategory
+{
+    /// <summary>Text manipulation, case conversion, search, and path utilities.</summary>
+    String,
+
+    /// <summary>Date, time, duration, and timestamp construction, extraction, and arithmetic.</summary>
+    Temporal,
+
+    /// <summary>Arithmetic, rounding, powers, roots, logarithms, trigonometry, and constants.</summary>
+    Numeric,
+
+    /// <summary>ML activation functions (sigmoid, ReLU, GELU, etc.), softmax, and L2 normalization.</summary>
+    Activation,
+
+    /// <summary>Vector and tensor operations: reductions, manipulation, distance, similarity, and introspection.</summary>
+    Vector,
+
+    /// <summary>Image metadata, loading, transforms, analysis, and perceptual hashing.</summary>
+    Image,
+
+    /// <summary>UUID generation/inspection, cryptographic hashing (MD5/SHA/CRC), and base64/hex encoding.</summary>
+    Encoding,
+
+    /// <summary>JSON path access, existence testing, and array inspection.</summary>
+    Json,
+
+    /// <summary>Explicit type conversion between data kinds.</summary>
+    Conversion,
+
+    /// <summary>General-purpose conditional, null-handling, and byte manipulation functions.</summary>
+    Utility,
+
+    /// <summary>Table-valued functions that produce multiple rows (used in FROM/JOIN clauses).</summary>
+    Table,
+}
