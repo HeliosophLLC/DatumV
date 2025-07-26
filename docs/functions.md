@@ -22,6 +22,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
+| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX). |
 
 > **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
 >
@@ -345,6 +346,18 @@ SELECT time_diff(shift_start, shift_end) AS shift_length FROM shifts
 |----------|-----------|-------------|----|
 | `unnest` | `unnest(array_col)` | Expand array-valued column into separate rows. Works with Vector, UInt8Array, JsonValue arrays. | 1 |
 | `range` | `range(start, end[, step])` | Generate a sequence of rows with a `Value` column from start to end (inclusive). Default step is 1. | 1 |
+
+## Aggregate Functions
+
+Aggregate functions reduce multiple rows into a single result per group. Used with `GROUP BY` or as global aggregations (see [SQL Reference — GROUP BY](sql.md#group-by--aggregation)).
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|  
+| `COUNT` | `COUNT(*)` or `COUNT(expr)` | Count all rows (`*`) or non-null values (`expr`). | 1 |
+| `SUM` | `SUM(expr)` | Sum of non-null `Scalar` values. Returns null if all inputs are null. | 1 |
+| `AVG` | `AVG(expr)` | Arithmetic mean of non-null `Scalar` values. Nulls excluded from denominator. | 1 |
+| `MIN` | `MIN(expr)` | Minimum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
+| `MAX` | `MAX(expr)` | Maximum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
 
 ## Example SQL with functions
 

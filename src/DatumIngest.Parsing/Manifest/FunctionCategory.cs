@@ -39,4 +39,7 @@ public enum FunctionCategory
 
     /// <summary>Table-valued functions that produce multiple rows (used in FROM/JOIN clauses).</summary>
     Table,
+
+    /// <summary>Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX).</summary>
+    Aggregate,
 }

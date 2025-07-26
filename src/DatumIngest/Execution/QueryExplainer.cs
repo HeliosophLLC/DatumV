@@ -42,6 +42,7 @@ public static class QueryExplainer
             AliasOperator alias => BuildAliasNode(alias, stats),
             SubqueryOperator subquery => BuildSubqueryNode(subquery, stats),
             LateMaterializationOperator lateMat => BuildLateMaterializationNode(lateMat, stats),
+            GroupByOperator groupBy => BuildGroupByNode(groupBy, stats),
             _ => new ExplainPlanNode
             {
                 OperatorName = op.GetType().Name,
@@ -286,6 +287,30 @@ public static class QueryExplainer
             Children = { child },
             EstimatedRows = child.EstimatedRows,
         };
+    }
+
+    private static ExplainPlanNode BuildGroupByNode(GroupByOperator groupBy, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        string keys = groupBy.GroupByExpressions.Count > 0
+            ? string.Join(", ", groupBy.GroupByExpressions.Select(FormatExpression))
+            : "(global)";
+
+        string aggregates = string.Join(", ", groupBy.AggregateColumns.Select(
+            aggregateColumn => aggregateColumn.OutputName));
+
+        ExplainPlanNode child = BuildNode(groupBy.Source, stats);
+
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "GroupBy",
+            Details = $"keys: [{keys}], aggregates: [{aggregates}]",
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
+        };
+
+        node.Warnings.Add("GroupBy materializes all groups in memory.");
+
+        return node;
     }
 
     // ──────────────── Cardinality estimation ────────────────

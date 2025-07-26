@@ -932,6 +932,54 @@ public static class FunctionDocumentation
             IsTableValued = true,
             Category = FunctionCategory.Table,
         });
+
+        // ── Aggregate Functions ──
+
+        Register(new FunctionSignature
+        {
+            Name = "COUNT",
+            Parameters = [Parameter("expression", "Any", isOptional: true)],
+            ReturnType = "Scalar",
+            Description = "Counts the number of rows. COUNT(*) counts all rows; COUNT(expr) counts non-null values.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "SUM",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Returns the sum of all non-null values in the group.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "AVG",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Returns the arithmetic mean of all non-null values in the group.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "MIN",
+            Parameters = [Parameter("expression", "Any")],
+            ReturnType = "Any",
+            Description = "Returns the minimum value in the group. Works on numeric, string, date, and time types.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "MAX",
+            Parameters = [Parameter("expression", "Any")],
+            ReturnType = "Any",
+            Description = "Returns the maximum value in the group. Works on numeric, string, date, and time types.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
     }
 
     /// <summary>Registers a standard unary numeric function (operates element-wise on Scalar/Vector/Tensor).</summary>

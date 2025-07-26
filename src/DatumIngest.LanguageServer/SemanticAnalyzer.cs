@@ -108,6 +108,19 @@ internal sealed class SemanticAnalyzer
             }
         }
 
+        if (statement.GroupBy is not null)
+        {
+            foreach (Expression groupExpression in statement.GroupBy.Expressions)
+            {
+                AnalyzeExpression(groupExpression, aliasToTable, opaqueAliases, diagnostics);
+            }
+        }
+
+        if (statement.Having is not null)
+        {
+            AnalyzeExpression(statement.Having, aliasToTable, opaqueAliases, diagnostics);
+        }
+
         return diagnostics.ToArray();
     }
 

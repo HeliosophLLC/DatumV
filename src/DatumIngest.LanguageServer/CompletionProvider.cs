@@ -39,6 +39,7 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterSelect:
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
+                AddAggregateFunctions(items);
                 AddKeywords(items, ["FROM", "AS", "CAST"]);
                 break;
 
@@ -61,9 +62,20 @@ public sealed class CompletionProvider
                 AddKeywords(items, ["ASC", "DESC"]);
                 break;
 
+            case CompletionZoneKind.AfterGroupBy:
+                AddColumns(items, allTables: true);
+                break;
+
+            case CompletionZoneKind.AfterHaving:
+                AddColumns(items, allTables: true);
+                AddAggregateFunctions(items);
+                AddKeywords(items, ExpressionKeywords);
+                break;
+
             case CompletionZoneKind.InFunctionArguments:
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
+                AddAggregateFunctions(items);
                 break;
 
             case CompletionZoneKind.AfterDot:
@@ -203,6 +215,31 @@ public sealed class CompletionProvider
                 InsertText = $"{function.Name}(",
                 Documentation = function.Description,
                 SortOrder = 1,
+            });
+        }
+    }
+
+    private void AddAggregateFunctions(List<CompletionItem> items)
+    {
+        foreach (FunctionSignature function in _manifest.Functions)
+        {
+            if (!function.IsAggregate)
+            {
+                continue;
+            }
+
+            string parameters = string.Join(", ", function.Parameters.Select(FormatParameter));
+            string signature = $"{function.Name}({parameters})";
+            string returnInfo = function.ReturnType is not null ? $" → {function.ReturnType}" : "";
+
+            items.Add(new CompletionItem
+            {
+                Label = function.Name,
+                Kind = CompletionItemKind.Function,
+                Detail = $"[{function.Category}] {signature}{returnInfo}",
+                InsertText = $"{function.Name}(",
+                Documentation = function.Description,
+                SortOrder = 2,
             });
         }
     }

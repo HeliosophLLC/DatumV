@@ -195,6 +195,17 @@ public static class CompletionContext
                 case SqlToken.Where:
                     return CompletionZoneKind.AfterWhere;
 
+                case SqlToken.Group:
+                    // "GROUP BY" — check for BY token following.
+                    if (index + 1 < tokens.Count && tokens[index + 1].Kind == SqlToken.By)
+                    {
+                        return CompletionZoneKind.AfterGroupBy;
+                    }
+                    return CompletionZoneKind.AfterGroupBy;
+
+                case SqlToken.Having:
+                    return CompletionZoneKind.AfterHaving;
+
                 case SqlToken.Order:
                     // "ORDER BY" — check for BY token following.
                     if (index + 1 < tokens.Count && tokens[index + 1].Kind == SqlToken.By)
@@ -204,10 +215,14 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterOrderBy;
 
                 case SqlToken.By:
-                    // Could be ORDER BY or SHARD ... BY — walk back to see.
+                    // Could be ORDER BY, GROUP BY, or SHARD ... BY — walk back to see.
                     if (index > 0 && tokens[index - 1].Kind == SqlToken.Order)
                     {
                         return CompletionZoneKind.AfterOrderBy;
+                    }
+                    if (index > 0 && tokens[index - 1].Kind == SqlToken.Group)
+                    {
+                        return CompletionZoneKind.AfterGroupBy;
                     }
                     return CompletionZoneKind.Expression;
 
@@ -296,6 +311,12 @@ public enum CompletionZoneKind
 
     /// <summary>After ORDER BY — offer columns.</summary>
     AfterOrderBy,
+
+    /// <summary>After GROUP BY — offer columns for grouping keys.</summary>
+    AfterGroupBy,
+
+    /// <summary>After HAVING — offer columns, aggregate functions, operators.</summary>
+    AfterHaving,
 
     /// <summary>After INTO — offer file path (no schema completions).</summary>
     AfterInto,

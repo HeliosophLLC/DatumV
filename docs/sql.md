@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, FROM, JOIN, WHERE, GROUP BY, HAVING, INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
 
 ## SELECT
 
@@ -96,6 +96,62 @@ WHERE NOT (col1 > 10 OR col2 < 5)
 ```
 
 Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`, `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`.
+
+## GROUP BY / Aggregation
+
+Group rows by one or more key expressions and compute aggregate results per group:
+
+```sql
+-- Count rows per category
+SELECT category, COUNT(*) FROM products GROUP BY category
+
+-- Multiple aggregates with aliases
+SELECT department, COUNT(*) AS headcount, AVG(salary) AS avg_salary
+FROM employees
+GROUP BY department
+
+-- Multiple grouping keys
+SELECT department, status, SUM(amount) AS total
+FROM orders
+GROUP BY department, status
+
+-- Global aggregation (no GROUP BY — entire table is one group)
+SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
+```
+
+### Aggregate Functions
+
+| Function | Description |
+|----------|-------------|
+| `COUNT(*)` | Count all rows in the group. |
+| `COUNT(expr)` | Count non-null values of `expr`. |
+| `SUM(expr)` | Sum of all non-null values. Returns null if all values are null. |
+| `AVG(expr)` | Arithmetic mean of non-null values. Returns null if all values are null. |
+| `MIN(expr)` | Minimum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
+| `MAX(expr)` | Maximum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
+
+### HAVING
+
+Filter groups after aggregation. HAVING operates on aggregate results, while WHERE filters individual rows before grouping:
+
+```sql
+-- Only categories with more than 5 products
+SELECT category, COUNT(*) AS cnt
+FROM products
+GROUP BY category
+HAVING COUNT(*) > 5
+
+-- Combine WHERE (pre-filter) and HAVING (post-filter)
+SELECT category, AVG(price) AS avg_price
+FROM products
+WHERE price > 0
+GROUP BY category
+HAVING AVG(price) > 100
+```
+
+### Execution model
+
+GROUP BY uses hash-based aggregation: all groups are accumulated in memory using a hash table keyed by the GROUP BY expressions. This is a blocking operator — all input rows must be consumed before any output rows are emitted.
 
 ## INTO
 
@@ -266,6 +322,7 @@ The explain plan emits warnings about potential performance issues:
 | CROSS JOIN produces a cartesian product | CROSS JOIN |
 | FULL OUTER JOIN materializes both sides | FULL OUTER JOIN |
 | LIKE predicate requires full scan | LIKE in WHERE |
+| GroupBy materializes all groups in memory | GROUP BY |
 
 ## Schema Introspection
 

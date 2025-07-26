@@ -74,10 +74,16 @@ public enum SqlToken
     /// <summary>The SHARD keyword (sharding clause).</summary>
     Shard,
 
+    /// <summary>The GROUP keyword (grouping clause).</summary>
+    Group,
+
+    /// <summary>The HAVING keyword (post-aggregation filter).</summary>
+    Having,
+
     /// <summary>The ORDER keyword (ordering clause).</summary>
     Order,
 
-    /// <summary>The BY keyword (used with ORDER and SHARD).</summary>
+    /// <summary>The BY keyword (used with ORDER, GROUP, and SHARD).</summary>
     By,
 
     /// <summary>The ASC keyword (ascending sort direction).</summary>

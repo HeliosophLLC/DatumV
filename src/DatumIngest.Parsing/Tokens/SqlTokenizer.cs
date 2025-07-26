@@ -111,6 +111,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("WHERE"), SqlToken.Where, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("BETWEEN"), SqlToken.Between, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("AND"), SqlToken.And, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("GROUP"), SqlToken.Group, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("HAVING"), SqlToken.Having, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ORDER"), SqlToken.Order, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("OFFSET"), SqlToken.Offset, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("OR"), SqlToken.Or, requireDelimiters: true)

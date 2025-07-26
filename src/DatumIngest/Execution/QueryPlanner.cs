@@ -129,6 +129,8 @@ public sealed class QueryPlanner
         }
 
         // 3b. Late materialization: fetch expensive output-only columns for surviving rows.
+        // When GROUP BY is present, late materialization must happen before aggregation
+        // so the aggregate functions see fully materialized column values.
         if (deferredColumns is not null)
         {
             foreach (KeyValuePair<string, DeferredTableColumns> entry in deferredColumns)
@@ -142,11 +144,50 @@ public sealed class QueryPlanner
             }
         }
 
+        // 3c. GROUP BY / aggregation.
+        bool hasGroupBy = statement.GroupBy is not null;
+        bool hasAggregates = HasAggregateFunction(statement.Columns, _functionRegistry);
+        IReadOnlyList<SelectColumn> projectionColumns = statement.Columns;
+
+        if (hasGroupBy || hasAggregates)
+        {
+            IReadOnlyList<Expression> groupByExpressions =
+                statement.GroupBy?.Expressions ?? Array.Empty<Expression>();
+
+            List<AggregateColumn> aggregateColumns = new();
+            List<SelectColumn> rewrittenColumns = new();
+
+            foreach (SelectColumn column in statement.Columns)
+            {
+                if (column is SelectAllColumns or SelectTableColumns)
+                {
+                    rewrittenColumns.Add(column);
+                    continue;
+                }
+
+                Expression rewritten = RewriteAggregateExpression(
+                    column.Expression, _functionRegistry, aggregateColumns);
+                rewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
+            }
+
+            source = new GroupByOperator(source, groupByExpressions, aggregateColumns);
+
+            // Apply HAVING as a filter on the grouped output.
+            if (statement.Having is not null)
+            {
+                Expression havingRewritten = RewriteAggregateExpression(
+                    statement.Having, _functionRegistry, aggregateColumns);
+                source = new FilterOperator(source, havingRewritten);
+            }
+
+            projectionColumns = rewrittenColumns;
+        }
+
         // 4. Apply SELECT projection.
-        bool hasStarOnly = statement.Columns.Count == 1 && statement.Columns[0] is SelectAllColumns;
+        bool hasStarOnly = projectionColumns.Count == 1 && projectionColumns[0] is SelectAllColumns;
         if (!hasStarOnly)
         {
-            source = new ProjectOperator(source, statement.Columns);
+            source = new ProjectOperator(source, projectionColumns);
         }
 
         // 5. Apply ORDER BY — use index scan when a sorted index covers the sort column.
@@ -406,6 +447,29 @@ public sealed class QueryPlanner
             }
         }
 
+        // GROUP BY expressions.
+        if (statement.GroupBy is not null)
+        {
+            foreach (Expression groupExpression in statement.GroupBy.Expressions)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(groupExpression))
+                {
+                    references.Add((tableName, columnName));
+                }
+            }
+        }
+
+        // HAVING predicate.
+        if (statement.Having is not null)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(statement.Having))
+            {
+                references.Add((tableName, columnName));
+            }
+        }
+
         return references;
     }
 
@@ -495,6 +559,128 @@ public sealed class QueryPlanner
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if any SELECT column contains an aggregate function call.
+    /// </summary>
+    private static bool HasAggregateFunction(
+        IReadOnlyList<SelectColumn> columns,
+        FunctionRegistry functionRegistry)
+    {
+        foreach (SelectColumn column in columns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                continue;
+            }
+
+            if (ExpressionContainsAggregate(column.Expression, functionRegistry))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively checks whether an expression tree contains an aggregate function call.
+    /// </summary>
+    private static bool ExpressionContainsAggregate(Expression expression, FunctionRegistry functionRegistry)
+    {
+        return expression switch
+        {
+            FunctionCallExpression func => functionRegistry.TryGetAggregate(func.FunctionName) is not null
+                || func.Arguments.Any(argument => ExpressionContainsAggregate(argument, functionRegistry)),
+            BinaryExpression bin => ExpressionContainsAggregate(bin.Left, functionRegistry)
+                || ExpressionContainsAggregate(bin.Right, functionRegistry),
+            UnaryExpression unary => ExpressionContainsAggregate(unary.Operand, functionRegistry),
+            CastExpression cast => ExpressionContainsAggregate(cast.Expression, functionRegistry),
+            InExpression inExpr => ExpressionContainsAggregate(inExpr.Expression, functionRegistry),
+            BetweenExpression between => ExpressionContainsAggregate(between.Expression, functionRegistry)
+                || ExpressionContainsAggregate(between.Low, functionRegistry)
+                || ExpressionContainsAggregate(between.High, functionRegistry),
+            IsNullExpression isNull => ExpressionContainsAggregate(isNull.Expression, functionRegistry),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Rewrites an expression by replacing aggregate <see cref="FunctionCallExpression"/>
+    /// nodes with <see cref="ColumnReference"/> nodes that reference the output columns
+    /// of the <see cref="GroupByOperator"/>. Each unique aggregate is added to
+    /// <paramref name="aggregateColumns"/> only once.
+    /// </summary>
+    private static Expression RewriteAggregateExpression(
+        Expression expression,
+        FunctionRegistry functionRegistry,
+        List<AggregateColumn> aggregateColumns)
+    {
+        if (expression is FunctionCallExpression func)
+        {
+            IAggregateFunction? aggregateFunction =
+                functionRegistry.TryGetAggregate(func.FunctionName);
+
+            if (aggregateFunction is not null)
+            {
+                bool isCountStar = IsCountStarCall(func);
+                string outputName = QueryExplainer.FormatExpression(func);
+
+                // Deduplicate: reuse existing AggregateColumn if the same aggregate
+                // expression already appears (e.g. SELECT COUNT(*), COUNT(*) FROM t).
+                bool alreadyRegistered = false;
+                foreach (AggregateColumn existing in aggregateColumns)
+                {
+                    if (string.Equals(existing.OutputName, outputName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        alreadyRegistered = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyRegistered)
+                {
+                    IReadOnlyList<Expression> arguments = isCountStar
+                        ? Array.Empty<Expression>()
+                        : func.Arguments;
+
+                    aggregateColumns.Add(new AggregateColumn(
+                        aggregateFunction, arguments, outputName, isCountStar));
+                }
+
+                return new ColumnReference(null, outputName);
+            }
+        }
+
+        // Recurse into sub-expressions.
+        return expression switch
+        {
+            BinaryExpression bin => new BinaryExpression(
+                RewriteAggregateExpression(bin.Left, functionRegistry, aggregateColumns),
+                bin.Operator,
+                RewriteAggregateExpression(bin.Right, functionRegistry, aggregateColumns)),
+            UnaryExpression unary => new UnaryExpression(
+                unary.Operator,
+                RewriteAggregateExpression(unary.Operand, functionRegistry, aggregateColumns)),
+            CastExpression cast => new CastExpression(
+                RewriteAggregateExpression(cast.Expression, functionRegistry, aggregateColumns),
+                cast.TargetType),
+            _ => expression,
+        };
+    }
+
+    /// <summary>
+    /// Detects the <c>COUNT(*)</c> sentinel pattern: a function call to COUNT with a
+    /// single <see cref="LiteralExpression"/> argument whose value is <c>"*"</c>.
+    /// </summary>
+    private static bool IsCountStarCall(FunctionCallExpression function)
+    {
+        return string.Equals(function.FunctionName, "COUNT", StringComparison.OrdinalIgnoreCase)
+            && function.Arguments.Count == 1
+            && function.Arguments[0] is LiteralExpression literal
+            && literal.Value is string value
+            && value == "*";
     }
 
     private IQueryOperator PlanSource(
@@ -787,6 +973,29 @@ public sealed class QueryPlanner
                 {
                     references.Add((tableName, columnName));
                 }
+            }
+        }
+
+        // GROUP BY expressions reference source columns needed before aggregation.
+        if (statement.GroupBy is not null)
+        {
+            foreach (Expression groupExpression in statement.GroupBy.Expressions)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(groupExpression))
+                {
+                    references.Add((tableName, columnName));
+                }
+            }
+        }
+
+        // HAVING can reference source columns via aggregate argument expressions.
+        if (statement.Having is not null)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(statement.Having))
+            {
+                references.Add((tableName, columnName));
             }
         }
 

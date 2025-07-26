@@ -755,4 +755,110 @@ public class SqlParserTests
         Assert.Equal("adult.data", table.Name);
         Assert.Equal("a", table.Alias);
     }
+
+    // ───────────────────── GROUP BY ─────────────────────
+
+    [Fact]
+    public void GroupBySingleColumn()
+    {
+        SelectStatement result = Parse("SELECT category, COUNT(*) FROM products GROUP BY category");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.Single(result.GroupBy.Expressions);
+        ColumnReference groupKey = Assert.IsType<ColumnReference>(result.GroupBy.Expressions[0]);
+        Assert.Equal("category", groupKey.ColumnName);
+    }
+
+    [Fact]
+    public void GroupByMultipleColumns()
+    {
+        SelectStatement result = Parse(
+            "SELECT department, status, COUNT(*) FROM orders GROUP BY department, status");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.Equal(2, result.GroupBy.Expressions.Count);
+
+        ColumnReference firstKey = Assert.IsType<ColumnReference>(result.GroupBy.Expressions[0]);
+        Assert.Equal("department", firstKey.ColumnName);
+
+        ColumnReference secondKey = Assert.IsType<ColumnReference>(result.GroupBy.Expressions[1]);
+        Assert.Equal("status", secondKey.ColumnName);
+    }
+
+    [Fact]
+    public void GroupByWithHaving()
+    {
+        SelectStatement result = Parse(
+            "SELECT category, COUNT(*) FROM products GROUP BY category HAVING COUNT(*) > 5");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.Single(result.GroupBy.Expressions);
+        Assert.NotNull(result.Having);
+
+        BinaryExpression having = Assert.IsType<BinaryExpression>(result.Having);
+        Assert.Equal(BinaryOperator.GreaterThan, having.Operator);
+
+        FunctionCallExpression havingFunction = Assert.IsType<FunctionCallExpression>(having.Left);
+        Assert.Equal("COUNT", havingFunction.FunctionName);
+    }
+
+    [Fact]
+    public void CountStarParsesAsLiteralStarArgument()
+    {
+        SelectStatement result = Parse("SELECT COUNT(*) FROM t");
+
+        Assert.Single(result.Columns);
+        FunctionCallExpression countCall =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("COUNT", countCall.FunctionName);
+        Assert.Single(countCall.Arguments);
+        LiteralExpression starLiteral = Assert.IsType<LiteralExpression>(countCall.Arguments[0]);
+        Assert.Equal("*", starLiteral.Value);
+    }
+
+    [Fact]
+    public void GlobalAggregationWithoutGroupBy()
+    {
+        SelectStatement result = Parse("SELECT COUNT(*), SUM(price), AVG(quantity) FROM orders");
+
+        Assert.Null(result.GroupBy);
+        Assert.Equal(3, result.Columns.Count);
+
+        FunctionCallExpression sum = Assert.IsType<FunctionCallExpression>(result.Columns[1].Expression);
+        Assert.Equal("SUM", sum.FunctionName);
+        Assert.Single(sum.Arguments);
+
+        FunctionCallExpression avg = Assert.IsType<FunctionCallExpression>(result.Columns[2].Expression);
+        Assert.Equal("AVG", avg.FunctionName);
+    }
+
+    [Fact]
+    public void GroupByWithOrderByAndLimit()
+    {
+        SelectStatement result = Parse(
+            "SELECT category, SUM(price) AS total "
+            + "FROM products "
+            + "GROUP BY category "
+            + "ORDER BY total DESC "
+            + "LIMIT 10");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.Single(result.GroupBy.Expressions);
+        Assert.Equal("total", result.Columns[1].Alias);
+        Assert.NotNull(result.OrderBy);
+        Assert.Equal(10, result.Limit);
+    }
+
+    [Fact]
+    public void GroupByWithQualifiedColumn()
+    {
+        SelectStatement result = Parse(
+            "SELECT t.category, COUNT(*) FROM t GROUP BY t.category");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.Single(result.GroupBy.Expressions);
+        ColumnReference groupKey = Assert.IsType<ColumnReference>(result.GroupBy.Expressions[0]);
+        Assert.Equal("t", groupKey.TableName);
+        Assert.Equal("category", groupKey.ColumnName);
+    }
 }

@@ -118,11 +118,15 @@ public static class SqlParser
     /// <summary>
     /// Function call: identifier ( arg1, arg2, ... )
     /// Must be tried before bare column reference because both start with Identifier.
+    /// Supports <c>COUNT(*)</c> by treating a bare <c>*</c> inside the argument list
+    /// as a sentinel <see cref="LiteralExpression"/> with value <c>"*"</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
         from name in Token.EqualTo(SqlToken.Identifier)
         from open in Token.EqualTo(SqlToken.LeftParen)
-        from args in SP.Ref(() => ExpressionParser!)
+        from args in Token.EqualTo(SqlToken.Star)
+                .Select(_ => (Expression)new LiteralExpression("*"))
+                .Or(SP.Ref(() => ExpressionParser!))
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
         select (Expression)new FunctionCallExpression(GetTokenText(name), args, ToSpan(name));
@@ -483,6 +487,23 @@ public static class SqlParser
             UnquoteString(path),
             shard);
 
+    // ───────────────────── GROUP BY clause ─────────────────────
+
+    /// <summary>GROUP BY expr1, expr2, ...</summary>
+    private static readonly TokenListParser<SqlToken, GroupByClause> GroupByClauseParser =
+        from groupKw in Token.EqualTo(SqlToken.Group)
+        from byKw in Token.EqualTo(SqlToken.By)
+        from expressions in ExpressionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        select new GroupByClause(expressions);
+
+    // ───────────────────── HAVING clause ─────────────────────
+
+    /// <summary>HAVING expression</summary>
+    private static readonly TokenListParser<SqlToken, Expression> HavingClauseParser =
+        from havingKw in Token.EqualTo(SqlToken.Having)
+        from condition in ExpressionParser
+        select condition;
+
     // ───────────────────── ORDER BY clause ─────────────────────
 
     /// <summary>A single ORDER BY item: expression [ASC|DESC].</summary>
@@ -525,6 +546,8 @@ public static class SqlParser
         from fromClause in FromClauseParser
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
+        from groupByClause in GroupByClauseParser.OptionalOrDefault()
+        from havingClause in HavingClauseParser.OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
         from orderByClause in OrderByClauseParser.OptionalOrDefault()
         from limitValue in LimitParser.OptionalOrDefault()
@@ -535,6 +558,8 @@ public static class SqlParser
             intoClause,
             joinClauses.Length > 0 ? joinClauses : null,
             whereClause,
+            groupByClause,
+            havingClause,
             orderByClause,
             limitValue,
             offsetValue);
@@ -557,6 +582,8 @@ public static class SqlParser
         SqlToken.Full,
         SqlToken.Cross,
         SqlToken.Where,
+        SqlToken.Group,
+        SqlToken.Having,
         SqlToken.Into,
         SqlToken.Order,
         SqlToken.Limit,
@@ -725,6 +752,46 @@ public static class SqlParser
             }
         }
 
+        // ── GROUP BY clause ──
+        GroupByClause? groupByClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Group)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, GroupByClause> groupByResult =
+                GroupByClauseParser.TryParse(remaining);
+
+            if (!groupByResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid GROUP BY clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                groupByClause = groupByResult.Value;
+                position += CountConsumed(tokenArray, position, groupByResult.Remainder);
+            }
+        }
+
+        // ── HAVING clause ──
+        Expression? havingClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Having)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, Expression> havingResult =
+                HavingClauseParser.TryParse(remaining);
+
+            if (!havingResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid HAVING clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                havingClause = havingResult.Value;
+                position += CountConsumed(tokenArray, position, havingResult.Remainder);
+            }
+        }
+
         // ── INTO clause ──
         IntoClause? intoClause = null;
         if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Into)
@@ -821,6 +888,8 @@ public static class SqlParser
                 intoClause,
                 joinClauses.Count > 0 ? joinClauses.ToArray() : null,
                 whereClause,
+                groupByClause,
+                havingClause,
                 orderByClause,
                 limitValue,
                 offsetValue);
@@ -835,6 +904,8 @@ public static class SqlParser
                 intoClause,
                 joinClauses.Count > 0 ? joinClauses.ToArray() : null,
                 whereClause,
+                groupByClause,
+                havingClause,
                 orderByClause,
                 limitValue,
                 offsetValue);

@@ -1,13 +1,14 @@
 namespace DatumIngest.Functions;
 
 /// <summary>
-/// Registry for looking up scalar and table-valued functions by name.
+/// Registry for looking up scalar, table-valued, and aggregate functions by name.
 /// Function names are matched case-insensitively.
 /// </summary>
 public sealed class FunctionRegistry
 {
     private readonly Dictionary<string, IScalarFunction> _scalarFunctions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ITableValuedFunction> _tableValuedFunctions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IAggregateFunction> _aggregateFunctions = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Registers a scalar function.
@@ -34,6 +35,18 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
+    /// Registers an aggregate function.
+    /// </summary>
+    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
+    public void RegisterAggregate(IAggregateFunction function)
+    {
+        if (!_aggregateFunctions.TryAdd(function.Name, function))
+        {
+            throw new ArgumentException($"Aggregate function '{function.Name}' is already registered.");
+        }
+    }
+
+    /// <summary>
     /// Looks up a scalar function by name.
     /// </summary>
     /// <returns>The function, or null if not found.</returns>
@@ -54,6 +67,16 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
+    /// Looks up an aggregate function by name.
+    /// </summary>
+    /// <returns>The function, or null if not found.</returns>
+    public IAggregateFunction? TryGetAggregate(string name)
+    {
+        _aggregateFunctions.TryGetValue(name, out IAggregateFunction? function);
+        return function;
+    }
+
+    /// <summary>
     /// Returns all registered scalar function names.
     /// </summary>
     public IEnumerable<string> ScalarFunctionNames => _scalarFunctions.Keys;
@@ -62,6 +85,11 @@ public sealed class FunctionRegistry
     /// Returns all registered table-valued function names.
     /// </summary>
     public IEnumerable<string> TableValuedFunctionNames => _tableValuedFunctions.Keys;
+
+    /// <summary>
+    /// Returns all registered aggregate function names.
+    /// </summary>
+    public IEnumerable<string> AggregateFunctionNames => _aggregateFunctions.Keys;
 
     /// <summary>
     /// Creates a registry pre-populated with all built-in functions.
@@ -343,6 +371,13 @@ public sealed class FunctionRegistry
         // Table-valued
         registry.RegisterTableValued(new TableValued.UnnestFunction());
         registry.RegisterTableValued(new TableValued.RangeFunction());
+
+        // Aggregate
+        registry.RegisterAggregate(new Aggregates.CountFunction());
+        registry.RegisterAggregate(new Aggregates.SumFunction());
+        registry.RegisterAggregate(new Aggregates.AvgFunction());
+        registry.RegisterAggregate(new Aggregates.MinFunction());
+        registry.RegisterAggregate(new Aggregates.MaxFunction());
 
         return registry;
     }

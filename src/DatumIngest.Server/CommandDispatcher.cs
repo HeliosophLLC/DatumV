@@ -222,6 +222,7 @@ public sealed class CommandDispatcher
 
         List<string> functionNames = session.FunctionRegistry.ScalarFunctionNames
             .Concat(session.FunctionRegistry.TableValuedFunctionNames)
+            .Concat(session.FunctionRegistry.AggregateFunctionNames)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -232,6 +233,8 @@ public sealed class CommandDispatcher
             FunctionSignature? documentation = FunctionDocumentation.TryGet(name);
             IScalarFunction? scalarFunction = session.FunctionRegistry.TryGetScalar(name);
 
+            bool isAggregate = session.FunctionRegistry.TryGetAggregate(name) is not null;
+
             signatures.Add(new FunctionSignature
             {
                 Name = documentation?.Name ?? name,
@@ -239,6 +242,7 @@ public sealed class CommandDispatcher
                 ReturnType = documentation?.ReturnType,
                 Description = documentation?.Description,
                 IsTableValued = documentation?.IsTableValued ?? false,
+                IsAggregate = isAggregate || (documentation?.IsAggregate ?? false),
                 QueryUnitCost = scalarFunction?.QueryUnitCost ?? 0,
             });
         }

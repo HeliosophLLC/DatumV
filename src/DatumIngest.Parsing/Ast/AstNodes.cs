@@ -19,6 +19,8 @@ public sealed record SelectStatement(
     IntoClause? Into = null,
     IReadOnlyList<JoinClause>? Joins = null,
     Expression? Where = null,
+    GroupByClause? GroupBy = null,
+    Expression? Having = null,
     OrderByClause? OrderBy = null,
     int? Limit = null,
     int? Offset = null);
@@ -133,6 +135,11 @@ public enum ShardMode
     /// <summary>Create a new shard every N bytes.</summary>
     ByteSize,
 }
+
+/// <summary>
+/// The GROUP BY clause with one or more grouping expressions.
+/// </summary>
+public sealed record GroupByClause(IReadOnlyList<Expression> Expressions);
 
 /// <summary>
 /// The ORDER BY clause with one or more sort items.
