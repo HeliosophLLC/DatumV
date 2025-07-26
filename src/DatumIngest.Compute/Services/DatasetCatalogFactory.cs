@@ -33,7 +33,7 @@ internal static class DatasetCatalogFactory
     /// </summary>
     /// <param name="directoryPath">Local directory containing dataset files.</param>
     /// <returns>A fully configured catalog ready for query execution.</returns>
-    public static TableCatalog Create(string directoryPath)
+    public static async Task<TableCatalog> CreateAsync(string directoryPath)
     {
         TableCatalog catalog = new();
 
@@ -56,6 +56,8 @@ internal static class DatasetCatalogFactory
             }
         }
 
+        await catalog.ExpandMultiTableSourcesAsync(CancellationToken.None).ConfigureAwait(false);
+
         DiscoverSidecarIndexes(catalog);
         DiscoverSidecarManifests(catalog);
 
@@ -69,20 +71,39 @@ internal static class DatasetCatalogFactory
     private static void DiscoverSidecarIndexes(TableCatalog catalog)
     {
         IndexReader reader = new();
+        HashSet<string> loadedPaths = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (string tableName in catalog.TableNames)
         {
             TableDescriptor descriptor = catalog.Resolve(tableName);
             string sidecarPath = descriptor.FilePath + ".datum-index";
 
-            if (!File.Exists(sidecarPath))
+            if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
             {
                 continue;
             }
 
             using FileStream stream = File.OpenRead(sidecarPath);
-            SourceIndex index = reader.Read(stream);
-            catalog.RegisterIndex(tableName, index);
+            SourceIndexSet indexSet = reader.Read(stream);
+
+            // Register per-table indexes for all descriptors sharing this source file.
+            foreach (string name in catalog.TableNames)
+            {
+                TableDescriptor d = catalog.Resolve(name);
+                if (!string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
+                    ? key
+                    : "";
+
+                if (indexSet.Tables.TryGetValue(tableKey, out SourceIndex? index))
+                {
+                    catalog.RegisterIndex(name, index);
+                }
+            }
         }
     }
 
@@ -92,22 +113,43 @@ internal static class DatasetCatalogFactory
     /// </summary>
     private static void DiscoverSidecarManifests(TableCatalog catalog)
     {
+        HashSet<string> loadedPaths = new(StringComparer.OrdinalIgnoreCase);
+
         foreach (string tableName in catalog.TableNames)
         {
             TableDescriptor descriptor = catalog.Resolve(tableName);
             string sidecarPath = descriptor.FilePath + ".datum-manifest";
 
-            if (!File.Exists(sidecarPath))
+            if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
             {
                 continue;
             }
 
             string json = File.ReadAllText(sidecarPath);
-            QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+            SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
 
-            if (manifest is not null)
+            if (sourceManifest is null)
             {
-                catalog.RegisterManifest(tableName, manifest);
+                continue;
+            }
+
+            // Register per-table manifests for all descriptors sharing this source file.
+            foreach (string name in catalog.TableNames)
+            {
+                TableDescriptor d = catalog.Resolve(name);
+                if (!string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
+                    ? key
+                    : "";
+
+                if (sourceManifest.Tables.TryGetValue(tableKey, out QueryResultsManifest? manifest))
+                {
+                    catalog.RegisterManifest(name, manifest);
+                }
             }
         }
     }

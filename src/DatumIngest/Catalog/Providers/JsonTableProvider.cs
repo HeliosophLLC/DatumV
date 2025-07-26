@@ -8,8 +8,10 @@ namespace DatumIngest.Catalog.Providers;
 /// Reads JSON files containing arrays of objects. Supports root-level arrays
 /// and nested arrays via a dot-delimited <c>json_path</c> option.
 /// Complex values (arrays, objects) are preserved as <see cref="DataKind.JsonValue"/>.
+/// When the root element is an object, implements <see cref="IMultiTableSource"/> to
+/// auto-discover top-level array properties as separate sub-tables.
 /// </summary>
-public sealed class JsonTableProvider : ITableProvider
+public sealed class JsonTableProvider : IMultiTableSource
 {
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
@@ -20,6 +22,13 @@ public sealed class JsonTableProvider : ITableProvider
         using (document)
         {
             JsonElement array = NavigateToArray(document.RootElement, descriptor);
+
+            // Check if this is a primitive array (first element is not an object).
+            if (IsPrimitiveArray(array))
+            {
+                DataKind kind = InferPrimitiveArrayKind(array);
+                return new Schema(new[] { new ColumnInfo("value", kind, nullable: true) });
+            }
 
             // Union of all property names from first pass (up to 100 elements)
             Dictionary<string, DataKind> columnKinds = new(StringComparer.OrdinalIgnoreCase);
@@ -107,6 +116,23 @@ public sealed class JsonTableProvider : ITableProvider
             for (int index = 0; index < names.Length; index++)
             {
                 nameIndex[names[index]] = index;
+            }
+
+            // Primitive array: yield single-column rows.
+            if (IsPrimitiveArray(array))
+            {
+                DataKind kind = schema.Columns[0].Kind;
+                string[] primitiveNames = new[] { "value" };
+                Dictionary<string, int> primitiveNameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["value"] = 0 };
+
+                foreach (JsonElement element in array.EnumerateArray())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    DataValue[] primitiveValues = new[] { JsonTypeInference.ConvertElement(element, kind) };
+                    yield return new Row(primitiveNames, primitiveValues, primitiveNameIndex);
+                }
+
+                yield break;
             }
 
             foreach (JsonElement element in array.EnumerateArray())
@@ -207,4 +233,92 @@ public sealed class JsonTableProvider : ITableProvider
         return current;
     }
 
+    /// <summary>
+    /// Checks whether the array contains primitive values (not objects).
+    /// An empty array is not considered primitive.
+    /// </summary>
+    private static bool IsPrimitiveArray(JsonElement array)
+    {
+        foreach (JsonElement element in array.EnumerateArray())
+        {
+            return element.ValueKind != JsonValueKind.Object;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Infers the <see cref="DataKind"/> for a primitive array by sampling up to 100 elements.
+    /// </summary>
+    private static DataKind InferPrimitiveArrayKind(JsonElement array)
+    {
+        DataKind kind = DataKind.String;
+        int sampled = 0;
+
+        foreach (JsonElement element in array.EnumerateArray())
+        {
+            if (sampled >= 100)
+            {
+                break;
+            }
+
+            DataKind detectedKind = JsonTypeInference.InferKind(element);
+
+            if (sampled == 0)
+            {
+                kind = detectedKind;
+            }
+            else
+            {
+                kind = JsonTypeInference.WidenKind(kind, detectedKind);
+            }
+
+            sampled++;
+        }
+
+        return kind;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DiscoveredTable>?> DiscoverTablesAsync(
+        TableDescriptor descriptor,
+        CancellationToken cancellationToken)
+    {
+        // Explicit json_path overrides discovery — treat as single table.
+        if (descriptor.Options.TryGetValue("json_path", out string? existingPath) &&
+            !string.IsNullOrEmpty(existingPath))
+        {
+            return null;
+        }
+
+        JsonDocument document = await LoadDocumentAsync(descriptor, cancellationToken);
+        using (document)
+        {
+            // Root must be an object to discover sub-tables.
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            List<DiscoveredTable> tables = new();
+
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                // Use the leaf property name as sub-table key.
+                Dictionary<string, string> options = new(descriptor.Options, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["json_path"] = property.Name
+                };
+
+                tables.Add(new DiscoveredTable(property.Name, options));
+            }
+
+            return tables.Count > 0 ? tables : null;
+        }
+    }
 }

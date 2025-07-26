@@ -93,7 +93,7 @@ public sealed class SessionManagerTests
             () => manager.CreateSessionAsync(
                 SessionRole.User,
                 "dataset-1",
-                _ => new TableCatalog(),
+                _ => Task.FromResult(new TableCatalog()),
                 CancellationToken.None));
     }
 
@@ -110,7 +110,7 @@ public sealed class SessionManagerTests
         Session session = await manager.CreateSessionAsync(
             SessionRole.User,
             "ds-1",
-            _ => new TableCatalog(),
+            _ => Task.FromResult(new TableCatalog()),
             CancellationToken.None);
 
         Assert.Equal("ds-1", session.DatasetId);

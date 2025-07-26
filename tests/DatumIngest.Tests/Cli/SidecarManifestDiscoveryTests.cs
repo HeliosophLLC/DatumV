@@ -130,7 +130,8 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
             }
 
             string json = File.ReadAllText(sidecarPath);
-            QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+            SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+            QueryResultsManifest? manifest = sourceManifest?.Tables[""];
 
             if (manifest is not null)
             {

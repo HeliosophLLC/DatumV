@@ -11,7 +11,13 @@ public static class IndexConstants
     public static ReadOnlySpan<byte> Magic => "DTIX"u8;
 
     /// <summary>Current format version.</summary>
-    public const ushort FormatVersion = 1;
+    public const ushort FormatVersion = 2;
+
+    /// <summary>
+    /// Reserved table index value indicating a shared section (e.g. fingerprint, table directory)
+    /// that applies to all tables in the index file.
+    /// </summary>
+    public const byte SharedTableIndex = 0xFF;
 
     /// <summary>Size of the fixed file header in bytes (magic + version + flags + TOC offset).</summary>
     public const int HeaderSize = 16;
@@ -56,4 +62,7 @@ public enum IndexSectionType : byte
 
     /// <summary>Per-chunk byte offsets into the source file for seekable providers.</summary>
     RowOffsets = 6,
+
+    /// <summary>Maps table indexes to table names within a multi-table index.</summary>
+    TableDirectory = 7,
 }

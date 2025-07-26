@@ -24,9 +24,9 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
     /// Empty directory produces a catalog with no tables but all providers registered.
     /// </summary>
     [Fact]
-    public void Create_EmptyDirectory_RegistersProvidersOnly()
+    public async Task Create_EmptyDirectory_RegistersProvidersOnly()
     {
-        TableCatalog catalog = DatasetCatalogFactory.Create(_tempDirectory);
+        TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
         Assert.Empty(catalog.TableNames);
         Assert.Contains("csv", catalog.ProviderNames);
@@ -42,11 +42,11 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
     /// CSV files are auto-discovered and registered with the filename as table name.
     /// </summary>
     [Fact]
-    public void Create_CsvFile_RegistersTable()
+    public async Task Create_CsvFile_RegistersTable()
     {
         File.WriteAllText(Path.Combine(_tempDirectory, "sales.csv"), "id,amount\n1,100\n");
 
-        TableCatalog catalog = DatasetCatalogFactory.Create(_tempDirectory);
+        TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
         Assert.Contains("sales", catalog.TableNames);
     }
@@ -55,13 +55,13 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
     /// Multiple files with different extensions are all discovered.
     /// </summary>
     [Fact]
-    public void Create_MultipleFormats_RegistersAll()
+    public async Task Create_MultipleFormats_RegistersAll()
     {
         File.WriteAllText(Path.Combine(_tempDirectory, "data.csv"), "a\n1\n");
         File.WriteAllText(Path.Combine(_tempDirectory, "config.json"), "{}");
         File.WriteAllText(Path.Combine(_tempDirectory, "events.jsonl"), "{}\n");
 
-        TableCatalog catalog = DatasetCatalogFactory.Create(_tempDirectory);
+        TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
         Assert.Contains("data", catalog.TableNames);
         Assert.Contains("config", catalog.TableNames);
@@ -73,12 +73,12 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
     /// and the duplicate is skipped without error.
     /// </summary>
     [Fact]
-    public void Create_DuplicateTableName_FirstFileWins()
+    public async Task Create_DuplicateTableName_FirstFileWins()
     {
         File.WriteAllText(Path.Combine(_tempDirectory, "data.csv"), "a\n1\n");
         File.WriteAllText(Path.Combine(_tempDirectory, "data.json"), "[]");
 
-        TableCatalog catalog = DatasetCatalogFactory.Create(_tempDirectory);
+        TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
         // Both files map to "data" — only one should be registered.
         Assert.Single(catalog.TableNames, name => name == "data");
@@ -88,12 +88,12 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
     /// Unsupported file extensions are ignored.
     /// </summary>
     [Fact]
-    public void Create_UnsupportedExtension_Ignored()
+    public async Task Create_UnsupportedExtension_Ignored()
     {
         File.WriteAllText(Path.Combine(_tempDirectory, "readme.txt"), "hello");
         File.WriteAllText(Path.Combine(_tempDirectory, "data.csv"), "a\n1\n");
 
-        TableCatalog catalog = DatasetCatalogFactory.Create(_tempDirectory);
+        TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
         Assert.DoesNotContain("readme", catalog.TableNames);
         Assert.Contains("data", catalog.TableNames);

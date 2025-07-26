@@ -135,13 +135,71 @@ public sealed class CommandDispatcher
         QuerySchemaResolver resolver = new(session.Catalog, session.FunctionRegistry);
         ResolvedQuerySchema resolved = await resolver.ResolveAsync(statement, cancellationToken).ConfigureAwait(false);
 
-        List<ColumnInfo> columns = new();
+        // Build a source schema for type inference on expressions.
+        List<ColumnInfo> sourceColumns = new();
         foreach (ResolvedColumn column in resolved.Columns)
         {
-            columns.Add(new ColumnInfo(column.ColumnName, column.Kind, column.Nullable));
+            sourceColumns.Add(new ColumnInfo(column.ColumnName, column.Kind, column.Nullable));
+
+            // Also register qualified name (table.column) so ExpressionTypeResolver
+            // can resolve qualified column references.
+            if (column.SourceTableOrAlias is not null)
+            {
+                string qualifiedName = $"{column.SourceTableOrAlias}.{column.ColumnName}";
+                sourceColumns.Add(new ColumnInfo(qualifiedName, column.Kind, column.Nullable));
+            }
         }
 
-        return new Schema(columns);
+        Schema sourceSchema = new(sourceColumns);
+
+        // Apply the SELECT clause projection to produce only the output columns.
+        List<ColumnInfo> outputColumns = new();
+
+        foreach (SelectColumn selectColumn in statement.Columns)
+        {
+            switch (selectColumn)
+            {
+                case SelectAllColumns:
+                    foreach (ResolvedColumn column in resolved.Columns)
+                    {
+                        outputColumns.Add(new ColumnInfo(column.ColumnName, column.Kind, column.Nullable));
+                    }
+                    break;
+
+                case SelectTableColumns tableColumns:
+                    foreach (ResolvedColumn column in resolved.FindColumns(tableColumns.TableName))
+                    {
+                        outputColumns.Add(new ColumnInfo(column.ColumnName, column.Kind, column.Nullable));
+                    }
+                    break;
+
+                default:
+                    string outputName = selectColumn.Alias
+                        ?? GetProjectedColumnName(selectColumn.Expression)
+                        ?? "expr";
+
+                    DataKind kind = ExpressionTypeResolver.ResolveType(
+                        selectColumn.Expression, sourceSchema, session.FunctionRegistry) ?? DataKind.String;
+
+                    outputColumns.Add(new ColumnInfo(outputName, kind, nullable: true));
+                    break;
+            }
+        }
+
+        return new Schema(outputColumns);
+    }
+
+    /// <summary>
+    /// Extracts a column name from an expression when it is a simple column reference.
+    /// </summary>
+    private static string? GetProjectedColumnName(Expression expression)
+    {
+        return expression switch
+        {
+            ColumnReference columnRef => columnRef.ColumnName,
+            FunctionCallExpression funcCall => funcCall.FunctionName,
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -270,11 +328,19 @@ public sealed class CommandDispatcher
         if (File.Exists(manifestPath))
         {
             string json = File.ReadAllText(manifestPath);
-            QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+            SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
 
-            if (manifest is not null)
+            if (sourceManifest is not null)
             {
-                session.Catalog.RegisterManifest(descriptor.Name, manifest);
+                // Look up the sub-table key; fall back to empty string for single-table sources.
+                string tableKey = descriptor.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
+                    ? key
+                    : "";
+
+                if (sourceManifest.Tables.TryGetValue(tableKey, out QueryResultsManifest? manifest))
+                {
+                    session.Catalog.RegisterManifest(descriptor.Name, manifest);
+                }
             }
         }
 

@@ -5,42 +5,69 @@ using System.Text.Json.Serialization;
 using DatumIngest.Manifest.Insights;
 
 /// <summary>
-/// Serializes and deserializes <see cref="QueryResultsManifest"/> using System.Text.Json
+/// Serializes and deserializes <see cref="SourceManifest"/> using System.Text.Json
 /// with source generation for AOT/trimming compatibility.
 /// </summary>
 public static class ManifestSerializer
 {
     /// <summary>
-    /// Serializes a manifest to a JSON string.
+    /// Serializes a source manifest to a JSON string.
+    /// </summary>
+    public static string Serialize(SourceManifest manifest)
+    {
+        return JsonSerializer.Serialize(manifest, ManifestJsonContext.Default.SourceManifest);
+    }
+
+    /// <summary>
+    /// Serializes a single-table manifest to a JSON string by wrapping it in a
+    /// <see cref="SourceManifest"/> with an empty-string key.
     /// </summary>
     public static string Serialize(QueryResultsManifest manifest)
     {
-        return JsonSerializer.Serialize(manifest, ManifestJsonContext.Default.QueryResultsManifest);
+        return Serialize(SourceManifest.Create(manifest));
     }
 
     /// <summary>
-    /// Serializes a manifest to a UTF-8 byte array.
+    /// Serializes a source manifest to a UTF-8 byte array.
+    /// </summary>
+    public static byte[] SerializeToUtf8Bytes(SourceManifest manifest)
+    {
+        return JsonSerializer.SerializeToUtf8Bytes(manifest, ManifestJsonContext.Default.SourceManifest);
+    }
+
+    /// <summary>
+    /// Serializes a single-table manifest to a UTF-8 byte array by wrapping it in a
+    /// <see cref="SourceManifest"/> with an empty-string key.
     /// </summary>
     public static byte[] SerializeToUtf8Bytes(QueryResultsManifest manifest)
     {
-        return JsonSerializer.SerializeToUtf8Bytes(manifest, ManifestJsonContext.Default.QueryResultsManifest);
+        return SerializeToUtf8Bytes(SourceManifest.Create(manifest));
     }
 
     /// <summary>
-    /// Deserializes a manifest from a JSON string.
+    /// Deserializes a source manifest from a JSON string.
     /// </summary>
-    public static QueryResultsManifest? Deserialize(string json)
+    public static SourceManifest? Deserialize(string json)
     {
-        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.QueryResultsManifest);
+        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.SourceManifest);
     }
 
     /// <summary>
-    /// Writes a manifest to a file as formatted JSON.
+    /// Writes a source manifest to a file as formatted JSON.
     /// </summary>
-    public static async Task WriteToFileAsync(QueryResultsManifest manifest, string path)
+    public static async Task WriteToFileAsync(SourceManifest manifest, string path)
     {
         string json = Serialize(manifest);
         await File.WriteAllTextAsync(path, json);
+    }
+
+    /// <summary>
+    /// Writes a single-table manifest to a file as formatted JSON by wrapping it in a
+    /// <see cref="SourceManifest"/> with an empty-string key.
+    /// </summary>
+    public static async Task WriteToFileAsync(QueryResultsManifest manifest, string path)
+    {
+        await WriteToFileAsync(SourceManifest.Create(manifest), path);
     }
 }
 
@@ -49,6 +76,7 @@ public static class ManifestSerializer
 /// Enables AOT compilation and trimming support.
 /// </summary>
 [JsonSerializable(typeof(QueryResultsManifest))]
+[JsonSerializable(typeof(SourceManifest))]
 [JsonSerializable(typeof(FeatureManifest))]
 [JsonSerializable(typeof(NumericFeatureManifest))]
 [JsonSerializable(typeof(StringFeatureManifest))]

@@ -50,7 +50,35 @@ public sealed class SourceIndexBuilder
         Stream? sourceStream,
         CancellationToken cancellationToken)
     {
-        SourceFingerprint fingerprint = sourceStream is not null
+        return await BuildAsync(descriptor, provider, sourceStream, fingerprint: null, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds an index for the specified table by streaming all rows, using an
+    /// externally-computed fingerprint to avoid redundant source file hashing.
+    /// </summary>
+    /// <param name="descriptor">Table descriptor identifying the source.</param>
+    /// <param name="provider">The table provider to read rows from.</param>
+    /// <param name="sourceStream">
+    /// Seekable stream over the source file for fingerprint computation when
+    /// <paramref name="fingerprint"/> is <c>null</c>, or <c>null</c> if neither
+    /// fingerprinting source is available.
+    /// </param>
+    /// <param name="fingerprint">
+    /// Pre-computed fingerprint to use instead of computing from the stream.
+    /// When provided, <paramref name="sourceStream"/> is not read for fingerprinting.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A fully constructed source index.</returns>
+    public async Task<SourceIndex> BuildAsync(
+        TableDescriptor descriptor,
+        ITableProvider provider,
+        Stream? sourceStream,
+        SourceFingerprint? fingerprint,
+        CancellationToken cancellationToken)
+    {
+        fingerprint ??= sourceStream is not null
             ? await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken).ConfigureAwait(false)
             : new SourceFingerprint(0, Array.Empty<byte>());
 

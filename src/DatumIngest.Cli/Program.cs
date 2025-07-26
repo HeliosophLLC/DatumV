@@ -25,6 +25,9 @@ try
     CliOptions options = CliOptions.Parse(args);
     TableCatalog catalog = BuildCatalog(options);
 
+    // Expand multi-table sources (e.g. JSON files with multiple array properties).
+    await catalog.ExpandMultiTableSourcesAsync(CancellationToken.None);
+
     // Load any pre-built indexes.
     LoadIndexes(catalog, options);
 
@@ -115,7 +118,7 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
         }
 
         using FileStream stream = File.OpenRead(indexPath);
-        SourceIndex index = reader.Read(stream);
+        SourceIndexSet indexSet = reader.Read(stream);
 
         // Derive table name from the index file path by stripping the .datum-index suffix.
         string fileName = Path.GetFileName(indexPath);
@@ -123,24 +126,29 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
             ? fileName[..^".datum-index".Length]
             : Path.GetFileNameWithoutExtension(fileName);
 
-        // If a table with this name is registered, attach the index.
-        // Otherwise check if stripping one more extension matches (e.g. "data.parquet.datum-index" → "data").
-        if (catalog.TryResolve(tableName, out _))
+        // Register each table entry from the sidecar.
+        foreach (KeyValuePair<string, SourceIndex> entry in indexSet.Tables)
         {
-            catalog.RegisterIndex(tableName, index);
-        }
-        else
-        {
-            string baseName = Path.GetFileNameWithoutExtension(tableName);
+            string resolvedName = entry.Key.Length > 0 ? $"{tableName}.{entry.Key}" : tableName;
 
-            if (catalog.TryResolve(baseName, out _))
+            // If a table with this name is registered, attach the index.
+            // Otherwise check if stripping one more extension matches.
+            if (catalog.TryResolve(resolvedName, out _))
             {
-                catalog.RegisterIndex(baseName, index);
+                catalog.RegisterIndex(resolvedName, entry.Value);
             }
             else
             {
-                // Register with the derived name; the user may reference it later.
-                catalog.RegisterIndex(tableName, index);
+                string baseName = Path.GetFileNameWithoutExtension(resolvedName);
+
+                if (catalog.TryResolve(baseName, out _))
+                {
+                    catalog.RegisterIndex(baseName, entry.Value);
+                }
+                else
+                {
+                    catalog.RegisterIndex(resolvedName, entry.Value);
+                }
             }
         }
     }
@@ -154,6 +162,8 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
 
 static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
 {
+    HashSet<string> loadedPaths = new(StringComparer.OrdinalIgnoreCase);
+
     foreach (string tableName in catalog.TableNames)
     {
         // Skip tables that already have an index (e.g. from explicit --index).
@@ -165,19 +175,39 @@ static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
         TableDescriptor descriptor = catalog.Resolve(tableName);
         string sidecarPath = descriptor.FilePath + ".datum-index";
 
-        if (!File.Exists(sidecarPath))
+        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
         {
             continue;
         }
 
         using FileStream stream = File.OpenRead(sidecarPath);
-        SourceIndex index = reader.Read(stream);
-        catalog.RegisterIndex(tableName, index);
+        SourceIndexSet indexSet = reader.Read(stream);
+
+        // Register per-table indexes for all descriptors sharing this source file.
+        foreach (string name in catalog.TableNames)
+        {
+            TableDescriptor d = catalog.Resolve(name);
+            if (!string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
+                ? key
+                : "";
+
+            if (indexSet.Tables.TryGetValue(tableKey, out SourceIndex? index))
+            {
+                catalog.RegisterIndex(name, index);
+            }
+        }
     }
 }
 
 static void DiscoverSidecarManifests(TableCatalog catalog)
 {
+    HashSet<string> loadedPaths = new(StringComparer.OrdinalIgnoreCase);
+
     foreach (string tableName in catalog.TableNames)
     {
         // Skip tables that already have a manifest (e.g. from explicit load).
@@ -189,17 +219,36 @@ static void DiscoverSidecarManifests(TableCatalog catalog)
         TableDescriptor descriptor = catalog.Resolve(tableName);
         string sidecarPath = descriptor.FilePath + ".datum-manifest";
 
-        if (!File.Exists(sidecarPath))
+        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
         {
             continue;
         }
 
         string json = File.ReadAllText(sidecarPath);
-        QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
 
-        if (manifest is not null)
+        if (sourceManifest is null)
         {
-            catalog.RegisterManifest(tableName, manifest);
+            continue;
+        }
+
+        // Register per-table manifests for all descriptors sharing this source file.
+        foreach (string name in catalog.TableNames)
+        {
+            TableDescriptor d = catalog.Resolve(name);
+            if (!string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
+                ? key
+                : "";
+
+            if (sourceManifest.Tables.TryGetValue(tableKey, out QueryResultsManifest? manifest))
+            {
+                catalog.RegisterManifest(name, manifest);
+            }
         }
     }
 }
@@ -239,52 +288,72 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
         throw new ArgumentException("The 'index' command requires at least one --source definition or a --catalog with tables.");
     }
 
-    foreach (TableDescriptor descriptor in descriptors)
+    foreach (IGrouping<string, TableDescriptor> group in descriptors
+        .GroupBy(d => d.FilePath, StringComparer.OrdinalIgnoreCase))
     {
-        await BuildIndexForDescriptorAsync(descriptor, catalog, builder, options.ChunkSize);
+        await BuildGroupedIndexAsync(group, catalog, builder, options.ChunkSize);
     }
 
     return 0;
 }
 
-static async Task BuildIndexForDescriptorAsync(
-    TableDescriptor descriptor,
+static async Task BuildGroupedIndexAsync(
+    IGrouping<string, TableDescriptor> group,
     TableCatalog catalog,
     SourceIndexBuilder builder,
     int chunkSize)
 {
-    ITableProvider provider = catalog.CreateProvider(descriptor);
-
+    string filePath = group.Key;
     Stream? sourceStream = null;
 
-    if (File.Exists(descriptor.FilePath))
+    if (File.Exists(filePath))
     {
-        sourceStream = File.OpenRead(descriptor.FilePath);
+        sourceStream = File.OpenRead(filePath);
     }
 
     try
     {
-        SourceIndex index = await builder.BuildAsync(
-            descriptor, provider, sourceStream, CancellationToken.None);
+        DatumIngest.Indexing.SourceFingerprint fingerprint = sourceStream is not null
+            ? await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(
+                sourceStream, CancellationToken.None).ConfigureAwait(false)
+            : new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
 
-        string indexPath = descriptor.FilePath + ".datum-index";
+        Dictionary<string, SourceIndex> tableIndexes = new();
+
+        foreach (TableDescriptor descriptor in group)
+        {
+            ITableProvider provider = catalog.CreateProvider(descriptor);
+
+            SourceIndex index = await builder.BuildAsync(
+                descriptor, provider, sourceStream: null, fingerprint, CancellationToken.None);
+
+            string tableKey = descriptor.Options.TryGetValue(
+                TableCatalog.SubTableKeyOption, out string? key) ? key : "";
+            tableIndexes[tableKey] = index;
+
+            Console.WriteLine($"  Table '{descriptor.Name}':");
+            Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
+            Console.WriteLine($"    Chunks: {index.Chunks.Count} (chunk size: {chunkSize})");
+
+            if (index.BloomFilters is not null)
+            {
+                Console.WriteLine($"    Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
+            }
+
+            if (index.SortedIndexes is not null)
+            {
+                Console.WriteLine($"    Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
+            }
+        }
+
+        SourceIndexSet indexSet = new(fingerprint, tableIndexes);
+        string indexPath = filePath + ".datum-index";
+
         using FileStream outputStream = File.Create(indexPath);
         IndexWriter writer = new();
-        writer.Write(index, outputStream);
+        writer.Write(indexSet, outputStream);
 
         Console.WriteLine($"Index created: {indexPath}");
-        Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
-        Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {chunkSize})");
-
-        if (index.BloomFilters is not null)
-        {
-            Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
-        }
-
-        if (index.SortedIndexes is not null)
-        {
-            Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
-        }
     }
     finally
     {
@@ -328,100 +397,118 @@ static async Task<int> RunIndexManifestAsync(TableCatalog catalog, CliOptions op
         throw new ArgumentException("The 'index-manifest' command requires at least one --source definition or a --catalog with tables.");
     }
 
-    foreach (TableDescriptor descriptor in descriptors)
+    foreach (IGrouping<string, TableDescriptor> group in descriptors
+        .GroupBy(d => d.FilePath, StringComparer.OrdinalIgnoreCase))
     {
-        await BuildIndexAndManifestForDescriptorAsync(descriptor, catalog, builder, options);
+        await BuildGroupedIndexAndManifestAsync(group, catalog, builder, options);
     }
 
     return 0;
 }
 
-static async Task BuildIndexAndManifestForDescriptorAsync(
-    TableDescriptor descriptor,
+static async Task BuildGroupedIndexAndManifestAsync(
+    IGrouping<string, TableDescriptor> group,
     TableCatalog catalog,
     SourceIndexBuilder builder,
     CliOptions options)
 {
-    ITableProvider provider = catalog.CreateProvider(descriptor);
-
+    string filePath = group.Key;
     Stream? sourceStream = null;
 
-    if (File.Exists(descriptor.FilePath))
+    if (File.Exists(filePath))
     {
-        sourceStream = File.OpenRead(descriptor.FilePath);
+        sourceStream = File.OpenRead(filePath);
     }
 
     try
     {
         DatumIngest.Indexing.SourceFingerprint fingerprint = sourceStream is not null
-            ? await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(sourceStream, CancellationToken.None).ConfigureAwait(false)
+            ? await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(
+                sourceStream, CancellationToken.None).ConfigureAwait(false)
             : new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
 
-        IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
-        StatisticsCollector statisticsCollector = new();
-        ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
-        ProgressReporter progress = new();
-        Dictionary<string, DataKind> columnKinds = new();
-        long rowCount = 0;
+        Dictionary<string, SourceIndex> tableIndexes = new();
+        Dictionary<string, QueryResultsManifest> tableManifests = new();
 
-        await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, CancellationToken.None)
-            .ConfigureAwait(false))
+        foreach (TableDescriptor descriptor in group)
         {
-            if (rowCount == 0)
+            ITableProvider provider = catalog.CreateProvider(descriptor);
+            IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
+            StatisticsCollector statisticsCollector = new();
+            ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
+            ProgressReporter progress = new();
+            Dictionary<string, DataKind> columnKinds = new();
+            long rowCount = 0;
+
+            await foreach (Row row in provider.OpenAsync(
+                descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
             {
-                foreach (string columnName in row.ColumnNames)
+                if (rowCount == 0)
                 {
-                    columnKinds[columnName] = row[columnName].Kind;
+                    foreach (string columnName in row.ColumnNames)
+                    {
+                        columnKinds[columnName] = row[columnName].Kind;
+                    }
                 }
+
+                indexBuilder.AddRow(row);
+                statisticsCollector.AddRow(row);
+                interactionCollector?.AddRow(row);
+                rowCount++;
+                progress.ReportRow();
             }
 
-            indexBuilder.AddRow(row);
-            statisticsCollector.AddRow(row);
-            interactionCollector?.AddRow(row);
-            rowCount++;
-            progress.ReportRow();
+            progress.WriteSummary();
+
+            SourceIndex index = indexBuilder.Finalize();
+            string tableKey = descriptor.Options.TryGetValue(
+                TableCatalog.SubTableKeyOption, out string? key) ? key : "";
+            tableIndexes[tableKey] = index;
+
+            Console.WriteLine($"  Table '{descriptor.Name}':");
+            Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
+            Console.WriteLine($"    Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
+
+            if (index.BloomFilters is not null)
+            {
+                Console.WriteLine($"    Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
+            }
+
+            if (index.SortedIndexes is not null)
+            {
+                Console.WriteLine($"    Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
+            }
+
+            IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
+            IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
+            QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
+            tableManifests[tableKey] = manifest;
+
+            Console.WriteLine($"    Features: {manifest.Features.Count}");
+
+            if (interactions is { Count: > 0 })
+            {
+                Console.WriteLine($"    Interactions: {interactions.Count} pairs");
+            }
         }
 
-        progress.WriteSummary();
-
-        // Write index.
-        SourceIndex index = indexBuilder.Finalize();
-        string indexPath = descriptor.FilePath + ".datum-index";
+        // Write grouped index sidecar.
+        SourceIndexSet indexSet = new(fingerprint, tableIndexes);
+        string indexPath = filePath + ".datum-index";
         using (FileStream outputStream = File.Create(indexPath))
         {
             IndexWriter writer = new();
-            writer.Write(index, outputStream);
+            writer.Write(indexSet, outputStream);
         }
 
         Console.WriteLine($"Index created: {indexPath}");
-        Console.WriteLine($"  Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
-        Console.WriteLine($"  Chunks: {index.Chunks.Count} (chunk size: {options.ChunkSize})");
 
-        if (index.BloomFilters is not null)
-        {
-            Console.WriteLine($"  Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
-        }
-
-        if (index.SortedIndexes is not null)
-        {
-            Console.WriteLine($"  Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
-        }
-
-        // Write manifest.
-        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
-        IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
-        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
-
-        string manifestPath = options.OutputPath ?? descriptor.FilePath + ".datum-manifest";
-        await ManifestSerializer.WriteToFileAsync(manifest, manifestPath).ConfigureAwait(false);
+        // Write grouped manifest sidecar.
+        SourceManifest sourceManifest = new() { Tables = tableManifests };
+        string manifestPath = options.OutputPath ?? filePath + ".datum-manifest";
+        await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
 
         Console.WriteLine($"Manifest created: {manifestPath}");
-        Console.WriteLine($"  Features: {manifest.Features.Count}");
-
-        if (interactions is { Count: > 0 })
-        {
-            Console.WriteLine($"  Interactions: {interactions.Count} pairs");
-        }
     }
     finally
     {
@@ -794,7 +881,8 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
     IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
     IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
     QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount, interactions);
-    string json = ManifestSerializer.Serialize(manifest);
+    SourceManifest sourceManifest = SourceManifest.Create(manifest);
+    string json = ManifestSerializer.Serialize(sourceManifest);
 
     if (outputPath is not null)
     {

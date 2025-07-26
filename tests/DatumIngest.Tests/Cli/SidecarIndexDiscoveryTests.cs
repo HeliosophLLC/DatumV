@@ -121,8 +121,15 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
             }
 
             using FileStream stream = File.OpenRead(sidecarPath);
-            SourceIndex index = reader.Read(stream);
-            catalog.RegisterIndex(tableName, index);
+            SourceIndexSet indexSet = reader.Read(stream);
+
+            string tableKey = descriptor.Options.TryGetValue(
+                TableCatalog.SubTableKeyOption, out string? key) ? key : "";
+
+            if (indexSet.Tables.TryGetValue(tableKey, out SourceIndex? index))
+            {
+                catalog.RegisterIndex(tableName, index);
+            }
         }
     }
 
@@ -146,6 +153,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         string sidecarPath = sourceFilePath + ".datum-index";
         using FileStream stream = File.Create(sidecarPath);
         IndexWriter writer = new();
-        writer.Write(index, stream);
+        SourceIndexSet indexSet = SourceIndexSet.Create(index);
+        writer.Write(indexSet, stream);
     }
 }

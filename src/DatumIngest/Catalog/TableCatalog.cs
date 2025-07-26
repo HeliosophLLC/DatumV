@@ -12,6 +12,12 @@ namespace DatumIngest.Catalog;
 /// </summary>
 public sealed class TableCatalog
 {
+    /// <summary>
+    /// Well-known option key stored on sub-table descriptors during multi-table expansion.
+    /// The value is the sub-table qualifier used as the key in sidecar containers.
+    /// </summary>
+    public const string SubTableKeyOption = "datum:table_key";
+
     private readonly Dictionary<string, TableDescriptor> _descriptors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Func<ITableProvider>> _providerFactories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
@@ -193,5 +199,60 @@ public sealed class TableCatalog
     public bool TryGetManifest(string tableName, out QueryResultsManifest? manifest)
     {
         return _manifests.TryGetValue(tableName, out manifest);
+    }
+
+    /// <summary>
+    /// Expands multi-table sources by discovering sub-tables for providers that implement
+    /// <see cref="IMultiTableSource"/>. Each discovered sub-table replaces the original
+    /// registration with a qualified name (<c>{baseName}.{subTableName}</c>).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task ExpandMultiTableSourcesAsync(CancellationToken cancellationToken)
+    {
+        // Snapshot keys to allow mutation during iteration.
+        List<string> tableNames = new(_descriptors.Keys);
+
+        foreach (string tableName in tableNames)
+        {
+            TableDescriptor descriptor = _descriptors[tableName];
+            ITableProvider provider = CreateProvider(descriptor);
+
+            if (provider is not IMultiTableSource multiTableSource)
+            {
+                continue;
+            }
+
+            IReadOnlyList<DiscoveredTable>? discovered = await multiTableSource
+                .DiscoverTablesAsync(descriptor, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (discovered is null || discovered.Count == 0)
+            {
+                continue;
+            }
+
+            // Remove the original single-table registration.
+            _descriptors.Remove(tableName);
+
+            // Register each discovered sub-table with a qualified name.
+            foreach (DiscoveredTable subTable in discovered)
+            {
+                string qualifiedName = $"{tableName}.{subTable.Name}";
+
+                // Merge sub-table options with the table-key marker.
+                Dictionary<string, string> mergedOptions = new(subTable.Options)
+                {
+                    [SubTableKeyOption] = subTable.Name
+                };
+
+                TableDescriptor subDescriptor = new(
+                    descriptor.Provider,
+                    qualifiedName,
+                    descriptor.FilePath,
+                    mergedOptions);
+
+                _descriptors[qualifiedName] = subDescriptor;
+            }
+        }
     }
 }

@@ -3,51 +3,69 @@ using DatumIngest.Model;
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Serializes a <see cref="SourceIndex"/> to a <c>.datum-index</c> binary format.
+/// Serializes a <see cref="SourceIndexSet"/> to a <c>.datum-index</c> binary format (version 2).
+/// Each TOC entry carries a table index byte to associate sections with specific sub-tables.
+/// Shared sections (fingerprint, table directory) use <see cref="IndexConstants.SharedTableIndex"/>.
 /// Sections are written sequentially, followed by a table of contents at the end
 /// of the stream. The TOC offset is stored in the fixed 16-byte header.
 /// </summary>
 public sealed class IndexWriter
 {
     /// <summary>
-    /// Writes the given index to the output stream.
+    /// Writes the given index set to the output stream.
     /// The stream must be writable and seekable.
     /// </summary>
-    /// <param name="index">The source index to serialize.</param>
+    /// <param name="indexSet">The source index set to serialize.</param>
     /// <param name="output">Writable, seekable output stream.</param>
-    public void Write(SourceIndex index, Stream output)
+    public void Write(SourceIndexSet indexSet, Stream output)
     {
         using BinaryWriter writer = new(output, System.Text.Encoding.UTF8, leaveOpen: true);
 
         WriteHeader(writer);
 
-        List<(IndexSectionType Type, long Offset, long Length)> sections = new();
+        List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> sections = new();
 
-        RecordSection(sections, IndexSectionType.Fingerprint, writer, () =>
-            WriteFingerprint(writer, index.Fingerprint));
+        // Shared fingerprint section.
+        RecordSection(sections, IndexSectionType.Fingerprint, IndexConstants.SharedTableIndex, writer, () =>
+            WriteFingerprint(writer, indexSet.Fingerprint));
 
-        RecordSection(sections, IndexSectionType.Schema, writer, () =>
-            WriteSchema(writer, index.Schema));
+        // Build ordered table list for deterministic index assignment.
+        List<KeyValuePair<string, SourceIndex>> tableList = new(indexSet.Tables);
+        tableList.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
 
-        RecordSection(sections, IndexSectionType.ChunkDirectory, writer, () =>
-            WriteChunkDirectory(writer, index.Chunks));
+        // Table directory mapping index → name.
+        RecordSection(sections, IndexSectionType.TableDirectory, IndexConstants.SharedTableIndex, writer, () =>
+            WriteTableDirectory(writer, tableList));
 
-        if (index.BloomFilters is not null)
+        // Per-table sections.
+        for (int tableIndex = 0; tableIndex < tableList.Count; tableIndex++)
         {
-            RecordSection(sections, IndexSectionType.BloomFilters, writer, () =>
-                WriteBloomFilters(writer, index.BloomFilters));
-        }
+            SourceIndex index = tableList[tableIndex].Value;
+            byte tableIndexByte = (byte)tableIndex;
 
-        if (index.SortedIndexes is not null)
-        {
-            RecordSection(sections, IndexSectionType.SortedIndexes, writer, () =>
-                WriteSortedIndexes(writer, index.SortedIndexes));
-        }
+            RecordSection(sections, IndexSectionType.Schema, tableIndexByte, writer, () =>
+                WriteSchema(writer, index.Schema));
 
-        if (index.ZipDirectory is not null)
-        {
-            RecordSection(sections, IndexSectionType.ZipDirectory, writer, () =>
-                WriteZipDirectory(writer, index.ZipDirectory));
+            RecordSection(sections, IndexSectionType.ChunkDirectory, tableIndexByte, writer, () =>
+                WriteChunkDirectory(writer, index.Chunks));
+
+            if (index.BloomFilters is not null)
+            {
+                RecordSection(sections, IndexSectionType.BloomFilters, tableIndexByte, writer, () =>
+                    WriteBloomFilters(writer, index.BloomFilters));
+            }
+
+            if (index.SortedIndexes is not null)
+            {
+                RecordSection(sections, IndexSectionType.SortedIndexes, tableIndexByte, writer, () =>
+                    WriteSortedIndexes(writer, index.SortedIndexes));
+            }
+
+            if (index.ZipDirectory is not null)
+            {
+                RecordSection(sections, IndexSectionType.ZipDirectory, tableIndexByte, writer, () =>
+                    WriteZipDirectory(writer, index.ZipDirectory));
+            }
         }
 
         long tableOfContentsOffset = output.Position;
@@ -68,28 +86,42 @@ public sealed class IndexWriter
     }
 
     private static void RecordSection(
-        List<(IndexSectionType, long, long)> sections,
+        List<(IndexSectionType, byte, long, long)> sections,
         IndexSectionType type,
+        byte tableIndex,
         BinaryWriter writer,
         Action writeBody)
     {
         long start = writer.BaseStream.Position;
         writeBody();
         long length = writer.BaseStream.Position - start;
-        sections.Add((type, start, length));
+        sections.Add((type, tableIndex, start, length));
     }
 
     private static void WriteTableOfContents(
         BinaryWriter writer,
-        List<(IndexSectionType Type, long Offset, long Length)> sections)
+        List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> sections)
     {
         writer.Write(sections.Count);
 
-        foreach ((IndexSectionType type, long offset, long length) in sections)
+        foreach ((IndexSectionType type, byte tableIndex, long offset, long length) in sections)
         {
             writer.Write((byte)type);
+            writer.Write(tableIndex);
             writer.Write(offset);
             writer.Write(length);
+        }
+    }
+
+    private static void WriteTableDirectory(
+        BinaryWriter writer,
+        List<KeyValuePair<string, SourceIndex>> tableList)
+    {
+        writer.Write((byte)tableList.Count);
+
+        foreach (KeyValuePair<string, SourceIndex> entry in tableList)
+        {
+            writer.Write(entry.Key);
         }
     }
 

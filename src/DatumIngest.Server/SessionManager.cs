@@ -46,7 +46,7 @@ public sealed class SessionManager
     public async Task<Session> CreateSessionAsync(
         SessionRole role,
         string datasetId,
-        Func<string, TableCatalog> catalogFactory,
+        Func<string, Task<TableCatalog>> catalogFactory,
         CancellationToken cancellationToken,
         QueryGovernor? governor = null)
     {
@@ -58,7 +58,7 @@ public sealed class SessionManager
         }
 
         string localPath = await _datasetStore.PullAsync(datasetId, cancellationToken).ConfigureAwait(false);
-        TableCatalog catalog = catalogFactory(localPath);
+        TableCatalog catalog = await catalogFactory(localPath).ConfigureAwait(false);
 
         Session session = new(role, datasetId, catalog, _functionRegistry, governor);
         _sessions[session.SessionId] = session;

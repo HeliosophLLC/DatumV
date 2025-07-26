@@ -56,7 +56,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 session = await _sessionManager.CreateSessionAsync(
                     role,
                     request.DatasetId,
-                    DatasetCatalogFactory.Create,
+                    DatasetCatalogFactory.CreateAsync,
                     context.CancellationToken,
                     governor).ConfigureAwait(false);
             }

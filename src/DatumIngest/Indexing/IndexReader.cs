@@ -3,52 +3,96 @@ using DatumIngest.Model;
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Deserializes a <see cref="SourceIndex"/> from a <c>.datum-index</c> binary stream.
-/// Reads the header, seeks to the table of contents, then loads sections in order.
-/// Schema and fingerprint are loaded eagerly; future sections (bloom, sorted) will
-/// be loaded on demand.
+/// Deserializes a <see cref="SourceIndexSet"/> from a <c>.datum-index</c> binary stream (version 2).
+/// Reads the header, seeks to the table of contents, reads the table directory to map
+/// table indexes to names, then loads each table's sections individually. The shared
+/// fingerprint is applied to all tables.
 /// </summary>
 public sealed class IndexReader
 {
     /// <summary>
-    /// Reads a source index from the given stream.
+    /// Reads a source index set from the given stream.
     /// The stream must be readable and seekable.
     /// </summary>
     /// <param name="input">Readable, seekable input stream.</param>
-    /// <returns>The deserialized source index.</returns>
+    /// <returns>The deserialized source index set containing all tables.</returns>
     /// <exception cref="InvalidDataException">Thrown when the stream contains invalid or unsupported index data.</exception>
-    public SourceIndex Read(Stream input)
+    public SourceIndexSet Read(Stream input)
     {
         using BinaryReader reader = new(input, System.Text.Encoding.UTF8, leaveOpen: true);
 
         ReadHeader(reader, out long tableOfContentsOffset);
 
         input.Position = tableOfContentsOffset;
-        Dictionary<IndexSectionType, (long Offset, long Length)> sections = ReadTableOfContents(reader);
+        List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> tocEntries = ReadTableOfContents(reader);
 
+        // Read shared fingerprint.
         SourceFingerprint fingerprint = ReadSectionAs(
-            reader, input, sections, IndexSectionType.Fingerprint, ReadFingerprint);
+            reader, input, tocEntries, IndexSectionType.Fingerprint, IndexConstants.SharedTableIndex, ReadFingerprint);
 
-        IndexSchema schema = ReadSectionAs(
-            reader, input, sections, IndexSectionType.Schema, ReadSchema);
+        // Read table directory to get index → name mapping.
+        IReadOnlyList<string> tableNames = ReadSectionAs(
+            reader, input, tocEntries, IndexSectionType.TableDirectory, IndexConstants.SharedTableIndex, ReadTableDirectory);
 
-        IReadOnlyList<IndexChunk> chunks = sections.ContainsKey(IndexSectionType.ChunkDirectory)
-            ? ReadSectionAs(reader, input, sections, IndexSectionType.ChunkDirectory, ReadChunkDirectory)
-            : Array.Empty<IndexChunk>();
+        // Group TOC entries by table index (excluding shared sections).
+        Dictionary<byte, List<(IndexSectionType Type, long Offset, long Length)>> perTableSections = new();
+        foreach ((IndexSectionType type, byte tableIndex, long offset, long length) in tocEntries)
+        {
+            if (tableIndex == IndexConstants.SharedTableIndex)
+            {
+                continue;
+            }
 
-        BloomFilterSet? bloomFilters = sections.ContainsKey(IndexSectionType.BloomFilters)
-            ? ReadSectionAs(reader, input, sections, IndexSectionType.BloomFilters, ReadBloomFilters)
-            : null;
+            if (!perTableSections.TryGetValue(tableIndex, out List<(IndexSectionType, long, long)>? list))
+            {
+                list = new();
+                perTableSections[tableIndex] = list;
+            }
 
-        SortedValueIndexSet? sortedIndexes = sections.ContainsKey(IndexSectionType.SortedIndexes)
-            ? ReadSectionAs(reader, input, sections, IndexSectionType.SortedIndexes, ReadSortedIndexes)
-            : null;
+            list.Add((type, offset, length));
+        }
 
-        ZipDirectoryCache? zipDirectory = sections.ContainsKey(IndexSectionType.ZipDirectory)
-            ? ReadSectionAs(reader, input, sections, IndexSectionType.ZipDirectory, ReadZipDirectory)
-            : null;
+        // Build SourceIndex for each table.
+        Dictionary<string, SourceIndex> tables = new(tableNames.Count, StringComparer.Ordinal);
 
-        return new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory);
+        for (int i = 0; i < tableNames.Count; i++)
+        {
+            byte tableIndex = (byte)i;
+
+            if (!perTableSections.TryGetValue(tableIndex, out List<(IndexSectionType, long, long)>? sections))
+            {
+                continue;
+            }
+
+            Dictionary<IndexSectionType, (long Offset, long Length)> sectionMap = new(sections.Count);
+            foreach ((IndexSectionType type, long offset, long length) in sections)
+            {
+                sectionMap[type] = (offset, length);
+            }
+
+            IndexSchema schema = ReadSectionAs(
+                reader, input, sectionMap, IndexSectionType.Schema, ReadSchema);
+
+            IReadOnlyList<IndexChunk> chunks = sectionMap.ContainsKey(IndexSectionType.ChunkDirectory)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.ChunkDirectory, ReadChunkDirectory)
+                : Array.Empty<IndexChunk>();
+
+            BloomFilterSet? bloomFilters = sectionMap.ContainsKey(IndexSectionType.BloomFilters)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.BloomFilters, ReadBloomFilters)
+                : null;
+
+            SortedValueIndexSet? sortedIndexes = sectionMap.ContainsKey(IndexSectionType.SortedIndexes)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.SortedIndexes, ReadSortedIndexes)
+                : null;
+
+            ZipDirectoryCache? zipDirectory = sectionMap.ContainsKey(IndexSectionType.ZipDirectory)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.ZipDirectory, ReadZipDirectory)
+                : null;
+
+            tables[tableNames[i]] = new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory);
+        }
+
+        return new SourceIndexSet(fingerprint, tables);
     }
 
     private static void ReadHeader(BinaryReader reader, out long tableOfContentsOffset)
@@ -73,22 +117,50 @@ public sealed class IndexReader
         tableOfContentsOffset = reader.ReadInt64();
     }
 
-    private static Dictionary<IndexSectionType, (long Offset, long Length)> ReadTableOfContents(BinaryReader reader)
+    private static List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> ReadTableOfContents(BinaryReader reader)
     {
         int sectionCount = reader.ReadInt32();
-        Dictionary<IndexSectionType, (long, long)> sections = new(sectionCount);
+        List<(IndexSectionType, byte, long, long)> sections = new(sectionCount);
 
         for (int i = 0; i < sectionCount; i++)
         {
             IndexSectionType type = (IndexSectionType)reader.ReadByte();
+            byte tableIndex = reader.ReadByte();
             long offset = reader.ReadInt64();
             long length = reader.ReadInt64();
-            sections[type] = (offset, length);
+            sections.Add((type, tableIndex, offset, length));
         }
 
         return sections;
     }
 
+    /// <summary>
+    /// Reads a section from the TOC entry list, filtering by section type and table index.
+    /// Used for shared sections (fingerprint, table directory).
+    /// </summary>
+    private static T ReadSectionAs<T>(
+        BinaryReader reader,
+        Stream input,
+        List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> tocEntries,
+        IndexSectionType sectionType,
+        byte tableIndex,
+        Func<BinaryReader, T> readBody)
+    {
+        foreach ((IndexSectionType type, byte idx, long offset, long length) in tocEntries)
+        {
+            if (type == sectionType && idx == tableIndex)
+            {
+                input.Position = offset;
+                return readBody(reader);
+            }
+        }
+
+        throw new InvalidDataException($"Required section '{sectionType}' (table index {tableIndex}) not found in datum-index file.");
+    }
+
+    /// <summary>
+    /// Reads a section from a per-table section map.
+    /// </summary>
     private static T ReadSectionAs<T>(
         BinaryReader reader,
         Stream input,
@@ -103,6 +175,19 @@ public sealed class IndexReader
 
         input.Position = location.Offset;
         return readBody(reader);
+    }
+
+    private static IReadOnlyList<string> ReadTableDirectory(BinaryReader reader)
+    {
+        byte tableCount = reader.ReadByte();
+        List<string> names = new(tableCount);
+
+        for (int i = 0; i < tableCount; i++)
+        {
+            names.Add(reader.ReadString());
+        }
+
+        return names;
     }
 
     // ───────────────────────── Section readers ─────────────────────────

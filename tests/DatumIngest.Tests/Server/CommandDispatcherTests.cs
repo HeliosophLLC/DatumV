@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
+using DatumIngest.Model;
 using DatumIngest.Server;
 
 namespace DatumIngest.Tests.Server;
@@ -17,6 +18,11 @@ public sealed class CommandDispatcherTests : IDisposable
     private readonly Session _adminSession;
     private readonly Session _userSession;
 
+    private static string FixturePath(string fileName)
+    {
+        return Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName);
+    }
+
     /// <summary>
     /// Sets up a dispatcher with admin and user sessions backed by a CSV catalog.
     /// </summary>
@@ -26,6 +32,9 @@ public sealed class CommandDispatcherTests : IDisposable
 
         TableCatalog adminCatalog = new();
         adminCatalog.RegisterProvider("csv", () => new CsvTableProvider());
+        adminCatalog.Register(new TableDescriptor(
+            "csv", "people", FixturePath("simple.csv"),
+            new Dictionary<string, string>()));
         _adminSession = _sessionManager.CreateLocalSession(SessionRole.Admin, adminCatalog);
 
         TableCatalog userCatalog = new();
@@ -272,6 +281,32 @@ public sealed class CommandDispatcherTests : IDisposable
         Assert.Equal("file.csv", descriptor.FilePath);
         Assert.Equal("|", descriptor.Options["delimiter"]);
         Assert.Equal("true", descriptor.Options["header"]);
+    }
+
+    /// <summary>
+    /// Selecting a subset of columns returns a schema matching only those columns,
+    /// and rows can be consumed without ordinal errors.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_SelectSubsetOfColumns_SchemaMatchesProjection()
+    {
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, "SELECT name FROM people", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.StreamingRows, result.Kind);
+        Assert.NotNull(result.Schema);
+        Assert.Single(result.Schema!.Columns);
+        Assert.Equal("name", result.Schema.Columns[0].Name);
+
+        // Consuming rows must not throw an ordinal mismatch.
+        List<Row> rows = new();
+        await foreach (Row row in result.Rows!)
+        {
+            Assert.Equal(1, row.FieldCount);
+            rows.Add(row);
+        }
+
+        Assert.Equal(3, rows.Count);
     }
 
     /// <inheritdoc/>

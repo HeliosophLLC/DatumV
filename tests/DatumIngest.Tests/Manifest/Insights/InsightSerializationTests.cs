@@ -16,7 +16,8 @@ public sealed class InsightSerializationTests
         QueryResultsManifest original = MakeManifestWithInsights();
 
         string json = ManifestSerializer.Serialize(original);
-        QueryResultsManifest? deserialized = ManifestSerializer.Deserialize(json);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
 
         Assert.NotNull(deserialized);
         Assert.NotNull(deserialized.Insights);
@@ -42,7 +43,8 @@ public sealed class InsightSerializationTests
         QueryResultsManifest original = MakeManifestWithInsights();
 
         string json = ManifestSerializer.Serialize(original);
-        QueryResultsManifest? deserialized = ManifestSerializer.Deserialize(json);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
 
         Assert.NotNull(deserialized?.Insights);
         InsightAction originalAction = original.Insights![0].Actions[0];
@@ -62,7 +64,8 @@ public sealed class InsightSerializationTests
         QueryResultsManifest original = MakeManifestWithInsights();
 
         string json = ManifestSerializer.Serialize(original);
-        QueryResultsManifest? deserialized = ManifestSerializer.Deserialize(json);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
 
         Assert.NotNull(deserialized?.QueryAnnotations);
         Assert.Equal(original.QueryAnnotations!.Count, deserialized.QueryAnnotations.Count);
@@ -82,7 +85,8 @@ public sealed class InsightSerializationTests
         QueryResultsManifest original = MakeManifestWithInsights();
 
         string json = ManifestSerializer.Serialize(original);
-        QueryResultsManifest? deserialized = ManifestSerializer.Deserialize(json);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
 
         Assert.Equal(original.RecommendedQuery, deserialized?.RecommendedQuery);
         Assert.Equal(original.FullSuggestedQuery, deserialized?.FullSuggestedQuery);
@@ -99,7 +103,8 @@ public sealed class InsightSerializationTests
         };
 
         string json = ManifestSerializer.Serialize(original);
-        QueryResultsManifest? deserialized = ManifestSerializer.Deserialize(json);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
 
         Assert.NotNull(deserialized);
         Assert.Null(deserialized.Insights);
