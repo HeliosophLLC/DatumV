@@ -27,5 +27,8 @@ public enum InsightCategory
     ImageQuality,
 
     /// <summary>Temporal range, granularity, cyclical encoding opportunities.</summary>
-    TemporalQuality
+    TemporalQuality,
+
+    /// <summary>Cross-manifest join quality, schema drift, normalization hints.</summary>
+    JoinQuality
 }

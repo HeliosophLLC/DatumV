@@ -216,3 +216,95 @@ await using ShardingOutputWriter writer = new(
 // Wrap the plan with SkipOperator to fast-forward past completed rows
 IQueryOperator resumedPlan = new SkipOperator(plan, resume.RowsToSkip);
 ```
+
+## Cross-Manifest Join Analysis
+
+### Programmatic API
+
+```csharp
+// Prepare manifests
+List<ManifestWithName> manifests =
+[
+    new("orders", ordersManifest),
+    new("customers", customersManifest),
+];
+
+// Run analysis with default thresholds
+CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests);
+
+// Inspect results
+foreach (JoinCandidate candidate in result.Candidates)
+{
+    Console.WriteLine($"{candidate.LeftTable}.{candidate.LeftColumn} → " +
+                      $"{candidate.RightTable}.{candidate.RightColumn} " +
+                      $"({candidate.Confidence:P0}, {candidate.Classification})");
+}
+
+// Transitive chains (3+ tables)
+foreach (JoinChain chain in result.Chains)
+{
+    Console.WriteLine(string.Join(" → ", chain.Tables));
+}
+
+// Generated SQL
+foreach (string sql in result.SqlQueries)
+{
+    Console.WriteLine(sql);
+}
+```
+
+Custom thresholds:
+
+```csharp
+CrossManifestThresholds thresholds = new()
+{
+    CandidateMinConfidence = 0.4,
+    GraphEdgeMinConfidence = 0.6,
+    ChainMaxDepth = 3,
+};
+
+CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests, thresholds);
+```
+
+### Serialization
+
+```csharp
+// Serialize to JSON (AOT-compatible)
+string json = ManifestSerializer.SerializeCrossManifest(result);
+
+// Deserialize
+CrossManifestResult deserialized = ManifestSerializer.DeserializeCrossManifest(json);
+```
+
+### TableCatalog Integration
+
+When a `TableCatalog` holds multiple tables with manifests, cross-manifest analysis is available automatically:
+
+```csharp
+if (catalog.HasJoinSuggestions)
+{
+    CrossManifestResult result = catalog.GetOrComputeCrossManifest();
+}
+```
+
+Results are cached — subsequent calls return the same instance until the catalog changes.
+
+### CLI
+
+```bash
+datum-ingest cross-manifest --manifest orders.datum-manifest --manifest customers.datum-manifest
+datum-ingest cross-manifest --manifest a.json --manifest b.json --output result.json
+```
+
+### REPL
+
+```
+.join-suggestions
+```
+
+### gRPC
+
+| RPC | Request | Response | Description |
+|-----|---------|----------|-------------|
+| `GetJoinSuggestions` | `GetJoinSuggestionsRequest` | `GetJoinSuggestionsResponse` | Returns `CrossManifestResult` as JSON |
+| `GetStats` | `GetStatsRequest` (table name) | `GetStatsResponse` | Returns per-table manifest statistics as JSON |

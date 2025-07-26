@@ -1,5 +1,6 @@
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
+using DatumIngest.Manifest.CrossManifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog;
@@ -22,6 +23,11 @@ public sealed class TableCatalog
     private readonly Dictionary<string, Func<ITableProvider>> _providerFactories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, QueryResultsManifest> _manifests = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Cached cross-manifest analysis result. Invalidated when a new manifest is registered.
+    /// </summary>
+    private CrossManifestResult? _crossManifestCache;
 
     /// <summary>
     /// Registers a provider factory for a given provider identifier.
@@ -188,6 +194,7 @@ public sealed class TableCatalog
     public void RegisterManifest(string tableName, QueryResultsManifest manifest)
     {
         _manifests[tableName] = manifest;
+        _crossManifestCache = null; // Invalidate — new manifest changes the analysis.
     }
 
     /// <summary>
@@ -199,6 +206,73 @@ public sealed class TableCatalog
     public bool TryGetManifest(string tableName, out QueryResultsManifest? manifest)
     {
         return _manifests.TryGetValue(tableName, out manifest);
+    }
+
+    /// <summary>
+    /// Maximum pairwise candidate count (N × M features) before automatic cross-manifest
+    /// analysis is skipped. Callers must explicitly invoke
+    /// <see cref="GetOrComputeCrossManifest"/> when this threshold is exceeded.
+    /// </summary>
+    private const int AutoAnalysisMaxPairwiseColumns = 1000;
+
+    /// <summary>
+    /// Returns <see langword="true"/> when cross-manifest join suggestions are available,
+    /// meaning at least two manifests are registered.
+    /// </summary>
+    public bool HasJoinSuggestions => _manifests.Count >= 2;
+
+    /// <summary>
+    /// Gets or computes the cached cross-manifest analysis result.
+    /// Returns <see langword="null"/> when fewer than two manifests are registered or
+    /// when the pairwise column product exceeds the automatic analysis threshold
+    /// and <paramref name="forceCompute"/> is <see langword="false"/>.
+    /// </summary>
+    /// <param name="thresholds">
+    /// Optional thresholds. When <see langword="null"/>, defaults are used.
+    /// </param>
+    /// <param name="forceCompute">
+    /// When <see langword="true"/>, bypass the pairwise column threshold check.
+    /// </param>
+    /// <returns>The cross-manifest result, or <see langword="null"/> if analysis is not applicable.</returns>
+    public CrossManifestResult? GetOrComputeCrossManifest(
+        CrossManifestThresholds? thresholds = null,
+        bool forceCompute = false)
+    {
+        if (_manifests.Count < 2)
+        {
+            return null;
+        }
+
+        if (_crossManifestCache is not null)
+        {
+            return _crossManifestCache;
+        }
+
+        // Check pairwise column product to avoid expensive analysis on very large catalogs.
+        if (!forceCompute)
+        {
+            long totalColumns = 0;
+
+            foreach (QueryResultsManifest manifest in _manifests.Values)
+            {
+                totalColumns += manifest.Features.Count;
+            }
+
+            if (totalColumns * totalColumns > AutoAnalysisMaxPairwiseColumns)
+            {
+                return null;
+            }
+        }
+
+        List<ManifestWithName> manifests = new(_manifests.Count);
+
+        foreach (KeyValuePair<string, QueryResultsManifest> entry in _manifests)
+        {
+            manifests.Add(new ManifestWithName(entry.Key, entry.Value));
+        }
+
+        _crossManifestCache = CrossManifestAnalyzer.Analyze(manifests, thresholds);
+        return _crossManifestCache;
     }
 
     /// <summary>

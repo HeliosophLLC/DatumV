@@ -15,5 +15,8 @@ public enum InsightScope
     FeatureGroup,
 
     /// <summary>Applies to the dataset as a whole.</summary>
-    Dataset
+    Dataset,
+
+    /// <summary>Applies across multiple manifests (tables) — e.g., join candidates, schema drift.</summary>
+    CrossManifest
 }

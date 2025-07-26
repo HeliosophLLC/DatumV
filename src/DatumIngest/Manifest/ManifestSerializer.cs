@@ -2,6 +2,7 @@ namespace DatumIngest.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DatumIngest.Manifest.CrossManifest;
 using DatumIngest.Manifest.Insights;
 
 /// <summary>
@@ -69,6 +70,22 @@ public static class ManifestSerializer
     {
         await WriteToFileAsync(SourceManifest.Create(manifest), path);
     }
+
+    /// <summary>
+    /// Serializes a cross-manifest result to a JSON string.
+    /// </summary>
+    public static string SerializeCrossManifest(CrossManifestResult result)
+    {
+        return JsonSerializer.Serialize(result, ManifestJsonContext.Default.CrossManifestResult);
+    }
+
+    /// <summary>
+    /// Deserializes a cross-manifest result from a JSON string.
+    /// </summary>
+    public static CrossManifestResult? DeserializeCrossManifest(string json)
+    {
+        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.CrossManifestResult);
+    }
 }
 
 /// <summary>
@@ -95,6 +112,13 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(QueryAnnotation))]
 [JsonSerializable(typeof(InsightThresholds))]
 [JsonSerializable(typeof(QuerySynthesisOptions))]
+[JsonSerializable(typeof(CrossManifestResult))]
+[JsonSerializable(typeof(JoinCandidate))]
+[JsonSerializable(typeof(JoinEvidence))]
+[JsonSerializable(typeof(JoinGraphEdge))]
+[JsonSerializable(typeof(JoinChain))]
+[JsonSerializable(typeof(CrossManifestThresholds))]
+[JsonSerializable(typeof(CrossManifestQueryOptions))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,

@@ -369,7 +369,11 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Add source failed."));
         }
 
-        return new AddSourceResponse { Message = result.Message ?? "Source added." };
+        return new AddSourceResponse
+        {
+            Message = result.Message ?? "Source added.",
+            HasJoinSuggestions = session.Catalog.HasJoinSuggestions,
+        };
     }
 
     /// <inheritdoc />
@@ -439,6 +443,61 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         };
 
         return Task.FromResult(response);
+    }
+
+    /// <inheritdoc />
+    public override Task<GetStatsResponse> GetStats(
+        GetStatsRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+
+        GetStatsResponse response = new();
+
+        foreach (string tableName in session.Catalog.TableNames)
+        {
+            string manifestJson = "";
+
+            if (session.Catalog.TryGetManifest(tableName, out QueryResultsManifest? manifest) && manifest is not null)
+            {
+                manifestJson = ManifestSerializer.Serialize(manifest);
+            }
+
+            response.Tables.Add(new TableStatsMessage
+            {
+                TableName = tableName,
+                ManifestJson = manifestJson,
+            });
+        }
+
+        return Task.FromResult(response);
+    }
+
+    /// <inheritdoc />
+    public override Task<GetJoinSuggestionsResponse> GetJoinSuggestions(
+        GetJoinSuggestionsRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+
+        if (!session.Catalog.HasJoinSuggestions)
+        {
+            throw new RpcException(new Status(
+                StatusCode.FailedPrecondition,
+                "At least two tables with manifests are required for join suggestions."));
+        }
+
+        Manifest.CrossManifest.CrossManifestResult? result =
+            session.Catalog.GetOrComputeCrossManifest(forceCompute: true);
+
+        if (result is null)
+        {
+            throw new RpcException(new Status(
+                StatusCode.Internal,
+                "Could not compute cross-manifest analysis."));
+        }
+
+        string resultJson = ManifestSerializer.SerializeCrossManifest(result);
+
+        return Task.FromResult(new GetJoinSuggestionsResponse { ResultJson = resultJson });
     }
 
     /// <summary>

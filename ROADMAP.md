@@ -89,39 +89,19 @@ Extend the output manifest with encoding provenance: which source column was enc
 
 ---
 
-## Cross-Manifest Analysis (V2 — needs design)
+## Cross-Manifest Analysis ✅
 
-**Status**: Deferred. The single-manifest insights pipeline (InsightAnalyzer → InsightClusterer → QuerySynthesizer) shipped in V1. Cross-manifest is a distinct product surface that deserves its own design pass.
+**Status**: Shipped. Multi-signal evidence pipeline discovers join candidates across tables using only manifest statistics.
 
-**The need is real.** Join candidate detection was attempted in consuming software with underwhelming results. Users working with multiple datasets need to know which columns correspond across tables, whether a join is feasible, and what the expected join quality would be. This is a genuine workflow gap, not a speculative feature.
+### Implemented
 
-### What exists today
-
-- Per-column feature manifests with TopK, histograms, quantiles, entropy, cardinality estimates
-- Pairwise within-manifest interactions (Pearson, Spearman, Cramér's V, ANOVA, MI, Theil's U, missingness correlation)
-- Catalog can hold multiple named tables with optional manifests — infrastructure for multi-source is present
-- QueryExplainer uses single-side statistics for join cost estimation
-
-### What's needed (8 types sketched, design incomplete)
-
-`CrossManifestAnalyzer`, `CrossManifestResult`, `JoinCandidate`, `JoinEvidence`, `CrossManifestThresholds`, `ManifestWithName`, `CrossManifestQueryBuilder`, `ColumnAliasMap`
-
-### Open design questions
-
-1. **Discovery vs. declaration.** If the user declares column equivalences (country ↔ native_country), ColumnAliasMap is a trivial dictionary. If the system *infers* them, we need fuzzy name matching, value-set intersection, type compatibility — a real schema matching pipeline. Probably both: allow user declarations, attempt inference for the rest.
-
-2. **Evidence scoring.** The V1 plan listed "Schema + TopK + histogram IoU + cardinality" as signals. TopK Jaccard is fragile for numerics (two `age` columns from different populations overlap without being joinable). TopK Jaccard works for categorical join keys but ID columns with millions of distinct values have near-zero TopK overlap despite being perfect keys. Histogram IoU only applies to continuous numerics, not categorical keys. We need a signal ensemble with weights tuned by column type, not a one-size-fits-all similarity score.
-
-3. **Output contract.** Single-manifest QuerySynthesizer rewrites SELECT projections. Cross-manifest QueryBuilder produces JOINs — fundamentally different SQL shape. What dialect? What FROM sources? What if the join is many-to-many (bad)? The output needs join-quality metrics (expected fanout, null-key ratio, cardinality ratio) alongside the generated SQL.
-
-4. **Integration point.** The single-manifest pipeline lives inside ManifestBuilder.Build(). Cross-manifest takes *multiple* manifests — it sits above the single-manifest pipeline. Who calls it? CLI command? Server endpoint? A new top-level analyzer?
-
-5. **What constitutes a "good" join?** Need clear definitions: key uniqueness on at least one side, acceptable null-key ratio, cardinality ratio bounds, value overlap threshold. These are domain-dependent — a star-schema fact→dimension join has very different expectations than a one-to-one entity merge.
-
-### Possible approach
-
-- Phase A: `ManifestWithName` wrapper, `ColumnAliasMap` (user-declared + fuzzy name inference), `CrossManifestThresholds`
-- Phase B: `JoinEvidence` with per-signal scores (name similarity, type compatibility, NDV ratio, TopK Jaccard for categoricals, key uniqueness, null-key ratio, value-range overlap for numerics), composite confidence
-- Phase C: `JoinCandidate` selection (above composite threshold), `CrossManifestResult` aggregation
-- Phase D: `CrossManifestQueryBuilder` — generate JOIN SQL with quality annotations
-- Phase E: Integration into CLI (`datum cross-manifest a.json b.json`) and server
+- **Column matching** — Levenshtein name similarity with suffix bonuses, type compatibility scoring
+- **Evidence scoring** — Six signals (name, type, TopK Jaccard, cardinality ratio, range overlap, unique key) combined with configurable weights into composite confidence
+- **Composite key detection** — Multi-column key discovery (up to 4 columns, 0.8 penalty)
+- **Join graph** — Candidates above threshold form edges; BFS discovers transitive chains across 3+ tables
+- **Join classification** — Automatic 1:1, 1:N, N:1, N:M classification from NDV/RowCount ratios
+- **Cross-manifest insights** — 7 rules: ManyToManyJoin, HighNullKey, CardinalityMismatch, DisjointRange, SchemaDrift, DenormalizationHint, StarSchema
+- **SQL generation** — JOIN queries with quality annotations; LEFT JOIN for nullable keys
+- **Integration** — CLI `cross-manifest` command, `.join-suggestions` REPL meta-command, `GetJoinSuggestions` and `GetStats` gRPC RPCs
+- **Serialization** — `SerializeCrossManifest` / `DeserializeCrossManifest` with AOT-compatible source-generated JSON
+- **Tests** — 106 tests covering all pipeline stages

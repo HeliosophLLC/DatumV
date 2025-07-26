@@ -238,6 +238,84 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
 }
 ```
 
+## Cross-Manifest Join Analysis
+
+When multiple manifests are available, `CrossManifestAnalyzer` discovers join candidates across tables using a multi-signal evidence pipeline — no data access required, only manifest statistics.
+
+### Pipeline
+
+1. **Column matching** — Pairwise column discovery via Levenshtein name similarity (with suffix bonuses for `_id`, `_key`, `_code`) and type compatibility scoring.
+2. **Evidence scoring** — Each candidate column pair receives six evidence signals:
+
+| Signal | Source | Purpose |
+|--------|--------|---------|
+| Name similarity | Levenshtein distance | How closely column names match |
+| Type compatibility | DataKind comparison | 1.0 exact, 0.8 coercible (Scalar↔UInt8, Date↔DateTime), 0.5 String↔JsonValue |
+| TopK Jaccard | TopK value sets | Value-domain overlap (case-insensitive, skips continuous numerics) |
+| Cardinality ratio | min(NDV) / max(NDV) | Whether columns draw from the same domain |
+| Range overlap | Numeric [min, max] intersection / union | Physical range compatibility |
+| Unique key score | NDV / RowCount ≥ 0.95 | Whether at least one side is a primary key |
+
+3. **Composite confidence** — Weighted combination of all signals (default weights: name 0.30, type 0.15, TopK 0.20, cardinality 0.15, range 0.10, unique key 0.10). When range overlap is null (non-numeric), its weight redistributes proportionally.
+4. **Composite key detection** — Groups single-column candidates by table pair and combines them into multi-column composite keys (up to 4 columns, with a 0.8 confidence penalty).
+5. **Join graph** — Candidates above the graph edge threshold (default 0.5) form edges; BFS discovers transitive chains across 3+ tables.
+6. **Cross-manifest insights** — Seven rules evaluate the candidates and manifests:
+
+| Insight | Severity | Trigger |
+|---------|----------|---------|
+| ManyToManyJoin | Warning | Both sides non-unique |
+| HighNullKey | Warning | Null-key ratio > 0.3 |
+| CardinalityMismatch | Info | Cardinality ratio < 0.01 (100:1 mismatch) |
+| DisjointRange | Critical/Warning | Numeric range overlap < 5% (Critical if 0%) |
+| SchemaDrift | Warning | Same column name, different DataKind across tables |
+| DenormalizationHint | Info | >50% column overlap with high value similarity |
+| StarSchema | Info | Fact table with ≥3 dimension tables (OneToMany/ManyToOne) |
+
+7. **SQL generation** — Produces a JOIN query with quality annotations as SQL comments. Uses LEFT JOIN for candidates with null-key ratio above 0.1.
+
+### CLI
+
+```bash
+# Analyze two or more manifest files
+datum-ingest cross-manifest --manifest orders.datum-manifest --manifest customers.datum-manifest
+
+# Write result to file
+datum-ingest cross-manifest --manifest a.json --manifest b.json --output result.json
+```
+
+### Interactive REPL
+
+```
+.join-suggestions
+```
+
+Displays join candidates, transitive chains, insights, and recommended SQL for all tables in the current session.
+
+### gRPC
+
+The compute backend exposes two RPCs:
+
+- `GetJoinSuggestions` — Returns a `CrossManifestResult` serialized as JSON.
+- `GetStats` — Returns per-table manifest statistics as JSON envelopes.
+
+The `AddSource` response includes a `has_join_suggestions` flag indicating whether enough tables are registered for cross-manifest analysis.
+
+### Thresholds
+
+All thresholds are configurable via `CrossManifestThresholds`:
+
+| Threshold | Default | Purpose |
+|-----------|---------|---------|
+| NameSimilarityMinThreshold | 0.4 | Column name matching sensitivity |
+| CandidateMinConfidence | 0.3 | Minimum confidence to include a candidate |
+| GraphEdgeMinConfidence | 0.5 | Minimum confidence for join graph edges |
+| ChainMaxDepth | 4 | Maximum tables in a transitive chain |
+| CompositeKeyMaxColumns | 4 | Maximum columns in a composite key |
+| CompositeKeyPenalty | 0.8 | Confidence penalty for composite keys |
+| HighNullKeyMinRatio | 0.3 | Insight trigger threshold |
+| CardinalityMismatchMinRatio | 0.01 | Insight trigger threshold |
+| StarSchemaMinDimensions | 3 | Minimum dimension tables for star schema detection |
+
 ## Planning Integration
 
 Manifests are not just for external consumption — they feed back into the query planner for data-driven cardinality estimation.

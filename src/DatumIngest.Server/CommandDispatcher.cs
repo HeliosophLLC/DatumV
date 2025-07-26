@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
+using DatumIngest.Manifest.CrossManifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
@@ -99,6 +100,7 @@ public sealed class CommandDispatcher
             ".explain" => await HandleExplainAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".sessions" => HandleListSessions(session),
             ".kill" => HandleKillQuery(session, argument),
+            ".join-suggestions" => HandleJoinSuggestions(session),
             _ => CommandResult.Error($"Unknown command: {command}. Type .help for available commands."),
         };
     }
@@ -218,6 +220,7 @@ public sealed class CommandDispatcher
             .explain <sql>                 Show the query execution plan
             .sessions                      List all active sessions (admin only)
             .kill <session_id>             Cancel a query on another session (admin only)
+            .join-suggestions              Show cross-manifest join suggestions
             
             Any other input is executed as a SQL query.
             Source definition format: provider:name=path[;key=value;...]
@@ -412,6 +415,85 @@ public sealed class CommandDispatcher
 
         target.CancelAndReset();
         return CommandResult.Success($"Cancelled active query on session '{targetId}'.");
+    }
+
+    /// <summary>
+    /// Handles the <c>.join-suggestions</c> meta-command by computing (or returning cached)
+    /// cross-manifest join analysis and formatting the results as a human-readable summary.
+    /// </summary>
+    private static CommandResult HandleJoinSuggestions(Session session)
+    {
+        if (!session.IsAuthorized(ServerOperation.Schema))
+        {
+            return CommandResult.Error("Permission denied: you are not authorized to inspect schemas.");
+        }
+
+        if (!session.Catalog.HasJoinSuggestions)
+        {
+            return CommandResult.Error("At least two tables with manifests are required for join suggestions.");
+        }
+
+        CrossManifestResult? result = session.Catalog.GetOrComputeCrossManifest(forceCompute: true);
+
+        if (result is null)
+        {
+            return CommandResult.Error("Could not compute cross-manifest analysis.");
+        }
+
+        System.Text.StringBuilder output = new();
+        output.AppendLine($"Cross-manifest join analysis across {result.Tables.Count} tables: {string.Join(", ", result.Tables)}");
+        output.AppendLine();
+
+        if (result.Candidates.Count == 0)
+        {
+            output.AppendLine("No join candidates discovered.");
+            return CommandResult.Success(output.ToString());
+        }
+
+        output.AppendLine($"  {result.Candidates.Count} join candidate(s):");
+
+        foreach (JoinCandidate candidate in result.Candidates)
+        {
+            string leftColumns = string.Join(", ", candidate.LeftColumns);
+            string rightColumns = string.Join(", ", candidate.RightColumns);
+            output.AppendLine($"    {candidate.LeftTable}.({leftColumns}) = {candidate.RightTable}.({rightColumns})  [{candidate.EstimatedJoinType}, confidence={candidate.Confidence:F2}]");
+
+            if (candidate.QualityWarnings is { Count: > 0 })
+            {
+                output.AppendLine($"      Warnings: {string.Join("; ", candidate.QualityWarnings)}");
+            }
+        }
+
+        if (result.TransitiveChains is { Count: > 0 })
+        {
+            output.AppendLine();
+            output.AppendLine($"  {result.TransitiveChains.Count} transitive chain(s):");
+
+            foreach (JoinChain chain in result.TransitiveChains)
+            {
+                output.AppendLine($"    {string.Join(" → ", chain.Tables)}  [min confidence={chain.MinConfidence:F2}]");
+            }
+        }
+
+        if (result.Insights is { Count: > 0 })
+        {
+            output.AppendLine();
+            output.AppendLine($"  {result.Insights.Count} insight(s):");
+
+            foreach (Manifest.Insights.DatasetInsight insight in result.Insights)
+            {
+                output.AppendLine($"    [{insight.Severity}] {insight.Observation}");
+            }
+        }
+
+        if (result.RecommendedQuery is not null)
+        {
+            output.AppendLine();
+            output.AppendLine("  Suggested JOIN query:");
+            output.AppendLine(result.RecommendedQuery);
+        }
+
+        return CommandResult.Success(output.ToString());
     }
 
     /// <summary>

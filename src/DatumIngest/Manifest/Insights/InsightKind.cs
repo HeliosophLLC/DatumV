@@ -119,4 +119,27 @@ public enum InsightKind
     /// Treatment: drop.
     /// </summary>
     UnusableFeature,
+
+    // ── Cross-Manifest (atomic) ──
+
+    /// <summary>A join candidate is classified as many-to-many, producing a Cartesian product.</summary>
+    ManyToManyJoin,
+
+    /// <summary>A join candidate has a high null-key ratio — inner joins will silently drop rows.</summary>
+    HighNullKey,
+
+    /// <summary>A join candidate has a large cardinality mismatch between join keys.</summary>
+    CardinalityMismatch,
+
+    /// <summary>A join candidate's key columns have disjoint value ranges — the join will produce few or no matches.</summary>
+    DisjointRange,
+
+    /// <summary>Columns with the same name have different types across tables, suggesting schema drift.</summary>
+    SchemaDrift,
+
+    /// <summary>Multiple tables share overlapping columns with high value overlap, suggesting denormalized data.</summary>
+    DenormalizationHint,
+
+    /// <summary>A central table has many one-to-many relationships to dimension tables, forming a star schema.</summary>
+    StarSchema,
 }

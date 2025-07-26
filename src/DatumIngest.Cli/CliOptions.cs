@@ -49,6 +49,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
 
+    /// <summary>Gets or sets the manifest file paths for the cross-manifest command.</summary>
+    public List<string> ManifestPaths { get; set; } = new();
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -66,7 +69,7 @@ internal sealed class CliOptions
         // The 'index' and 'manifest-schema' commands do not require a SQL argument.
         int argStart;
 
-        if (options.Command is "index" or "index-manifest" or "manifest-schema" or "shell")
+        if (options.Command is "index" or "index-manifest" or "manifest-schema" or "shell" or "cross-manifest")
         {
             argStart = 1;
         }
@@ -176,14 +179,22 @@ internal sealed class CliOptions
                     options.OutputPath = args[++i];
                     break;
 
+                case "--manifest":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--manifest requires a path argument");
+                    }
+                    options.ManifestPaths.Add(args[++i]);
+                    break;
+
                 default:
                     throw new ArgumentException($"Unknown argument: {args[i]}");
             }
         }
 
-        if (options.CatalogPath is null && options.Sources.Count == 0)
+        if (options.CatalogPath is null && options.Sources.Count == 0 && options.ManifestPaths.Count == 0)
         {
-            throw new ArgumentException("At least one of --catalog or --source is required.");
+            throw new ArgumentException("At least one of --catalog, --source, or --manifest is required.");
         }
 
         return options;

@@ -53,6 +53,11 @@ try
         return await shell.RunAsync(CancellationToken.None);
     }
 
+    if (options.Command == "cross-manifest")
+    {
+        return await RunCrossManifestAsync(catalog, options);
+    }
+
     SelectStatement statement = SqlParser.Parse(options.Sql);
 
     return options.Command switch
@@ -63,7 +68,7 @@ try
         "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(statement, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', or 'index-manifest'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'cross-manifest'.")
     };
 }
 catch (ArgumentException ex)
@@ -915,6 +920,62 @@ static async Task<int> RunSchemaAsync(SelectStatement statement, TableCatalog ca
     }
 
     Console.WriteLine($"\n({schema.Columns.Count} column(s) from {schema.TableNames.Count()} source(s))");
+    return 0;
+}
+
+static async Task<int> RunCrossManifestAsync(TableCatalog catalog, CliOptions options)
+{
+    // Load manifest files directly when --manifest paths are provided.
+    foreach (string manifestPath in options.ManifestPaths)
+    {
+        string json = await File.ReadAllTextAsync(manifestPath);
+        DatumIngest.Manifest.SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+
+        if (sourceManifest is null)
+        {
+            Console.Error.WriteLine($"Warning: could not parse manifest file: {manifestPath}");
+            continue;
+        }
+
+        // Use the file name (without extension) as the table name if the manifest
+        // contains a single anonymous table.
+        string baseName = Path.GetFileNameWithoutExtension(manifestPath);
+
+        foreach (System.Collections.Generic.KeyValuePair<string, QueryResultsManifest> entry in sourceManifest.Tables)
+        {
+            string tableName = string.IsNullOrEmpty(entry.Key) ? baseName : entry.Key;
+            catalog.RegisterManifest(tableName, entry.Value);
+        }
+    }
+
+    if (!catalog.HasJoinSuggestions)
+    {
+        Console.Error.WriteLine("Error: at least two tables with manifests are required for cross-manifest analysis.");
+        return 1;
+    }
+
+    DatumIngest.Manifest.CrossManifest.CrossManifestResult? result =
+        catalog.GetOrComputeCrossManifest(forceCompute: true);
+
+    if (result is null)
+    {
+        Console.Error.WriteLine("Error: could not compute cross-manifest analysis.");
+        return 1;
+    }
+
+    string resultJson = ManifestSerializer.SerializeCrossManifest(result);
+
+    if (options.OutputPath is not null)
+    {
+        await File.WriteAllTextAsync(options.OutputPath, resultJson);
+        Console.Error.WriteLine($"Cross-manifest result written to: {options.OutputPath}");
+    }
+    else
+    {
+        Console.WriteLine(resultJson);
+    }
+
+    Console.Error.WriteLine($"({result.Tables.Count} table(s), {result.Candidates.Count} candidate(s), {result.JoinGraph.Count} edge(s))");
     return 0;
 }
 
