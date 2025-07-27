@@ -12,15 +12,21 @@ internal static class CrossManifestQueryBuilder
 {
     /// <summary>
     /// Builds a JOIN SQL query from the given candidates, optionally annotated with
-    /// quality warnings. Tables are joined in a chain based on the best candidates.
+    /// quality warnings and per-column insights. Tables are joined in a chain based on the best candidates.
     /// Returns <see langword="null"/> when no candidates meet the confidence threshold.
     /// </summary>
     /// <param name="candidates">Scored join candidates.</param>
     /// <param name="options">Options controlling SQL generation.</param>
+    /// <param name="perTableInsights">
+    /// Optional per-table column insights from single-manifest analysis.
+    /// When present, the generated SQL includes column-level comments noting
+    /// nullity, skew, type coercions, and other data quality findings.
+    /// </param>
     /// <returns>The generated SQL string, or <see langword="null"/> if no candidates qualify.</returns>
     internal static string? BuildQuery(
         IReadOnlyList<JoinCandidate> candidates,
-        CrossManifestQueryOptions options)
+        CrossManifestQueryOptions options,
+        IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? perTableInsights = null)
     {
         // Filter to candidates above the confidence threshold.
         List<JoinCandidate> qualifying = new();
@@ -92,7 +98,7 @@ internal static class CrossManifestQueryBuilder
             }
         }
 
-        return FormatQuery(orderedJoins, options);
+        return FormatQuery(orderedJoins, options, perTableInsights);
     }
 
     /// <summary>
@@ -137,7 +143,8 @@ internal static class CrossManifestQueryBuilder
     /// </summary>
     private static string FormatQuery(
         List<JoinCandidate> orderedJoins,
-        CrossManifestQueryOptions options)
+        CrossManifestQueryOptions options,
+        IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? perTableInsights)
     {
         StringBuilder builder = new();
 
@@ -225,7 +232,13 @@ internal static class CrossManifestQueryBuilder
             builder.AppendLine(FormatOnClause(candidate, existingTable, newTable));
         }
 
-        builder.Append(';');
+        // Emit per-table column insights as comments.
+        if (options.IncludeAnnotations && perTableInsights is not null)
+        {
+            AppendPerTableInsightComments(builder, emitted, perTableInsights);
+        }
+
+        builder.AppendLine("LIMIT 100;");
 
         return builder.ToString();
     }
@@ -316,11 +329,56 @@ internal static class CrossManifestQueryBuilder
     }
 
     /// <summary>
-    /// Quotes a SQL identifier with square brackets.
+    /// Appends per-table column insight comments before the LIMIT clause.
+    /// Groups insights by table and emits a short summary for each affected column.
+    /// </summary>
+    private static void AppendPerTableInsightComments(
+        StringBuilder builder,
+        HashSet<string> tables,
+        IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>> perTableInsights)
+    {
+        bool headerEmitted = false;
+
+        foreach (string table in tables)
+        {
+            if (!perTableInsights.TryGetValue(table, out IReadOnlyList<DatasetInsight>? insights))
+            {
+                continue;
+            }
+
+            if (!headerEmitted)
+            {
+                builder.AppendLine("-- Column insights:");
+                headerEmitted = true;
+            }
+
+            foreach (DatasetInsight insight in insights)
+            {
+                string columns = string.Join(", ", insight.AffectedFeatures);
+                builder.AppendFormat(
+                    "--   {0}: [{1}] {2}",
+                    table,
+                    columns,
+                    FormatInsightSummary(insight));
+                builder.AppendLine();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Produces a short one-line summary of an insight for SQL comment output.
+    /// </summary>
+    private static string FormatInsightSummary(DatasetInsight insight)
+    {
+        return $"{insight.Kind} ({insight.Severity}): {insight.Observation}";
+    }
+
+    /// <summary>
+    /// Quotes a SQL identifier with double quotes (PostgreSQL style).
     /// </summary>
     private static string QuoteIdentifier(string identifier)
     {
-        // Escape embedded closing brackets by doubling them.
-        return $"[{identifier.Replace("]", "]]", StringComparison.Ordinal)}]";
+        // Escape embedded double quotes by doubling them.
+        return $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
     }
 }

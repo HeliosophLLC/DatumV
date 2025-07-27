@@ -22,6 +22,8 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Query metering system**: `QueryMeter` integrated into `ExecutionContext` for per-query QU accumulation across functions and operators, with `GetUsage` RPC for billing~~ ✅
 - ~~**Statistics-based partition pruning**: Skip row groups whose min/max statistics prove a predicate unsatisfiable~~ ✅
 - ~~**Bloom filter acceleration**: Use Parquet bloom filters to skip partitions for equality predicates~~ ✅
+- **Late materialization for Parquet provider**: Implement `IKeyedTableProvider` on `ParquetTableProvider` so expensive binary/nested columns can be deferred past joins. Requires synthetic row-number keying and row-group-level seeking via ParquetSharp.
+- **Late materialization for HDF5 provider**: Implement `IKeyedTableProvider` on `Hdf5TableProvider` so large multi-dimensional datasets can be deferred past joins. Requires implicit row-index key and lazy per-dataset loading.
 - **Remote data sources**: HTTP/S3/Azure Blob providers
 - ~~**Schema caching**: Skip re-inference on repeated queries~~ ✅
 - **Data validation**: CHECK constraints / VALIDATE clause for data quality gates

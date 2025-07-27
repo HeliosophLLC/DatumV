@@ -55,6 +55,7 @@ public static class CrossManifestAnalyzer
                 Tables = manifests.Select(m => m.Name).ToList(),
                 Candidates = [],
                 JoinGraph = [],
+                PerTableInsights = AnalyzePerTable(manifests),
             };
         }
 
@@ -107,8 +108,12 @@ public static class CrossManifestAnalyzer
             insights = insightList;
         }
 
-        // Phase 5: Generate SQL and annotations.
-        string? recommendedQuery = CrossManifestQueryBuilder.BuildQuery(allCandidates, effectiveQueryOptions);
+        // Phase 5: Analyze per-table column insights.
+        IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? perTableInsights = AnalyzePerTable(manifests);
+
+        // Phase 6: Generate SQL and annotations.
+        string? recommendedQuery = CrossManifestQueryBuilder.BuildQuery(
+            allCandidates, effectiveQueryOptions, perTableInsights);
         IReadOnlyList<QueryAnnotation> annotations = CrossManifestQueryBuilder.GenerateAnnotations(
             allCandidates, effectiveQueryOptions);
 
@@ -119,6 +124,7 @@ public static class CrossManifestAnalyzer
             JoinGraph = graph,
             TransitiveChains = chains,
             Insights = insights,
+            PerTableInsights = perTableInsights,
             RecommendedQuery = recommendedQuery,
             QueryAnnotations = annotations.Count > 0 ? annotations : null,
         };
@@ -235,5 +241,28 @@ public static class CrossManifestAnalyzer
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Runs single-manifest <see cref="InsightAnalyzer"/> on each table to produce
+    /// per-column insights (nullity, skew, encoding, outliers, etc.).
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? AnalyzePerTable(
+        IReadOnlyList<ManifestWithName> manifests)
+    {
+        Dictionary<string, IReadOnlyList<DatasetInsight>>? result = null;
+
+        foreach (ManifestWithName manifest in manifests)
+        {
+            IReadOnlyList<DatasetInsight> tableInsights = InsightAnalyzer.Analyze(manifest.Manifest);
+
+            if (tableInsights.Count > 0)
+            {
+                result ??= new Dictionary<string, IReadOnlyList<DatasetInsight>>(StringComparer.Ordinal);
+                result[manifest.Name] = tableInsights;
+            }
+        }
+
+        return result;
     }
 }

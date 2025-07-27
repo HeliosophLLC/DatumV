@@ -19,9 +19,9 @@ public sealed class CrossManifestQueryBuilderTests
         string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default);
 
         Assert.NotNull(sql);
-        Assert.Contains("[orders]", sql);
-        Assert.Contains("[customers]", sql);
-        Assert.Contains("[customer_id]", sql);
+        Assert.Contains("\"orders\"", sql);
+        Assert.Contains("\"customers\"", sql);
+        Assert.Contains("\"customer_id\"", sql);
         Assert.Contains("JOIN", sql);
     }
 
@@ -111,9 +111,9 @@ public sealed class CrossManifestQueryBuilderTests
         string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default);
 
         Assert.NotNull(sql);
-        Assert.Contains("[orders]", sql);
-        Assert.Contains("[customers]", sql);
-        Assert.Contains("[products]", sql);
+        Assert.Contains("\"orders\"", sql);
+        Assert.Contains("\"customers\"", sql);
+        Assert.Contains("\"products\"", sql);
     }
 
     [Fact]
@@ -136,8 +136,8 @@ public sealed class CrossManifestQueryBuilderTests
 
         Assert.NotNull(sql);
         Assert.Contains("AND", sql);
-        Assert.Contains("[region_id]", sql);
-        Assert.Contains("[year]", sql);
+        Assert.Contains("\"region_id\"", sql);
+        Assert.Contains("\"year\"", sql);
     }
 
     [Fact]
@@ -151,7 +151,96 @@ public sealed class CrossManifestQueryBuilderTests
         string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default);
 
         Assert.NotNull(sql);
-        Assert.EndsWith(";", sql);
+        Assert.Contains("LIMIT 100;", sql);
+    }
+
+    // ── Per-Table Insights ──
+
+    [Fact]
+    public void BuildQuery_WithPerTableInsights_IncludesColumnInsightComments()
+    {
+        List<JoinCandidate> candidates =
+        [
+            MakeCandidate("orders", "customers", "customer_id", "customer_id", 0.8),
+        ];
+
+        Dictionary<string, IReadOnlyList<DatumIngest.Manifest.Insights.DatasetInsight>> perTableInsights = new()
+        {
+            ["orders"] =
+            [
+                new DatumIngest.Manifest.Insights.DatasetInsight
+                {
+                    Kind = DatumIngest.Manifest.Insights.InsightKind.HighMissingness,
+                    Category = DatumIngest.Manifest.Insights.InsightCategory.DataQuality,
+                    Severity = DatumIngest.Manifest.Insights.InsightSeverity.Warning,
+                    Confidence = 0.9,
+                    Scope = DatumIngest.Manifest.Insights.InsightScope.Feature,
+                    Observation = "discount_code has 50% null values",
+                    Risk = "Joining on this column would lose half the rows.",
+                    Recommendation = "Filter nulls or use COALESCE.",
+                    AffectedFeatures = ["discount_code"],
+                    Actions = [],
+                    RecommendedApplyMode = DatumIngest.Manifest.Insights.ApplyMode.Suggest,
+                },
+            ],
+        };
+
+        string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default, perTableInsights);
+
+        Assert.NotNull(sql);
+        Assert.Contains("-- Column insights:", sql);
+        Assert.Contains("discount_code", sql);
+        Assert.Contains("HighMissingness", sql);
+    }
+
+    [Fact]
+    public void BuildQuery_WithoutPerTableInsights_NoColumnInsightComments()
+    {
+        List<JoinCandidate> candidates =
+        [
+            MakeCandidate("orders", "customers", "customer_id", "customer_id", 0.8),
+        ];
+
+        string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default);
+
+        Assert.NotNull(sql);
+        Assert.DoesNotContain("-- Column insights:", sql);
+    }
+
+    [Fact]
+    public void BuildQuery_AnnotationsDisabled_NoColumnInsightComments()
+    {
+        List<JoinCandidate> candidates =
+        [
+            MakeCandidate("orders", "customers", "customer_id", "customer_id", 0.8),
+        ];
+
+        Dictionary<string, IReadOnlyList<DatumIngest.Manifest.Insights.DatasetInsight>> perTableInsights = new()
+        {
+            ["orders"] =
+            [
+                new DatumIngest.Manifest.Insights.DatasetInsight
+                {
+                    Kind = DatumIngest.Manifest.Insights.InsightKind.HighMissingness,
+                    Category = DatumIngest.Manifest.Insights.InsightCategory.DataQuality,
+                    Severity = DatumIngest.Manifest.Insights.InsightSeverity.Warning,
+                    Confidence = 0.9,
+                    Scope = DatumIngest.Manifest.Insights.InsightScope.Feature,
+                    Observation = "discount_code has 50% null values",
+                    Risk = ".",
+                    Recommendation = ".",
+                    AffectedFeatures = ["discount_code"],
+                    Actions = [],
+                    RecommendedApplyMode = DatumIngest.Manifest.Insights.ApplyMode.Suggest,
+                },
+            ],
+        };
+
+        CrossManifestQueryOptions noAnnotations = new() { IncludeAnnotations = false };
+        string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, noAnnotations, perTableInsights);
+
+        Assert.NotNull(sql);
+        Assert.DoesNotContain("-- Column insights:", sql);
     }
 
     // ── Annotations ──

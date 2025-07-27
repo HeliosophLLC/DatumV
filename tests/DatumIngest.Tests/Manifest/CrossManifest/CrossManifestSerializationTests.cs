@@ -186,6 +186,47 @@ public sealed class CrossManifestSerializationTests
         Assert.Equal("High null-key ratio", deserialized.Candidates[0].QualityWarnings![0]);
     }
 
+    [Fact]
+    public void RoundTrip_PerTableInsights_Preserved()
+    {
+        CrossManifestResult original = new()
+        {
+            Tables = ["orders"],
+            Candidates = [],
+            JoinGraph = [],
+            PerTableInsights = new Dictionary<string, IReadOnlyList<DatasetInsight>>
+            {
+                ["orders"] =
+                [
+                    new DatasetInsight
+                    {
+                        Kind = InsightKind.HighMissingness,
+                        Category = InsightCategory.DataQuality,
+                        Severity = InsightSeverity.Warning,
+                        Confidence = 0.9,
+                        Scope = InsightScope.Feature,
+                        Observation = "discount_code has 50% null values",
+                        Risk = "Joining on this column would lose half the rows.",
+                        Recommendation = "Filter nulls or use COALESCE.",
+                        AffectedFeatures = ["discount_code"],
+                        Actions = [],
+                        RecommendedApplyMode = ApplyMode.Suggest,
+                    },
+                ],
+            },
+        };
+
+        string json = ManifestSerializer.SerializeCrossManifest(original);
+        CrossManifestResult? deserialized = ManifestSerializer.DeserializeCrossManifest(json);
+
+        Assert.NotNull(deserialized);
+        Assert.NotNull(deserialized.PerTableInsights);
+        Assert.True(deserialized.PerTableInsights.ContainsKey("orders"));
+        Assert.Single(deserialized.PerTableInsights["orders"]);
+        Assert.Equal(InsightKind.HighMissingness, deserialized.PerTableInsights["orders"][0].Kind);
+        Assert.Equal("discount_code", deserialized.PerTableInsights["orders"][0].AffectedFeatures[0]);
+    }
+
     // ── Helpers ──
 
     private static CrossManifestResult MakeResult()
@@ -214,7 +255,7 @@ public sealed class CrossManifestSerializationTests
             ],
             TransitiveChains = null,
             Insights = null,
-            RecommendedQuery = "SELECT * FROM [orders] INNER JOIN [customers] ON [orders].[customer_id] = [customers].[customer_id];",
+            RecommendedQuery = "SELECT * FROM \"orders\" INNER JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"customer_id\"\nLIMIT 100;\n",
             QueryAnnotations = null,
         };
     }

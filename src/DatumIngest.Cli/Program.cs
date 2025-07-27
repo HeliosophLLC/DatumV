@@ -991,12 +991,19 @@ static IOutputWriter CreateBaseWriter(OutputFormat format, string path)
 
 static Schema InferSchema(Row row)
 {
+    string[] names = new string[row.FieldCount];
+    for (int i = 0; i < row.FieldCount; i++)
+    {
+        names[i] = row.ColumnNames[i];
+    }
+
+    ColumnNameResolver.DeduplicateNames(names, aliasedPositions: null);
+
     ColumnInfo[] columns = new ColumnInfo[row.FieldCount];
     for (int i = 0; i < row.FieldCount; i++)
     {
-        string name = row.ColumnNames[i];
         DataValue value = row[i];
-        columns[i] = new ColumnInfo(name, value.Kind, value.IsNull);
+        columns[i] = new ColumnInfo(names[i], value.Kind, value.IsNull);
     }
 
     return new Schema(columns);

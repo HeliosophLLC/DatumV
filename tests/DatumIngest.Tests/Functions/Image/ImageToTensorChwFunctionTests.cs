@@ -128,4 +128,26 @@ public sealed class ImageToTensorChwFunctionTests
         DataValue result = _function.Execute([DataValue.Null(DataKind.Image)]);
         Assert.True(result.IsNull);
     }
+
+    /// <summary>
+    /// When the input is a bitmap-backed <see cref="ImageHandle"/> (as produced by
+    /// the IDX provider), executing the function must not dispose the source bitmap.
+    /// The caller may still need the image — e.g. <c>SELECT *, image_to_tensor_chw(image)</c>.
+    /// </summary>
+    [Fact]
+    public void Execute_BitmapBackedHandle_DoesNotCorruptSource()
+    {
+        SKBitmap bitmap = new(4, 3, SKColorType.Rgba8888, SKAlphaType.Opaque);
+        bitmap.Erase(SKColors.Green);
+
+        ImageHandle handle = new(bitmap, SKEncodedImageFormat.Png);
+        DataValue imageValue = DataValue.FromImageHandle(handle);
+
+        // Execute the function — this should NOT dispose the bitmap.
+        _function.Execute([imageValue]);
+
+        // The image must still be encodable after the function returns.
+        byte[] encoded = handle.GetEncodedBytes();
+        Assert.NotEmpty(encoded);
+    }
 }

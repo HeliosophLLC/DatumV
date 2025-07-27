@@ -75,7 +75,8 @@ public sealed class QueryPlanner
             CollectAllReferencedColumns(statement);
 
         // 1. Build the source operator (FROM clause) with projection pushdown.
-        IQueryOperator source = PlanSource(statement.From.Source, allReferencedColumns, deferredColumns);
+        bool hasJoins = statement.Joins is not null && statement.Joins.Count > 0;
+        IQueryOperator source = PlanSource(statement.From.Source, allReferencedColumns, deferredColumns, hasJoins);
 
         // Track which table aliases are available on the current (left) side.
         HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase);
@@ -94,7 +95,7 @@ public sealed class QueryPlanner
         {
             foreach (JoinClause join in statement.Joins)
             {
-                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns);
+                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns, hasJoins);
 
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
@@ -686,13 +687,14 @@ public sealed class QueryPlanner
     private IQueryOperator PlanSource(
         TableSource source,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns)
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
+        bool hasJoins)
     {
         return source switch
         {
-            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, deferredColumns),
+            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, deferredColumns, hasJoins),
             SubquerySource subquery => PlanSubquery(subquery),
-            FunctionSource functionSource => PlanFunctionSource(functionSource),
+            FunctionSource functionSource => PlanFunctionSource(functionSource, hasJoins),
             _ => throw new InvalidOperationException(
                 $"Unsupported table source type: {source.GetType().Name}."),
         };
@@ -701,7 +703,8 @@ public sealed class QueryPlanner
     private IQueryOperator PlanTableReference(
         TableReference tableRef,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns)
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
+        bool hasJoins)
     {
         TableDescriptor descriptor = _catalog.Resolve(tableRef.Name);
 
@@ -761,10 +764,12 @@ public sealed class QueryPlanner
             ((ScanOperator)scanOperator).SetSourceIndex(sourceIndex!);
         }
 
-        // If the table has an alias, wrap column names.
-        if (tableRef.Alias is not null)
+        // Wrap column names with the alias prefix. When the query involves JOINs,
+        // unaliased tables are implicitly aliased with their table name to prevent
+        // column name collisions in the combined row schema.
+        if (tableRef.Alias is not null || hasJoins)
         {
-            scanOperator = new AliasOperator(scanOperator, tableRef.Alias);
+            scanOperator = new AliasOperator(scanOperator, tableRef.Alias ?? tableRef.Name);
         }
 
         return scanOperator;
@@ -776,7 +781,7 @@ public sealed class QueryPlanner
         return new SubqueryOperator(innerPlan, subquery.Alias);
     }
 
-    private IQueryOperator PlanFunctionSource(FunctionSource functionSource)
+    private IQueryOperator PlanFunctionSource(FunctionSource functionSource, bool hasJoins)
     {
         ITableValuedFunction? function = _functionRegistry.TryGetTableValued(functionSource.FunctionName);
 
@@ -788,9 +793,10 @@ public sealed class QueryPlanner
 
         IQueryOperator sourceOperator = new FunctionSourceOperator(function, functionSource.Arguments);
 
-        if (functionSource.Alias is not null)
+        if (functionSource.Alias is not null || hasJoins)
         {
-            sourceOperator = new AliasOperator(sourceOperator, functionSource.Alias);
+            sourceOperator = new AliasOperator(
+                sourceOperator, functionSource.Alias ?? functionSource.FunctionName);
         }
 
         return sourceOperator;

@@ -24,7 +24,7 @@ namespace DatumIngest.Catalog.Providers;
 /// with the 30+ built-in image functions (resize, crop, blur, etc.).
 /// </para>
 /// </remarks>
-public sealed class IdxTableProvider : ISeekableTableProvider
+public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvider
 {
     private const int MagicNumberLength = 4;
 
@@ -123,12 +123,19 @@ public sealed class IdxTableProvider : ISeekableTableProvider
     {
         using FileStream stream = OpenFile(descriptor);
         IdxHeader header = ReadHeader(stream);
+        string dataColumnName = DataColumnName(header);
+
+        Dictionary<string, ColumnCost> columnCosts = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [dataColumnName] = ColumnCost.Expensive,
+        };
 
         return Task.FromResult(new ProviderCapabilities(
             EstimatedRowCount: header.ItemCount,
             EstimatedRowSizeBytes: header.ItemByteSize + sizeof(float),
             SupportsSeek: true,
-            ColumnCosts: new Dictionary<string, ColumnCost>()));
+            ColumnCosts: columnCosts,
+            KeyColumn: "index"));
     }
 
     /// <inheritdoc />
@@ -204,6 +211,74 @@ public sealed class IdxTableProvider : ISeekableTableProvider
             if (includeData)
             {
                 values[valueIndex] = CreateDataValue(header, itemBuffer);
+            }
+
+            yield return new Row(names, values, nameIndex);
+        }
+
+        await Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+        TableDescriptor descriptor,
+        string keyColumn,
+        IReadOnlySet<DataValue> keyValues,
+        IReadOnlySet<string>? requiredColumns,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using FileStream stream = OpenFile(descriptor);
+        IdxHeader header = ReadHeader(stream);
+        long dataStartPosition = stream.Position;
+
+        string dataColumnName = DataColumnName(header);
+        bool includeData = requiredColumns is null ||
+            requiredColumns.Contains(dataColumnName);
+
+        // The key column (index) is always included per the interface contract.
+        List<string> columnNames = new() { "index" };
+        if (includeData)
+        {
+            columnNames.Add(dataColumnName);
+        }
+
+        string[] names = columnNames.ToArray();
+        Dictionary<string, int> nameIndex = new(names.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < names.Length; i++)
+        {
+            nameIndex[names[i]] = i;
+        }
+
+        // Extract valid integer indices from the key set, sort for sequential I/O.
+        List<int> sortedIndices = new();
+        foreach (DataValue key in keyValues)
+        {
+            int index = (int)key.AsScalar();
+            if (index >= 0 && index < header.ItemCount)
+            {
+                sortedIndices.Add(index);
+            }
+        }
+
+        sortedIndices.Sort();
+
+        int itemByteSize = header.ItemByteSize;
+        byte[] itemBuffer = new byte[itemByteSize];
+
+        foreach (int rowIndex in sortedIndices)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            long offset = dataStartPosition + (long)rowIndex * itemByteSize;
+            stream.Seek(offset, SeekOrigin.Begin);
+
+            DataValue[] values = new DataValue[names.Length];
+            values[0] = DataValue.FromScalar(rowIndex);
+
+            if (includeData)
+            {
+                ReadExactly(stream, itemBuffer);
+                values[1] = CreateDataValue(header, itemBuffer);
             }
 
             yield return new Row(names, values, nameIndex);

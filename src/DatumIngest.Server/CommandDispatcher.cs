@@ -139,17 +139,26 @@ public sealed class CommandDispatcher
         ResolvedQuerySchema resolved = await resolver.ResolveAsync(statement, cancellationToken).ConfigureAwait(false);
 
         // Build a source schema for type inference on expressions.
+        // Use first-occurrence-wins dedup so that columns shared across
+        // JOINed tables do not cause duplicate-name exceptions.
         List<ColumnInfo> sourceColumns = new();
+        HashSet<string> seenSourceNames = new(StringComparer.OrdinalIgnoreCase);
         foreach (ResolvedColumn column in resolved.Columns)
         {
-            sourceColumns.Add(new ColumnInfo(column.ColumnName, column.Kind, column.Nullable));
-
-            // Also register qualified name (table.column) so ExpressionTypeResolver
+            // Add qualified name (table.column) so ExpressionTypeResolver
             // can resolve qualified column references.
             if (column.SourceTableOrAlias is not null)
             {
                 string qualifiedName = $"{column.SourceTableOrAlias}.{column.ColumnName}";
-                sourceColumns.Add(new ColumnInfo(qualifiedName, column.Kind, column.Nullable));
+                if (seenSourceNames.Add(qualifiedName))
+                {
+                    sourceColumns.Add(new ColumnInfo(qualifiedName, column.Kind, column.Nullable));
+                }
+            }
+
+            if (seenSourceNames.Add(column.ColumnName))
+            {
+                sourceColumns.Add(new ColumnInfo(column.ColumnName, column.Kind, column.Nullable));
             }
         }
 
@@ -304,6 +313,7 @@ public sealed class CommandDispatcher
                 Parameters = documentation?.Parameters ?? [],
                 ReturnType = documentation?.ReturnType,
                 Description = documentation?.Description,
+                Category = documentation?.Category ?? FunctionCategory.Utility,
                 IsTableValued = documentation?.IsTableValued ?? false,
                 IsAggregate = isAggregate || (documentation?.IsAggregate ?? false),
                 QueryUnitCost = scalarFunction?.QueryUnitCost ?? 0,

@@ -474,6 +474,39 @@ public sealed class JoinOperator : IQueryOperator
                 nameIndex[names[index]] = index;
             }
 
+            // Add unqualified shortcuts for aliased columns so that expressions
+            // like image_to_tensor_chw(image) can resolve unqualified names after
+            // a JOIN.  Skip ambiguous names that appear on both sides.
+            HashSet<string> ambiguous = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, int> unqualified = new(StringComparer.OrdinalIgnoreCase);
+
+            for (int index = 0; index < totalFields; index++)
+            {
+                int dotPosition = names[index].LastIndexOf('.');
+                if (dotPosition < 0)
+                {
+                    continue;
+                }
+
+                string shortName = names[index][(dotPosition + 1)..];
+                if (ambiguous.Contains(shortName))
+                {
+                    continue;
+                }
+
+                if (!unqualified.TryAdd(shortName, index))
+                {
+                    // Same unqualified name on both sides — remove and mark ambiguous.
+                    unqualified.Remove(shortName);
+                    ambiguous.Add(shortName);
+                }
+            }
+
+            foreach (KeyValuePair<string, int> entry in unqualified)
+            {
+                nameIndex.TryAdd(entry.Key, entry.Value);
+            }
+
             return new CombinedRowSchema(names, nameIndex, left.FieldCount);
         }
 

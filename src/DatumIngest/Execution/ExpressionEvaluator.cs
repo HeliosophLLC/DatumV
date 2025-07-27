@@ -242,10 +242,10 @@ public sealed class ExpressionEvaluator
         {
             _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
         }
-            // Dispose consumed ImageHandle arguments whose bitmaps are no longer needed.
-            // The result carries its own ImageHandle (if any), so we only dispose handles
-            // that are not the same instance as the result's handle.
-            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result);
+            // Dispose intermediate ImageHandle arguments whose bitmaps are no longer needed.
+            // Handles still referenced by the source row are kept alive — they may appear
+            // as ordinal copies in the projected row (e.g. SELECT *, func(image)).
+            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, row);
 
             return result;
         }
@@ -259,10 +259,13 @@ public sealed class ExpressionEvaluator
 
     /// <summary>
     /// Disposes <see cref="ImageHandle"/> payloads in evaluated arguments that are
-    /// no longer referenced by the result. This releases native <see cref="SkiaSharp.SKBitmap"/>
-    /// memory from intermediate pipeline stages.
+    /// no longer referenced by the result or the source row. This releases native
+    /// <see cref="SkiaSharp.SKBitmap"/> memory from intermediate pipeline stages
+    /// (e.g. nested <c>image_to_tensor_chw(resize(image, 64, 64))</c>) while keeping
+    /// handles that the source row still owns alive for ordinal copies.
     /// </summary>
-    private static void DisposeConsumedImageHandles(ReadOnlySpan<DataValue> arguments, DataValue result)
+    private static void DisposeConsumedImageHandles(
+        ReadOnlySpan<DataValue> arguments, DataValue result, Row sourceRow)
     {
         for (int index = 0; index < arguments.Length; index++)
         {
@@ -286,8 +289,35 @@ public sealed class ExpressionEvaluator
                 continue;
             }
 
+            // If the source row still references this handle, don't dispose — it may
+            // be needed by ordinal copies in the projected row (SELECT *, func(image)).
+            if (IsHandleReferencedByRow(argumentHandle, sourceRow))
+            {
+                continue;
+            }
+
             argumentHandle.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Checks whether any column in the row holds the given <see cref="ImageHandle"/>.
+    /// </summary>
+    private static bool IsHandleReferencedByRow(ImageHandle handle, Row row)
+    {
+        for (int index = 0; index < row.FieldCount; index++)
+        {
+            DataValue value = row[index];
+
+            if (value.Kind == DataKind.Image
+                && !value.IsNull
+                && ReferenceEquals(handle, value.TryGetOwnedImageHandle()))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private DataValue EvaluateIn(InExpression inExpr, Row row)

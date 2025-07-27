@@ -47,9 +47,10 @@ public sealed class ImageToBytesFunction : IScalarFunction, ICostAwareFunction
         ImageHandle inputHandle = input.GetImageHandle();
         SKBitmap bitmap = inputHandle.GetBitmap("image_to_bytes");
 
-        using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888
-            ? bitmap
-            : ConvertToRgba8888(bitmap);
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
 
         int byteCount = rgba.Height * rgba.Width * 4;
         byte[] pixels = new byte[byteCount];

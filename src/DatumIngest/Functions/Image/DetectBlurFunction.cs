@@ -53,9 +53,10 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
         ImageHandle inputHandle = input.GetImageHandle();
         SKBitmap bitmap = inputHandle.GetBitmap("detect_blur");
 
-        using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888
-            ? bitmap
-            : ConvertToRgba8888(bitmap);
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
 
         int width = rgba.Width;
         int height = rgba.Height;

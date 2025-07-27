@@ -1,7 +1,9 @@
 using DatumIngest.Execution;
 using DatumIngest.Functions;
+using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using SkiaSharp;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -652,6 +654,33 @@ public class ExpressionEvaluatorTests
                 new ColumnReference("quantity")),
             row);
         Assert.Equal(30f, result.AsScalar());
+    }
+
+    /// <summary>
+    /// Reproduces the crash from SELECT *, image_to_tensor_chw(image): the function
+    /// consumed and disposed the image handle, but the ordinal copy of the image
+    /// column (from *) still referenced the same handle, causing an
+    /// <see cref="ObjectDisposedException"/> during serialization.
+    /// </summary>
+    [Fact]
+    public void EvaluateFunction_ImageFunction_DoesNotDisposeSourceRowHandle()
+    {
+        SKBitmap bitmap = new(4, 4, SKColorType.Rgba8888, SKAlphaType.Premul);
+        ImageHandle handle = new(bitmap, SKEncodedImageFormat.Png);
+        DataValue imageValue = DataValue.FromImageHandle(handle);
+        Row row = MakeRow(("image", imageValue));
+
+        FunctionCallExpression call = new(
+            "image_to_tensor_chw",
+            new List<Expression> { new ColumnReference("image") });
+
+        DataValue result = _evaluator.Evaluate(call, row);
+
+        Assert.Equal(DataKind.Tensor, result.Kind);
+
+        // The source row's handle must remain usable — ordinal copies need it.
+        byte[] encoded = handle.GetEncodedBytes();
+        Assert.NotNull(encoded);
     }
 
     [Fact]

@@ -869,6 +869,68 @@ public class QueryPlannerTests
         Assert.NotNull(lateOp);
         Assert.Equal("d", lateOp.Alias);
     }
+
+    // ─────────────── Implicit aliasing for unaliased JOINs ───────────────
+
+    /// <summary>
+    /// When tables in a JOIN have no explicit alias, the planner should implicitly
+    /// wrap them with <see cref="AliasOperator"/> using the table name, so that
+    /// column names are qualified and do not collide.
+    /// </summary>
+    [Fact]
+    public void Plan_JoinWithoutAliases_ImplicitlyAliasesBothSides()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "left_table", "l.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "right_table", "r.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM left_table INNER JOIN right_table ON left_table.id = right_table.id
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("left_table", Alias: null)),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("right_table", Alias: null),
+                new BinaryExpression(
+                    new ColumnReference("left_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("right_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Plan should be: JoinOperator(AliasOperator(Scan), AliasOperator(Scan))
+        Assert.IsType<JoinOperator>(plan);
+        JoinOperator join = (JoinOperator)plan;
+
+        AliasOperator leftAlias = Assert.IsType<AliasOperator>(join.Left);
+        Assert.Equal("left_table", leftAlias.Alias);
+
+        AliasOperator rightAlias = Assert.IsType<AliasOperator>(join.Right);
+        Assert.Equal("right_table", rightAlias.Alias);
+    }
+
+    /// <summary>
+    /// A single-table query without JOINs should NOT get an implicit alias, preserving
+    /// unqualified column names in the output.
+    /// </summary>
+    [Fact]
+    public void Plan_SingleTableNoAlias_NoImplicitAliasOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("my_table", "data.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("my_table", Alias: null)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // No AliasOperator should be inserted for a single FROM table without JOINs.
+        Assert.IsType<ScanOperator>(plan);
+    }
 }
 
 /// <summary>

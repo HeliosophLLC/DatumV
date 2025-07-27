@@ -48,6 +48,44 @@ public sealed class CrossManifestAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_SingleManifest_IncludesPerTableInsights()
+    {
+        List<ManifestWithName> manifests =
+        [
+            MakeManifest("orders", MakeHighNullFeature("discount_code")),
+        ];
+
+        CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests);
+
+        Assert.Empty(result.Candidates);
+        Assert.NotNull(result.PerTableInsights);
+        Assert.True(result.PerTableInsights.ContainsKey("orders"));
+        Assert.True(result.PerTableInsights["orders"].Count > 0);
+    }
+
+    [Fact]
+    public void Analyze_MultipleManifests_IncludesPerTableInsights()
+    {
+        List<ManifestWithName> manifests =
+        [
+            MakeManifest("orders",
+                MakeIntegerFeature("customer_id", estimatedDistinctCount: 900,
+                    topK: [new FrequencyEntry("1", 10), new FrequencyEntry("2", 10), new FrequencyEntry("3", 10)]),
+                MakeHighNullFeature("discount_code")),
+            MakeManifest("customers",
+                MakeIntegerFeature("customer_id", estimatedDistinctCount: 1000,
+                    topK: [new FrequencyEntry("1", 1), new FrequencyEntry("2", 1), new FrequencyEntry("3", 1)])),
+        ];
+
+        CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests);
+
+        // Should have join candidates AND per-table insights.
+        Assert.True(result.Candidates.Count > 0);
+        Assert.NotNull(result.PerTableInsights);
+        Assert.True(result.PerTableInsights.ContainsKey("orders"));
+    }
+
+    [Fact]
     public void Analyze_NoMatchingColumns_ReturnsNoCandidates()
     {
         List<ManifestWithName> manifests =
@@ -222,6 +260,37 @@ public sealed class CrossManifestAnalyzerTests
             OutlierCount = 0,
             OutlierRatio = 0.0,
             IntegerValued = true,
+        };
+    }
+
+    /// <summary>
+    /// Creates a numeric feature with a high null ratio (50%), triggering HighMissingness insights.
+    /// </summary>
+    private static NumericFeatureManifest MakeHighNullFeature(string name)
+    {
+        return new NumericFeatureManifest
+        {
+            Name = name,
+            Kind = DataKind.Scalar,
+            Count = 1000,
+            NullCount = 500,
+            ValidCount = 500,
+            NullRatio = 0.5,
+            EstimatedDistinctCount = 50,
+            TopKValues = [],
+            Min = 0.0,
+            Max = 100.0,
+            Mean = 50.0,
+            Variance = 25.0,
+            StandardDeviation = 5.0,
+            Skewness = 0.0,
+            Kurtosis = 3.0,
+            Histogram = new HistogramData([], []),
+            ZeroCount = 0,
+            ZeroRatio = 0.0,
+            OutlierCount = 0,
+            OutlierRatio = 0.0,
+            IntegerValued = false,
         };
     }
 }

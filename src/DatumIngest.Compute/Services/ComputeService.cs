@@ -187,6 +187,18 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
             throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
         }
+        catch (RpcException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Surface the real exception so it doesn't get swallowed as
+            // the generic "Exception was thrown by handler" gRPC message.
+            throw new RpcException(new Status(
+                StatusCode.Internal,
+                $"Query failed at row {rowCount}: {exception.GetType().Name}: {exception.Message}"));
+        }
         finally
         {
             session.AddQueryUnits(meter.FunctionQueryUnits);
@@ -629,6 +641,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             FunctionCategory.Conversion => FunctionCategoryValue.FunctionCategoryConversion,
             FunctionCategory.Utility => FunctionCategoryValue.FunctionCategoryUtility,
             FunctionCategory.Table => FunctionCategoryValue.FunctionCategoryTable,
+            FunctionCategory.Aggregate => FunctionCategoryValue.FunctionCategoryAggregate,
             _ => FunctionCategoryValue.FunctionCategoryUtility,
         };
     }

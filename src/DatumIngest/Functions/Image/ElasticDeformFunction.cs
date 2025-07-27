@@ -61,9 +61,10 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
 
         SKBitmap original = inputHandle.GetBitmap("elastic_deform");
 
-        using SKBitmap rgba = original.ColorType == SKColorType.Rgba8888
-            ? original
-            : ConvertToRgba8888(original);
+        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(original)
+            : null;
+        SKBitmap rgba = converted ?? original;
 
         int width = rgba.Width;
         int height = rgba.Height;

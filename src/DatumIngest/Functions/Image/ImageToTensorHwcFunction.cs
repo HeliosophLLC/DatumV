@@ -48,9 +48,10 @@ public sealed class ImageToTensorHwcFunction : IScalarFunction, ICostAwareFuncti
         ImageHandle inputHandle = input.GetImageHandle();
         SKBitmap bitmap = inputHandle.GetBitmap("image_to_tensor_hwc");
 
-        using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888
-            ? bitmap
-            : ConvertToRgba8888(bitmap);
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
 
         int width = rgba.Width;
         int height = rgba.Height;

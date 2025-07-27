@@ -51,9 +51,10 @@ public sealed class ImageBrightnessMeanFunction : IScalarFunction, ICostAwareFun
         ImageHandle inputHandle = input.GetImageHandle();
         SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_mean");
 
-        using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888
-            ? bitmap
-            : ConvertToRgba8888(bitmap);
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
 
         int totalPixels = rgba.Width * rgba.Height;
         nint pixelPointer = rgba.GetPixels();

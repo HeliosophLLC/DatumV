@@ -1,6 +1,9 @@
 using DatumIngest.Compute.Grpc;
 using DatumIngest.Compute.Services;
+using DatumIngest.Functions.Image;
 using DatumIngest.Model;
+
+using SkiaSharp;
 
 namespace DatumIngest.Tests.Compute;
 
@@ -258,5 +261,62 @@ public sealed class ProtoConverterTests
         ColumnInfoMessage message = ProtoConverter.ToProto(column);
 
         Assert.Equal(expectedProtoKind, message.Kind);
+    }
+
+    /// <summary>
+    /// Simulates <c>SELECT *, image_to_tensor_chw(image)</c> on a bitmap-backed
+    /// image (as produced by the IDX provider): the same <see cref="ImageHandle"/>
+    /// is consumed by a function AND serialized as a raw image column.
+    /// Both proto conversions must succeed without corrupting the source bitmap.
+    /// </summary>
+    [Fact]
+    public void ToProto_BitmapBackedImage_SurvivesFunctionThenSerialization()
+    {
+        SKBitmap bitmap = new(28, 28, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        bitmap.Erase(SKColors.White);
+
+        ImageHandle handle = new(bitmap, SKEncodedImageFormat.Png);
+        DataValue imageValue = DataValue.FromImageHandle(handle);
+
+        // Function consumes the image (reads pixels from the bitmap).
+        ImageToTensorChwFunction function = new();
+        DataValue tensorValue = function.Execute([imageValue]);
+
+        // Serialize both values through ProtoConverter — the image column
+        // must still be encodable after the function read from the same bitmap.
+        DataValueMessage imageMessage = ProtoConverter.ToProto(imageValue);
+        DataValueMessage tensorMessage = ProtoConverter.ToProto(tensorValue);
+
+        Assert.False(imageMessage.ImageValue.IsEmpty);
+        Assert.Equal(3, tensorMessage.TensorValue.Shape.Count);
+    }
+
+    /// <summary>
+    /// Simulates <c>SELECT image, resize(image, 8, 8)</c> on a bitmap-backed
+    /// image: the original image is serialized alongside a resized copy.
+    /// </summary>
+    [Fact]
+    public void ToProto_BitmapBackedImage_SurvivesResizeThenSerialization()
+    {
+        SKBitmap bitmap = new(28, 28, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        bitmap.Erase(SKColors.Red);
+
+        ImageHandle handle = new(bitmap, SKEncodedImageFormat.Png);
+        DataValue imageValue = DataValue.FromImageHandle(handle);
+
+        // Resize function consumes the image and produces a new one.
+        ResizeImageFunction resize = new();
+        DataValue resizedValue = resize.Execute([
+            imageValue,
+            DataValue.FromScalar(8),
+            DataValue.FromScalar(8),
+        ]);
+
+        // Serialize both — original and resized.
+        DataValueMessage originalMessage = ProtoConverter.ToProto(imageValue);
+        DataValueMessage resizedMessage = ProtoConverter.ToProto(resizedValue);
+
+        Assert.False(originalMessage.ImageValue.IsEmpty);
+        Assert.False(resizedMessage.ImageValue.IsEmpty);
     }
 }

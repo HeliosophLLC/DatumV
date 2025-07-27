@@ -23,6 +23,14 @@ public sealed class CrossManifestResult
     /// <summary>Gets cross-manifest insights (join quality, schema drift, normalization hints). Null if none.</summary>
     public IReadOnlyList<DatasetInsight>? Insights { get; init; }
 
+    /// <summary>
+    /// Gets per-table column insights from single-manifest analysis. Each entry maps a
+    /// table name to its column-level insights (nullity, skew, encoding, outliers, etc.).
+    /// Present for all tables, including single-table results with no join candidates.
+    /// Null if no per-table insights were found.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? PerTableInsights { get; init; }
+
     /// <summary>Gets the recommended JOIN SQL query. Null if no candidates exceed the confidence threshold.</summary>
     public string? RecommendedQuery { get; init; }
 

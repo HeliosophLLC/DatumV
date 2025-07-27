@@ -54,9 +54,10 @@ public sealed class ImageBrightnessHistogramFunction : IScalarFunction, ICostAwa
         ImageHandle inputHandle = input.GetImageHandle();
         SKBitmap bitmap = inputHandle.GetBitmap("image_brightness_histogram");
 
-        using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888
-            ? bitmap
-            : ConvertToRgba8888(bitmap);
+        using SKBitmap? converted = bitmap.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(bitmap)
+            : null;
+        SKBitmap rgba = converted ?? bitmap;
 
         int totalPixels = rgba.Width * rgba.Height;
         nint pixelPointer = rgba.GetPixels();

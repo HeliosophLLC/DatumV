@@ -745,4 +745,111 @@ public sealed class IdxTableProviderTests : IDisposable
             Assert.Equal(allRows[i]["value"].AsUInt8(), seekRows[i]["value"].AsUInt8());
         }
     }
+
+    // ───────────────────── FetchByKeysAsync (keyed random access) ─────────────────────
+
+    /// <summary>
+    /// FetchByKeysAsync returns only the rows whose index values match the
+    /// requested key set, with all columns populated.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_Labels_ReturnsOnlyMatchingRows()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        HashSet<DataValue> keys = [DataValue.FromScalar(1), DataValue.FromScalar(3)];
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(path), "index", keys, null,
+                CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+
+        // Results should be ordered by key.
+        Assert.Equal(1f, rows[0]["index"].AsScalar());
+        Assert.Equal(2, rows[0]["value"].AsUInt8());
+
+        Assert.Equal(3f, rows[1]["index"].AsScalar());
+        Assert.Equal(0, rows[1]["value"].AsUInt8());
+    }
+
+    /// <summary>
+    /// FetchByKeysAsync respects projection pushdown — when only the data
+    /// column is requested, index is still included (per the interface contract)
+    /// but the result is limited to the specified columns.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_WithProjection_ReturnsOnlyRequestedColumns()
+    {
+        string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
+        IdxTableProvider provider = new();
+
+        HashSet<DataValue> keys = [DataValue.FromScalar(0)];
+        HashSet<string> requiredColumns = new(StringComparer.OrdinalIgnoreCase) { "value" };
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(path), "index", keys, requiredColumns,
+                CancellationToken.None));
+
+        Assert.Single(rows);
+        // Key column is always included.
+        Assert.Equal(0f, rows[0]["index"].AsScalar());
+        Assert.Equal(7, rows[0]["value"].AsUInt8());
+    }
+
+    /// <summary>
+    /// FetchByKeysAsync on an image file returns correct image data for the
+    /// requested indices.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_Images_ReturnsCorrectImageData()
+    {
+        string path = CreateImagesFixture(); // 3 images of 2×2
+        IdxTableProvider provider = new();
+
+        HashSet<DataValue> keys = [DataValue.FromScalar(2)];
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(path), "index", keys, null,
+                CancellationToken.None));
+
+        Assert.Single(rows);
+        Assert.Equal(2f, rows[0]["index"].AsScalar());
+        Assert.Equal(DataKind.Image, rows[0]["image"].Kind);
+    }
+
+    /// <summary>
+    /// FetchByKeysAsync silently ignores key values that are out of range.
+    /// </summary>
+    [Fact]
+    public async Task FetchByKeys_OutOfRangeKeys_IgnoresInvalidKeys()
+    {
+        string path = CreateLabelsFixture(); // 5 labels
+        IdxTableProvider provider = new();
+
+        HashSet<DataValue> keys =
+            [DataValue.FromScalar(1), DataValue.FromScalar(99), DataValue.FromScalar(-1)];
+        List<Row> rows = await ReadAllAsync(
+            provider.FetchByKeysAsync(Descriptor(path), "index", keys, null,
+                CancellationToken.None));
+
+        Assert.Single(rows);
+        Assert.Equal(1f, rows[0]["index"].AsScalar());
+    }
+
+    /// <summary>
+    /// GetCapabilities reports the data column as expensive and index as the key
+    /// column, enabling late materialization in the query planner.
+    /// </summary>
+    [Fact]
+    public async Task GetCapabilities_Images_ReportsExpensiveDataColumn()
+    {
+        string path = CreateImagesFixture();
+        IdxTableProvider provider = new();
+
+        ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(
+            Descriptor(path), CancellationToken.None);
+
+        Assert.Equal("index", capabilities.KeyColumn);
+        Assert.True(capabilities.ColumnCosts.ContainsKey("image"));
+        Assert.Equal(ColumnCost.Expensive, capabilities.ColumnCosts["image"]);
+    }
 }
