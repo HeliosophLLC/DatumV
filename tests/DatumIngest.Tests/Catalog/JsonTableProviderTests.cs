@@ -166,6 +166,43 @@ public sealed class JsonTableProviderTests
         Assert.False(capabilities.SupportsSeek);
     }
 
+    // ───────────────────── Root object error ─────────────────────
+
+    /// <summary>
+    /// Verifies that calling <see cref="JsonTableProvider.GetSchemaAsync"/> on a root-object
+    /// JSON file (without a <c>json_path</c> option) produces an error message listing
+    /// the available array properties rather than a generic failure.
+    /// </summary>
+    [Fact]
+    public async Task GetSchema_RootObject_WithoutJsonPath_ThrowsWithArrayPropertyNames()
+    {
+        JsonTableProvider provider = new();
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.GetSchemaAsync(Descriptor("root_object.json"), CancellationToken.None));
+
+        Assert.Contains("licenses", exception.Message);
+        Assert.Contains("captions", exception.Message);
+        Assert.Contains("json_path", exception.Message);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="IMultiTableSource.DiscoverTablesAsync"/> discovers array
+    /// properties in a root-object JSON file and sets the <c>json_path</c> option on each.
+    /// </summary>
+    [Fact]
+    public async Task DiscoverTables_RootObject_ReturnsOneEntryPerArrayProperty()
+    {
+        JsonTableProvider provider = new();
+        IReadOnlyList<DiscoveredTable>? tables = await provider.DiscoverTablesAsync(
+            Descriptor("root_object.json"), CancellationToken.None);
+
+        Assert.NotNull(tables);
+        Assert.Equal(2, tables.Count);
+        Assert.Contains(tables, table => table.Name == "licenses" && table.Options["json_path"] == "licenses");
+        Assert.Contains(tables, table => table.Name == "captions" && table.Options["json_path"] == "captions");
+    }
+
     // ───────────────────── Cancellation ─────────────────────
 
     [Fact]

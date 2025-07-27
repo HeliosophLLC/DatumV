@@ -1,0 +1,11 @@
+{
+  "metadata": "dataset-v1",
+  "licenses": [
+    {"id": 1, "name": "MIT"},
+    {"id": 2, "name": "Apache-2.0"}
+  ],
+  "captions": [
+    {"image_id": 10, "text": "A sunny day"},
+    {"image_id": 11, "text": "A rainy evening"}
+  ]
+}

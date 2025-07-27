@@ -198,8 +198,36 @@ public sealed class JsonTableProvider : IMultiTableSource
         {
             if (root.ValueKind != JsonValueKind.Array)
             {
-                throw new InvalidOperationException(
-                    "JSON root is not an array. Specify a 'json_path' option to navigate to an array property.");
+                string message = "JSON root is not an array.";
+
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    List<string> arrayProperties = new();
+                    foreach (JsonProperty property in root.EnumerateObject())
+                    {
+                        if (property.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            arrayProperties.Add(property.Name);
+                        }
+                    }
+
+                    if (arrayProperties.Count > 0)
+                    {
+                        message += $" The root object contains array properties: [{string.Join(", ", arrayProperties)}]." +
+                                   " Specify a 'json_path' option to select one, or use catalog expansion (ExpandMultiTableSourcesAsync)" +
+                                   " to register each as a separate table.";
+                    }
+                    else
+                    {
+                        message += " The root object contains no array properties.";
+                    }
+                }
+                else
+                {
+                    message += " Specify a 'json_path' option to navigate to an array property.";
+                }
+
+                throw new InvalidOperationException(message);
             }
             return root;
         }
