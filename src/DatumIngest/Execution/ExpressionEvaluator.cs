@@ -25,6 +25,12 @@ public sealed class ExpressionEvaluator
     private readonly Dictionary<string, Regex> _likeRegexCache = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Cached resolved DataKind for each CASE expression, computed once on first evaluation.
+    /// Used to coerce branch results to a consistent type for downstream consumers.
+    /// </summary>
+    private readonly Dictionary<CaseExpression, DataKind?> _caseResolvedKindCache = new();
+
+    /// <summary>
     /// Creates an evaluator that can resolve function calls.
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
@@ -416,12 +422,42 @@ public sealed class ExpressionEvaluator
     }
 
     /// <summary>
-    /// Evaluates a CASE expression with short-circuit semantics.
+    /// Evaluates a CASE expression with short-circuit semantics and implicit
+    /// branch type coercion. On first evaluation, resolves the common output type
+    /// across all branches; subsequent evaluations reuse the cached result.
     /// Simple CASE compares the operand against each WHEN value for equality.
     /// Searched CASE evaluates each WHEN condition as a boolean predicate.
     /// Only the matching THEN branch is evaluated.
     /// </summary>
     private DataValue EvaluateCase(CaseExpression caseExpression, Row row)
+    {
+        DataValue result = EvaluateCaseBranch(caseExpression, row);
+
+        // Resolve target kind once per CaseExpression and coerce the result.
+        if (!_caseResolvedKindCache.TryGetValue(caseExpression, out DataKind? resolvedKind))
+        {
+            resolvedKind = ResolveCaseTargetKind(caseExpression, row);
+            _caseResolvedKindCache[caseExpression] = resolvedKind;
+        }
+
+        if (resolvedKind is not null && !result.IsNull && result.Kind != resolvedKind.Value)
+        {
+            return TypeCoercion.CoerceValue(result, resolvedKind.Value);
+        }
+
+        // Ensure typed nulls match the resolved kind so output writers see consistent types.
+        if (resolvedKind is not null && result.IsNull && result.Kind != resolvedKind.Value)
+        {
+            return DataValue.Null(resolvedKind.Value);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Evaluates the matching CASE branch without coercion — pure short-circuit logic.
+    /// </summary>
+    private DataValue EvaluateCaseBranch(CaseExpression caseExpression, Row row)
     {
         if (caseExpression.Operand is not null)
         {
@@ -456,6 +492,104 @@ public sealed class ExpressionEvaluator
         }
 
         return DataValue.Null(DataKind.Scalar);
+    }
+
+    /// <summary>
+    /// Resolves the target DataKind for a CASE expression by building a schema from
+    /// the current row and delegating to <see cref="ExpressionTypeResolver"/>.
+    /// Falls back to AST-level inference when a row-derived schema cannot be built.
+    /// </summary>
+    private DataKind? ResolveCaseTargetKind(CaseExpression caseExpression, Row row)
+    {
+        // Build a schema from the row so column references resolve to their actual types.
+        if (row.FieldCount > 0)
+        {
+            ColumnInfo[] columns = new ColumnInfo[row.FieldCount];
+            HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+            bool hasDuplicates = false;
+
+            for (int index = 0; index < row.FieldCount; index++)
+            {
+                string name = row.ColumnNames[index];
+                if (!seen.Add(name))
+                {
+                    hasDuplicates = true;
+                    break;
+                }
+
+                columns[index] = new ColumnInfo(name, row[index].Kind, row[index].IsNull);
+            }
+
+            if (!hasDuplicates)
+            {
+                Schema rowSchema = new(columns);
+                return ExpressionTypeResolver.ResolveType(caseExpression, rowSchema, _functions);
+            }
+        }
+
+        // Fallback: AST-level inference without schema (handles literal-only branches).
+        return InferCaseExpressionKind(caseExpression);
+    }
+
+    /// <summary>
+    /// Lightweight CASE type inference from the AST alone, without schema.
+    /// Handles the common scenario of literal-mixed branches.
+    /// Returns null when any branch type cannot be determined.
+    /// </summary>
+    private DataKind? InferCaseExpressionKind(CaseExpression caseExpression)
+    {
+        DataKind? commonKind = null;
+
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            DataKind? branchKind = InferLiteralExpressionKind(whenClause.Result);
+            if (branchKind is null)
+            {
+                return null;
+            }
+
+            commonKind = commonKind is null
+                ? branchKind
+                : ExpressionTypeResolver.UnifyCaseBranchKinds(commonKind.Value, branchKind.Value);
+
+            if (commonKind is null)
+            {
+                return null;
+            }
+        }
+
+        if (caseExpression.ElseResult is not null)
+        {
+            DataKind? elseKind = InferLiteralExpressionKind(caseExpression.ElseResult);
+            if (elseKind is not null && commonKind is not null)
+            {
+                commonKind = ExpressionTypeResolver.UnifyCaseBranchKinds(commonKind.Value, elseKind.Value);
+            }
+        }
+
+        return commonKind;
+    }
+
+    /// <summary>
+    /// Infers the DataKind of an expression from its AST structure alone.
+    /// Returns null for expressions that require schema context (column references).
+    /// </summary>
+    private static DataKind? InferLiteralExpressionKind(Expression expression)
+    {
+        return expression switch
+        {
+            LiteralExpression { Value: string } => DataKind.String,
+            LiteralExpression { Value: int or long or float or double } => DataKind.Scalar,
+            LiteralExpression { Value: bool } => DataKind.Boolean,
+            LiteralExpression { Value: null } => DataKind.Scalar,
+            CastExpression cast => ExpressionTypeResolver.ResolveCastTargetKind(cast.TargetType),
+            BinaryExpression => DataKind.Scalar,
+            UnaryExpression => DataKind.Scalar,
+            InExpression => DataKind.Scalar,
+            BetweenExpression => DataKind.Scalar,
+            IsNullExpression => DataKind.Scalar,
+            _ => null,
+        };
     }
 
     // ──────────────────── Arithmetic helpers ────────────────────

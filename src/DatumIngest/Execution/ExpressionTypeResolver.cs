@@ -154,24 +154,33 @@ public static class ExpressionTypeResolver
 
     private static DataKind? ResolveCast(CastExpression cast)
     {
+        return ResolveCastTargetKind(cast.TargetType);
+    }
+
+    /// <summary>
+    /// Resolves a CAST target type name to a DataKind. Accepts both enum names
+    /// and common aliases ("bool", "time", "duration").
+    /// </summary>
+    internal static DataKind? ResolveCastTargetKind(string targetType)
+    {
         // The target type is a string literal naming a DataKind member.
-        if (Enum.TryParse<DataKind>(cast.TargetType, ignoreCase: true, out DataKind targetKind))
+        if (Enum.TryParse<DataKind>(targetType, ignoreCase: true, out DataKind targetKind))
         {
             return targetKind;
         }
 
         // Accept common aliases that don't match enum names.
-        if (string.Equals(cast.TargetType, "bool", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(targetType, "bool", StringComparison.OrdinalIgnoreCase))
         {
             return DataKind.Boolean;
         }
 
-        if (string.Equals(cast.TargetType, "time", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(targetType, "time", StringComparison.OrdinalIgnoreCase))
         {
             return DataKind.Time;
         }
 
-        if (string.Equals(cast.TargetType, "duration", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(targetType, "duration", StringComparison.OrdinalIgnoreCase))
         {
             return DataKind.Duration;
         }
@@ -195,6 +204,9 @@ public static class ExpressionTypeResolver
     /// <summary>
     /// Resolves the output type of a CASE expression by finding the common type
     /// across all THEN branch results and the optional ELSE result.
+    /// When the standard widening chain cannot unify two branch types and one of
+    /// them is String, the non-String type wins (SQL Server-style precedence).
+    /// String values are implicitly parsed to the target type at evaluation time.
     /// </summary>
     private static DataKind? ResolveCaseExpression(CaseExpression caseExpression, Schema sourceSchema, FunctionRegistry functions)
     {
@@ -210,7 +222,7 @@ public static class ExpressionTypeResolver
 
             commonKind = commonKind is null
                 ? branchKind
-                : TypeCoercion.FindCommonKind(commonKind.Value, branchKind.Value);
+                : UnifyCaseBranchKinds(commonKind.Value, branchKind.Value);
 
             if (commonKind is null)
             {
@@ -223,10 +235,37 @@ public static class ExpressionTypeResolver
             DataKind? elseKind = ResolveType(caseExpression.ElseResult, sourceSchema, functions);
             if (elseKind is not null && commonKind is not null)
             {
-                commonKind = TypeCoercion.FindCommonKind(commonKind.Value, elseKind.Value);
+                commonKind = UnifyCaseBranchKinds(commonKind.Value, elseKind.Value);
             }
         }
 
         return commonKind;
+    }
+
+    /// <summary>
+    /// Unifies two CASE branch kinds. Tries the standard widening chain first;
+    /// when that fails and one kind is String, applies SQL Server-style precedence
+    /// by preferring the non-String kind (String values are parsed at runtime).
+    /// </summary>
+    internal static DataKind? UnifyCaseBranchKinds(DataKind kindA, DataKind kindB)
+    {
+        DataKind? common = TypeCoercion.FindCommonKind(kindA, kindB);
+        if (common is not null)
+        {
+            return common;
+        }
+
+        // String + coercible type: prefer the non-String kind.
+        if (kindA == DataKind.String && TypeCoercion.CanCoerceStringTo(kindB))
+        {
+            return kindB;
+        }
+
+        if (kindB == DataKind.String && TypeCoercion.CanCoerceStringTo(kindA))
+        {
+            return kindA;
+        }
+
+        return null;
     }
 }

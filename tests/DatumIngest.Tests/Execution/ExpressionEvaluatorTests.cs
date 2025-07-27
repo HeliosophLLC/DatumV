@@ -897,4 +897,93 @@ public class ExpressionEvaluatorTests
             MakeRow());
         Assert.Equal("first", result.AsString());
     }
+
+    // ─────────────── CASE mixed-type coercion ───────────────
+
+    [Fact]
+    public void Case_MixedStringAndScalar_CoercesStringToScalar()
+    {
+        // CASE WHEN true THEN '42' ELSE 1 END → '42' is coerced to 42f
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression("42"))],
+                new LiteralExpression(1)),
+            MakeRow());
+        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(42f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Case_MixedStringAndScalar_ElseBranchPreservesScalar()
+    {
+        // CASE WHEN false THEN '0' ELSE 1 END → 1 stays Scalar
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(false), new LiteralExpression("0"))],
+                new LiteralExpression(1)),
+            MakeRow());
+        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Case_MixedStringAndScalar_UnparseableReturnsNull()
+    {
+        // CASE WHEN true THEN 'abc' ELSE 1 END → 'abc' can't parse as Scalar → null
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression("abc"))],
+                new LiteralExpression(1)),
+            MakeRow());
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Scalar, result.Kind);
+    }
+
+    [Fact]
+    public void Case_MixedBooleanAndScalar_CoercesBooleanToScalar()
+    {
+        // CASE WHEN true THEN false ELSE 1 END → false is widened to 0f
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression(false))],
+                new LiteralExpression(1)),
+            MakeRow());
+        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(0f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Case_NullResult_AdoptsResolvedKind()
+    {
+        // CASE WHEN false THEN '0' END → no match, no ELSE → null with Scalar kind
+        Row row = MakeRow(("x", DataValue.FromScalar(5)));
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [
+                    new WhenClause(new LiteralExpression(false), new LiteralExpression("0")),
+                    new WhenClause(new LiteralExpression(false), new LiteralExpression(1)),
+                ],
+                null),
+            row);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Scalar, result.Kind);
+    }
+
+    [Fact]
+    public void Case_AllSameType_NoCoercionNeeded()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression("yes"))],
+                new LiteralExpression("no")),
+            MakeRow());
+        Assert.Equal(DataKind.String, result.Kind);
+        Assert.Equal("yes", result.AsString());
+    }
 }

@@ -127,4 +127,98 @@ public class TypeCoercionTests
         Assert.Equal(DataKind.Vector, vector.Kind);
         Assert.Equal([128.0f], vector.AsVector());
     }
+
+    // ─────────────── CoerceValue ───────────────
+
+    [Fact]
+    public void CoerceValue_SameKind_ReturnsSameValue()
+    {
+        DataValue value = DataValue.FromScalar(42f);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        Assert.Equal(42f, result.AsScalar());
+    }
+
+    [Fact]
+    public void CoerceValue_Null_ReturnsTypedNull()
+    {
+        DataValue value = DataValue.Null(DataKind.String);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Scalar, result.Kind);
+    }
+
+    [Fact]
+    public void CoerceValue_WideningChain_BooleanToScalar()
+    {
+        DataValue value = DataValue.FromBoolean(true);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void CoerceValue_StringToScalar_ParsesNumber()
+    {
+        DataValue value = DataValue.FromString("3.14");
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(3.14f, result.AsScalar(), 0.001f);
+    }
+
+    [Fact]
+    public void CoerceValue_StringToScalar_UnparseableReturnsNull()
+    {
+        DataValue value = DataValue.FromString("abc");
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Scalar, result.Kind);
+    }
+
+    [Fact]
+    public void CoerceValue_StringToBoolean_ParsesTrue()
+    {
+        DataValue value = DataValue.FromString("true");
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Boolean);
+        Assert.Equal(DataKind.Boolean, result.Kind);
+        Assert.True(result.AsBoolean());
+    }
+
+    [Fact]
+    public void CoerceValue_StringToBoolean_ParsesOne()
+    {
+        DataValue value = DataValue.FromString("1");
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Boolean);
+        Assert.True(result.AsBoolean());
+    }
+
+    [Fact]
+    public void CoerceValue_StringToBoolean_InvalidReturnsNull()
+    {
+        DataValue value = DataValue.FromString("maybe");
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Boolean);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void CoerceValue_IncompatibleKinds_ReturnsNull()
+    {
+        DataValue value = DataValue.FromScalar(42f);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Date);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Date, result.Kind);
+    }
+
+    // ─────────────── CanCoerceStringTo ───────────────
+
+    [Theory]
+    [InlineData(DataKind.Scalar, true)]
+    [InlineData(DataKind.Boolean, true)]
+    [InlineData(DataKind.Date, true)]
+    [InlineData(DataKind.Vector, false)]
+    [InlineData(DataKind.Image, false)]
+    [InlineData(DataKind.Tensor, false)]
+    public void CanCoerceStringTo_ReturnsExpected(DataKind kind, bool expected)
+    {
+        Assert.Equal(expected, TypeCoercion.CanCoerceStringTo(kind));
+    }
 }

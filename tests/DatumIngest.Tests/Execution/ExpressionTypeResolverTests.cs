@@ -304,4 +304,62 @@ public sealed class ExpressionTypeResolverTests
 
         Assert.Equal(DataKind.String, result);
     }
+
+    // ───────────────────── CASE branch coercion ─────────────────────
+
+    [Fact]
+    public void ResolveCase_MixedStringAndScalar_ResolvesToScalar()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression("0"))],
+                new LiteralExpression(1)),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Scalar, result);
+    }
+
+    [Fact]
+    public void ResolveCase_MixedStringAndBoolean_ResolvesToBoolean()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression("true"))],
+                new LiteralExpression(false)),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Boolean, result);
+    }
+
+    [Fact]
+    public void ResolveCase_StringAndColumnScalar_ResolvesToScalar()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new ColumnReference("id"))],
+                new LiteralExpression("fallback")),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Scalar, result);
+    }
+
+    [Fact]
+    public void ResolveCase_IncompatibleNonStringTypes_ReturnsNull()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new ColumnReference("created"))],
+                new ColumnReference("id")),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Null(result);
+    }
 }

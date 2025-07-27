@@ -269,6 +269,39 @@ FROM users
 - CASE expressions can be nested.
 - For simple single-condition cases, the `iif()` function provides a more concise alternative.
 
+### Branch Type Coercion
+
+When THEN/ELSE branches return different data types, DatumIngest applies
+implicit type coercion following SQL Server–style type precedence rules:
+
+1. **Common type wins.** If all branches share a common type through the
+   standard widening chain (e.g. `UInt8 → Scalar`, `Boolean → Scalar`), that
+   common type is used.
+2. **Non-String type wins over String.** When some branches return `String` and
+   others return a numeric, boolean, or temporal type, the non-String type is
+   chosen as the result type. String values are parsed to the target type at
+   runtime.
+3. **Unparseable strings become NULL.** If a String branch value cannot be
+   parsed to the target type at runtime, the result is NULL rather than an
+   error. This is an ETL-friendly behavior — data flows through without
+   interruption, and downstream consumers can detect NULLs as conversion
+   failures.
+
+```sql
+-- The result type is Scalar, not String.
+-- The string '0' is parsed to the number 0 at runtime.
+SELECT CASE WHEN x > 0 THEN '0' ELSE 1 END AS value
+FROM data
+
+-- If 'not_a_number' cannot be parsed, the result is NULL.
+SELECT CASE WHEN x > 0 THEN 'not_a_number' ELSE 1 END AS value
+FROM data
+```
+
+Coercible String targets include: `Scalar`, `UInt8`, `Boolean`, `Date`,
+`DateTime`, `Time`, `Duration`, `Uuid`, and `JsonValue`. Types like `Vector`,
+`Matrix`, `Tensor`, `Image`, and `UInt8Array` cannot be coerced from String.
+
 ## Subqueries
 
 ```sql
