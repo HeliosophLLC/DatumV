@@ -100,6 +100,7 @@ public sealed class CommandDispatcher
             ".explain" => await HandleExplainAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".sessions" => HandleListSessions(session),
             ".kill" => HandleKillQuery(session, argument),
+            ".cancel" => HandleCancelQuery(session),
             ".join-suggestions" => HandleJoinSuggestions(session),
             _ => CommandResult.Error($"Unknown command: {command}. Type .help for available commands."),
         };
@@ -220,6 +221,7 @@ public sealed class CommandDispatcher
             .explain <sql>                 Show the query execution plan
             .sessions                      List all active sessions (admin only)
             .kill <session_id>             Cancel a query on another session (admin only)
+            .cancel                        Cancel the active query on this session
             .join-suggestions              Show cross-manifest join suggestions
             
             Any other input is executed as a SQL query.
@@ -415,6 +417,17 @@ public sealed class CommandDispatcher
 
         target.CancelAndReset();
         return CommandResult.Success($"Cancelled active query on session '{targetId}'.");
+    }
+
+    private static CommandResult HandleCancelQuery(Session session)
+    {
+        if (!session.IsAuthorized(ServerOperation.CancelQuery))
+        {
+            return CommandResult.Error("Permission denied: you are not authorized to cancel queries.");
+        }
+
+        session.CancelAndReset();
+        return CommandResult.Success("Active query cancelled.");
     }
 
     /// <summary>

@@ -367,6 +367,18 @@ Cancels a running query on another session. The target session's cancellation to
 
 **Errors:** `InvalidArgument` if the target session is not found or the GUID is malformed.
 
+#### CancelQuery
+
+Cancels the active query on the caller's own session. Unlike `KillQuery`, this does not require admin privileges — any session can cancel its own query. The session's cancellation token fires, stopping the execution pipeline immediately. The session remains open and can run new queries.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID of the caller. |
+
+**Returns:** `message` — confirmation text (e.g. `"Active query cancelled."`). The session is immediately ready for a new query.
+
+**Errors:** `NotFound` if the session ID is not found.
+
 #### GetUsage
 
 Returns accumulated usage metrics for a session. Unlike `ListSessions`, this does not require admin privileges — any session can query its own usage.
@@ -478,6 +490,13 @@ await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
         break; // Exiting the loop disposes the stream, cancelling the server call.
     }
 }
+```
+
+To cancel the active query on your own session from a separate call
+(e.g. a UI "Cancel" button or a concurrent task):
+
+```csharp
+string message = await connection.CancelActiveQueryAsync(sessionId);
 ```
 
 To cancel another session's query (requires admin):
@@ -640,7 +659,7 @@ CreateSessionResponse session = await connection.Client.CreateSessionAsync(
 | `PermissionDenied` | User-role session attempting admin operation |
 | `ResourceExhausted` | Row budget or Query Unit budget exceeded during query streaming |
 | `DeadlineExceeded` | Query deadline fired during execution |
-| `Cancelled` | Query cancelled by KillQuery or session cancellation |
+| `Cancelled` | Query cancelled by CancelQuery, KillQuery, or session cancellation |
 | `Internal` | Unexpected server error |
 
 ## Message Size Limits

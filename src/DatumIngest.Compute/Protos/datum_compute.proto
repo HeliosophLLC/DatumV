@@ -41,6 +41,9 @@ service DatumCompute {
   // Cancels a running query on another session (admin only).
   rpc KillQuery (KillQueryRequest) returns (KillQueryResponse);
 
+  // Cancels the active query on the caller's own session.
+  rpc CancelQuery (CancelQueryRequest) returns (CancelQueryResponse);
+
   // Returns accumulated usage metrics for a session.
   rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
 
@@ -309,6 +312,14 @@ message KillQueryRequest {
 }
 
 message KillQueryResponse {
+  string message = 1;
+}
+
+message CancelQueryRequest {
+  string session_id = 1;
+}
+
+message CancelQueryResponse {
   string message = 1;
 }
 

@@ -430,6 +430,23 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     }
 
     /// <inheritdoc />
+    public override async Task<CancelQueryResponse> CancelQuery(
+        CancelQueryRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+
+        CommandResult result = await _dispatcher.DispatchAsync(
+            session, ".cancel", LinkedToken(context, session)).ConfigureAwait(false);
+
+        if (!result.IsSuccess)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Cancel failed."));
+        }
+
+        return new CancelQueryResponse { Message = result.Message ?? "Active query cancelled." };
+    }
+
+    /// <inheritdoc />
     public override Task<GetUsageResponse> GetUsage(
         GetUsageRequest request, ServerCallContext context)
     {

@@ -36,6 +36,9 @@ public enum ServerOperation
     /// <summary>Cancel a running query on another session.</summary>
     KillQuery,
 
+    /// <summary>Cancel the active query on the caller's own session.</summary>
+    CancelQuery,
+
     /// <summary>Shut down the server process.</summary>
     Shutdown,
 }

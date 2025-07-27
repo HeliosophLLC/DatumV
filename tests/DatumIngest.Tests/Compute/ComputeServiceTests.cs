@@ -443,6 +443,99 @@ public sealed class ComputeServiceTests : IDisposable
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
     }
 
+    // ─────────────────── CancelQuery (self-cancel) ───────────────────
+
+    /// <summary>
+    /// CancelQuery cancels the caller's own active query and resets
+    /// the session for subsequent commands.
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_ActiveSession_CancelsAndResets()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        CancellationToken originalToken = session.CancellationToken;
+
+        CancelQueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
+
+        Assert.True(originalToken.IsCancellationRequested);
+        Assert.NotNull(response.Message);
+
+        // Session is reusable — new token is not cancelled.
+        Assert.False(session.CancellationToken.IsCancellationRequested);
+    }
+
+    /// <summary>
+    /// CancelQuery is idempotent — calling it when no query is active
+    /// succeeds without error.
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_NoActiveQuery_Succeeds()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+
+        CancelQueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
+
+        Assert.NotNull(response.Message);
+    }
+
+    /// <summary>
+    /// CancelQuery with an invalid session ID throws NotFound.
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_InvalidSession_ThrowsNotFound()
+    {
+        CancelQueryRequest request = new()
+        {
+            SessionId = Guid.NewGuid().ToString(),
+        };
+
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.CancelQuery(request, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.NotFound, exception.StatusCode);
+    }
+
+    /// <summary>
+    /// CancelQuery stops a streaming query in progress, producing a
+    /// <see cref="StatusCode.Cancelled"/> gRPC status on the query stream.
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_DuringStreaming_StopsStream()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, catalog);
+
+        QueryRequest queryRequest = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        // Writer that cancels the session after the first row is written,
+        // simulating a concurrent CancelQuery call.
+        CancellingStreamWriter<QueryRow> writer = new(session, cancelAfterRow: 1);
+
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.Query(queryRequest, writer, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.Cancelled, exception.StatusCode);
+        Assert.Contains("cancelled", exception.Status.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.True(writer.Messages.Count >= 1);
+    }
+
     // ─────────────────── Query Cancellation ───────────────────
 
     /// <summary>

@@ -356,6 +356,7 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green].explain <sql>[/]       Show query execution plan");
         AnsiConsole.MarkupLine("  [green].sessions[/]            List active sessions (admin)");
         AnsiConsole.MarkupLine("  [green].kill <session_id>[/]   Cancel a running query (admin)");
+        AnsiConsole.MarkupLine("  [green].cancel[/]              Cancel the active query on this session");
         AnsiConsole.MarkupLine("  [green].timer[/]               Toggle query timing display");
         AnsiConsole.MarkupLine("  [green].export <path>[/]       Export next query to file");
         AnsiConsole.MarkupLine("  [green].help[/]                Show this help");

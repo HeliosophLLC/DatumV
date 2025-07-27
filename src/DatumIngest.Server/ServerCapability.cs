@@ -12,6 +12,7 @@ public static class ServerCapability
         ServerOperation.Schema,
         ServerOperation.Explain,
         ServerOperation.Stats,
+        ServerOperation.CancelQuery,
     };
 
     /// <summary>
