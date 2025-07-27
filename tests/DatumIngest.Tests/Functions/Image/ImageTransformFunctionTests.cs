@@ -257,6 +257,13 @@ public sealed class ImageTransformFunctionTests
     }
 
     [Fact]
+    public void Noise_Validate_TwoArgs()
+    {
+        Assert.Equal(DataKind.Image,
+            _noise.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+    }
+
+    [Fact]
     public void Noise_Validate_WithFormat()
     {
         Assert.Equal(DataKind.Image,
@@ -317,6 +324,23 @@ public sealed class ImageTransformFunctionTests
             DataValue.FromScalar(10)
         ]);
         Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Noise_TwoArgs_DefaultsToGaussian()
+    {
+        byte[] png = MakeTestPng(10, 10);
+
+        DataValue result = _noise.Execute([
+            DataValue.FromImage(png),
+            DataValue.FromScalar(10)
+        ]);
+
+        Assert.Equal(DataKind.Image, result.Kind);
+        Assert.False(result.IsNull);
+        (int width, int height) = DecodeDimensions(result);
+        Assert.Equal(10, width);
+        Assert.Equal(10, height);
     }
 
     // ───────────────── BlurImageFunction ─────────────────

@@ -6,7 +6,8 @@ using SkiaSharp;
 
 /// <summary>
 /// Adds noise to an image. Supports Gaussian and salt-and-pepper noise models.
-/// <c>noise(img, type, val)</c> or <c>noise(img, type, val, format)</c>.
+/// <c>noise(img, val)</c>, <c>noise(img, type, val)</c>, or <c>noise(img, type, val, format)</c>.
+/// The two-argument form defaults to Gaussian noise.
 /// Type <c>'gaussian'</c>: additive Gaussian noise where <c>val</c> is standard deviation (0–255 scale).
 /// Type <c>'salt_pepper'</c>: randomly sets <c>val</c> ratio of pixels to black or white.
 /// The optional format argument controls output encoding (<c>'jpeg'</c>, <c>'png'</c>, <c>'webp'</c>).
@@ -22,16 +23,22 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length is not (3 or 4))
+        if (argumentKinds.Length is not (2 or 3 or 4))
         {
             throw new ArgumentException(
-                "noise() requires 3 or 4 arguments: image, type, val[, format].");
+                "noise() requires 2–4 arguments: image, val or image, type, val[, format].");
         }
 
         if (argumentKinds[0] is not (DataKind.Image or DataKind.UInt8Array))
         {
             throw new ArgumentException(
                 $"noise() first argument must be Image or UInt8Array, got {argumentKinds[0]}.");
+        }
+
+        // Two-argument form: noise(image, value) — defaults to gaussian.
+        if (argumentKinds.Length == 2)
+        {
+            return DataKind.Image;
         }
 
         if (argumentKinds[1] != DataKind.String)
@@ -60,10 +67,24 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        string noiseType = arguments[1].AsString().ToUpperInvariant();
-        float value = arguments[2].AsScalar();
 
-        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
+        // Two-argument form: noise(image, value) — defaults to gaussian.
+        string noiseType;
+        float value;
+        string? formatOverride;
+
+        if (arguments.Length == 2)
+        {
+            noiseType = "GAUSSIAN";
+            value = arguments[1].AsScalar();
+            formatOverride = null;
+        }
+        else
+        {
+            noiseType = arguments[1].AsString().ToUpperInvariant();
+            value = arguments[2].AsScalar();
+            formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
+        }
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
 
         SKBitmap original = inputHandle.GetBitmap("noise");
