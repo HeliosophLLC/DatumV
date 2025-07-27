@@ -3,6 +3,8 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Compute.Grpc;
 using DatumIngest.Compute.Services;
 using DatumIngest.Functions;
+using DatumIngest.Manifest;
+using DatumIngest.Model;
 using DatumIngest.Server;
 using Grpc.Core;
 
@@ -767,6 +769,141 @@ public sealed class ComputeServiceTests : IDisposable
         await _service.Query(request, writer, TestCallContext.Create());
 
         Assert.True(writer.Messages.Count > 0);
+    }
+
+    // ─────────────────── GetJoinSuggestions ───────────────────
+
+    /// <summary>
+    /// GetJoinSuggestions with fewer than two manifests returns an empty response
+    /// instead of throwing.
+    /// </summary>
+    [Fact]
+    public async Task GetJoinSuggestions_NoManifests_ReturnsEmptyResponse()
+    {
+        TableCatalog catalog = new();
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        GetJoinSuggestionsRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        GetJoinSuggestionsResponse response = await _service.GetJoinSuggestions(
+            request, TestCallContext.Create());
+
+        Assert.Empty(response.ResultJson);
+    }
+
+    /// <summary>
+    /// GetJoinSuggestions with a single manifest returns an empty response
+    /// instead of throwing.
+    /// </summary>
+    [Fact]
+    public async Task GetJoinSuggestions_SingleManifest_ReturnsEmptyResponse()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterManifest("orders", new QueryResultsManifest
+        {
+            RowCount = 100,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Features = [],
+        });
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        GetJoinSuggestionsRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        GetJoinSuggestionsResponse response = await _service.GetJoinSuggestions(
+            request, TestCallContext.Create());
+
+        Assert.Empty(response.ResultJson);
+    }
+
+    /// <summary>
+    /// GetJoinSuggestions with two manifests returns a non-empty JSON result.
+    /// </summary>
+    [Fact]
+    public async Task GetJoinSuggestions_TwoManifests_ReturnsResult()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterManifest("orders", new QueryResultsManifest
+        {
+            RowCount = 1000,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Features =
+            [
+                new NumericFeatureManifest
+                {
+                    Name = "customer_id",
+                    Kind = DataKind.Scalar,
+                    Count = 1000,
+                    NullCount = 0,
+                    ValidCount = 1000,
+                    NullRatio = 0.0,
+                    EstimatedDistinctCount = 900,
+                    TopKValues = [new FrequencyEntry("1", 10), new FrequencyEntry("2", 10)],
+                    Min = 1.0,
+                    Max = 1000.0,
+                    Mean = 500.0,
+                    Variance = 25.0,
+                    StandardDeviation = 5.0,
+                    Skewness = 0.0,
+                    Kurtosis = 3.0,
+                    Histogram = new HistogramData([], []),
+                    ZeroCount = 0,
+                    ZeroRatio = 0.0,
+                    OutlierCount = 0,
+                    OutlierRatio = 0.0,
+                    IntegerValued = true,
+                },
+            ],
+        });
+        catalog.RegisterManifest("customers", new QueryResultsManifest
+        {
+            RowCount = 1000,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Features =
+            [
+                new NumericFeatureManifest
+                {
+                    Name = "customer_id",
+                    Kind = DataKind.Scalar,
+                    Count = 1000,
+                    NullCount = 0,
+                    ValidCount = 1000,
+                    NullRatio = 0.0,
+                    EstimatedDistinctCount = 1000,
+                    TopKValues = [new FrequencyEntry("1", 1), new FrequencyEntry("2", 1)],
+                    Min = 1.0,
+                    Max = 1000.0,
+                    Mean = 500.0,
+                    Variance = 25.0,
+                    StandardDeviation = 5.0,
+                    Skewness = 0.0,
+                    Kurtosis = 3.0,
+                    Histogram = new HistogramData([], []),
+                    ZeroCount = 0,
+                    ZeroRatio = 0.0,
+                    OutlierCount = 0,
+                    OutlierRatio = 0.0,
+                    IntegerValued = true,
+                },
+            ],
+        });
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        GetJoinSuggestionsRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        GetJoinSuggestionsResponse response = await _service.GetJoinSuggestions(
+            request, TestCallContext.Create());
+
+        Assert.NotEmpty(response.ResultJson);
+        Assert.Contains("customer_id", response.ResultJson);
     }
 
     /// <inheritdoc/>

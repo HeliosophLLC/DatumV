@@ -497,9 +497,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         if (!session.Catalog.HasJoinSuggestions)
         {
-            throw new RpcException(new Status(
-                StatusCode.FailedPrecondition,
-                "At least two tables with manifests are required for join suggestions."));
+            return Task.FromResult(new GetJoinSuggestionsResponse());
         }
 
         Manifest.CrossManifest.CrossManifestResult? result =
@@ -507,9 +505,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         if (result is null)
         {
-            throw new RpcException(new Status(
-                StatusCode.Internal,
-                "Could not compute cross-manifest analysis."));
+            return Task.FromResult(new GetJoinSuggestionsResponse());
         }
 
         string resultJson = ManifestSerializer.SerializeCrossManifest(result);
