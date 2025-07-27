@@ -444,6 +444,110 @@ public sealed class SourceIndexBuilderTests
         Assert.True(index.SortedIndexes.HasColumn("id"));
     }
 
+    // ───────────── BuildSetAsync ─────────────
+
+    [Fact]
+    public async Task BuildSetAsync_SingleTable_ProducesCorrectIndexSet()
+    {
+        Row[] rows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1.0f))),
+            MakeRow(("id", DataValue.FromScalar(2.0f))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("orders");
+        SourceIndexBuilder builder = new(chunkSize: 100);
+
+        SourceIndexSet indexSet = await builder.BuildSetAsync(
+            [(descriptor, provider)], sourceStream: null, CancellationToken.None);
+
+        Assert.Single(indexSet.Tables);
+        Assert.True(indexSet.Tables.ContainsKey("orders"));
+        Assert.Equal(2, indexSet.Tables["orders"].Schema.TotalRowCount);
+    }
+
+    [Fact]
+    public async Task BuildSetAsync_MultipleTables_ProducesAllEntries()
+    {
+        Row[] ordersRows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1.0f)), ("total", DataValue.FromScalar(99.0f))),
+            MakeRow(("id", DataValue.FromScalar(2.0f)), ("total", DataValue.FromScalar(42.0f))),
+        ];
+
+        Row[] itemsRows =
+        [
+            MakeRow(("orderId", DataValue.FromScalar(1.0f)), ("product", DataValue.FromString("widget"))),
+        ];
+
+        InMemoryTableProvider ordersProvider = new(ordersRows);
+        InMemoryTableProvider itemsProvider = new(itemsRows);
+        TableDescriptor ordersDescriptor = CreateDescriptor("orders");
+        TableDescriptor itemsDescriptor = CreateDescriptor("orders.items");
+        SourceIndexBuilder builder = new(chunkSize: 100);
+
+        SourceIndexSet indexSet = await builder.BuildSetAsync(
+            [(ordersDescriptor, ordersProvider), (itemsDescriptor, itemsProvider)],
+            sourceStream: null, CancellationToken.None);
+
+        Assert.Equal(2, indexSet.Tables.Count);
+        Assert.True(indexSet.Tables.ContainsKey("orders"));
+        Assert.True(indexSet.Tables.ContainsKey("orders.items"));
+        Assert.Equal(2, indexSet.Tables["orders"].Schema.TotalRowCount);
+        Assert.Equal(1, indexSet.Tables["orders.items"].Schema.TotalRowCount);
+    }
+
+    [Fact]
+    public async Task BuildSetAsync_SharesFingerprint_AcrossAllTables()
+    {
+        Row[] rows = [MakeRow(("x", DataValue.FromScalar(1.0f)))];
+        InMemoryTableProvider provider1 = new(rows);
+        InMemoryTableProvider provider2 = new(rows);
+        SourceIndexBuilder builder = new(chunkSize: 100);
+
+        SourceFingerprint fingerprint = new(123, new byte[] { 1, 2, 3 });
+        SourceIndexSet indexSet = await builder.BuildSetAsync(
+            [(CreateDescriptor("a"), provider1), (CreateDescriptor("b"), provider2)],
+            sourceStream: null, fingerprint, CancellationToken.None);
+
+        Assert.Equal(fingerprint, indexSet.Fingerprint);
+        Assert.Equal(fingerprint, indexSet.Tables["a"].Fingerprint);
+        Assert.Equal(fingerprint, indexSet.Tables["b"].Fingerprint);
+    }
+
+    [Fact]
+    public async Task BuildSetAsync_RoundTrips_ThroughWriterReader()
+    {
+        Row[] rows =
+        [
+            MakeRow(("value", DataValue.FromScalar(1.0f))),
+            MakeRow(("value", DataValue.FromScalar(2.0f))),
+        ];
+
+        InMemoryTableProvider provider1 = new(rows);
+        InMemoryTableProvider provider2 = new(rows);
+        SourceIndexBuilder builder = new(chunkSize: 100);
+
+        SourceIndexSet original = await builder.BuildSetAsync(
+            [(CreateDescriptor("alpha"), provider1), (CreateDescriptor("beta"), provider2)],
+            sourceStream: null, CancellationToken.None);
+
+        using MemoryStream stream = new();
+        IndexWriter writer = new();
+        writer.Write(original, stream);
+
+        stream.Position = 0;
+        IndexReader reader = new();
+        SourceIndexSet restored = reader.Read(stream);
+
+        Assert.Equal(original.Tables.Count, restored.Tables.Count);
+        Assert.True(restored.Tables.ContainsKey("alpha"));
+        Assert.True(restored.Tables.ContainsKey("beta"));
+        Assert.Equal(2, restored.Tables["alpha"].Schema.TotalRowCount);
+        Assert.Equal(2, restored.Tables["beta"].Schema.TotalRowCount);
+    }
+
     // ───────────── Helpers ─────────────
 
     private static TableDescriptor CreateDescriptor(string name)

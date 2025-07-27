@@ -272,10 +272,13 @@ SourceIndexBuilder builder = new(
 SourceIndex index = await builder.BuildAsync(
     descriptor, provider, sourceStream, CancellationToken.None);
 
+// Wrap in a SourceIndexSet container (keyed by table name)
+SourceIndexSet indexSet = SourceIndexSet.Create("data", index);
+
 // Write to disk
 using FileStream output = File.Create("data.csv.datum-index");
 IndexWriter writer = new();
-writer.Write(index, output);
+writer.Write(indexSet, output);
 ```
 
 ### Co-generate during output writing
@@ -301,11 +304,30 @@ SourceIndex index = incremental.Finalize();
 ```csharp
 using FileStream stream = File.OpenRead("data.csv.datum-index");
 IndexReader reader = new();
-SourceIndex index = reader.Read(stream);
+SourceIndexSet indexSet = reader.Read(stream);
 
-// Register with the catalog for automatic pruning
-catalog.RegisterIndex("data", index);
+// Register individual table indexes with the catalog
+foreach (KeyValuePair<string, SourceIndex> entry in indexSet.Tables)
+{
+    catalog.RegisterIndex(entry.Key, entry.Value);
+}
 ```
+
+### Sidecar auto-discovery
+
+Instead of manually reading and registering indexes, call `catalog.DiscoverSidecars()` after table registration to auto-discover `.datum-index` (and `.datum-manifest` and `.datum-schema`) sidecar files:
+
+```csharp
+TableCatalog catalog = new();
+catalog.Register("data", "./data.csv");
+catalog.DiscoverSidecars();
+
+// The query planner automatically applies chunk pruning when an index
+// is registered for a table name.
+IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+```
+
+See [Programmatic API — Sidecar Auto-Discovery](api.md#sidecar-auto-discovery) for details.
 
 ### Register for query-time pruning
 

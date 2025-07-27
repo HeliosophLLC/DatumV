@@ -69,13 +69,15 @@ Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:
 DatumIngest/
   src/
     DatumIngest/             # Core library
-      Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo
+      Model/                      # DataKind, DataValue, Row, Schema, ColumnInfo, SourceSchema
       Parsing/                    # SQL tokenizer and parser (Superpower)
       Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet)
       Execution/                  # Query planner, operators, expression evaluator
       Functions/                  # Scalar and table-valued functions
       Indexing/                   # Source indexes, bloom filters, sorted indexes, binary I/O
+      Manifest/                   # Manifest model, serialization, cross-manifest analysis
       Statistics/                 # Column statistics with pluggable accumulators
+      Analysis/                   # SourceAnalyzer: single-pass co-generation of schema, index, manifest
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding
     DatumIngest.Parsing/     # Extracted tokenizer/parser (shared by core and language server)
     DatumIngest.Server/      # Session engine: SessionManager, CommandDispatcher, IDatasetStore
@@ -85,7 +87,7 @@ DatumIngest/
     DatumIngest.Wasm/        # Blazor WebAssembly host with JSInvokable interop
     DatumIngest.Cli/         # CLI tool (query, explore, stats, schema, index commands)
   tests/
-    DatumIngest.Tests/       # 2,300+ unit tests
+    DatumIngest.Tests/       # 3,200+ unit tests
   benchmarks/
     DatumIngest.Benchmarks/  # BenchmarkDotNet performance tests
 ```

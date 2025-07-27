@@ -168,7 +168,7 @@ Creates a new session on the compute backend.
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
-When `dataset_id` is provided, the backend pulls the dataset to local storage and auto-discovers all supported files (CSV, JSON, JSONL, Parquet, HDF5, ZIP, IDX) in the resulting directory. Each file becomes a table named after its filename without extension. Sidecar `.datum-index` and `.datum-manifest` files are also discovered automatically, enabling chunk pruning and manifest-driven cardinality estimation for all sessions created from the dataset. If no `IDatasetStore` is registered, passing a non-empty `dataset_id` returns `FailedPrecondition`.
+When `dataset_id` is provided, the backend pulls the dataset to local storage and auto-discovers all supported files (CSV, JSON, JSONL, Parquet, HDF5, ZIP, IDX) in the resulting directory. Each file becomes a table named after its filename without extension. Sidecar `.datum-index`, `.datum-manifest`, and `.datum-schema` files are also discovered automatically via `catalog.DiscoverSidecars()`, enabling chunk pruning, manifest-driven cardinality estimation, and cached schema resolution for all sessions created from the dataset. If no `IDatasetStore` is registered, passing a non-empty `dataset_id` returns `FailedPrecondition`.
 
 **Roles:**
 - **User** — can run queries, inspect schemas, list tables/providers/functions, and view explain plans.

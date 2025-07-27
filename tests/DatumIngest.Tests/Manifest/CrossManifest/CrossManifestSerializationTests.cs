@@ -214,7 +214,7 @@ public sealed class CrossManifestSerializationTests
             ],
             TransitiveChains = null,
             Insights = null,
-            RecommendedQuery = "SELECT * FROM \"orders\" INNER JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"customer_id\";",
+            RecommendedQuery = "SELECT * FROM [orders] INNER JOIN [customers] ON [orders].[customer_id] = [customers].[customer_id];",
             QueryAnnotations = null,
         };
     }

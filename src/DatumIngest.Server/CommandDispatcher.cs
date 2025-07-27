@@ -157,6 +157,7 @@ public sealed class CommandDispatcher
 
         // Apply the SELECT clause projection to produce only the output columns.
         List<ColumnInfo> outputColumns = new();
+        HashSet<int> aliasedPositions = new();
 
         foreach (SelectColumn selectColumn in statement.Columns)
         {
@@ -178,31 +179,30 @@ public sealed class CommandDispatcher
 
                 default:
                     string outputName = selectColumn.Alias
-                        ?? GetProjectedColumnName(selectColumn.Expression)
-                        ?? "expr";
+                        ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
                     DataKind kind = ExpressionTypeResolver.ResolveType(
                         selectColumn.Expression, sourceSchema, session.FunctionRegistry) ?? DataKind.String;
 
                     outputColumns.Add(new ColumnInfo(outputName, kind, nullable: true));
+                    if (selectColumn.Alias is not null)
+                    {
+                        aliasedPositions.Add(outputColumns.Count - 1);
+                    }
                     break;
             }
         }
 
-        return new Schema(outputColumns);
-    }
-
-    /// <summary>
-    /// Extracts a column name from an expression when it is a simple column reference.
-    /// </summary>
-    private static string? GetProjectedColumnName(Expression expression)
-    {
-        return expression switch
+        string[] names = outputColumns.Select(column => column.Name).ToArray();
+        ColumnNameResolver.DeduplicateNames(names, aliasedPositions);
+        List<ColumnInfo> deduplicatedColumns = new(outputColumns.Count);
+        for (int index = 0; index < outputColumns.Count; index++)
         {
-            ColumnReference columnRef => columnRef.ColumnName,
-            FunctionCallExpression funcCall => funcCall.FunctionName,
-            _ => null,
-        };
+            ColumnInfo original = outputColumns[index];
+            deduplicatedColumns.Add(new ColumnInfo(names[index], original.Kind, original.Nullable));
+        }
+
+        return new Schema(deduplicatedColumns);
     }
 
     /// <summary>
@@ -331,14 +331,10 @@ public sealed class CommandDispatcher
         }
 
         TableDescriptor descriptor = ParseSourceDefinition(definition);
-        session.Catalog.Register(descriptor);
+        await session.Catalog.RegisterAsync(descriptor, cancellationToken).ConfigureAwait(false);
 
-        // Expand multi-table sources (e.g. root-object JSON → one sub-table per array property).
-        await session.Catalog.ExpandMultiTableSourcesAsync(cancellationToken).ConfigureAwait(false);
-
-        // Auto-discover sidecar manifests. After expansion the original descriptor may have
-        // been replaced by qualified sub-table descriptors, so we discover for each.
-        DiscoverSidecarManifests(session.Catalog, descriptor);
+        // Auto-discover sidecar files (indexes, manifests, schemas) for the newly registered source.
+        session.Catalog.DiscoverSidecars();
 
         // Report expansion when the original name was replaced.
         if (!session.Catalog.TryResolve(descriptor.Name, out _))
@@ -354,51 +350,6 @@ public sealed class CommandDispatcher
         }
 
         return CommandResult.Success($"Source '{descriptor.Name}' registered ({descriptor.Provider}).");
-    }
-
-    /// <summary>
-    /// Discovers and registers sidecar manifests (<c>.datum-manifest</c>) for all tables
-    /// derived from the given source descriptor, handling both single-table and expanded cases.
-    /// </summary>
-    private static void DiscoverSidecarManifests(TableCatalog catalog, TableDescriptor originalDescriptor)
-    {
-        string manifestPath = originalDescriptor.FilePath + ".datum-manifest";
-        if (!File.Exists(manifestPath))
-        {
-            return;
-        }
-
-        string json = File.ReadAllText(manifestPath);
-        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-        if (sourceManifest is null)
-        {
-            return;
-        }
-
-        // Single-table case: original descriptor still exists (no expansion).
-        if (catalog.TryResolve(originalDescriptor.Name, out TableDescriptor? resolved))
-        {
-            if (sourceManifest.Tables.TryGetValue(resolved!.Name, out QueryResultsManifest? manifest))
-            {
-                catalog.RegisterManifest(originalDescriptor.Name, manifest);
-            }
-
-            return;
-        }
-
-        // Expanded case: register manifests for each sub-table.
-        foreach (string tableName in catalog.TableNames)
-        {
-            if (!tableName.StartsWith(originalDescriptor.Name + ".", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (sourceManifest.Tables.TryGetValue(tableName, out QueryResultsManifest? subManifest))
-            {
-                catalog.RegisterManifest(tableName, subManifest);
-            }
-        }
     }
 
     private static async Task<CommandResult> HandleExplainAsync(

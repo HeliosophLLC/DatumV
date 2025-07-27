@@ -98,36 +98,11 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
     }
 
     /// <summary>
-    /// Replicates the auto-discovery logic from <c>Program.cs</c> so it can be
-    /// exercised without running the full CLI entry point.
+    /// Delegates to the unified <see cref="TableCatalog.DiscoverSidecars"/> method.
     /// </summary>
     private static void DiscoverSidecarIndexes(TableCatalog catalog)
     {
-        IndexReader reader = new();
-
-        foreach (string tableName in catalog.TableNames)
-        {
-            if (catalog.TryGetIndex(tableName, out _))
-            {
-                continue;
-            }
-
-            TableDescriptor descriptor = catalog.Resolve(tableName);
-            string sidecarPath = descriptor.FilePath + ".datum-index";
-
-            if (!File.Exists(sidecarPath))
-            {
-                continue;
-            }
-
-            using FileStream stream = File.OpenRead(sidecarPath);
-            SourceIndexSet indexSet = reader.Read(stream);
-
-            if (indexSet.Tables.TryGetValue(tableName, out SourceIndex? index))
-            {
-                catalog.RegisterIndex(tableName, index);
-            }
-        }
+        catalog.DiscoverSidecars();
     }
 
     private string CreateCsvFile(string name, string content)

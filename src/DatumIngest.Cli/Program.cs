@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Cli;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
@@ -86,15 +85,6 @@ static TableCatalog BuildCatalog(CliOptions options)
 {
     TableCatalog catalog = new();
 
-    // Register all built-in providers
-    catalog.RegisterProvider("csv", () => new CsvTableProvider());
-    catalog.RegisterProvider("json", () => new JsonTableProvider());
-    catalog.RegisterProvider("jsonl", () => new JsonlTableProvider());
-    catalog.RegisterProvider("zip", () => new ZipTableProvider());
-    catalog.RegisterProvider("hdf5", () => new Hdf5TableProvider());
-    catalog.RegisterProvider("parquet", () => new ParquetTableProvider());
-    catalog.RegisterProvider("idx", () => new IdxTableProvider());
-
     // Load catalog file if specified
     if (options.CatalogPath is not null)
     {
@@ -158,96 +148,8 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
         }
     }
 
-    // Auto-discover sidecar index files for registered tables.
-    DiscoverSidecarIndexes(catalog, reader);
-
-    // Auto-discover sidecar manifest files for registered tables.
-    DiscoverSidecarManifests(catalog);
-}
-
-static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
-{
-    HashSet<string> loadedPaths = new(StringComparer.OrdinalIgnoreCase);
-
-    foreach (string tableName in catalog.TableNames)
-    {
-        // Skip tables that already have an index (e.g. from explicit --index).
-        if (catalog.TryGetIndex(tableName, out _))
-        {
-            continue;
-        }
-
-        TableDescriptor descriptor = catalog.Resolve(tableName);
-        string sidecarPath = descriptor.FilePath + ".datum-index";
-
-        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
-        {
-            continue;
-        }
-
-        using FileStream stream = File.OpenRead(sidecarPath);
-        SourceIndexSet indexSet = reader.Read(stream);
-
-        // Register per-table indexes for all descriptors sharing this source file.
-        foreach (string name in catalog.TableNames)
-        {
-            TableDescriptor d = catalog.Resolve(name);
-            if (!string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (indexSet.Tables.TryGetValue(name, out SourceIndex? index))
-            {
-                catalog.RegisterIndex(name, index);
-            }
-        }
-    }
-}
-
-static void DiscoverSidecarManifests(TableCatalog catalog)
-{
-    HashSet<string> loadedPaths = new(StringComparer.OrdinalIgnoreCase);
-
-    foreach (string tableName in catalog.TableNames)
-    {
-        // Skip tables that already have a manifest (e.g. from explicit load).
-        if (catalog.TryGetManifest(tableName, out _))
-        {
-            continue;
-        }
-
-        TableDescriptor descriptor = catalog.Resolve(tableName);
-        string sidecarPath = descriptor.FilePath + ".datum-manifest";
-
-        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
-        {
-            continue;
-        }
-
-        string json = File.ReadAllText(sidecarPath);
-        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-
-        if (sourceManifest is null)
-        {
-            continue;
-        }
-
-        // Register per-table manifests for all descriptors sharing this source file.
-        foreach (string name in catalog.TableNames)
-        {
-            TableDescriptor d = catalog.Resolve(name);
-            if (!string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (sourceManifest.Tables.TryGetValue(name, out QueryResultsManifest? manifest))
-            {
-                catalog.RegisterManifest(name, manifest);
-            }
-        }
-    }
+    // Auto-discover sidecar files (indexes, manifests, schemas) for registered tables.
+    catalog.DiscoverSidecars();
 }
 
 static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)

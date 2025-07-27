@@ -7,6 +7,7 @@
   - Bad: `var builder = new StringBuilder();`
   - Good: `StringBuilder builder = new();`
 - **No DTO.** This is a domain model, not a data transfer layer. Types represent meaningful domain concepts with behavior, not property bags.
+- Do not use null-forgiving operator (`!`). Handle nullability explicitly with checks, `?? throw`, or pattern matching. Or decorate methods with `[return: NotNull]` if they guarantee non-null results. There are other compiler attributes for nullability that can be used to express intent without suppressing warnings.
 
 ## Documentation
 

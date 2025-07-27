@@ -337,7 +337,9 @@ public sealed class FunctionRegistry
 
         // Image — Loading & Decode
         registry.RegisterScalar(new Image.LoadImageFunction());
-        registry.RegisterScalar(new Image.DecodeImageFunction());
+        registry.RegisterScalar(new Image.ImageToBytesFunction());
+        registry.RegisterScalar(new Image.ImageToTensorHwcFunction());
+        registry.RegisterScalar(new Image.ImageToTensorChwFunction());
 
         // Image — Analysis
         registry.RegisterScalar(new Image.ImageBrightnessMeanFunction());

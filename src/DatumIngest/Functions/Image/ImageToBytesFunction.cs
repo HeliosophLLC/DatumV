@@ -5,13 +5,14 @@ using DatumIngest.Model;
 using SkiaSharp;
 
 /// <summary>
-/// Decodes encoded image bytes into a Tensor of pixel values with shape [height, width, 4] (RGBA).
-/// <c>decode_image(img)</c> accepts Image or UInt8Array. Pixel values are floats in the 0–255 range.
+/// Extracts raw RGBA pixel bytes from an encoded image.
+/// <c>image_to_bytes(img)</c> accepts Image or UInt8Array and returns a flat
+/// UInt8Array of length <c>height × width × 4</c> in RGBA byte order.
 /// </summary>
-public sealed class DecodeImageFunction : IScalarFunction, ICostAwareFunction
+public sealed class ImageToBytesFunction : IScalarFunction, ICostAwareFunction
 {
     /// <inheritdoc />
-    public string Name => "decode_image";
+    public string Name => "image_to_bytes";
 
     /// <inheritdoc />
     public int QueryUnitCost => 50;
@@ -21,16 +22,16 @@ public sealed class DecodeImageFunction : IScalarFunction, ICostAwareFunction
     {
         if (argumentKinds.Length != 1)
         {
-            throw new ArgumentException("decode_image() requires exactly 1 argument.");
+            throw new ArgumentException("image_to_bytes() requires exactly 1 argument.");
         }
 
         if (argumentKinds[0] is not (DataKind.Image or DataKind.UInt8Array))
         {
             throw new ArgumentException(
-                $"decode_image() requires Image or UInt8Array, got {argumentKinds[0]}.");
+                $"image_to_bytes() requires Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Tensor;
+        return DataKind.UInt8Array;
     }
 
     /// <inheritdoc />
@@ -40,36 +41,31 @@ public sealed class DecodeImageFunction : IScalarFunction, ICostAwareFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Tensor);
+            return DataValue.Null(DataKind.UInt8Array);
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        SKBitmap bitmap = inputHandle.GetBitmap("decode_image");
+        SKBitmap bitmap = inputHandle.GetBitmap("image_to_bytes");
 
-        // Ensure RGBA8888 layout for consistent pixel access
         using SKBitmap rgba = bitmap.ColorType == SKColorType.Rgba8888
             ? bitmap
             : ConvertToRgba8888(bitmap);
 
-        int width = rgba.Width;
-        int height = rgba.Height;
-        const int channelCount = 4; // RGBA
-
-        float[] pixels = new float[height * width * channelCount];
+        int byteCount = rgba.Height * rgba.Width * 4;
+        byte[] pixels = new byte[byteCount];
         nint pixelPtr = rgba.GetPixels();
 
         unsafe
         {
             byte* source = (byte*)pixelPtr;
-            int totalElements = height * width * channelCount;
 
-            for (int i = 0; i < totalElements; i++)
+            for (int i = 0; i < byteCount; i++)
             {
                 pixels[i] = source[i];
             }
         }
 
-        return DataValue.FromTensor(pixels, [height, width, channelCount]);
+        return DataValue.FromUInt8Array(pixels);
     }
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)

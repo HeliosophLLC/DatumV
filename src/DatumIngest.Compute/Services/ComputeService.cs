@@ -468,25 +468,22 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
 
-        GetStatsResponse response = new();
+        Dictionary<string, QueryResultsManifest> tables = new();
 
         foreach (string tableName in session.Catalog.TableNames)
         {
-            string manifestJson = "";
-
-            if (session.Catalog.TryGetManifest(tableName, out QueryResultsManifest? manifest) && manifest is not null)
+            if (session.Catalog.TryGetManifest(tableName, out QueryResultsManifest? manifest)
+                && manifest is not null)
             {
-                manifestJson = ManifestSerializer.Serialize(tableName, manifest);
+                tables[tableName] = manifest;
             }
-
-            response.Tables.Add(new TableStatsMessage
-            {
-                TableName = tableName,
-                ManifestJson = manifestJson,
-            });
         }
 
-        return Task.FromResult(response);
+        string manifestJson = tables.Count > 0
+            ? ManifestSerializer.Serialize(new SourceManifest { Tables = tables })
+            : "";
+
+        return Task.FromResult(new GetStatsResponse { ManifestJson = manifestJson });
     }
 
     /// <inheritdoc />

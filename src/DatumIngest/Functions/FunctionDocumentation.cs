@@ -666,10 +666,26 @@ public static class FunctionDocumentation
         });
         Register(new FunctionSignature
         {
-            Name = "decode_image",
-            Parameters = [Parameter("bytes", "UInt8Array")],
-            ReturnType = "Image",
-            Description = "Decodes an image from raw bytes.",
+            Name = "image_to_bytes",
+            Parameters = [Parameter("img", "Image")],
+            ReturnType = "UInt8Array",
+            Description = "Extracts raw RGBA pixel bytes from an image.",
+            Category = FunctionCategory.Image,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "image_to_tensor_hwc",
+            Parameters = [Parameter("img", "Image")],
+            ReturnType = "Tensor",
+            Description = "Decodes image to [H, W, 3] RGB float tensor (HWC layout).",
+            Category = FunctionCategory.Image,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "image_to_tensor_chw",
+            Parameters = [Parameter("img", "Image")],
+            ReturnType = "Tensor",
+            Description = "Decodes image to [3, H, W] RGB float tensor (CHW layout).",
             Category = FunctionCategory.Image,
         });
 

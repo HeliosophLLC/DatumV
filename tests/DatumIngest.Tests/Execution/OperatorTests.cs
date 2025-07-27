@@ -200,6 +200,61 @@ public class OperatorTests
         Assert.Equal(5f, rows[0]["name_len"].AsScalar());
     }
 
+    [Fact]
+    public async Task Project_DuplicateFunctionNames_Deduplicated()
+    {
+        MockOperator source = new(
+            MakeRow(("name", DataValue.FromString("hello"))));
+
+        ProjectOperator project = new(source,
+        [
+            new SelectColumn(
+                new FunctionCallExpression("len", [new ColumnReference("name")])),
+            new SelectColumn(
+                new FunctionCallExpression("len", [new ColumnReference("name")]))
+        ]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal("len_1", rows[0].ColumnNames[0]);
+        Assert.Equal("len_2", rows[0].ColumnNames[1]);
+    }
+
+    [Fact]
+    public async Task Project_UnaliasedFunctionName_UsedAsColumnName()
+    {
+        MockOperator source = new(
+            MakeRow(("name", DataValue.FromString("hello"))));
+
+        ProjectOperator project = new(source,
+        [
+            new SelectColumn(
+                new FunctionCallExpression("len", [new ColumnReference("name")]))
+        ]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Equal("len", rows[0].ColumnNames[0]);
+    }
+
+    [Fact]
+    public async Task Project_UnaliasedExpression_NamedExpression()
+    {
+        MockOperator source = new(
+            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(2f))));
+
+        ProjectOperator project = new(source,
+        [
+            new SelectColumn(
+                new BinaryExpression(
+                    new ColumnReference("a"),
+                    BinaryOperator.Add,
+                    new ColumnReference("b")))
+        ]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Equal("expression", rows[0].ColumnNames[0]);
+    }
+
     // ─────────────── JoinOperator tests ───────────────
 
     [Fact]

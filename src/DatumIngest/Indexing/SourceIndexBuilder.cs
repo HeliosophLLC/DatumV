@@ -181,6 +181,70 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
+    /// Builds a complete <see cref="SourceIndexSet"/> for one or more tables that share the
+    /// same source file. Computes the fingerprint once and builds each table's index in turn.
+    /// </summary>
+    /// <param name="tables">
+    /// One or more (descriptor, provider) pairs representing the logical tables within a single
+    /// source file. Each entry produces one keyed index in the resulting set.
+    /// </param>
+    /// <param name="sourceStream">
+    /// Seekable stream over the source file for fingerprint computation,
+    /// or <c>null</c> if fingerprinting is not possible.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="SourceIndexSet"/> containing all per-table indexes and a shared fingerprint.</returns>
+    public async Task<SourceIndexSet> BuildSetAsync(
+        IReadOnlyList<(TableDescriptor Descriptor, ITableProvider Provider)> tables,
+        Stream? sourceStream,
+        CancellationToken cancellationToken)
+    {
+        return await BuildSetAsync(tables, sourceStream, fingerprint: null, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds a complete <see cref="SourceIndexSet"/> for one or more tables that share the
+    /// same source file, using an externally-computed fingerprint.
+    /// </summary>
+    /// <param name="tables">
+    /// One or more (descriptor, provider) pairs representing the logical tables within a single
+    /// source file. Each entry produces one keyed index in the resulting set.
+    /// </param>
+    /// <param name="sourceStream">
+    /// Seekable stream over the source file, used only when <paramref name="fingerprint"/> is
+    /// <c>null</c>. Otherwise ignored.
+    /// </param>
+    /// <param name="fingerprint">
+    /// Pre-computed fingerprint, or <c>null</c> to compute from <paramref name="sourceStream"/>.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="SourceIndexSet"/> containing all per-table indexes and a shared fingerprint.</returns>
+    public async Task<SourceIndexSet> BuildSetAsync(
+        IReadOnlyList<(TableDescriptor Descriptor, ITableProvider Provider)> tables,
+        Stream? sourceStream,
+        SourceFingerprint? fingerprint,
+        CancellationToken cancellationToken)
+    {
+        fingerprint ??= sourceStream is not null
+            ? await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken).ConfigureAwait(false)
+            : new SourceFingerprint(0, Array.Empty<byte>());
+
+        Dictionary<string, SourceIndex> tableIndexes = new();
+
+        foreach ((TableDescriptor descriptor, ITableProvider provider) in tables)
+        {
+            SourceIndex index = await BuildAsync(
+                descriptor, provider, sourceStream: null, fingerprint, cancellationToken)
+                .ConfigureAwait(false);
+
+            tableIndexes[descriptor.Name] = index;
+        }
+
+        return new SourceIndexSet(fingerprint, tableIndexes);
+    }
+
+    /// <summary>
     /// Creates an incremental index builder for co-generation during output writing (the <c>--with-index</c> workflow).
     /// Each row is observed but not consumed — the caller still owns the enumeration.
     /// Call <see cref="IncrementalIndexBuilder.AddRow"/> for each row, then <see cref="IncrementalIndexBuilder.Finalize"/> to produce the index.

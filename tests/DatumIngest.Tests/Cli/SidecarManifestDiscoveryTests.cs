@@ -108,36 +108,14 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
         Assert.Equal(2, discovered.Features[0].EstimatedDistinctCount);
     }
 
+
+
     /// <summary>
-    /// Replicates the auto-discovery logic from <c>Program.cs</c> so it can be
-    /// exercised without running the full CLI entry point.
+    /// Delegates to the unified <see cref="TableCatalog.DiscoverSidecars"/> method.
     /// </summary>
     private static void DiscoverSidecarManifests(TableCatalog catalog)
     {
-        foreach (string tableName in catalog.TableNames)
-        {
-            if (catalog.TryGetManifest(tableName, out _))
-            {
-                continue;
-            }
-
-            TableDescriptor descriptor = catalog.Resolve(tableName);
-            string sidecarPath = descriptor.FilePath + ".datum-manifest";
-
-            if (!File.Exists(sidecarPath))
-            {
-                continue;
-            }
-
-            string json = File.ReadAllText(sidecarPath);
-            SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-            QueryResultsManifest? manifest = sourceManifest?.Tables[tableName];
-
-            if (manifest is not null)
-            {
-                catalog.RegisterManifest(tableName, manifest);
-            }
-        }
+        catalog.DiscoverSidecars();
     }
 
     private string CreateCsvFile(string name, string content)

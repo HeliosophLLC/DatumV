@@ -403,7 +403,8 @@ SELECT coalesce(primary_score, fallback_score) AS score FROM results
 
 -- Image preprocessing pipeline
 SELECT resize(file_bytes, 224, 224) AS img, label FROM images
-SELECT decode_image(resize(file_bytes, 224, 224)) AS pixels FROM images
+SELECT image_to_tensor_chw(resize(file_bytes, 224, 224)) AS pixels FROM images
+SELECT image_to_tensor_hwc(resize(file_bytes, 224, 224)) AS pixels FROM images
 SELECT width(file_bytes) AS w, height(file_bytes) AS h FROM images WHERE pixel_count(file_bytes) > 1000000
 
 -- Image augmentation
@@ -587,12 +588,14 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Scalar. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. | 10 |
 | `image_pixel_std` | `image_pixel_std(img[, channels])` | Standard deviation of pixel values. Same signature as `image_pixel_mean`. | 10 |
 
-## Image — Loading & Decode (2)
+## Image — Loading & Decode (4)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
 | `load_image` | `load_image(bytes)` | Load encoded bytes (UInt8Array from ZIP/binary column) as an Image for use with transform and analysis functions. No decode — wraps the bytes as an opaque Image value for the fused pipeline. | 1 |
-| `decode_image` | `decode_image(img)` | Decode to [H, W, 4] RGBA float tensor (values 0–255). | 50 |
+| `image_to_bytes` | `image_to_bytes(img)` | Extract raw RGBA pixel bytes as UInt8Array (length H×W×4). | 50 |
+| `image_to_tensor_hwc` | `image_to_tensor_hwc(img)` | Decode to [H, W, 3] RGB float tensor (values 0–255). TensorFlow/NumPy layout. | 50 |
+| `image_to_tensor_chw` | `image_to_tensor_chw(img)` | Decode to [3, H, W] RGB float tensor (values 0–255). PyTorch layout. | 50 |
 
 ## Image — Transforms (13)
 

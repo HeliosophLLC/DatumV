@@ -47,7 +47,7 @@ service DatumCompute {
   // Returns accumulated usage metrics for a session.
   rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
 
-  // Returns per-table manifest statistics for all registered tables.
+  // Returns a unified manifest combining all registered tables.
   rpc GetStats (GetStatsRequest) returns (GetStatsResponse);
 
   // Returns cross-manifest join suggestions across all tables with manifests.
@@ -410,14 +410,8 @@ message GetStatsRequest {
 }
 
 message GetStatsResponse {
-  repeated TableStatsMessage tables = 1;
-}
-
-message TableStatsMessage {
-  string table_name = 1;
-
-  // JSON-serialized QueryResultsManifest. Empty when no manifest is available.
-  string manifest_json = 2;
+  // JSON-serialized SourceManifest containing all tables with available manifests.
+  string manifest_json = 1;
 }
 
 message GetJoinSuggestionsRequest {

@@ -1,6 +1,5 @@
 using BenchmarkDotNet.Attributes;
 using DatumIngest.Catalog;
-using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
@@ -54,7 +53,6 @@ public class ExecutionBenchmarks
     private static TableCatalog BuildCatalog(string dataPath, string? lookupPath = null)
     {
         TableCatalog catalog = new();
-        catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "data", dataPath, new Dictionary<string, string>()));
         if (lookupPath is not null)
         {

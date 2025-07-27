@@ -491,21 +491,21 @@ public sealed class ImageTransformFunctionTests
     }
 
     [Fact]
-    public void FusedPipeline_DecodeImage_ConsumesHandle()
+    public void FusedPipeline_ImageToTensorHwc_ConsumesHandle()
     {
         byte[] png = MakeTestPng(8, 6, SKColors.Green);
-        DecodeImageFunction decode = new();
+        ImageToTensorHwcFunction tensorHwc = new();
 
-        // Simulate: decode_image(grayscale(img))
+        // Simulate: image_to_tensor_hwc(grayscale(img))
         DataValue grayscaleResult = _grayscale.Execute([DataValue.FromImage(png)]);
-        DataValue tensor = decode.Execute([grayscaleResult]);
+        DataValue tensor = tensorHwc.Execute([grayscaleResult]);
 
         Assert.Equal(DataKind.Tensor, tensor.Kind);
         float[] data = tensor.AsTensor(out int[] shape);
         Assert.Equal(3, shape.Length);
         Assert.Equal(6, shape[0]);  // height
         Assert.Equal(8, shape[1]);  // width
-        Assert.Equal(4, shape[2]);  // RGBA channels
+        Assert.Equal(3, shape[2]);  // RGB channels
     }
 
     [Fact]

@@ -50,21 +50,6 @@ public sealed class ProjectOperator : IQueryOperator
         }
     }
 
-    private static string ResolveColumnName(SelectColumn column)
-    {
-        if (column.Alias is not null)
-        {
-            return column.Alias;
-        }
-
-        return column.Expression switch
-        {
-            ColumnReference colRef => colRef.ColumnName,
-            FunctionCallExpression funcCall => funcCall.FunctionName,
-            _ => "expr",
-        };
-    }
-
     /// <summary>
     /// Pre-computed projection layout built once from the first source row.
     /// Holds the shared output column names, name-index dictionary, and a plan
@@ -96,6 +81,7 @@ public sealed class ProjectOperator : IQueryOperator
             IReadOnlyList<SelectColumn> columns, Row firstRow)
         {
             List<string> names = new();
+            HashSet<int> aliasedPositions = new();
             List<ProjectionSlot> slots = new();
 
             foreach (SelectColumn column in columns)
@@ -126,13 +112,20 @@ public sealed class ProjectOperator : IQueryOperator
                         break;
 
                     default:
-                        names.Add(ResolveColumnName(column));
+                        string name = column.Alias
+                            ?? ColumnNameResolver.GetRawName(column.Expression);
+                        names.Add(name);
+                        if (column.Alias is not null)
+                        {
+                            aliasedPositions.Add(names.Count - 1);
+                        }
                         slots.Add(ProjectionSlot.Evaluate(column.Expression));
                         break;
                 }
             }
 
             string[] nameArray = names.ToArray();
+            ColumnNameResolver.DeduplicateNames(nameArray, aliasedPositions);
             Dictionary<string, int> nameIndex =
                 new(nameArray.Length, StringComparer.OrdinalIgnoreCase);
             for (int index = 0; index < nameArray.Length; index++)

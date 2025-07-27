@@ -316,11 +316,11 @@ internal static class CrossManifestQueryBuilder
     }
 
     /// <summary>
-    /// Quotes a SQL identifier with double quotes.
+    /// Quotes a SQL identifier with square brackets.
     /// </summary>
     private static string QuoteIdentifier(string identifier)
     {
-        // Escape embedded double quotes by doubling them.
-        return $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+        // Escape embedded closing brackets by doubling them.
+        return $"[{identifier.Replace("]", "]]", StringComparison.Ordinal)}]";
     }
 }

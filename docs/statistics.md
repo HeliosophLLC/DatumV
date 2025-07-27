@@ -296,7 +296,7 @@ Displays join candidates, transitive chains, insights, and recommended SQL for a
 The compute backend exposes two RPCs:
 
 - `GetJoinSuggestions` — Returns a `CrossManifestResult` serialized as JSON.
-- `GetStats` — Returns per-table manifest statistics as JSON envelopes.
+- `GetStats` — Returns a unified manifest JSON combining all tables in the session catalog.
 
 The `AddSource` response includes a `has_join_suggestions` flag indicating whether enough tables are registered for cross-manifest analysis.
 
@@ -322,7 +322,7 @@ Manifests are not just for external consumption — they feed back into the quer
 
 ### Sidecar Discovery
 
-When a source is registered, the CLI, gRPC compute backend, and `.source` interactive command all check for a `.datum-manifest` sidecar file alongside the source file (e.g., `data.csv.datum-manifest`). If found, the manifest is deserialized and registered in the `TableCatalog`.
+After tables are registered in the `TableCatalog`, call `catalog.DiscoverSidecars()` to auto-discover `.datum-manifest`, `.datum-index`, and `.datum-schema` sidecar files alongside each source file. Tables that already have a registered artifact are skipped, and each sidecar file is read at most once per unique source path. The CLI, gRPC compute backend, and `.source` interactive command all call this method after source registration. See [Programmatic API — Sidecar Auto-Discovery](api.md#sidecar-auto-discovery) for details.
 
 ### Cost Model
 

@@ -24,14 +24,20 @@ await ManifestSerializer.WriteToFileAsync("data", manifest, "manifest.json");
 
 ### Loading & Registration
 
-Manifests can be deserialized from JSON and registered in the `TableCatalog` for use by the query planner and cost model:
+Manifests are deserialized via `ManifestSerializer`, which returns a `SourceManifest` — a container keyed by table name that supports multi-table sources. Individual manifests are registered in the `TableCatalog` for use by the query planner and cost model:
 
 ```csharp
 string json = await File.ReadAllTextAsync("data.csv.datum-manifest");
-QueryResultsManifest? manifest = ManifestSerializer.Deserialize(json);
-if (manifest is not null)
+SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+
+if (sourceManifest is not null
+    && sourceManifest.Tables.TryGetValue("data", out QueryResultsManifest? manifest))
+{
     catalog.RegisterManifest("data", manifest);
+}
 ```
+
+For the common single-table case, `ManifestSerializer.Serialize(tableName, manifest)` and `ManifestSerializer.WriteToFileAsync(tableName, manifest, path)` accept a table name and manifest directly.
 
 When a manifest is registered, the query planner uses it to:
 - Override the scan operator's estimated row count with the manifest's authoritative `RowCount` (useful for CSV, JSON, JSONL, and ZIP sources that cannot report row counts from metadata alone).
@@ -39,7 +45,103 @@ When a manifest is registered, the query planner uses it to:
 
 ### Sidecar Auto-Discovery
 
-Both the CLI and the gRPC compute backend automatically discover `.datum-manifest` sidecar files (named `{source-file}.datum-manifest`) alongside registered sources. The `.source` interactive command also checks for a sidecar manifest when adding a source at runtime.
+After tables have been registered and expanded, call `catalog.DiscoverSidecars()` to auto-discover all three sidecar types alongside registered source files:
+
+| Sidecar | Naming Convention | Contents |
+|---------|-------------------|----------|
+| `.datum-index` | `{source-file}.datum-index` | Binary source index (chunk statistics, bloom filters, sorted indexes) |
+| `.datum-manifest` | `{source-file}.datum-manifest` | JSON feature manifest (per-column statistics, interactions) |
+| `.datum-schema` | `{source-file}.datum-schema` | JSON schema cache (column names, data kinds, nullability) |
+
+```csharp
+TableCatalog catalog = new();
+catalog.Register("data", "./data.csv");
+catalog.DiscoverSidecars();
+
+// Sidecars are now registered — e.g.:
+catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+catalog.TryGetIndex("data", out SourceIndex? index);
+catalog.TryGetSchema("data", out Schema? schema);
+```
+
+`DiscoverSidecars()` reads each sidecar file at most once per unique source file path and skips tables that already have a registered artifact. Tables sharing the same source file (e.g., multi-table JSON) all receive matching entries from a single sidecar read.
+
+The CLI, gRPC compute backend, and `.source` interactive command all call `catalog.DiscoverSidecars()` after source registration.
+
+## Source Analysis
+
+`SourceAnalyzer` generates all three sidecar artifacts (schema, index, manifest) in a single pass over the source data. The result is a `SourceAnalysisResult` containing a `SourceSchema`, `SourceIndexSet`, and `SourceManifest`.
+
+### Catalog-driven analysis
+
+The simplest entry point analyzes all tables registered in a catalog:
+
+```csharp
+SourceAnalyzer analyzer = new(
+    chunkSize: 10_000,
+    bloomColumns: new HashSet<string> { "id" },
+    indexColumns: new HashSet<string> { "id" },
+    withInteractions: true);
+
+SourceAnalysisResult result = await analyzer.AnalyzeAsync(catalog, CancellationToken.None);
+
+// Write all three sidecars
+string sourcePath = catalog.Resolve("data").FilePath;
+await SchemaSerializer.WriteToFileAsync(result.Schema, sourcePath + ".datum-schema");
+await ManifestSerializer.WriteToFileAsync(result.Manifest, sourcePath + ".datum-manifest");
+
+using FileStream indexStream = File.Create(sourcePath + ".datum-index");
+IndexWriter writer = new();
+writer.Write(result.IndexSet, indexStream);
+```
+
+### Per-table analysis
+
+For fine-grained control, pass explicit table/provider pairs:
+
+```csharp
+TableDescriptor descriptor = catalog.Resolve("data");
+ITableProvider provider = catalog.CreateProvider(descriptor);
+
+SourceAnalysisResult result = await analyzer.AnalyzeAsync(
+    [(descriptor, provider)],
+    sourceStream: null,
+    CancellationToken.None);
+```
+
+### Result structure
+
+```csharp
+// SourceAnalysisResult is a sealed record with three fields:
+SourceSchema schema = result.Schema;           // Per-table schemas
+SourceIndexSet indexSet = result.IndexSet;      // Per-table indexes + source fingerprint
+SourceManifest manifest = result.Manifest;      // Per-table column statistics
+
+// Each container is keyed by table name:
+Schema tableSchema = schema.Tables["data"];
+SourceIndex tableIndex = indexSet.Tables["data"];
+QueryResultsManifest tableManifest = manifest.Tables["data"];
+```
+
+## Schema Serialization
+
+`SchemaSerializer` reads and writes `.datum-schema` sidecar files. Like manifests, schemas are wrapped in a `SourceSchema` container keyed by table name:
+
+```csharp
+// Serialize a single-table schema
+string json = SchemaSerializer.Serialize("data", schema);
+await SchemaSerializer.WriteToFileAsync("data", schema, "data.csv.datum-schema");
+
+// Serialize a multi-table schema
+SourceSchema sourceSchema = result.Schema;
+await SchemaSerializer.WriteToFileAsync(sourceSchema, "multi.json.datum-schema");
+
+// Deserialize
+SourceSchema? loaded = SchemaSerializer.Deserialize(json);
+Schema? tableSchema = loaded?.Tables["data"];
+```
+
+When a `.datum-schema` sidecar is present, `GetSchemaAsync` returns the cached schema without invoking the provider — eliminating schema inference I/O (e.g., sampling the first 100 rows of a CSV).
 
 ## EXPLAIN
 
@@ -146,25 +248,47 @@ public class MyTableFunction : ISchemaAwareTableFunction
 
 ## Auto-detecting table registration
 
-The `Register` overloads detect the file format automatically from extension, filename pattern, or magic bytes:
+`TableCatalog` pre-registers all built-in provider factories (csv, json, jsonl, parquet, hdf5, zip, idx) in its constructor — no manual `RegisterProvider` calls are needed for supported formats. The `Register` overloads detect the file format automatically from extension, filename pattern, or magic bytes:
 
 ```csharp
 TableCatalog catalog = new();
-catalog.RegisterProvider("csv", () => new CsvTableProvider());
-catalog.RegisterProvider("idx", () => new IdxTableProvider());
-catalog.RegisterProvider("parquet", () => new ParquetTableProvider());
 
-// Auto-detect from file extension
+// Simplest form — table name derived from filename (e.g. "iris.csv")
+catalog.Register("./iris.csv");
+
+// Explicit table name when you want a custom identifier
 catalog.Register("data", "./iris.csv");
-
-// MNIST-style IDX files detected from filename pattern
-catalog.Register("images", "./train-images-idx3-ubyte");
 
 // Auto-detect with provider-specific options
 catalog.Register("data", "./data.tsv", new Dictionary<string, string> { ["delimiter"] = "\t" });
 
 // Explicit TableDescriptor still works as an override
 catalog.Register(new TableDescriptor("csv", "data", "./data.csv", new()));
+```
+
+### Async registration with auto-expansion
+
+`RegisterAsync` combines registration with multi-table expansion in one call. For sources that resolve to multiple sub-tables (e.g., root-object JSON), the original registration is replaced by one entry per discovered sub-table:
+
+```csharp
+TableCatalog catalog = new();
+
+// Table name derived from filename
+await catalog.RegisterAsync("./multi-table.json", CancellationToken.None);
+
+// Or with an explicit name
+await catalog.RegisterAsync("data", "./multi-table.json", CancellationToken.None);
+
+// If the JSON has root keys "orders" and "customers",
+// the catalog now contains "multi-table.json.orders" / "data.orders"
+// and "multi-table.json.customers" / "data.customers".
+```
+
+For custom providers, use `RegisterProvider` before registering tables:
+
+```csharp
+catalog.RegisterProvider("custom", () => new MyCustomProvider());
+catalog.Register("data", "./data.custom");
 ```
 
 When the format cannot be determined, `Register` throws `ArgumentException` with a message listing supported formats. See [Providers — Format auto-detection](providers.md#format-auto-detection) for the full detection rules.
@@ -307,4 +431,4 @@ datum-ingest cross-manifest --manifest a.json --manifest b.json --output result.
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
 | `GetJoinSuggestions` | `GetJoinSuggestionsRequest` | `GetJoinSuggestionsResponse` | Returns `CrossManifestResult` as JSON |
-| `GetStats` | `GetStatsRequest` (table name) | `GetStatsResponse` | Returns per-table manifest statistics as JSON |
+| `GetStats` | `GetStatsRequest` (session ID) | `GetStatsResponse` | Returns a unified manifest JSON combining all tables |

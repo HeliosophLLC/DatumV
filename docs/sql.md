@@ -4,6 +4,21 @@
 
 DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, FROM, JOIN, WHERE, GROUP BY, HAVING, INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
 
+## Comments
+
+Line comments start with `--` and continue to the end of the line. Block comments are enclosed in `/* ... */`. Both styles are stripped during tokenization and may appear anywhere whitespace is allowed.
+
+```sql
+-- This is a line comment
+SELECT
+    col1,           -- inline comment
+    /* col2, */     -- block comment can disable code
+    col3
+FROM my_table
+```
+
+Block comments do not nest.
+
 ## SELECT
 
 ```sql

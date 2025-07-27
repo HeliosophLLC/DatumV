@@ -1,3 +1,4 @@
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Manifest.CrossManifest;
@@ -23,11 +24,27 @@ public sealed class TableCatalog
     private readonly Dictionary<string, Func<ITableProvider>> _providerFactories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, QueryResultsManifest> _manifests = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Schema> _schemas = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Cached cross-manifest analysis result. Invalidated when a new manifest is registered.
     /// </summary>
     private CrossManifestResult? _crossManifestCache;
+
+    /// <summary>
+    /// Initializes a new <see cref="TableCatalog"/> with all built-in provider factories
+    /// pre-registered (csv, json, jsonl, parquet, hdf5, zip, idx).
+    /// </summary>
+    public TableCatalog()
+    {
+        _providerFactories["csv"] = () => new CsvTableProvider();
+        _providerFactories["json"] = () => new JsonTableProvider();
+        _providerFactories["jsonl"] = () => new JsonlTableProvider();
+        _providerFactories["parquet"] = () => new ParquetTableProvider();
+        _providerFactories["hdf5"] = () => new Hdf5TableProvider();
+        _providerFactories["zip"] = () => new ZipTableProvider();
+        _providerFactories["idx"] = () => new IdxTableProvider();
+    }
 
     /// <summary>
     /// Registers a provider factory for a given provider identifier.
@@ -46,6 +63,20 @@ public sealed class TableCatalog
     public void Register(TableDescriptor descriptor)
     {
         _descriptors[descriptor.Name] = descriptor;
+    }
+
+    /// <summary>
+    /// Registers a table from a file path, using the full filename (including
+    /// extension) as the table name and auto-detecting the provider.
+    /// </summary>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the file format cannot be determined. Use the
+    /// <see cref="Register(TableDescriptor)"/> overload with an explicit provider.
+    /// </exception>
+    public void Register(string filePath)
+    {
+        Register(Path.GetFileName(filePath), filePath);
     }
 
     /// <summary>
@@ -85,6 +116,70 @@ public sealed class TableCatalog
                 nameof(filePath));
 
         Register(new TableDescriptor(provider, name, filePath, options));
+    }
+
+    /// <summary>
+    /// Registers a table by name and file path, auto-detecting the provider and
+    /// expanding multi-table sources (e.g. root-object JSON files) in one call.
+    /// </summary>
+    /// <param name="name">Logical table name for SQL FROM clauses.</param>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the file format cannot be determined.
+    /// </exception>
+    public Task RegisterAsync(string name, string filePath, CancellationToken cancellationToken)
+    {
+        return RegisterAsync(name, filePath, new Dictionary<string, string>(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a table from a file path, using the full filename (including
+    /// extension) as the table name, auto-detecting the provider, and expanding
+    /// multi-table sources (e.g. root-object JSON files) in one call.
+    /// </summary>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the file format cannot be determined.
+    /// </exception>
+    public Task RegisterAsync(string filePath, CancellationToken cancellationToken)
+    {
+        return RegisterAsync(Path.GetFileName(filePath), filePath, cancellationToken);
+    }
+
+    /// <summary>
+    /// Registers a table by name and file path with provider-specific options,
+    /// auto-detecting the provider and expanding multi-table sources
+    /// (e.g. root-object JSON files) in one call.
+    /// </summary>
+    /// <param name="name">Logical table name for SQL FROM clauses.</param>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <param name="options">Provider-specific key-value options (e.g. delimiter, header).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the file format cannot be determined.
+    /// </exception>
+    public async Task RegisterAsync(
+        string name,
+        string filePath,
+        IReadOnlyDictionary<string, string> options,
+        CancellationToken cancellationToken)
+    {
+        Register(name, filePath, options);
+        await ExpandTableAsync(name, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Registers a table descriptor and expands multi-table sources
+    /// (e.g. root-object JSON files) in one call.
+    /// </summary>
+    /// <param name="descriptor">Table descriptor to register.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task RegisterAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        Register(descriptor);
+        await ExpandTableAsync(descriptor.Name, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -152,6 +247,12 @@ public sealed class TableCatalog
     /// </exception>
     public async Task<Schema> GetSchemaAsync(string tableName, CancellationToken cancellationToken)
     {
+        // Return cached schema from sidecar if available, avoiding provider I/O.
+        if (_schemas.TryGetValue(tableName, out Schema? cachedSchema))
+        {
+            return cachedSchema;
+        }
+
         // Return cached schema from index if available, avoiding provider I/O.
         if (_indexes.TryGetValue(tableName, out SourceIndex? index))
         {
@@ -206,6 +307,159 @@ public sealed class TableCatalog
     public bool TryGetManifest(string tableName, out QueryResultsManifest? manifest)
     {
         return _manifests.TryGetValue(tableName, out manifest);
+    }
+
+    /// <summary>
+    /// Registers a pre-computed <see cref="Schema"/> for a table,
+    /// enabling cached schema resolution without provider I/O.
+    /// </summary>
+    /// <param name="tableName">Logical table name matching a registered descriptor.</param>
+    /// <param name="schema">The schema to cache.</param>
+    public void RegisterSchema(string tableName, Schema schema)
+    {
+        _schemas[tableName] = schema;
+    }
+
+    /// <summary>
+    /// Attempts to retrieve a cached <see cref="Schema"/> for the given table name.
+    /// </summary>
+    /// <param name="tableName">Logical table name.</param>
+    /// <param name="schema">The cached schema, or <c>null</c> if none is registered.</param>
+    /// <returns><c>true</c> if a cached schema was found; otherwise <c>false</c>.</returns>
+    public bool TryGetSchema(string tableName, out Schema? schema)
+    {
+        return _schemas.TryGetValue(tableName, out schema);
+    }
+
+    /// <summary>
+    /// Auto-discovers <c>.datum-index</c>, <c>.datum-manifest</c>, and <c>.datum-schema</c>
+    /// sidecar files for all registered tables. Each sidecar is loaded at most once per
+    /// unique source file path, and tables that already have a registered artifact are skipped.
+    /// </summary>
+    /// <remarks>
+    /// This is the single entry point for sidecar discovery, replacing the per-site
+    /// implementations that previously existed in the CLI, gRPC server, and compute backend.
+    /// Call this after all tables have been registered and expanded.
+    /// </remarks>
+    public void DiscoverSidecars()
+    {
+        HashSet<string> loadedIndexPaths = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> loadedManifestPaths = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> loadedSchemaPaths = new(StringComparer.OrdinalIgnoreCase);
+
+        // Snapshot table names to avoid issues if the set is mutated.
+        List<string> tableNames = new(_descriptors.Keys);
+
+        foreach (string tableName in tableNames)
+        {
+            TableDescriptor descriptor = _descriptors[tableName];
+
+            DiscoverSidecarIndex(descriptor, tableNames, loadedIndexPaths);
+            DiscoverSidecarManifest(descriptor, tableNames, loadedManifestPaths);
+            DiscoverSidecarSchema(descriptor, tableNames, loadedSchemaPaths);
+        }
+    }
+
+    private void DiscoverSidecarIndex(
+        TableDescriptor descriptor,
+        List<string> tableNames,
+        HashSet<string> loadedPaths)
+    {
+        string sidecarPath = descriptor.FilePath + ".datum-index";
+
+        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
+        {
+            return;
+        }
+
+        IndexReader reader = new();
+        using FileStream stream = File.OpenRead(sidecarPath);
+        SourceIndexSet indexSet = reader.Read(stream);
+
+        RegisterSidecarEntries(
+            indexSet.Tables,
+            descriptor.FilePath,
+            tableNames,
+            (name, index) => { if (!_indexes.ContainsKey(name)) _indexes[name] = index; });
+    }
+
+    private void DiscoverSidecarManifest(
+        TableDescriptor descriptor,
+        List<string> tableNames,
+        HashSet<string> loadedPaths)
+    {
+        string sidecarPath = descriptor.FilePath + ".datum-manifest";
+
+        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
+        {
+            return;
+        }
+
+        string json = File.ReadAllText(sidecarPath);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+
+        if (sourceManifest is null)
+        {
+            return;
+        }
+
+        RegisterSidecarEntries(
+            sourceManifest.Tables,
+            descriptor.FilePath,
+            tableNames,
+            (name, manifest) => { if (!_manifests.ContainsKey(name)) RegisterManifest(name, manifest); });
+    }
+
+    private void DiscoverSidecarSchema(
+        TableDescriptor descriptor,
+        List<string> tableNames,
+        HashSet<string> loadedPaths)
+    {
+        string sidecarPath = descriptor.FilePath + ".datum-schema";
+
+        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
+        {
+            return;
+        }
+
+        string json = File.ReadAllText(sidecarPath);
+        SourceSchema? sourceSchema = SchemaSerializer.Deserialize(json);
+
+        if (sourceSchema is null)
+        {
+            return;
+        }
+
+        RegisterSidecarEntries(
+            sourceSchema.Tables,
+            descriptor.FilePath,
+            tableNames,
+            (name, schema) => { if (!_schemas.ContainsKey(name)) _schemas[name] = schema; });
+    }
+
+    /// <summary>
+    /// Matches sidecar entries to registered tables sharing the same source file path,
+    /// then invokes <paramref name="register"/> for each match.
+    /// </summary>
+    private void RegisterSidecarEntries<T>(
+        IReadOnlyDictionary<string, T> sidecarEntries,
+        string filePath,
+        List<string> tableNames,
+        Action<string, T> register)
+    {
+        foreach (string name in tableNames)
+        {
+            if (!_descriptors.TryGetValue(name, out TableDescriptor? d)
+                || !string.Equals(d.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (sidecarEntries.TryGetValue(name, out T? value))
+            {
+                register(name, value);
+            }
+        }
     }
 
     /// <summary>
@@ -288,45 +542,61 @@ public sealed class TableCatalog
 
         foreach (string tableName in tableNames)
         {
-            TableDescriptor descriptor = _descriptors[tableName];
-            ITableProvider provider = CreateProvider(descriptor);
+            await ExpandTableAsync(tableName, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
-            if (provider is not IMultiTableSource multiTableSource)
+    /// <summary>
+    /// Expands a single table registration if its provider implements
+    /// <see cref="IMultiTableSource"/>, replacing it with one entry per discovered sub-table.
+    /// Does nothing when the provider is not a multi-table source or discovery returns no results.
+    /// </summary>
+    /// <param name="tableName">Logical table name to attempt expansion on.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task ExpandTableAsync(string tableName, CancellationToken cancellationToken)
+    {
+        if (!_descriptors.TryGetValue(tableName, out TableDescriptor? descriptor))
+        {
+            return;
+        }
+
+        ITableProvider provider = CreateProvider(descriptor);
+
+        if (provider is not IMultiTableSource multiTableSource)
+        {
+            return;
+        }
+
+        IReadOnlyList<DiscoveredTable>? discovered = await multiTableSource
+            .DiscoverTablesAsync(descriptor, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (discovered is null || discovered.Count == 0)
+        {
+            return;
+        }
+
+        // Remove the original single-table registration.
+        _descriptors.Remove(tableName);
+
+        // Register each discovered sub-table with a qualified name.
+        foreach (DiscoveredTable subTable in discovered)
+        {
+            string qualifiedName = $"{tableName}.{subTable.Name}";
+
+            // Merge sub-table options with the table-key marker.
+            Dictionary<string, string> mergedOptions = new(subTable.Options)
             {
-                continue;
-            }
+                [SubTableKeyOption] = subTable.Name
+            };
 
-            IReadOnlyList<DiscoveredTable>? discovered = await multiTableSource
-                .DiscoverTablesAsync(descriptor, cancellationToken)
-                .ConfigureAwait(false);
+            TableDescriptor subDescriptor = new(
+                descriptor.Provider,
+                qualifiedName,
+                descriptor.FilePath,
+                mergedOptions);
 
-            if (discovered is null || discovered.Count == 0)
-            {
-                continue;
-            }
-
-            // Remove the original single-table registration.
-            _descriptors.Remove(tableName);
-
-            // Register each discovered sub-table with a qualified name.
-            foreach (DiscoveredTable subTable in discovered)
-            {
-                string qualifiedName = $"{tableName}.{subTable.Name}";
-
-                // Merge sub-table options with the table-key marker.
-                Dictionary<string, string> mergedOptions = new(subTable.Options)
-                {
-                    [SubTableKeyOption] = subTable.Name
-                };
-
-                TableDescriptor subDescriptor = new(
-                    descriptor.Provider,
-                    qualifiedName,
-                    descriptor.FilePath,
-                    mergedOptions);
-
-                _descriptors[qualifiedName] = subDescriptor;
-            }
+            _descriptors[qualifiedName] = subDescriptor;
         }
     }
 }

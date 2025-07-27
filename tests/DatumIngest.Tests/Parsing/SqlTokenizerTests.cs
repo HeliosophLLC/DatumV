@@ -325,4 +325,87 @@ public class SqlTokenizerTests
         Assert.Single(tokens);
         Assert.Equal(SqlToken.Identifier, tokens[0].Kind);
     }
+
+    // ───────────────────── Comments ─────────────────────
+
+    [Fact]
+    public void LineCommentIsIgnored()
+    {
+        Token<SqlToken>[] tokens = Tokenize("SELECT a -- this is a comment");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.Identifier],
+            kinds);
+    }
+
+    [Fact]
+    public void LineCommentOnItsOwnLineIsIgnored()
+    {
+        Token<SqlToken>[] tokens = Tokenize("-- comment\nSELECT a");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.Identifier],
+            kinds);
+    }
+
+    [Fact]
+    public void LineCommentAtEndOfInputIsIgnored()
+    {
+        Token<SqlToken>[] tokens = Tokenize("SELECT a\n-- trailing comment");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.Identifier],
+            kinds);
+    }
+
+    [Fact]
+    public void BlockCommentIsIgnored()
+    {
+        Token<SqlToken>[] tokens = Tokenize("SELECT /* skip this */ a");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.Identifier],
+            kinds);
+    }
+
+    [Fact]
+    public void MultiLineBlockCommentIsIgnored()
+    {
+        Token<SqlToken>[] tokens = Tokenize("SELECT /*\n  multi\n  line\n*/ a");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.Identifier],
+            kinds);
+    }
+
+    [Fact]
+    public void InputWithOnlyACommentProducesNoTokens()
+    {
+        Token<SqlToken>[] tokens = Tokenize("-- just a comment");
+        Assert.Empty(tokens);
+    }
+
+    [Fact]
+    public void BlockCommentOnlyProducesNoTokens()
+    {
+        Token<SqlToken>[] tokens = Tokenize("/* block only */");
+        Assert.Empty(tokens);
+    }
+
+    [Fact]
+    public void CommentBetweenTokensIsIgnored()
+    {
+        Token<SqlToken>[] tokens = Tokenize("SELECT a, /* comment */ b FROM t");
+        SqlToken[] kinds = tokens.Select(token => token.Kind).ToArray();
+
+        Assert.Equal(
+            [SqlToken.Select, SqlToken.Identifier, SqlToken.Comma,
+             SqlToken.Identifier, SqlToken.From, SqlToken.Identifier],
+            kinds);
+    }
 }

@@ -49,7 +49,9 @@ public sealed class ImageCostAwareTests
     [InlineData(typeof(DetectBlurFunction))]
     [InlineData(typeof(CompressionArtifactScoreFunction))]
     [InlineData(typeof(PerceptualHashFunction))]
-    [InlineData(typeof(DecodeImageFunction))]
+    [InlineData(typeof(ImageToBytesFunction))]
+    [InlineData(typeof(ImageToTensorHwcFunction))]
+    [InlineData(typeof(ImageToTensorChwFunction))]
     public void PixelAnalysisFunction_ImplementsICostAwareFunction(Type functionType)
     {
         object instance = Activator.CreateInstance(functionType)!;

@@ -55,12 +55,45 @@ public static class SqlTokenizer
             .OptionalOrDefault()
         select Unit.Value;
 
+    /// <summary>
+    /// Recognizes a <c>--</c> line comment through to end-of-line or end-of-input.
+    /// </summary>
+    private static readonly TextParser<Unit> LineCommentToken =
+        from start in Span.EqualTo("--")
+        from body in Character.Except('\n').IgnoreMany()
+        select Unit.Value;
+
+    /// <summary>
+    /// Recognizes a <c>/* ... */</c> block comment. Nesting is not supported.
+    /// </summary>
+    private static readonly TextParser<Unit> BlockCommentToken = input =>
+    {
+        if (input.Length < 4 || input[0] != '/' || input[1] != '*')
+            return Result.Empty<Unit>(input, "block comment");
+
+        for (int i = 2; i <= input.Length - 2; i++)
+        {
+            if (input[i] == '*' && input[i + 1] == '/')
+            {
+                int consumed = i + 2;
+                return Result.Value(Unit.Value, input, input.Skip(consumed));
+            }
+        }
+
+        return Result.Empty<Unit>(input, "unterminated block comment");
+    };
+
     /// <summary>The singleton tokenizer instance.</summary>
     public static Tokenizer<SqlToken> Instance { get; } =
         new TokenizerBuilder<SqlToken>()
 
             // Whitespace — discarded, not emitted as tokens
             .Ignore(Span.WhiteSpace)
+
+            // Comments — discarded, must precede operator matches that share
+            // the same prefix characters (- and /)
+            .Ignore(LineCommentToken)
+            .Ignore(BlockCommentToken)
 
             // Multi-character symbols must come before their single-char prefixes
             .Match(Span.EqualTo("<="), SqlToken.LessOrEqual)

@@ -122,6 +122,7 @@ public sealed class QuerySchemaResolver
 
         // Now determine what the SELECT clause projects out.
         List<ResolvedColumn> outputColumns = new();
+        HashSet<int> aliasedPositions = new();
 
         foreach (SelectColumn selectColumn in subquery.Query.Columns)
         {
@@ -145,13 +146,8 @@ public sealed class QuerySchemaResolver
 
                 default:
                     // Named expression — infer type and determine output name.
-                    string? outputName = selectColumn.Alias
-                        ?? GetExpressionColumnName(selectColumn.Expression);
-
-                    if (outputName is null)
-                    {
-                        continue;
-                    }
+                    string outputName = selectColumn.Alias
+                        ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
                     DataKind? kind = ExpressionTypeResolver.ResolveType(
                         selectColumn.Expression, innerSchema, _functionRegistry);
@@ -161,11 +157,24 @@ public sealed class QuerySchemaResolver
                         kind ?? DataKind.String,
                         Nullable: true,
                         subquery.Alias));
+                    if (selectColumn.Alias is not null)
+                    {
+                        aliasedPositions.Add(outputColumns.Count - 1);
+                    }
                     break;
             }
         }
 
-        return outputColumns;
+        // Deduplicate auto-generated column names.
+        string[] names = outputColumns.Select(column => column.ColumnName).ToArray();
+        ColumnNameResolver.DeduplicateNames(names, aliasedPositions);
+        List<ResolvedColumn> deduplicatedColumns = new(outputColumns.Count);
+        for (int index = 0; index < outputColumns.Count; index++)
+        {
+            deduplicatedColumns.Add(outputColumns[index] with { ColumnName = names[index] });
+        }
+
+        return deduplicatedColumns;
     }
 
     /// <summary>
@@ -254,19 +263,6 @@ public sealed class QuerySchemaResolver
         }
 
         return new Schema(columns);
-    }
-
-    /// <summary>
-    /// Extracts a column name from an expression when it is a simple column reference.
-    /// Returns <c>null</c> for complex expressions that have no natural name.
-    /// </summary>
-    private static string? GetExpressionColumnName(Expression expression)
-    {
-        return expression switch
-        {
-            ColumnReference columnRef => columnRef.ColumnName,
-            _ => null,
-        };
     }
 
     /// <summary>

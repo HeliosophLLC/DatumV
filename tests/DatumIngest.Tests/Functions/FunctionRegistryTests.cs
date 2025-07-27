@@ -20,7 +20,7 @@ public class FunctionRegistryTests
             "cast", "to_epoch", "date_part", "cyclical_encode",
             "json_value", "json_query", "json_exists", "json_array_length",
             "width", "height", "channels", "pixel_count", "dimensions",
-            "decode_image",
+            "image_to_bytes", "image_to_tensor_hwc", "image_to_tensor_chw",
             "resize", "crop", "grayscale", "rotate", "noise", "blur",
             "year", "month", "day", "hour", "minute", "second",
             "quarter", "dayofweek", "dayofyear",

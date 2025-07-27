@@ -19,9 +19,9 @@ public sealed class CrossManifestQueryBuilderTests
         string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default);
 
         Assert.NotNull(sql);
-        Assert.Contains("\"orders\"", sql);
-        Assert.Contains("\"customers\"", sql);
-        Assert.Contains("\"customer_id\"", sql);
+        Assert.Contains("[orders]", sql);
+        Assert.Contains("[customers]", sql);
+        Assert.Contains("[customer_id]", sql);
         Assert.Contains("JOIN", sql);
     }
 
@@ -111,9 +111,9 @@ public sealed class CrossManifestQueryBuilderTests
         string? sql = CrossManifestQueryBuilder.BuildQuery(candidates, CrossManifestQueryOptions.Default);
 
         Assert.NotNull(sql);
-        Assert.Contains("\"orders\"", sql);
-        Assert.Contains("\"customers\"", sql);
-        Assert.Contains("\"products\"", sql);
+        Assert.Contains("[orders]", sql);
+        Assert.Contains("[customers]", sql);
+        Assert.Contains("[products]", sql);
     }
 
     [Fact]
@@ -136,8 +136,8 @@ public sealed class CrossManifestQueryBuilderTests
 
         Assert.NotNull(sql);
         Assert.Contains("AND", sql);
-        Assert.Contains("\"region_id\"", sql);
-        Assert.Contains("\"year\"", sql);
+        Assert.Contains("[region_id]", sql);
+        Assert.Contains("[year]", sql);
     }
 
     [Fact]

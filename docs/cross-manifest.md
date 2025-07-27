@@ -220,6 +220,6 @@ Displays join candidates, transitive chains, insights, and recommended SQL for a
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
 | `GetJoinSuggestions` | `GetJoinSuggestionsRequest` | `GetJoinSuggestionsResponse` | Returns `CrossManifestResult` as JSON. |
-| `GetStats` | `GetStatsRequest` (table name) | `GetStatsResponse` | Returns per-table manifest statistics as JSON. |
+| `GetStats` | `GetStatsRequest` (session ID) | `GetStatsResponse` | Returns a unified manifest JSON combining all tables. |
 
 The `AddSource` response includes a `has_join_suggestions` flag indicating whether enough tables are registered for cross-manifest analysis.

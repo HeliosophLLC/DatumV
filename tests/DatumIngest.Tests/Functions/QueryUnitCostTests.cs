@@ -44,7 +44,9 @@ public class QueryUnitCostTests
     [InlineData("image_pixel_mean", 10)]
     [InlineData("perceptual_hash", 10)]
     [InlineData("resize", 50)]
-    [InlineData("decode_image", 50)]
+    [InlineData("image_to_bytes", 50)]
+    [InlineData("image_to_tensor_hwc", 50)]
+    [InlineData("image_to_tensor_chw", 50)]
     [InlineData("grayscale", 50)]
     public void Function_ReportsExpectedQueryUnitCost(string functionName, int expectedCost)
     {

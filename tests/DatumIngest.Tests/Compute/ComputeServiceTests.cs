@@ -124,7 +124,7 @@ public sealed class ComputeServiceTests : IDisposable
             Session? session = sessionManager.GetSession(Guid.Parse(response.SessionId));
             Assert.NotNull(session);
             Assert.Equal("test-ds", session.DatasetId);
-            Assert.Contains("people", session.Catalog.TableNames);
+            Assert.Contains("people.csv", session.Catalog.TableNames);
         }
         finally
         {
