@@ -159,6 +159,62 @@ public sealed class IsFiniteFunction : IScalarFunction
 }
 
 /// <summary>
+/// Returns 1 if the value is an even integer, 0 otherwise: is_even(x).
+/// Non-integer values always return 0.
+/// </summary>
+public sealed class IsEvenFunction : IScalarFunction
+{
+    /// <inheritdoc />
+    public string Name => "is_even";
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length != 1)
+            throw new ArgumentException("is_even() requires exactly 1 argument.");
+        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+            throw new ArgumentException("is_even() requires a Scalar or UInt8 argument.");
+        return DataKind.Scalar;
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
+        return DataValue.FromScalar(value == MathF.Truncate(value) && value % 2 == 0 ? 1f : 0f);
+    }
+}
+
+/// <summary>
+/// Returns 1 if the value is an odd integer, 0 otherwise: is_odd(x).
+/// Non-integer values always return 0.
+/// </summary>
+public sealed class IsOddFunction : IScalarFunction
+{
+    /// <inheritdoc />
+    public string Name => "is_odd";
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length != 1)
+            throw new ArgumentException("is_odd() requires exactly 1 argument.");
+        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+            throw new ArgumentException("is_odd() requires a Scalar or UInt8 argument.");
+        return DataKind.Scalar;
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
+        return DataValue.FromScalar(value == MathF.Truncate(value) && value % 2 != 0 ? 1f : 0f);
+    }
+}
+
+/// <summary>
 /// Returns the first argument if it is not null, otherwise the second: if_null(x, default).
 /// </summary>
 public sealed class IfNullFunction : IScalarFunction

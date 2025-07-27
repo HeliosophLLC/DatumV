@@ -549,7 +549,7 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `dot` | `dot(a, b)` | Dot product of two vectors. | 2 |
 | `hamming_distance` | `hamming_distance(a, b)` | Hamming distance between two strings. | 2 |
 
-## Math — Utility & Conditional (8)
+## Math — Utility & Conditional (10)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|| `coalesce` | `coalesce(a, b, ...)` | Returns first non-null argument. | 1 |
@@ -557,6 +557,8 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `least` | `least(a, b, ...)` | Returns minimum of scalar arguments. | 1 |
 | `is_nan` | `is_nan(x)` | Returns 1 if NaN, 0 otherwise. | 1 |
 | `is_finite` | `is_finite(x)` | Returns 1 if finite, 0 if NaN or infinite. | 1 |
+| `is_even` | `is_even(x)` | Returns 1 if x is an even integer, 0 otherwise. | 1 |
+| `is_odd` | `is_odd(x)` | Returns 1 if x is an odd integer, 0 otherwise. | 1 |
 | `if_null` | `if_null(x, default)` | Returns x if not null, otherwise default. | 1 |
 | `iif` | `iif(cond, then, else)` | Returns then when cond is truthy (non-null, non-zero), else otherwise. | 1 |
 | `random` | `random()` | Random float in [0, 1). | 1 |

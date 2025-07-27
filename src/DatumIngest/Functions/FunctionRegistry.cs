@@ -317,6 +317,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.LeastFunction());
         registry.RegisterScalar(new Math.IsNanFunction());
         registry.RegisterScalar(new Math.IsFiniteFunction());
+        registry.RegisterScalar(new Math.IsEvenFunction());
+        registry.RegisterScalar(new Math.IsOddFunction());
         registry.RegisterScalar(new Math.IfNullFunction());
         registry.RegisterScalar(new Math.IifFunction());
         registry.RegisterScalar(new Math.RandomFunction());

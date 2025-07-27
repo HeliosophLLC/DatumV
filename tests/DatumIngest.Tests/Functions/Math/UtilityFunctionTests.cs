@@ -112,6 +112,106 @@ public class UtilityFunctionTests
         Assert.Equal(0f, function.Execute([DataValue.FromScalar(float.NaN)]).AsScalar());
     }
 
+    // ───────────────── IsEvenFunction ─────────────────
+
+    [Fact]
+    public void IsEven_EvenInteger_ReturnsOne()
+    {
+        IsEvenFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromScalar(4)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsEven_OddInteger_ReturnsZero()
+    {
+        IsEvenFunction function = new();
+        Assert.Equal(0f, function.Execute([DataValue.FromScalar(3)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsEven_Zero_ReturnsOne()
+    {
+        IsEvenFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromScalar(0)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsEven_NegativeEven_ReturnsOne()
+    {
+        IsEvenFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromScalar(-6)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsEven_NonInteger_ReturnsZero()
+    {
+        IsEvenFunction function = new();
+        Assert.Equal(0f, function.Execute([DataValue.FromScalar(2.5f)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsEven_Null_ReturnsNull()
+    {
+        Assert.True(new IsEvenFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+    }
+
+    [Fact]
+    public void IsEven_UInt8_Even()
+    {
+        IsEvenFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromUInt8(10)]).AsScalar());
+    }
+
+    // ───────────────── IsOddFunction ─────────────────
+
+    [Fact]
+    public void IsOdd_OddInteger_ReturnsOne()
+    {
+        IsOddFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromScalar(3)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsOdd_EvenInteger_ReturnsZero()
+    {
+        IsOddFunction function = new();
+        Assert.Equal(0f, function.Execute([DataValue.FromScalar(4)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsOdd_Zero_ReturnsZero()
+    {
+        IsOddFunction function = new();
+        Assert.Equal(0f, function.Execute([DataValue.FromScalar(0)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsOdd_NegativeOdd_ReturnsOne()
+    {
+        IsOddFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromScalar(-7)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsOdd_NonInteger_ReturnsZero()
+    {
+        IsOddFunction function = new();
+        Assert.Equal(0f, function.Execute([DataValue.FromScalar(3.5f)]).AsScalar());
+    }
+
+    [Fact]
+    public void IsOdd_Null_ReturnsNull()
+    {
+        Assert.True(new IsOddFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+    }
+
+    [Fact]
+    public void IsOdd_UInt8_Odd()
+    {
+        IsOddFunction function = new();
+        Assert.Equal(1f, function.Execute([DataValue.FromUInt8(7)]).AsScalar());
+    }
+
     [Fact]
     public void IfNull_ValueNotNull_ReturnsValue()
     {
