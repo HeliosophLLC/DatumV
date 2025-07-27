@@ -603,6 +603,7 @@ public sealed class QueryPlanner
                 || ExpressionContainsAggregate(between.Low, functionRegistry)
                 || ExpressionContainsAggregate(between.High, functionRegistry),
             IsNullExpression isNull => ExpressionContainsAggregate(isNull.Expression, functionRegistry),
+            CaseExpression caseExpr => CaseExpressionContainsAggregate(caseExpr, functionRegistry),
             _ => false,
         };
     }
@@ -667,8 +668,61 @@ public sealed class QueryPlanner
             CastExpression cast => new CastExpression(
                 RewriteAggregateExpression(cast.Expression, functionRegistry, aggregateColumns),
                 cast.TargetType),
+            CaseExpression caseExpr => RewriteCaseAggregateExpression(caseExpr, functionRegistry, aggregateColumns),
             _ => expression,
         };
+    }
+
+    /// <summary>
+    /// Checks whether a CASE expression contains any aggregate function calls
+    /// in its operand, WHEN conditions, THEN results, or ELSE result.
+    /// </summary>
+    private static bool CaseExpressionContainsAggregate(CaseExpression caseExpression, FunctionRegistry functionRegistry)
+    {
+        if (caseExpression.Operand is not null && ExpressionContainsAggregate(caseExpression.Operand, functionRegistry))
+        {
+            return true;
+        }
+
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            if (ExpressionContainsAggregate(whenClause.Condition, functionRegistry)
+                || ExpressionContainsAggregate(whenClause.Result, functionRegistry))
+            {
+                return true;
+            }
+        }
+
+        return caseExpression.ElseResult is not null
+            && ExpressionContainsAggregate(caseExpression.ElseResult, functionRegistry);
+    }
+
+    /// <summary>
+    /// Rewrites aggregate references inside a CASE expression by descending
+    /// into operand, WHEN conditions, THEN results, and the ELSE branch.
+    /// </summary>
+    private static CaseExpression RewriteCaseAggregateExpression(
+        CaseExpression caseExpression,
+        FunctionRegistry functionRegistry,
+        List<AggregateColumn> aggregateColumns)
+    {
+        Expression? rewrittenOperand = caseExpression.Operand is not null
+            ? RewriteAggregateExpression(caseExpression.Operand, functionRegistry, aggregateColumns)
+            : null;
+
+        List<WhenClause> rewrittenClauses = new(caseExpression.WhenClauses.Count);
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            rewrittenClauses.Add(new WhenClause(
+                RewriteAggregateExpression(whenClause.Condition, functionRegistry, aggregateColumns),
+                RewriteAggregateExpression(whenClause.Result, functionRegistry, aggregateColumns)));
+        }
+
+        Expression? rewrittenElse = caseExpression.ElseResult is not null
+            ? RewriteAggregateExpression(caseExpression.ElseResult, functionRegistry, aggregateColumns)
+            : null;
+
+        return new CaseExpression(rewrittenOperand, rewrittenClauses, rewrittenElse, caseExpression.Span);
     }
 
     /// <summary>

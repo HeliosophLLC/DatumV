@@ -228,6 +228,47 @@ SELECT * FROM data ORDER BY score DESC LIMIT 10
 
 When ORDER BY + LIMIT are combined, a bounded priority queue (top-N sort) avoids materializing the full result set.
 
+## CASE Expressions
+
+CASE expressions provide inline conditional logic, similar to if/else chains.
+
+### Searched CASE
+
+Each WHEN clause contains an independent boolean condition:
+
+```sql
+SELECT CASE
+         WHEN score >= 90 THEN 'A'
+         WHEN score >= 80 THEN 'B'
+         WHEN score >= 70 THEN 'C'
+         ELSE 'F'
+       END AS grade
+FROM students
+```
+
+### Simple CASE
+
+Compares an operand against each WHEN value:
+
+```sql
+SELECT CASE status
+         WHEN 1 THEN 'active'
+         WHEN 2 THEN 'inactive'
+         WHEN 3 THEN 'banned'
+         ELSE 'unknown'
+       END AS status_label
+FROM users
+```
+
+### Behavior
+
+- WHEN clauses are evaluated in order; the first match wins.
+- If no WHEN clause matches and no ELSE is provided, the result is NULL.
+- For simple CASE, a NULL operand never matches any WHEN value (SQL three-valued logic).
+- CASE expressions can appear anywhere an expression is valid: SELECT, WHERE, ORDER BY, GROUP BY, HAVING, and JOIN ON.
+- CASE expressions can be nested.
+- For simple single-condition cases, the `iif()` function provides a more concise alternative.
+
 ## Subqueries
 
 ```sql

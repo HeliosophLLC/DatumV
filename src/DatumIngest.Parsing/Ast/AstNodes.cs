@@ -322,3 +322,32 @@ public sealed record CastExpression(Expression Expression, string TargetType, So
 /// expression evaluation) should treat this as opaque and skip validation.
 /// </summary>
 public sealed record ErrorExpression(SourceSpan? Span = null) : Expression;
+
+/// <summary>
+/// A single WHEN ... THEN branch within a <see cref="CaseExpression"/>.
+/// </summary>
+/// <param name="Condition">
+/// For a simple CASE (<c>CASE operand WHEN value ...</c>), the value to compare against the operand.
+/// For a searched CASE (<c>CASE WHEN condition ...</c>), the boolean condition to evaluate.
+/// </param>
+/// <param name="Result">The expression to return when this branch matches.</param>
+public sealed record WhenClause(Expression Condition, Expression Result);
+
+/// <summary>
+/// A SQL CASE expression supporting both simple and searched forms.
+/// <para>
+/// Simple form: <c>CASE operand WHEN value1 THEN result1 ... [ELSE default] END</c> —
+/// <see cref="Operand"/> is present and each <see cref="WhenClause.Condition"/> is compared
+/// against it for equality.
+/// </para>
+/// <para>
+/// Searched form: <c>CASE WHEN condition1 THEN result1 ... [ELSE default] END</c> —
+/// <see cref="Operand"/> is <see langword="null"/> and each <see cref="WhenClause.Condition"/>
+/// is evaluated as a boolean predicate.
+/// </para>
+/// </summary>
+public sealed record CaseExpression(
+    Expression? Operand,
+    IReadOnlyList<WhenClause> WhenClauses,
+    Expression? ElseResult,
+    SourceSpan? Span = null) : Expression;

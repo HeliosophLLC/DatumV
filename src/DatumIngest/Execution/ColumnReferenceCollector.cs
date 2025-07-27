@@ -109,6 +109,25 @@ public static class ColumnReferenceCollector
                 Walk(cast.Expression, references);
                 break;
 
+            case CaseExpression caseExpr:
+                if (caseExpr.Operand is not null)
+                {
+                    Walk(caseExpr.Operand, references);
+                }
+
+                foreach (WhenClause whenClause in caseExpr.WhenClauses)
+                {
+                    Walk(whenClause.Condition, references);
+                    Walk(whenClause.Result, references);
+                }
+
+                if (caseExpr.ElseResult is not null)
+                {
+                    Walk(caseExpr.ElseResult, references);
+                }
+
+                break;
+
             case SubqueryExpression:
                 // Subquery column references are scoped to the inner query;
                 // they do not reference the outer query's tables.

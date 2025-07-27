@@ -222,4 +222,44 @@ public class ColumnReferenceCollectorTests
         Assert.Contains(("a", "name"), references);
         Assert.Contains(("b", "label"), references);
     }
+
+    // ─────────────── CASE expression ───────────────
+
+    [Fact]
+    public void Collect_SearchedCaseExpression_CollectsAllReferences()
+    {
+        Expression expression = new CaseExpression(
+            null,
+            [
+                new WhenClause(
+                    new BinaryExpression(
+                        new ColumnReference("t", "status"),
+                        BinaryOperator.Equal,
+                        new LiteralExpression(1)),
+                    new ColumnReference("t", "label")),
+            ],
+            new ColumnReference("t", "fallback"));
+
+        HashSet<(string?, string)> references = ColumnReferenceCollector.Collect(expression);
+
+        Assert.Equal(3, references.Count);
+        Assert.Contains(("t", "status"), references);
+        Assert.Contains(("t", "label"), references);
+        Assert.Contains(("t", "fallback"), references);
+    }
+
+    [Fact]
+    public void Collect_SimpleCaseExpression_IncludesOperand()
+    {
+        Expression expression = new CaseExpression(
+            new ColumnReference("t", "category"),
+            [new WhenClause(new LiteralExpression(1), new ColumnReference("t", "name"))],
+            null);
+
+        HashSet<(string?, string)> references = ColumnReferenceCollector.Collect(expression);
+
+        Assert.Equal(2, references.Count);
+        Assert.Contains(("t", "category"), references);
+        Assert.Contains(("t", "name"), references);
+    }
 }

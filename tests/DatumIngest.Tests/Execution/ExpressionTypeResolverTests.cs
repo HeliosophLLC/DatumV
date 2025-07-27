@@ -240,4 +240,68 @@ public sealed class ExpressionTypeResolverTests
 
         Assert.Null(result);
     }
+
+    // ───────────────────── CASE expressions ─────────────────────
+
+    [Fact]
+    public void ResolveCase_AllBranchesScalar_ReturnsScalar()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new LiteralExpression(1))],
+                new LiteralExpression(0)),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Scalar, result);
+    }
+
+    [Fact]
+    public void ResolveCase_AllBranchesString_ReturnsString()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [
+                    new WhenClause(new LiteralExpression(true), new LiteralExpression("a")),
+                    new WhenClause(new LiteralExpression(false), new LiteralExpression("b")),
+                ],
+                new LiteralExpression("c")),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.String, result);
+    }
+
+    [Fact]
+    public void ResolveCase_WithoutElse_ResolvesFromThenBranches()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(true), new ColumnReference("id"))],
+                null),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.Scalar, result);
+    }
+
+    [Fact]
+    public void ResolveCase_SimpleCaseWithOperand_ReturnsUnifiedType()
+    {
+        DataKind? result = ExpressionTypeResolver.ResolveType(
+            new CaseExpression(
+                new ColumnReference("id"),
+                [
+                    new WhenClause(new LiteralExpression(1), new LiteralExpression("one")),
+                    new WhenClause(new LiteralExpression(2), new LiteralExpression("two")),
+                ],
+                new LiteralExpression("other")),
+            TestSchema,
+            DefaultFunctions);
+
+        Assert.Equal(DataKind.String, result);
+    }
 }

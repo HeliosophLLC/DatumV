@@ -107,6 +107,21 @@ public enum SqlToken
     /// <summary>The FALSE keyword (boolean literal).</summary>
     False,
 
+    /// <summary>The CASE keyword (conditional expression).</summary>
+    Case,
+
+    /// <summary>The WHEN keyword (conditional branch).</summary>
+    When,
+
+    /// <summary>The THEN keyword (conditional result).</summary>
+    Then,
+
+    /// <summary>The ELSE keyword (conditional default).</summary>
+    Else,
+
+    /// <summary>The END keyword (conditional terminator).</summary>
+    End,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>

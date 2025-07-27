@@ -861,4 +861,93 @@ public class SqlParserTests
         Assert.Equal("t", groupKey.TableName);
         Assert.Equal("category", groupKey.ColumnName);
     }
+
+    // ───────────────────── CASE expressions ─────────────────────
+
+    [Fact]
+    public void SearchedCaseExpression()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE WHEN x > 0 THEN 'positive' ELSE 'non-positive' END FROM t");
+
+        Assert.Single(result.Columns);
+        CaseExpression caseExpr = Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+        Assert.Null(caseExpr.Operand);
+        Assert.Single(caseExpr.WhenClauses);
+        Assert.IsType<BinaryExpression>(caseExpr.WhenClauses[0].Condition);
+        Assert.IsType<LiteralExpression>(caseExpr.WhenClauses[0].Result);
+        Assert.NotNull(caseExpr.ElseResult);
+        Assert.IsType<LiteralExpression>(caseExpr.ElseResult);
+    }
+
+    [Fact]
+    public void SimpleCaseExpression()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE status WHEN 1 THEN 'active' WHEN 2 THEN 'inactive' END FROM t");
+
+        Assert.Single(result.Columns);
+        CaseExpression caseExpr = Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+        Assert.NotNull(caseExpr.Operand);
+        ColumnReference operand = Assert.IsType<ColumnReference>(caseExpr.Operand);
+        Assert.Equal("status", operand.ColumnName);
+        Assert.Equal(2, caseExpr.WhenClauses.Count);
+        Assert.Null(caseExpr.ElseResult);
+    }
+
+    [Fact]
+    public void CaseExpressionWithoutElse()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE WHEN x = 1 THEN 'one' END FROM t");
+
+        CaseExpression caseExpr = Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+        Assert.Null(caseExpr.Operand);
+        Assert.Single(caseExpr.WhenClauses);
+        Assert.Null(caseExpr.ElseResult);
+    }
+
+    [Fact]
+    public void CaseExpressionMultipleWhenClauses()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE WHEN x = 1 THEN 'a' WHEN x = 2 THEN 'b' WHEN x = 3 THEN 'c' ELSE 'd' END FROM t");
+
+        CaseExpression caseExpr = Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+        Assert.Equal(3, caseExpr.WhenClauses.Count);
+        Assert.NotNull(caseExpr.ElseResult);
+    }
+
+    [Fact]
+    public void CaseExpressionInWhere()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t WHERE CASE WHEN x > 0 THEN 1 ELSE 0 END = 1");
+
+        Assert.NotNull(result.Where);
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.IsType<CaseExpression>(binary.Left);
+    }
+
+    [Fact]
+    public void CaseExpressionWithAlias()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE WHEN x > 0 THEN 'yes' ELSE 'no' END AS label FROM t");
+
+        Assert.Equal("label", result.Columns[0].Alias);
+        Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+    }
+
+    [Fact]
+    public void NestedCaseExpression()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE WHEN x > 0 THEN CASE WHEN x > 10 THEN 'big' ELSE 'small' END ELSE 'zero' END FROM t");
+
+        CaseExpression outer = Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+        CaseExpression inner = Assert.IsType<CaseExpression>(outer.WhenClauses[0].Result);
+        Assert.Single(inner.WhenClauses);
+        Assert.NotNull(inner.ElseResult);
+    }
 }

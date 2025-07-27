@@ -596,6 +596,7 @@ public static class QueryExplainer
             BetweenExpression between => $"{FormatExpression(between.Expression)} {(between.Negated ? "NOT BETWEEN" : "BETWEEN")} {FormatExpression(between.Low)} AND {FormatExpression(between.High)}",
             IsNullExpression isNull => $"{FormatExpression(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
             CastExpression cast => $"CAST({FormatExpression(cast.Expression)} AS {cast.TargetType})",
+            CaseExpression caseExpr => FormatCaseExpression(caseExpr),
             _ => expression.ToString() ?? "?",
         };
     }
@@ -640,6 +641,35 @@ public static class QueryExplainer
             UnaryOperator.Negate => $"-{FormatExpression(unary.Operand)}",
             _ => $"{unary.Operator} {FormatExpression(unary.Operand)}",
         };
+    }
+
+    private static string FormatCaseExpression(CaseExpression caseExpression)
+    {
+        System.Text.StringBuilder builder = new();
+        builder.Append("CASE");
+
+        if (caseExpression.Operand is not null)
+        {
+            builder.Append(' ');
+            builder.Append(FormatExpression(caseExpression.Operand));
+        }
+
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            builder.Append(" WHEN ");
+            builder.Append(FormatExpression(whenClause.Condition));
+            builder.Append(" THEN ");
+            builder.Append(FormatExpression(whenClause.Result));
+        }
+
+        if (caseExpression.ElseResult is not null)
+        {
+            builder.Append(" ELSE ");
+            builder.Append(FormatExpression(caseExpression.ElseResult));
+        }
+
+        builder.Append(" END");
+        return builder.ToString();
     }
 
     private static bool ContainsLike(Expression expression)

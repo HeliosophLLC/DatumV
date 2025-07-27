@@ -163,6 +163,11 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("CAST"), SqlToken.Cast, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("TRUE"), SqlToken.True, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FALSE"), SqlToken.False, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("CASE"), SqlToken.Case, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("WHEN"), SqlToken.When, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("THEN"), SqlToken.Then, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("ELSE"), SqlToken.Else, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("END"), SqlToken.End, requireDelimiters: true)
 
             // Numeric literals
             .Match(NumberToken, SqlToken.NumberLiteral, requireDelimiters: true)

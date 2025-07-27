@@ -248,6 +248,25 @@ internal sealed class SemanticAnalyzer
                 AnalyzeExpression(cast.Expression, aliasToTable, opaqueAliases, diagnostics);
                 break;
 
+            case CaseExpression caseExpr:
+                if (caseExpr.Operand is not null)
+                {
+                    AnalyzeExpression(caseExpr.Operand, aliasToTable, opaqueAliases, diagnostics);
+                }
+
+                foreach (WhenClause whenClause in caseExpr.WhenClauses)
+                {
+                    AnalyzeExpression(whenClause.Condition, aliasToTable, opaqueAliases, diagnostics);
+                    AnalyzeExpression(whenClause.Result, aliasToTable, opaqueAliases, diagnostics);
+                }
+
+                if (caseExpr.ElseResult is not null)
+                {
+                    AnalyzeExpression(caseExpr.ElseResult, aliasToTable, opaqueAliases, diagnostics);
+                }
+
+                break;
+
             case SubqueryExpression subquery:
                 Diagnostic[] subDiagnostics = Analyze(subquery.Query);
                 diagnostics.AddRange(subDiagnostics);

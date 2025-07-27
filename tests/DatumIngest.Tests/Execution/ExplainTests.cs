@@ -711,6 +711,38 @@ public class ExplainTests
     }
 
     [Fact]
+    public void FormatExpression_SearchedCase_FormatsCorrectly()
+    {
+        string result = QueryExplainer.FormatExpression(
+            new CaseExpression(
+                null,
+                [
+                    new WhenClause(
+                        new BinaryExpression(
+                            new ColumnReference("x"),
+                            BinaryOperator.GreaterThan,
+                            new LiteralExpression(0.0)),
+                        new LiteralExpression("positive")),
+                ],
+                new LiteralExpression("non-positive")));
+        Assert.Equal("CASE WHEN x > 0 THEN 'positive' ELSE 'non-positive' END", result);
+    }
+
+    [Fact]
+    public void FormatExpression_SimpleCase_FormatsWithOperand()
+    {
+        string result = QueryExplainer.FormatExpression(
+            new CaseExpression(
+                new ColumnReference("status"),
+                [
+                    new WhenClause(new LiteralExpression(1.0), new LiteralExpression("active")),
+                    new WhenClause(new LiteralExpression(2.0), new LiteralExpression("inactive")),
+                ],
+                null));
+        Assert.Equal("CASE status WHEN 1 THEN 'active' WHEN 2 THEN 'inactive' END", result);
+    }
+
+    [Fact]
     public void FormatExpression_Literal_Null_FormatsAsNull()
     {
         string result = QueryExplainer.FormatExpression(new LiteralExpression(null));

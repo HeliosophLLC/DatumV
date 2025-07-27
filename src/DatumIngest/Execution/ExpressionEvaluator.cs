@@ -54,6 +54,7 @@ public sealed class ExpressionEvaluator
             BetweenExpression between => EvaluateBetween(between, row),
             IsNullExpression isNull => EvaluateIsNull(isNull, row),
             CastExpression cast => EvaluateCast(cast, row),
+            CaseExpression caseExpr => EvaluateCase(caseExpr, row),
             _ => throw new InvalidOperationException(
                 $"Unsupported expression type: {expression.GetType().Name}."),
         };
@@ -412,6 +413,49 @@ public sealed class ExpressionEvaluator
             arguments.AsSpan(0, 2).Clear();
             ArrayPool<DataValue>.Shared.Return(arguments);
         }
+    }
+
+    /// <summary>
+    /// Evaluates a CASE expression with short-circuit semantics.
+    /// Simple CASE compares the operand against each WHEN value for equality.
+    /// Searched CASE evaluates each WHEN condition as a boolean predicate.
+    /// Only the matching THEN branch is evaluated.
+    /// </summary>
+    private DataValue EvaluateCase(CaseExpression caseExpression, Row row)
+    {
+        if (caseExpression.Operand is not null)
+        {
+            // Simple CASE: compare operand against each WHEN value.
+            DataValue operand = Evaluate(caseExpression.Operand, row);
+
+            foreach (WhenClause whenClause in caseExpression.WhenClauses)
+            {
+                DataValue whenValue = Evaluate(whenClause.Condition, row);
+                if (!operand.IsNull && !whenValue.IsNull && operand.Equals(whenValue))
+                {
+                    return Evaluate(whenClause.Result, row);
+                }
+            }
+        }
+        else
+        {
+            // Searched CASE: evaluate each WHEN condition as boolean.
+            foreach (WhenClause whenClause in caseExpression.WhenClauses)
+            {
+                if (EvaluateAsBoolean(whenClause.Condition, row))
+                {
+                    return Evaluate(whenClause.Result, row);
+                }
+            }
+        }
+
+        // No match: return ELSE result or typed null.
+        if (caseExpression.ElseResult is not null)
+        {
+            return Evaluate(caseExpression.ElseResult, row);
+        }
+
+        return DataValue.Null(DataKind.Scalar);
     }
 
     // ──────────────────── Arithmetic helpers ────────────────────

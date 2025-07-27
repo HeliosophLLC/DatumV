@@ -174,12 +174,36 @@ public static class SqlParser
         select (Expression)new UnaryExpression(UnaryOperator.Negate, operand);
 
     /// <summary>
+    /// CASE expression supporting both simple and searched forms.
+    /// Simple: <c>CASE expr WHEN val THEN result ... [ELSE default] END</c>.
+    /// Searched: <c>CASE WHEN cond THEN result ... [ELSE default] END</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> CaseCall =
+        from caseKw in Token.EqualTo(SqlToken.Case)
+        from operand in SP.Ref(() => ExpressionParser!).OptionalOrDefault()
+        from whenClauses in (
+            from whenKw in Token.EqualTo(SqlToken.When)
+            from condition in SP.Ref(() => ExpressionParser!)
+            from thenKw in Token.EqualTo(SqlToken.Then)
+            from result in SP.Ref(() => ExpressionParser!)
+            select new WhenClause(condition, result)
+        ).AtLeastOnce()
+        from elseResult in (
+            from elseKw in Token.EqualTo(SqlToken.Else)
+            from result in SP.Ref(() => ExpressionParser!)
+            select result
+        ).OptionalOrDefault()
+        from endKw in Token.EqualTo(SqlToken.End)
+        select (Expression)new CaseExpression(operand, whenClauses, elseResult, ToSpan(caseKw, endKw));
+
+    /// <summary>
     /// Primary expression: the atomic unit in the precedence hierarchy.
     /// Order matters: function call must be tried before column reference
     /// because both start with an Identifier token.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> PrimaryExpression =
-        CastCall.Try()
+        CaseCall.Try()
+            .Or(CastCall.Try())
             .Or(FunctionCall.Try())
             .Or(QualifiedColumn)
             .Or(NumberLiteral)

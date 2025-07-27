@@ -40,7 +40,7 @@ public sealed class CompletionProvider
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
-                AddKeywords(items, ["FROM", "AS", "CAST"]);
+                AddKeywords(items, ["FROM", "AS", "CAST", "CASE"]);
                 break;
 
             case CompletionZoneKind.AfterFrom:
@@ -266,6 +266,6 @@ public sealed class CompletionProvider
     private static readonly string[] ExpressionKeywords =
     [
         "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
-        "IS", "NULL", "TRUE", "FALSE", "CAST",
+        "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE",
     ];
 }

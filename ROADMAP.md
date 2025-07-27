@@ -2,7 +2,7 @@
 
 The following features are architecturally accounted for but deferred from V1:
 
-- **GROUP BY / Aggregation**: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING
+- ~~**GROUP BY / Aggregation**: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING~~ ✅
 - **Spill-to-disk joins**: Grace hash join for datasets too large for memory
 - **Adaptive batch sizing**: Auto-tune based on row size estimates and available memory
 - **Excel provider**: Read .xlsx files (ITableProvider interface is ready)
@@ -33,7 +33,8 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Language server — multi-error diagnostics**: Error-recovering parser for multiple parse errors per document~~ ✅
 - **Language server — semantic diagnostics**: ~~Unknown table/column warnings~~, type mismatch detection ✅ (partial)
 - ~~**Language server — WASM size optimization**: Extract `DatumIngest.Parsing` with manifest POCOs to eliminate all transitive heavy dependencies from LanguageServer/Wasm~~ ✅
-- **CASE / WHEN expressions**: Searched CASE (`CASE expr WHEN ... THEN ... ELSE ... END`) and simple CASE (`CASE WHEN cond THEN ... END`). Requires new lexer tokens, AST nodes, and evaluator support. `iif()` provides basic inline conditional as a function today.
+- ~~**CASE / WHEN expressions**: Searched CASE (`CASE WHEN cond THEN ... END`) and simple CASE (`CASE expr WHEN value THEN ... ELSE ... END`). Requires new lexer tokens, AST nodes, and evaluator support. `iif()` provides basic inline conditional as a function today.~~ ✅
+- **NULLIF / COALESCE expressions**: `NULLIF(a, b)` returns NULL when a equals b, `COALESCE(a, b, ...)` returns first non-null argument. Currently available as functions; promote to expression syntax for SQL standard compliance.
 
 ---
 

@@ -773,4 +773,128 @@ public class ExpressionEvaluatorTests
         Assert.Equal(DataKind.Scalar, result.Kind);
         Assert.Equal(7200f, result.AsScalar());
     }
+
+    // ─────────────── CASE expression ───────────────
+
+    [Fact]
+    public void Case_Searched_MatchesFirstTrueBranch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [
+                    new WhenClause(new LiteralExpression(false), new LiteralExpression("no")),
+                    new WhenClause(new LiteralExpression(true), new LiteralExpression("yes")),
+                ],
+                new LiteralExpression("default")),
+            MakeRow());
+        Assert.Equal("yes", result.AsString());
+    }
+
+    [Fact]
+    public void Case_Searched_FallsToElse()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(false), new LiteralExpression("no"))],
+                new LiteralExpression("fallback")),
+            MakeRow());
+        Assert.Equal("fallback", result.AsString());
+    }
+
+    [Fact]
+    public void Case_Searched_NoElse_ReturnsNull()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [new WhenClause(new LiteralExpression(false), new LiteralExpression("no"))],
+                null),
+            MakeRow());
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Case_Simple_MatchesOperand()
+    {
+        Row row = MakeRow(("status", DataValue.FromScalar(2)));
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                new ColumnReference("status"),
+                [
+                    new WhenClause(new LiteralExpression(1), new LiteralExpression("one")),
+                    new WhenClause(new LiteralExpression(2), new LiteralExpression("two")),
+                ],
+                new LiteralExpression("other")),
+            row);
+        Assert.Equal("two", result.AsString());
+    }
+
+    [Fact]
+    public void Case_Simple_NoMatch_FallsToElse()
+    {
+        Row row = MakeRow(("status", DataValue.FromScalar(99)));
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                new ColumnReference("status"),
+                [new WhenClause(new LiteralExpression(1), new LiteralExpression("one"))],
+                new LiteralExpression("unknown")),
+            row);
+        Assert.Equal("unknown", result.AsString());
+    }
+
+    [Fact]
+    public void Case_Simple_NullOperand_ReturnsNull()
+    {
+        Row row = MakeRow(("status", DataValue.Null(DataKind.Scalar)));
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                new ColumnReference("status"),
+                [new WhenClause(new LiteralExpression(1), new LiteralExpression("one"))],
+                null),
+            row);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Case_Searched_WithColumnCondition()
+    {
+        Row row = MakeRow(("x", DataValue.FromScalar(5)));
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [
+                    new WhenClause(
+                        new BinaryExpression(
+                            new ColumnReference("x"),
+                            BinaryOperator.GreaterThan,
+                            new LiteralExpression(10)),
+                        new LiteralExpression("big")),
+                    new WhenClause(
+                        new BinaryExpression(
+                            new ColumnReference("x"),
+                            BinaryOperator.GreaterThan,
+                            new LiteralExpression(0)),
+                        new LiteralExpression("small")),
+                ],
+                new LiteralExpression("zero")),
+            row);
+        Assert.Equal("small", result.AsString());
+    }
+
+    [Fact]
+    public void Case_ShortCircuits_FirstMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new CaseExpression(
+                null,
+                [
+                    new WhenClause(new LiteralExpression(true), new LiteralExpression("first")),
+                    new WhenClause(new LiteralExpression(true), new LiteralExpression("second")),
+                ],
+                null),
+            MakeRow());
+        Assert.Equal("first", result.AsString());
+    }
 }

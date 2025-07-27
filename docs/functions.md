@@ -560,7 +560,7 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `is_even` | `is_even(x)` | Returns 1 if x is an even integer, 0 otherwise. | 1 |
 | `is_odd` | `is_odd(x)` | Returns 1 if x is an odd integer, 0 otherwise. | 1 |
 | `if_null` | `if_null(x, default)` | Returns x if not null, otherwise default. | 1 |
-| `iif` | `iif(cond, then, else)` | Returns then when cond is truthy (non-null, non-zero), else otherwise. | 1 |
+| `iif` | `iif(cond, then, else)` | Returns then when cond is truthy (non-null, non-zero), else otherwise. For multi-branch conditionals, see [CASE expressions](sql.md#case-expressions). | 1 |
 | `random` | `random()` | Random float in [0, 1). | 1 |
 
 ## Image — Metadata (5)

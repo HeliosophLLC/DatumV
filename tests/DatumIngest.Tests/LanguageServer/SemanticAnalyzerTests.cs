@@ -468,4 +468,46 @@ public sealed class SemanticAnalyzerTests
             diagnostic.Severity == DiagnosticSeverity.Warning &&
             diagnostic.Message.Contains("ghost"));
     }
+
+    // ───────────────────── CASE expression ─────────────────────
+
+    [Fact]
+    public void Analyze_ValidCaseExpression_ReturnsEmpty()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "x", "label")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT CASE WHEN x > 0 THEN label ELSE 'none' END FROM t", manifest);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Analyze_UnknownColumnInCaseCondition_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "x")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT CASE WHEN ghost > 0 THEN 'yes' ELSE 'no' END FROM t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("ghost"));
+    }
+
+    [Fact]
+    public void Analyze_UnknownColumnInCaseResult_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "x")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT CASE WHEN x > 0 THEN phantom ELSE 'no' END FROM t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("phantom"));
+    }
 }

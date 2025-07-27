@@ -34,6 +34,7 @@ public static class ExpressionTypeResolver
             BetweenExpression => DataKind.Scalar,
             IsNullExpression => DataKind.Scalar,
             CastExpression cast => ResolveCast(cast),
+            CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             _ => null,
         };
     }
@@ -189,5 +190,43 @@ public static class ExpressionTypeResolver
             or BinaryOperator.And
             or BinaryOperator.Or
             or BinaryOperator.Like;
+    }
+
+    /// <summary>
+    /// Resolves the output type of a CASE expression by finding the common type
+    /// across all THEN branch results and the optional ELSE result.
+    /// </summary>
+    private static DataKind? ResolveCaseExpression(CaseExpression caseExpression, Schema sourceSchema, FunctionRegistry functions)
+    {
+        DataKind? commonKind = null;
+
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            DataKind? branchKind = ResolveType(whenClause.Result, sourceSchema, functions);
+            if (branchKind is null)
+            {
+                return null;
+            }
+
+            commonKind = commonKind is null
+                ? branchKind
+                : TypeCoercion.FindCommonKind(commonKind.Value, branchKind.Value);
+
+            if (commonKind is null)
+            {
+                return null;
+            }
+        }
+
+        if (caseExpression.ElseResult is not null)
+        {
+            DataKind? elseKind = ResolveType(caseExpression.ElseResult, sourceSchema, functions);
+            if (elseKind is not null && commonKind is not null)
+            {
+                commonKind = TypeCoercion.FindCommonKind(commonKind.Value, elseKind.Value);
+            }
+        }
+
+        return commonKind;
     }
 }
