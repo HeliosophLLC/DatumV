@@ -32,7 +32,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
     {
         string csvPath = CreateCsvFile("data.csv", "id,name\n1,Alice\n2,Bob\n");
         SourceIndex index = CreateTestIndex(rowCount: 2);
-        WriteSidecar(csvPath, index);
+        WriteSidecar(csvPath, "data", index);
 
         TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
@@ -65,7 +65,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         string csvPath = CreateCsvFile("data.csv", "id\n1\n");
         SourceIndex explicitIndex = CreateTestIndex(rowCount: 999);
         SourceIndex sidecarIndex = CreateTestIndex(rowCount: 1);
-        WriteSidecar(csvPath, sidecarIndex);
+        WriteSidecar(csvPath, "data", sidecarIndex);
 
         TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
@@ -83,8 +83,8 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
     {
         string csvPath1 = CreateCsvFile("images.csv", "pixel\n0\n1\n");
         string csvPath2 = CreateCsvFile("labels.csv", "label\n3\n7\n");
-        WriteSidecar(csvPath1, CreateTestIndex(rowCount: 2));
-        WriteSidecar(csvPath2, CreateTestIndex(rowCount: 2));
+        WriteSidecar(csvPath1, "images", CreateTestIndex(rowCount: 2));
+        WriteSidecar(csvPath2, "labels", CreateTestIndex(rowCount: 2));
 
         TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
@@ -123,10 +123,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
             using FileStream stream = File.OpenRead(sidecarPath);
             SourceIndexSet indexSet = reader.Read(stream);
 
-            string tableKey = descriptor.Options.TryGetValue(
-                TableCatalog.SubTableKeyOption, out string? key) ? key : "";
-
-            if (indexSet.Tables.TryGetValue(tableKey, out SourceIndex? index))
+            if (indexSet.Tables.TryGetValue(tableName, out SourceIndex? index))
             {
                 catalog.RegisterIndex(tableName, index);
             }
@@ -148,12 +145,12 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         return new SourceIndex(fingerprint, indexSchema, Array.Empty<IndexChunk>());
     }
 
-    private static void WriteSidecar(string sourceFilePath, SourceIndex index)
+    private static void WriteSidecar(string sourceFilePath, string tableName, SourceIndex index)
     {
         string sidecarPath = sourceFilePath + ".datum-index";
         using FileStream stream = File.Create(sidecarPath);
         IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create(index);
+        SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
         writer.Write(indexSet, stream);
     }
 }

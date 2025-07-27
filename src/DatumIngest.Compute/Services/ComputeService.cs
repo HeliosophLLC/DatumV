@@ -476,7 +476,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
             if (session.Catalog.TryGetManifest(tableName, out QueryResultsManifest? manifest) && manifest is not null)
             {
-                manifestJson = ManifestSerializer.Serialize(manifest);
+                manifestJson = ManifestSerializer.Serialize(tableName, manifest);
             }
 
             response.Tables.Add(new TableStatsMessage

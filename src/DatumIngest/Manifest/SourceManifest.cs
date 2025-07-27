@@ -1,41 +1,40 @@
 namespace DatumIngest.Manifest;
 
 /// <summary>
-/// Container for per-sub-table manifests within a single source file.
+/// Container for per-table manifests within a single source file.
 /// A <c>.datum-manifest</c> sidecar always contains a <see cref="SourceManifest"/>,
-/// even for single-table sources — the sole table uses an empty-string key.
+/// keyed by the logical table name used in the catalog.
 /// </summary>
 /// <remarks>
 /// <para>
 /// When a source file exposes multiple logical tables (e.g. a JSON file with several
-/// top-level array properties), each table's statistics are stored under its sub-table
-/// qualifier key (the leaf property name). Single-table sources use <c>""</c> as the key.
+/// top-level array properties), each table's statistics are stored under its fully
+/// qualified catalog name (e.g. <c>"annotations"</c>, <c>"annotations.labels"</c>).
 /// </para>
 /// <para>
 /// Use <see cref="Create"/> to wrap a single <see cref="QueryResultsManifest"/> with
-/// the default empty key.
+/// its catalog table name.
 /// </para>
 /// </remarks>
 public sealed class SourceManifest
 {
     /// <summary>
-    /// Gets the per-sub-table manifests, keyed by sub-table qualifier.
-    /// An empty string key represents the sole or default table in the source file.
-    /// Non-empty keys represent sub-table qualifiers (e.g. JSON property names).
+    /// Gets the per-table manifests, keyed by catalog table name.
+    /// Single-table sources have one entry; multi-table sources have one per sub-table.
     /// </summary>
     public required IReadOnlyDictionary<string, QueryResultsManifest> Tables { get; init; }
 
     /// <summary>
-    /// Creates a <see cref="SourceManifest"/> wrapping a single <see cref="QueryResultsManifest"/>
-    /// with an empty-string key.
+    /// Creates a <see cref="SourceManifest"/> wrapping a single <see cref="QueryResultsManifest"/>.
     /// </summary>
+    /// <param name="tableName">Catalog table name used as the dictionary key.</param>
     /// <param name="manifest">The single-table manifest.</param>
-    /// <returns>A new source manifest with one entry keyed by <c>""</c>.</returns>
-    public static SourceManifest Create(QueryResultsManifest manifest)
+    /// <returns>A new source manifest with one entry keyed by <paramref name="tableName"/>.</returns>
+    public static SourceManifest Create(string tableName, QueryResultsManifest manifest)
     {
         return new SourceManifest
         {
-            Tables = new Dictionary<string, QueryResultsManifest> { [""] = manifest }
+            Tables = new Dictionary<string, QueryResultsManifest> { [tableName] = manifest }
         };
     }
 }

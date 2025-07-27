@@ -15,9 +15,9 @@ public sealed class InsightSerializationTests
     {
         QueryResultsManifest original = MakeManifestWithInsights();
 
-        string json = ManifestSerializer.Serialize(original);
+        string json = ManifestSerializer.Serialize("test", original);
         SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
+        QueryResultsManifest? deserialized = sourceManifest?.Tables["test"];
 
         Assert.NotNull(deserialized);
         Assert.NotNull(deserialized.Insights);
@@ -42,9 +42,9 @@ public sealed class InsightSerializationTests
     {
         QueryResultsManifest original = MakeManifestWithInsights();
 
-        string json = ManifestSerializer.Serialize(original);
+        string json = ManifestSerializer.Serialize("test", original);
         SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
+        QueryResultsManifest? deserialized = sourceManifest?.Tables["test"];
 
         Assert.NotNull(deserialized?.Insights);
         InsightAction originalAction = original.Insights![0].Actions[0];
@@ -63,9 +63,9 @@ public sealed class InsightSerializationTests
     {
         QueryResultsManifest original = MakeManifestWithInsights();
 
-        string json = ManifestSerializer.Serialize(original);
+        string json = ManifestSerializer.Serialize("test", original);
         SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
+        QueryResultsManifest? deserialized = sourceManifest?.Tables["test"];
 
         Assert.NotNull(deserialized?.QueryAnnotations);
         Assert.Equal(original.QueryAnnotations!.Count, deserialized.QueryAnnotations.Count);
@@ -84,9 +84,9 @@ public sealed class InsightSerializationTests
     {
         QueryResultsManifest original = MakeManifestWithInsights();
 
-        string json = ManifestSerializer.Serialize(original);
+        string json = ManifestSerializer.Serialize("test", original);
         SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
+        QueryResultsManifest? deserialized = sourceManifest?.Tables["test"];
 
         Assert.Equal(original.RecommendedQuery, deserialized?.RecommendedQuery);
         Assert.Equal(original.FullSuggestedQuery, deserialized?.FullSuggestedQuery);
@@ -102,9 +102,9 @@ public sealed class InsightSerializationTests
             Features = [MakeNumericFeature("col")]
         };
 
-        string json = ManifestSerializer.Serialize(original);
+        string json = ManifestSerializer.Serialize("test", original);
         SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-        QueryResultsManifest? deserialized = sourceManifest?.Tables[""];
+        QueryResultsManifest? deserialized = sourceManifest?.Tables["test"];
 
         Assert.NotNull(deserialized);
         Assert.Null(deserialized.Insights);
@@ -117,7 +117,7 @@ public sealed class InsightSerializationTests
     {
         QueryResultsManifest manifest = MakeManifestWithInsights();
 
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         // Enums should serialize as strings, not integers.
         Assert.Contains("\"ConstantFeature\"", json);

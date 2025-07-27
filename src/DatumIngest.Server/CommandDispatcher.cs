@@ -96,7 +96,7 @@ public sealed class CommandDispatcher
             ".schema" or ".columns" => await HandleSchemaAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".providers" => HandleListProviders(session),
             ".functions" => HandleListFunctions(session),
-            ".source" => HandleAddSource(session, argument),
+            ".source" => await HandleAddSourceAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".explain" => await HandleExplainAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".sessions" => HandleListSessions(session),
             ".kill" => HandleKillQuery(session, argument),
@@ -313,7 +313,12 @@ public sealed class CommandDispatcher
         return CommandResult.FunctionList(signatures);
     }
 
-    private static CommandResult HandleAddSource(Session session, string definition)
+    /// <summary>
+    /// Registers a data source, expands multi-table providers (e.g. root-object JSON
+    /// files), and discovers sidecar manifests for the resulting tables.
+    /// </summary>
+    private static async Task<CommandResult> HandleAddSourceAsync(
+        Session session, string definition, CancellationToken cancellationToken)
     {
         if (!session.IsAuthorized(ServerOperation.AddSource))
         {
@@ -328,28 +333,72 @@ public sealed class CommandDispatcher
         TableDescriptor descriptor = ParseSourceDefinition(definition);
         session.Catalog.Register(descriptor);
 
-        // Auto-discover sidecar manifest for statistics-driven cardinality estimation.
-        string manifestPath = descriptor.FilePath + ".datum-manifest";
-        if (File.Exists(manifestPath))
+        // Expand multi-table sources (e.g. root-object JSON → one sub-table per array property).
+        await session.Catalog.ExpandMultiTableSourcesAsync(cancellationToken).ConfigureAwait(false);
+
+        // Auto-discover sidecar manifests. After expansion the original descriptor may have
+        // been replaced by qualified sub-table descriptors, so we discover for each.
+        DiscoverSidecarManifests(session.Catalog, descriptor);
+
+        // Report expansion when the original name was replaced.
+        if (!session.Catalog.TryResolve(descriptor.Name, out _))
         {
-            string json = File.ReadAllText(manifestPath);
-            SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+            List<string> expandedNames = session.Catalog.TableNames
+                .Where(name => name.StartsWith(descriptor.Name + ".", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            if (sourceManifest is not null)
-            {
-                // Look up the sub-table key; fall back to empty string for single-table sources.
-                string tableKey = descriptor.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
-                    ? key
-                    : "";
-
-                if (sourceManifest.Tables.TryGetValue(tableKey, out QueryResultsManifest? manifest))
-                {
-                    session.Catalog.RegisterManifest(descriptor.Name, manifest);
-                }
-            }
+            return CommandResult.Success(
+                $"Source '{descriptor.Name}' expanded into {expandedNames.Count} table(s): " +
+                $"{string.Join(", ", expandedNames)} ({descriptor.Provider}).");
         }
 
         return CommandResult.Success($"Source '{descriptor.Name}' registered ({descriptor.Provider}).");
+    }
+
+    /// <summary>
+    /// Discovers and registers sidecar manifests (<c>.datum-manifest</c>) for all tables
+    /// derived from the given source descriptor, handling both single-table and expanded cases.
+    /// </summary>
+    private static void DiscoverSidecarManifests(TableCatalog catalog, TableDescriptor originalDescriptor)
+    {
+        string manifestPath = originalDescriptor.FilePath + ".datum-manifest";
+        if (!File.Exists(manifestPath))
+        {
+            return;
+        }
+
+        string json = File.ReadAllText(manifestPath);
+        SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
+        if (sourceManifest is null)
+        {
+            return;
+        }
+
+        // Single-table case: original descriptor still exists (no expansion).
+        if (catalog.TryResolve(originalDescriptor.Name, out TableDescriptor? resolved))
+        {
+            if (sourceManifest.Tables.TryGetValue(resolved!.Name, out QueryResultsManifest? manifest))
+            {
+                catalog.RegisterManifest(originalDescriptor.Name, manifest);
+            }
+
+            return;
+        }
+
+        // Expanded case: register manifests for each sub-table.
+        foreach (string tableName in catalog.TableNames)
+        {
+            if (!tableName.StartsWith(originalDescriptor.Name + ".", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (sourceManifest.Tables.TryGetValue(tableName, out QueryResultsManifest? subManifest))
+            {
+                catalog.RegisterManifest(tableName, subManifest);
+            }
+        }
     }
 
     private static async Task<CommandResult> HandleExplainAsync(

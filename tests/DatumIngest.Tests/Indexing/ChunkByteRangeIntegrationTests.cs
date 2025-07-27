@@ -173,13 +173,13 @@ public sealed class ChunkByteRangeIntegrationTests : IDisposable
         // Write and read back.
         using MemoryStream stream = new();
         IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create(original);
+        SourceIndexSet indexSet = SourceIndexSet.Create("test", original);
         writer.Write(indexSet, stream);
 
         stream.Position = 0;
         IndexReader reader = new();
         SourceIndexSet deserializedSet = reader.Read(stream);
-        SourceIndex deserialized = deserializedSet.Tables[""];
+        SourceIndex deserialized = deserializedSet.Tables["test"];
 
         Assert.Equal(original.Chunks.Count, deserialized.Chunks.Count);
 

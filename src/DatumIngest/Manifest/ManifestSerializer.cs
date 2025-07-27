@@ -21,11 +21,13 @@ public static class ManifestSerializer
 
     /// <summary>
     /// Serializes a single-table manifest to a JSON string by wrapping it in a
-    /// <see cref="SourceManifest"/> with an empty-string key.
+    /// <see cref="SourceManifest"/> keyed by <paramref name="tableName"/>.
     /// </summary>
-    public static string Serialize(QueryResultsManifest manifest)
+    /// <param name="tableName">Catalog table name used as the dictionary key.</param>
+    /// <param name="manifest">The single-table manifest to serialize.</param>
+    public static string Serialize(string tableName, QueryResultsManifest manifest)
     {
-        return Serialize(SourceManifest.Create(manifest));
+        return Serialize(SourceManifest.Create(tableName, manifest));
     }
 
     /// <summary>
@@ -38,11 +40,13 @@ public static class ManifestSerializer
 
     /// <summary>
     /// Serializes a single-table manifest to a UTF-8 byte array by wrapping it in a
-    /// <see cref="SourceManifest"/> with an empty-string key.
+    /// <see cref="SourceManifest"/> keyed by <paramref name="tableName"/>.
     /// </summary>
-    public static byte[] SerializeToUtf8Bytes(QueryResultsManifest manifest)
+    /// <param name="tableName">Catalog table name used as the dictionary key.</param>
+    /// <param name="manifest">The single-table manifest to serialize.</param>
+    public static byte[] SerializeToUtf8Bytes(string tableName, QueryResultsManifest manifest)
     {
-        return SerializeToUtf8Bytes(SourceManifest.Create(manifest));
+        return SerializeToUtf8Bytes(SourceManifest.Create(tableName, manifest));
     }
 
     /// <summary>
@@ -64,11 +68,14 @@ public static class ManifestSerializer
 
     /// <summary>
     /// Writes a single-table manifest to a file as formatted JSON by wrapping it in a
-    /// <see cref="SourceManifest"/> with an empty-string key.
+    /// <see cref="SourceManifest"/> keyed by <paramref name="tableName"/>.
     /// </summary>
-    public static async Task WriteToFileAsync(QueryResultsManifest manifest, string path)
+    /// <param name="tableName">Catalog table name used as the dictionary key.</param>
+    /// <param name="manifest">The single-table manifest to write.</param>
+    /// <param name="path">Output file path.</param>
+    public static async Task WriteToFileAsync(string tableName, QueryResultsManifest manifest, string path)
     {
-        await WriteToFileAsync(SourceManifest.Create(manifest), path);
+        await WriteToFileAsync(SourceManifest.Create(tableName, manifest), path);
     }
 
     /// <summary>

@@ -95,11 +95,7 @@ internal static class DatasetCatalogFactory
                     continue;
                 }
 
-                string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
-                    ? key
-                    : "";
-
-                if (indexSet.Tables.TryGetValue(tableKey, out SourceIndex? index))
+                if (indexSet.Tables.TryGetValue(name, out SourceIndex? index))
                 {
                     catalog.RegisterIndex(name, index);
                 }
@@ -142,11 +138,7 @@ internal static class DatasetCatalogFactory
                     continue;
                 }
 
-                string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
-                    ? key
-                    : "";
-
-                if (sourceManifest.Tables.TryGetValue(tableKey, out QueryResultsManifest? manifest))
+                if (sourceManifest.Tables.TryGetValue(name, out QueryResultsManifest? manifest))
                 {
                     catalog.RegisterManifest(name, manifest);
                 }

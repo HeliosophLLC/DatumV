@@ -309,6 +309,40 @@ public sealed class CommandDispatcherTests : IDisposable
         Assert.Equal(3, rows.Count);
     }
 
+    /// <summary>
+    /// <c>.source</c> with a root-object JSON file automatically expands into sub-tables
+    /// for each top-level array property, without requiring an explicit
+    /// <see cref="TableCatalog.ExpandMultiTableSourcesAsync"/> call.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_AddSourceRootObjectJson_ExpandsIntoSubTables()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("json", () => new JsonTableProvider());
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        string sourcePath = FixturePath("root_object.json");
+        CommandResult result = await _dispatcher.DispatchAsync(
+            session, $".source json:data={sourcePath}", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.Contains("expanded", result.Message);
+
+        // The original "data" table should no longer exist.
+        Assert.False(catalog.TryResolve("data", out _));
+
+        // Sub-tables should be registered with qualified names.
+        Assert.True(catalog.TryResolve("data.licenses", out _));
+        Assert.True(catalog.TryResolve("data.captions", out _));
+
+        // Each sub-table should be queryable without errors.
+        Schema licensesSchema = await catalog.GetSchemaAsync("data.licenses", CancellationToken.None);
+        Assert.NotNull(licensesSchema.FindColumn("id"));
+        Assert.NotNull(licensesSchema.FindColumn("name"));
+
+        session.Dispose();
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {

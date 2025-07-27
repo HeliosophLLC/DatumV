@@ -12,7 +12,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_NumericManifest_ProducesValidJson()
     {
         QueryResultsManifest manifest = BuildNumericManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"type\": \"numeric\"", json);
         Assert.Contains("\"rowCount\": 3", json);
@@ -26,7 +26,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_StringManifest_ContainsLengthFields()
     {
         QueryResultsManifest manifest = BuildStringManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"type\": \"string\"", json);
         Assert.Contains("\"minLength\":", json);
@@ -37,7 +37,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_ImageManifest_ContainsDimensionFields()
     {
         QueryResultsManifest manifest = BuildImageManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"type\": \"image\"", json);
         Assert.Contains("\"minWidth\":", json);
@@ -52,7 +52,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_VectorManifest_ContainsElementStats()
     {
         QueryResultsManifest manifest = BuildVectorManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"type\": \"vector\"", json);
         Assert.Contains("\"minLength\":", json);
@@ -63,7 +63,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_TemporalManifest_ContainsDates()
     {
         QueryResultsManifest manifest = BuildTemporalManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"type\": \"temporal\"", json);
         Assert.Contains("\"earliest\":", json);
@@ -74,7 +74,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_CamelCasePropertyNames()
     {
         QueryResultsManifest manifest = BuildNumericManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"rowCount\":", json);
         Assert.Contains("\"generatedAtUtc\":", json);
@@ -90,7 +90,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_KindAsString()
     {
         QueryResultsManifest manifest = BuildNumericManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"kind\": \"Scalar\"", json);
     }
@@ -99,7 +99,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_Indented()
     {
         QueryResultsManifest manifest = BuildNumericManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\n", json);
         Assert.Contains("  ", json);
@@ -122,7 +122,7 @@ public sealed class ManifestSerializerTests
         };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 1);
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"type\": \"numeric\"", json);
         Assert.Contains("\"type\": \"string\"", json);
@@ -132,7 +132,7 @@ public sealed class ManifestSerializerTests
     public void SerializeToUtf8Bytes_ProducesNonEmptyOutput()
     {
         QueryResultsManifest manifest = BuildNumericManifest();
-        byte[] bytes = ManifestSerializer.SerializeToUtf8Bytes(manifest);
+        byte[] bytes = ManifestSerializer.SerializeToUtf8Bytes("test", manifest);
 
         Assert.True(bytes.Length > 0);
     }
@@ -151,7 +151,7 @@ public sealed class ManifestSerializerTests
         Dictionary<string, DataKind> kinds = new() { ["cat"] = DataKind.String };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 10);
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"frequency\": 10", json);
     }
@@ -236,7 +236,7 @@ public sealed class ManifestSerializerTests
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"nullRatio\": 0.5", json);
     }
@@ -253,7 +253,7 @@ public sealed class ManifestSerializerTests
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"missingRuns\": 2", json);
     }
@@ -274,7 +274,7 @@ public sealed class ManifestSerializerTests
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.String };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 10);
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"dominantValueRatio\": 0.9", json);
     }
@@ -283,7 +283,7 @@ public sealed class ManifestSerializerTests
     public void Serialize_NumericManifest_ContainsIqrOutlierFields()
     {
         QueryResultsManifest manifest = BuildNumericManifest();
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize("test", manifest);
 
         Assert.Contains("\"iqr\":", json);
         Assert.Contains("\"lowerFence\":", json);

@@ -1,19 +1,18 @@
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Container for per-sub-table source indexes within a single <c>.datum-index</c> file.
+/// Container for per-table source indexes within a single <c>.datum-index</c> file.
 /// The fingerprint is shared across all tables (one source file), while each table has
 /// its own schema, chunk directory, and optional acceleration structures.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Single-table sources use an empty-string key in <see cref="Tables"/>.
-/// Multi-table sources (e.g. a JSON file with multiple array properties) use the
-/// sub-table qualifier as the key (the leaf property name).
+/// Table keys are the fully qualified catalog table names (e.g. <c>"annotations"</c>,
+/// <c>"annotations.labels"</c>). Single-table sources have one entry.
 /// </para>
 /// <para>
-/// Use <see cref="Create"/> to wrap a single <see cref="SourceIndex"/> with the
-/// default empty key, extracting the shared fingerprint automatically.
+/// Use <see cref="Create"/> to wrap a single <see cref="SourceIndex"/> with its
+/// catalog table name, extracting the shared fingerprint automatically.
 /// </para>
 /// </remarks>
 public sealed class SourceIndexSet
@@ -26,8 +25,8 @@ public sealed class SourceIndexSet
     public SourceFingerprint Fingerprint { get; }
 
     /// <summary>
-    /// Gets the per-sub-table source indexes, keyed by sub-table qualifier.
-    /// An empty string key represents the sole or default table in the source file.
+    /// Gets the per-table source indexes, keyed by catalog table name.
+    /// Single-table sources have one entry; multi-table sources have one per sub-table.
     /// </summary>
     public IReadOnlyDictionary<string, SourceIndex> Tables { get; }
 
@@ -44,13 +43,14 @@ public sealed class SourceIndexSet
 
     /// <summary>
     /// Creates a <see cref="SourceIndexSet"/> wrapping a single <see cref="SourceIndex"/>
-    /// with an empty-string key. The fingerprint is extracted from the index.
+    /// with a named key. The fingerprint is extracted from the index.
     /// </summary>
+    /// <param name="tableName">Catalog table name used as the dictionary key.</param>
     /// <param name="index">The single-table source index.</param>
-    /// <returns>A new source index set with one entry keyed by <c>""</c>.</returns>
-    public static SourceIndexSet Create(SourceIndex index)
+    /// <returns>A new source index set with one entry keyed by <paramref name="tableName"/>.</returns>
+    public static SourceIndexSet Create(string tableName, SourceIndex index)
     {
-        Dictionary<string, SourceIndex> tables = new() { [""] = index };
+        Dictionary<string, SourceIndex> tables = new() { [tableName] = index };
         return new SourceIndexSet(index.Fingerprint, tables);
     }
 }

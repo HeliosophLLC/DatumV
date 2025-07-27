@@ -18,8 +18,8 @@ IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetIn
 Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Scalar, ["name"] = DataKind.String };
 
 QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount, interactions);
-string json = ManifestSerializer.Serialize(manifest);
-await ManifestSerializer.WriteToFileAsync(manifest, "manifest.json");
+string json = ManifestSerializer.Serialize("data", manifest);
+await ManifestSerializer.WriteToFileAsync("data", manifest, "manifest.json");
 ```
 
 ### Loading & Registration

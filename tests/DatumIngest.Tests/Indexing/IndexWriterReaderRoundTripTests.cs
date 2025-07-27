@@ -265,13 +265,13 @@ public sealed class IndexWriterReaderRoundTripTests
     {
         using MemoryStream stream = new();
         IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create(index);
+        SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
         writer.Write(indexSet, stream);
 
         stream.Position = 0;
         IndexReader reader = new();
         SourceIndexSet restoredSet = reader.Read(stream);
-        return restoredSet.Tables[""];
+        return restoredSet.Tables["test"];
     }
 
     private static SourceIndex BuildIndexWithChunk(ChunkColumnStatistics statistics)

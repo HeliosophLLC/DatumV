@@ -197,11 +197,7 @@ static void DiscoverSidecarIndexes(TableCatalog catalog, IndexReader reader)
                 continue;
             }
 
-            string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
-                ? key
-                : "";
-
-            if (indexSet.Tables.TryGetValue(tableKey, out SourceIndex? index))
+            if (indexSet.Tables.TryGetValue(name, out SourceIndex? index))
             {
                 catalog.RegisterIndex(name, index);
             }
@@ -246,11 +242,7 @@ static void DiscoverSidecarManifests(TableCatalog catalog)
                 continue;
             }
 
-            string tableKey = d.Options.TryGetValue(TableCatalog.SubTableKeyOption, out string? key)
-                ? key
-                : "";
-
-            if (sourceManifest.Tables.TryGetValue(tableKey, out QueryResultsManifest? manifest))
+            if (sourceManifest.Tables.TryGetValue(name, out QueryResultsManifest? manifest))
             {
                 catalog.RegisterManifest(name, manifest);
             }
@@ -332,9 +324,7 @@ static async Task BuildGroupedIndexAsync(
             SourceIndex index = await builder.BuildAsync(
                 descriptor, provider, sourceStream: null, fingerprint, CancellationToken.None);
 
-            string tableKey = descriptor.Options.TryGetValue(
-                TableCatalog.SubTableKeyOption, out string? key) ? key : "";
-            tableIndexes[tableKey] = index;
+            tableIndexes[descriptor.Name] = index;
 
             Console.WriteLine($"  Table '{descriptor.Name}':");
             Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
@@ -466,9 +456,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
             progress.WriteSummary();
 
             SourceIndex index = indexBuilder.Finalize();
-            string tableKey = descriptor.Options.TryGetValue(
-                TableCatalog.SubTableKeyOption, out string? key) ? key : "";
-            tableIndexes[tableKey] = index;
+            tableIndexes[descriptor.Name] = index;
 
             Console.WriteLine($"  Table '{descriptor.Name}':");
             Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
@@ -487,7 +475,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
             IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
             IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
             QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
-            tableManifests[tableKey] = manifest;
+            tableManifests[descriptor.Name] = manifest;
 
             Console.WriteLine($"    Features: {manifest.Features.Count}");
 
@@ -886,7 +874,7 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
     IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
     IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
     QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount, interactions);
-    SourceManifest sourceManifest = SourceManifest.Create(manifest);
+    SourceManifest sourceManifest = SourceManifest.Create("result", manifest);
     string json = ManifestSerializer.Serialize(sourceManifest);
 
     if (outputPath is not null)

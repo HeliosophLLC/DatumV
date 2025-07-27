@@ -32,7 +32,7 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
     {
         string csvPath = CreateCsvFile("data.csv", "id,name\n1,Alice\n2,Bob\n");
         QueryResultsManifest manifest = CreateTestManifest(rowCount: 2, columnName: "id", ndv: 2);
-        WriteSidecar(csvPath, manifest);
+        WriteSidecar(csvPath, "data", manifest);
 
         TableCatalog catalog = CreateCatalog("data", csvPath);
 
@@ -61,7 +61,7 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
         string csvPath = CreateCsvFile("data.csv", "id\n1\n");
         QueryResultsManifest explicitManifest = CreateTestManifest(rowCount: 999, columnName: "id", ndv: 999);
         QueryResultsManifest sidecarManifest = CreateTestManifest(rowCount: 1, columnName: "id", ndv: 1);
-        WriteSidecar(csvPath, sidecarManifest);
+        WriteSidecar(csvPath, "data", sidecarManifest);
 
         TableCatalog catalog = CreateCatalog("data", csvPath);
         catalog.RegisterManifest("data", explicitManifest);
@@ -77,8 +77,8 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
     {
         string csvPath1 = CreateCsvFile("images.csv", "pixel\n0\n1\n");
         string csvPath2 = CreateCsvFile("labels.csv", "label\n3\n7\n");
-        WriteSidecar(csvPath1, CreateTestManifest(rowCount: 2, columnName: "pixel", ndv: 2));
-        WriteSidecar(csvPath2, CreateTestManifest(rowCount: 2, columnName: "label", ndv: 2));
+        WriteSidecar(csvPath1, "images", CreateTestManifest(rowCount: 2, columnName: "pixel", ndv: 2));
+        WriteSidecar(csvPath2, "labels", CreateTestManifest(rowCount: 2, columnName: "label", ndv: 2));
 
         TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
@@ -96,7 +96,7 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
     {
         string csvPath = CreateCsvFile("data.csv", "age,name\n25,Alice\n30,Bob\n");
         QueryResultsManifest manifest = CreateTestManifest(rowCount: 2, columnName: "age", ndv: 2);
-        WriteSidecar(csvPath, manifest);
+        WriteSidecar(csvPath, "data", manifest);
 
         TableCatalog catalog = CreateCatalog("data", csvPath);
 
@@ -131,7 +131,7 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
 
             string json = File.ReadAllText(sidecarPath);
             SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-            QueryResultsManifest? manifest = sourceManifest?.Tables[""];
+            QueryResultsManifest? manifest = sourceManifest?.Tables[tableName];
 
             if (manifest is not null)
             {
@@ -191,10 +191,10 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
         };
     }
 
-    private static void WriteSidecar(string sourceFilePath, QueryResultsManifest manifest)
+    private static void WriteSidecar(string sourceFilePath, string tableName, QueryResultsManifest manifest)
     {
         string sidecarPath = sourceFilePath + ".datum-manifest";
-        string json = ManifestSerializer.Serialize(manifest);
+        string json = ManifestSerializer.Serialize(tableName, manifest);
         File.WriteAllText(sidecarPath, json);
     }
 }
