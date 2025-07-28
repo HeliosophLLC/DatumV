@@ -950,4 +950,146 @@ public class SqlParserTests
         Assert.Single(inner.WhenClauses);
         Assert.NotNull(inner.ElseResult);
     }
+
+    // ───────────────────── Window functions ─────────────────────
+
+    [Fact]
+    public void WindowFunction_RowNumber_OverEmpty()
+    {
+        SelectStatement result = Parse("SELECT ROW_NUMBER() OVER () FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("ROW_NUMBER", window.FunctionName);
+        Assert.Empty(window.Arguments);
+        Assert.Null(window.Window.PartitionBy);
+        Assert.Null(window.Window.OrderBy);
+        Assert.Null(window.Window.Frame);
+    }
+
+    [Fact]
+    public void WindowFunction_WithPartitionBy()
+    {
+        SelectStatement result = Parse(
+            "SELECT ROW_NUMBER() OVER (PARTITION BY category) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.NotNull(window.Window.PartitionBy);
+        Assert.Single(window.Window.PartitionBy);
+
+        ColumnReference partitionCol =
+            Assert.IsType<ColumnReference>(window.Window.PartitionBy[0]);
+        Assert.Equal("category", partitionCol.ColumnName);
+    }
+
+    [Fact]
+    public void WindowFunction_WithOrderBy()
+    {
+        SelectStatement result = Parse(
+            "SELECT RANK() OVER (ORDER BY score DESC) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("RANK", window.FunctionName);
+        Assert.NotNull(window.Window.OrderBy);
+        Assert.Single(window.Window.OrderBy);
+        Assert.Equal(SortDirection.Descending, window.Window.OrderBy[0].Direction);
+    }
+
+    [Fact]
+    public void WindowFunction_WithPartitionByAndOrderBy()
+    {
+        SelectStatement result = Parse(
+            "SELECT ROW_NUMBER() OVER (PARTITION BY dept ORDER BY hire_date ASC) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.NotNull(window.Window.PartitionBy);
+        Assert.Single(window.Window.PartitionBy);
+        Assert.NotNull(window.Window.OrderBy);
+        Assert.Single(window.Window.OrderBy);
+        Assert.Equal(SortDirection.Ascending, window.Window.OrderBy[0].Direction);
+    }
+
+    [Fact]
+    public void WindowFunction_WithRowsFrame()
+    {
+        SelectStatement result = Parse(
+            "SELECT SUM(val) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("SUM", window.FunctionName);
+        Assert.NotNull(window.Window.Frame);
+        Assert.Equal(WindowFrameType.Rows, window.Window.Frame.FrameType);
+        Assert.IsType<UnboundedPrecedingBound>(window.Window.Frame.Start);
+        Assert.IsType<CurrentRowBound>(window.Window.Frame.End);
+    }
+
+    [Fact]
+    public void WindowFunction_WithPrecedingAndFollowingFrame()
+    {
+        SelectStatement result = Parse(
+            "SELECT AVG(val) OVER (ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.NotNull(window.Window.Frame);
+
+        PrecedingBound start = Assert.IsType<PrecedingBound>(window.Window.Frame.Start);
+        Assert.Equal(1, start.Offset);
+
+        FollowingBound end = Assert.IsType<FollowingBound>(window.Window.Frame.End);
+        Assert.Equal(1, end.Offset);
+    }
+
+    [Fact]
+    public void WindowFunction_WithAlias()
+    {
+        SelectStatement result = Parse(
+            "SELECT ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("ROW_NUMBER", window.FunctionName);
+        Assert.Equal("rn", result.Columns[0].Alias);
+    }
+
+    [Fact]
+    public void WindowFunction_LagWithArguments()
+    {
+        SelectStatement result = Parse(
+            "SELECT LAG(price, 2, 0) OVER (ORDER BY date) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("LAG", window.FunctionName);
+        Assert.Equal(3, window.Arguments.Count);
+    }
+
+    [Fact]
+    public void WindowFunction_MultiplePartitionByKeys()
+    {
+        SelectStatement result = Parse(
+            "SELECT SUM(amount) OVER (PARTITION BY dept, region ORDER BY date) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.NotNull(window.Window.PartitionBy);
+        Assert.Equal(2, window.Window.PartitionBy.Count);
+    }
+
+    [Fact]
+    public void WindowFunction_UnboundedFollowingFrame()
+    {
+        SelectStatement result = Parse(
+            "SELECT SUM(val) OVER (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t");
+
+        WindowFunctionCallExpression window =
+            Assert.IsType<WindowFunctionCallExpression>(result.Columns[0].Expression);
+        Assert.NotNull(window.Window.Frame);
+        Assert.IsType<CurrentRowBound>(window.Window.Frame.Start);
+        Assert.IsType<UnboundedFollowingBound>(window.Window.Frame.End);
+    }
 }

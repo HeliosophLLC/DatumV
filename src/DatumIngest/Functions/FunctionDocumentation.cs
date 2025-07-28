@@ -996,6 +996,66 @@ public static class FunctionDocumentation
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
         });
+
+        RegisterWindowFunctions();
+    }
+
+    private static void RegisterWindowFunctions()
+    {
+        Register(new FunctionSignature
+        {
+            Name = "ROW_NUMBER",
+            Parameters = [],
+            ReturnType = "Scalar",
+            Description = "Assigns a unique sequential integer to each row within its partition, starting at 1.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "RANK",
+            Parameters = [],
+            ReturnType = "Scalar",
+            Description = "Assigns a rank to each row within its partition based on ORDER BY values. Ties receive the same rank with gaps after.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "DENSE_RANK",
+            Parameters = [],
+            ReturnType = "Scalar",
+            Description = "Assigns a rank to each row within its partition based on ORDER BY values. Ties receive the same rank without gaps.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "NTILE",
+            Parameters = [Parameter("buckets", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Distributes rows of an ordered partition into the specified number of approximately equal-sized buckets.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "LAG",
+            Parameters = [Parameter("expression", "Any"), Parameter("offset", "Scalar", isOptional: true), Parameter("default", "Any", isOptional: true)],
+            ReturnType = "Any",
+            Description = "Returns the value of the expression from a preceding row within the partition. Default offset is 1.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "LEAD",
+            Parameters = [Parameter("expression", "Any"), Parameter("offset", "Scalar", isOptional: true), Parameter("default", "Any", isOptional: true)],
+            ReturnType = "Any",
+            Description = "Returns the value of the expression from a following row within the partition. Default offset is 1.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
     }
 
     /// <summary>Registers a standard unary numeric function (operates element-wise on Scalar/Vector/Tensor).</summary>

@@ -122,11 +122,105 @@ public static class SqlParser
                 token.ToStringValue()[1..],
                 ToSpan(token)));
 
+    // ───────────────────── Window specification parsers ─────────────────────
+
     /// <summary>
-    /// Function call: identifier ( arg1, arg2, ... )
+    /// A single window frame bound: UNBOUNDED PRECEDING, N PRECEDING,
+    /// CURRENT ROW, N FOLLOWING, or UNBOUNDED FOLLOWING.
+    /// CURRENT ROW is parsed as the CURRENT token followed by an identifier
+    /// whose text is "ROW" (ROW is not a reserved keyword).
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, FrameBound> FrameBoundParser =
+        // UNBOUNDED PRECEDING
+        (from unbounded in Token.EqualTo(SqlToken.Unbounded)
+         from preceding in Token.EqualTo(SqlToken.Preceding)
+         select (FrameBound)new UnboundedPrecedingBound())
+        .Try()
+        // UNBOUNDED FOLLOWING
+        .Or(from unbounded in Token.EqualTo(SqlToken.Unbounded)
+            from following in Token.EqualTo(SqlToken.Following)
+            select (FrameBound)new UnboundedFollowingBound())
+        .Try()
+        // CURRENT ROW
+        .Or(from current in Token.EqualTo(SqlToken.Current)
+            from row in Token.EqualTo(SqlToken.Identifier)
+                .Where(token => string.Equals(token.ToStringValue(), "ROW", StringComparison.OrdinalIgnoreCase))
+            select (FrameBound)new CurrentRowBound())
+        .Try()
+        // N PRECEDING
+        .Or(from offset in Token.EqualTo(SqlToken.NumberLiteral)
+                .Apply(Numerics.DecimalDouble)
+            from preceding in Token.EqualTo(SqlToken.Preceding)
+            select (FrameBound)new PrecedingBound((int)offset))
+        .Try()
+        // N FOLLOWING
+        .Or(from offset in Token.EqualTo(SqlToken.NumberLiteral)
+                .Apply(Numerics.DecimalDouble)
+            from following in Token.EqualTo(SqlToken.Following)
+            select (FrameBound)new FollowingBound((int)offset));
+
+    /// <summary>
+    /// Window frame: ROWS BETWEEN start AND end.
+    /// Only the ROWS frame type is supported; RANGE is reserved for future use.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, WindowFrame> WindowFrameParser =
+        from rows in Token.EqualTo(SqlToken.Rows)
+        from between in Token.EqualTo(SqlToken.Between)
+        from start in FrameBoundParser
+        from and in Token.EqualTo(SqlToken.And)
+        from end in FrameBoundParser
+        select new WindowFrame(WindowFrameType.Rows, start, end);
+
+    /// <summary>
+    /// PARTITION BY expression list within a window specification.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression[]> WindowPartitionByParser =
+        from partitionKw in Token.EqualTo(SqlToken.Partition)
+        from byKw in Token.EqualTo(SqlToken.By)
+        from expressions in SP.Ref(() => ExpressionParser!).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        select expressions;
+
+    /// <summary>
+    /// ORDER BY item list within a window specification.
+    /// Reuses <see cref="OrderByItem"/> from the main ORDER BY parser.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, OrderByItem[]> WindowOrderByParser =
+        from orderKw in Token.EqualTo(SqlToken.Order)
+        from byKw in Token.EqualTo(SqlToken.By)
+        from items in SP.Ref(() => WindowOrderByItemParser!).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        select items;
+
+    /// <summary>
+    /// A single ORDER BY item within a window specification.
+    /// Defined separately to avoid circular reference with the main ExpressionParser.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, OrderByItem> WindowOrderByItemParser =
+        from expression in SP.Ref(() => ExpressionParser!)
+        from direction in Token.EqualTo(SqlToken.Asc).Select(_ => SortDirection.Ascending)
+            .Or(Token.EqualTo(SqlToken.Desc).Select(_ => SortDirection.Descending))
+            .OptionalOrDefault(SortDirection.Ascending)
+        select new OrderByItem(expression, direction);
+
+    /// <summary>
+    /// OVER ( [PARTITION BY ...] [ORDER BY ...] [frame] ) — the full window specification.
+    /// Returns <see langword="null"/> when no OVER keyword is present.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, WindowSpecification?> WindowSpecificationParser =
+        (from over in Token.EqualTo(SqlToken.Over)
+         from open in Token.EqualTo(SqlToken.LeftParen)
+         from partitionBy in WindowPartitionByParser.OptionalOrDefault()
+         from orderBy in WindowOrderByParser.OptionalOrDefault()
+         from frame in WindowFrameParser.Try().OptionalOrDefault()
+         from close in Token.EqualTo(SqlToken.RightParen)
+         select (WindowSpecification?)new WindowSpecification(partitionBy, orderBy, frame))
+        .OptionalOrDefault();
+
+    /// <summary>
+    /// Function call: identifier ( arg1, arg2, ... ) [OVER window_spec]
     /// Must be tried before bare column reference because both start with Identifier.
     /// Supports <c>COUNT(*)</c> by treating a bare <c>*</c> inside the argument list
     /// as a sentinel <see cref="LiteralExpression"/> with value <c>"*"</c>.
+    /// When followed by an <c>OVER</c> keyword, produces a <see cref="WindowFunctionCallExpression"/>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
         from name in Token.EqualTo(SqlToken.Identifier)
@@ -136,7 +230,10 @@ public static class SqlParser
                 .Or(SP.Ref(() => ExpressionParser!))
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
-        select (Expression)new FunctionCallExpression(GetTokenText(name), args, ToSpan(name));
+        from windowSpec in WindowSpecificationParser.OptionalOrDefault()
+        select windowSpec is not null
+            ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, ToSpan(name))
+            : (Expression)new FunctionCallExpression(GetTokenText(name), args, ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =

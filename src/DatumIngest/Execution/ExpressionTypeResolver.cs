@@ -35,6 +35,7 @@ public static class ExpressionTypeResolver
             IsNullExpression => DataKind.Scalar,
             CastExpression cast => ResolveCast(cast),
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
+            WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
             ParameterExpression => null,
             _ => null,
         };
@@ -268,5 +269,41 @@ public static class ExpressionTypeResolver
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the output type of a window function call by looking up the
+    /// window function (or aggregate-as-window) and calling its validation.
+    /// </summary>
+    private static DataKind? ResolveWindowFunction(
+        WindowFunctionCallExpression window,
+        Schema sourceSchema,
+        FunctionRegistry functions)
+    {
+        IWindowFunction? windowFunction = functions.TryGetWindowOrAggregate(window.FunctionName);
+        if (windowFunction is null)
+        {
+            return null;
+        }
+
+        DataKind[] argumentKinds = new DataKind[window.Arguments.Count];
+        for (int index = 0; index < window.Arguments.Count; index++)
+        {
+            DataKind? kind = ResolveType(window.Arguments[index], sourceSchema, functions);
+            if (kind is null)
+            {
+                return null;
+            }
+            argumentKinds[index] = kind.Value;
+        }
+
+        try
+        {
+            return windowFunction.ValidateArguments(argumentKinds);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 }

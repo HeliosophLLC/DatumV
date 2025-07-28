@@ -122,6 +122,30 @@ public enum SqlToken
     /// <summary>The END keyword (conditional terminator).</summary>
     End,
 
+    /// <summary>The OVER keyword (window specification).</summary>
+    Over,
+
+    /// <summary>The PARTITION keyword (window partitioning).</summary>
+    Partition,
+
+    /// <summary>The ROWS keyword (window frame type).</summary>
+    Rows,
+
+    /// <summary>The RANGE keyword (window frame type, reserved for future use).</summary>
+    Range,
+
+    /// <summary>The UNBOUNDED keyword (window frame bound).</summary>
+    Unbounded,
+
+    /// <summary>The PRECEDING keyword (window frame direction).</summary>
+    Preceding,
+
+    /// <summary>The FOLLOWING keyword (window frame direction).</summary>
+    Following,
+
+    /// <summary>The CURRENT keyword (used with ROW for window frame bound).</summary>
+    Current,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>

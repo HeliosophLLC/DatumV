@@ -359,3 +359,79 @@ public sealed record CaseExpression(
     IReadOnlyList<WhenClause> WhenClauses,
     Expression? ElseResult,
     SourceSpan? Span = null) : Expression;
+
+// ──────────────────────── Window function expressions ────────────────────────
+
+/// <summary>
+/// A function call with an OVER clause, making it a window function invocation.
+/// <para>
+/// Examples: <c>ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)</c>,
+/// <c>SUM(amount) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)</c>.
+/// </para>
+/// </summary>
+public sealed record WindowFunctionCallExpression(
+    string FunctionName,
+    IReadOnlyList<Expression> Arguments,
+    WindowSpecification Window,
+    SourceSpan? Span = null) : Expression;
+
+/// <summary>
+/// The OVER clause specification containing optional partitioning, ordering, and frame.
+/// </summary>
+/// <param name="PartitionBy">
+/// The PARTITION BY expressions that define window partitions, or <see langword="null"/>
+/// if the entire result set is a single partition.
+/// </param>
+/// <param name="OrderBy">
+/// The ORDER BY items that define the row ordering within each partition, or
+/// <see langword="null"/> if no ordering is specified.
+/// </param>
+/// <param name="Frame">
+/// The window frame specification (e.g. ROWS BETWEEN ...), or <see langword="null"/>
+/// for the default frame semantics.
+/// </param>
+public sealed record WindowSpecification(
+    IReadOnlyList<Expression>? PartitionBy = null,
+    IReadOnlyList<OrderByItem>? OrderBy = null,
+    WindowFrame? Frame = null);
+
+/// <summary>
+/// A window frame specification defining the subset of partition rows visible
+/// to a window function for each row.
+/// </summary>
+/// <param name="FrameType">The frame unit type (currently only <see cref="WindowFrameType.Rows"/>).</param>
+/// <param name="Start">The lower bound of the window frame.</param>
+/// <param name="End">The upper bound of the window frame.</param>
+public sealed record WindowFrame(
+    WindowFrameType FrameType,
+    FrameBound Start,
+    FrameBound End);
+
+/// <summary>
+/// The unit type for a window frame specification.
+/// </summary>
+public enum WindowFrameType
+{
+    /// <summary>Frame boundaries are expressed as row offsets from the current row.</summary>
+    Rows,
+}
+
+/// <summary>
+/// Base type for window frame boundary specifications.
+/// </summary>
+public abstract record FrameBound;
+
+/// <summary>UNBOUNDED PRECEDING — the frame starts at the first row of the partition.</summary>
+public sealed record UnboundedPrecedingBound() : FrameBound;
+
+/// <summary>N PRECEDING — the frame boundary is N rows before the current row.</summary>
+public sealed record PrecedingBound(int Offset) : FrameBound;
+
+/// <summary>CURRENT ROW — the frame boundary is the current row.</summary>
+public sealed record CurrentRowBound() : FrameBound;
+
+/// <summary>N FOLLOWING — the frame boundary is N rows after the current row.</summary>
+public sealed record FollowingBound(int Offset) : FrameBound;
+
+/// <summary>UNBOUNDED FOLLOWING — the frame extends to the last row of the partition.</summary>
+public sealed record UnboundedFollowingBound() : FrameBound;

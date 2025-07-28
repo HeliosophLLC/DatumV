@@ -87,6 +87,27 @@ public static class ColumnReferenceCollector
                 }
                 break;
 
+            case WindowFunctionCallExpression window:
+                foreach (Expression argument in window.Arguments)
+                {
+                    Walk(argument, references);
+                }
+                if (window.Window.PartitionBy is not null)
+                {
+                    foreach (Expression partition in window.Window.PartitionBy)
+                    {
+                        Walk(partition, references);
+                    }
+                }
+                if (window.Window.OrderBy is not null)
+                {
+                    foreach (OrderByItem orderByItem in window.Window.OrderBy)
+                    {
+                        Walk(orderByItem.Expression, references);
+                    }
+                }
+                break;
+
             case InExpression inExpression:
                 Walk(inExpression.Expression, references);
                 foreach (Expression value in inExpression.Values)

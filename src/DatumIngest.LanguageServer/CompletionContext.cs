@@ -162,6 +162,12 @@ public static class CompletionContext
                     continue;
                 }
 
+                // Check if this is an OVER clause paren.
+                if (index > 0 && tokens[index - 1].Kind == SqlToken.Over)
+                {
+                    return CompletionZoneKind.InsideOver;
+                }
+
                 // We're inside a function call or subquery — check what precedes the paren.
                 if (index > 0 && tokens[index - 1].Kind == SqlToken.Identifier)
                 {
@@ -332,4 +338,7 @@ public enum CompletionZoneKind
 
     /// <summary>General expression context — offer columns, functions, operators.</summary>
     Expression,
+
+    /// <summary>Inside OVER clause — offer PARTITION BY, ORDER BY, ROWS BETWEEN.</summary>
+    InsideOver,
 }

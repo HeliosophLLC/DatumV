@@ -61,6 +61,9 @@ public sealed class ExpressionEvaluator
             IsNullExpression isNull => EvaluateIsNull(isNull, row),
             CastExpression cast => EvaluateCast(cast, row),
             CaseExpression caseExpr => EvaluateCase(caseExpr, row),
+            WindowFunctionCallExpression window => throw new InvalidOperationException(
+                $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
+                "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
             ParameterExpression parameter => throw new InvalidOperationException(
                 $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
             _ => throw new InvalidOperationException(

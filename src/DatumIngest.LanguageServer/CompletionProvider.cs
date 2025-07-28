@@ -40,6 +40,7 @@ public sealed class CompletionProvider
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
+                AddWindowFunctions(items);
                 AddKeywords(items, ["FROM", "AS", "CAST", "CASE"]);
                 break;
 
@@ -76,6 +77,10 @@ public sealed class CompletionProvider
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
+                break;
+
+            case CompletionZoneKind.InsideOver:
+                AddKeywords(items, ["PARTITION BY", "ORDER BY", "ROWS BETWEEN"]);
                 break;
 
             case CompletionZoneKind.AfterDot:
@@ -224,6 +229,31 @@ public sealed class CompletionProvider
         foreach (FunctionSignature function in _manifest.Functions)
         {
             if (!function.IsAggregate)
+            {
+                continue;
+            }
+
+            string parameters = string.Join(", ", function.Parameters.Select(FormatParameter));
+            string signature = $"{function.Name}({parameters})";
+            string returnInfo = function.ReturnType is not null ? $" → {function.ReturnType}" : "";
+
+            items.Add(new CompletionItem
+            {
+                Label = function.Name,
+                Kind = CompletionItemKind.Function,
+                Detail = $"[{function.Category}] {signature}{returnInfo}",
+                InsertText = $"{function.Name}(",
+                Documentation = function.Description,
+                SortOrder = 2,
+            });
+        }
+    }
+
+    private void AddWindowFunctions(List<CompletionItem> items)
+    {
+        foreach (FunctionSignature function in _manifest.Functions)
+        {
+            if (!function.IsWindowFunction)
             {
                 continue;
             }

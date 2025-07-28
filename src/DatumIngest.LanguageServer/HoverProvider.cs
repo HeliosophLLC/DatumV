@@ -220,8 +220,13 @@ public sealed class HoverProvider
             SqlToken.Asc => "**ASC** — Ascending sort order (default).",
             SqlToken.Desc => "**DESC** — Descending sort order.",
             SqlToken.True => "**TRUE** — Boolean true literal.",
-            SqlToken.False => "**FALSE** — Boolean false literal.",
-            _ => null,
+            SqlToken.False => "**FALSE** — Boolean false literal.",            SqlToken.Over => "**OVER** \u2014 Defines a window specification for a window function: `function() OVER(PARTITION BY ... ORDER BY ... ROWS BETWEEN ...)`.",
+            SqlToken.Partition => "**PARTITION** \u2014 Used with BY to divide rows into partitions for window function evaluation.",
+            SqlToken.Rows => "**ROWS** \u2014 Specifies a row-based window frame: `ROWS BETWEEN start AND end`.",
+            SqlToken.Unbounded => "**UNBOUNDED** \u2014 Indicates the frame extends to the beginning (PRECEDING) or end (FOLLOWING) of the partition.",
+            SqlToken.Preceding => "**PRECEDING** \u2014 Indicates rows before the current row in a window frame.",
+            SqlToken.Following => "**FOLLOWING** \u2014 Indicates rows after the current row in a window frame.",
+            SqlToken.Current => "**CURRENT** \u2014 Used with ROW to indicate the current row in a window frame: `CURRENT ROW`.",            _ => null,
         };
     }
 

@@ -8,8 +8,8 @@ The following features are architecturally accounted for but deferred from V1:
 - **Adaptive batch sizing**: Auto-tune based on row size estimates and available memory
 - **Excel provider**: Read .xlsx files (ITableProvider interface is ready)
 - **UNION / INTERSECT / EXCEPT**: Set operations between query results
-- **Window functions**: ROW_NUMBER, RANK, LAG, LEAD with OVER/PARTITION BY
-- **Dataset splitting**: `hash_split(key, seed)` function returning a deterministic float in [0, 1) per row, enabling reproducible train/val/test splits via WHERE clauses. Combined with window functions (ROW_NUMBER + PARTITION BY), supports stratified splitting that preserves class proportions per split. Temporal splits already expressible via WHERE on date columns. Depends on: window functions.
+- ~~**Window functions**: ROW_NUMBER, RANK, LAG, LEAD with OVER/PARTITION BY~~ ✅
+- **Dataset splitting**: `hash_split(key, seed)` function returning a deterministic float in [0, 1) per row, enabling reproducible train/val/test splits via WHERE clauses. Combined with window functions (ROW_NUMBER + PARTITION BY), supports stratified splitting that preserves class proportions per split. Temporal splits already expressible via WHERE on date columns.
 - **Pipe mode**: Stream results to stdout as CSV/JSON/NDJSON
 - ~~**Top-N bounded sort**: Bounded priority queue in `OrderByOperator` for ORDER BY + LIMIT without full materialization~~ ✅
 - ~~**WHERE index seek**: Use sorted value indexes to fetch matching rows directly via `ISeekableTableProvider` instead of streaming and discarding — point lookups for high-selectivity equality predicates~~ ✅

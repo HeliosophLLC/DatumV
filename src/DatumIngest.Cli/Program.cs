@@ -921,6 +921,7 @@ static async Task<int> RunManifestSchemaAsync(TableCatalog catalog, string? outp
         "CROSS", "INNER", "ON", "INTO", "AS", "AND", "OR", "NOT", "IN",
         "BETWEEN", "LIKE", "IS", "NULL", "ORDER", "BY", "ASC", "DESC",
         "LIMIT", "OFFSET", "SHARD", "CAST", "TRUE", "FALSE",
+        "OVER", "PARTITION", "ROWS", "UNBOUNDED", "PRECEDING", "FOLLOWING", "CURRENT",
     };
 
     LanguageServerManifest manifest = new()

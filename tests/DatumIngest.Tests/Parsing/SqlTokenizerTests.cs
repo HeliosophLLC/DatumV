@@ -56,6 +56,14 @@ public class SqlTokenizerTests
     [InlineData("CAST", SqlToken.Cast)]
     [InlineData("TRUE", SqlToken.True)]
     [InlineData("FALSE", SqlToken.False)]
+    [InlineData("OVER", SqlToken.Over)]
+    [InlineData("over", SqlToken.Over)]
+    [InlineData("PARTITION", SqlToken.Partition)]
+    [InlineData("ROWS", SqlToken.Rows)]
+    [InlineData("UNBOUNDED", SqlToken.Unbounded)]
+    [InlineData("PRECEDING", SqlToken.Preceding)]
+    [InlineData("FOLLOWING", SqlToken.Following)]
+    [InlineData("CURRENT", SqlToken.Current)]
     public void KeywordsAreRecognized(string input, SqlToken expected)
     {
         AssertSingleToken(input, expected);

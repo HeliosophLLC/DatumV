@@ -597,6 +597,7 @@ public static class QueryExplainer
             IsNullExpression isNull => $"{FormatExpression(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
             CastExpression cast => $"CAST({FormatExpression(cast.Expression)} AS {cast.TargetType})",
             CaseExpression caseExpr => FormatCaseExpression(caseExpr),
+            WindowFunctionCallExpression window => FormatWindowFunctionCall(window),
             _ => expression.ToString() ?? "?",
         };
     }
@@ -670,6 +671,60 @@ public static class QueryExplainer
 
         builder.Append(" END");
         return builder.ToString();
+    }
+
+    private static string FormatWindowFunctionCall(WindowFunctionCallExpression window)
+    {
+        System.Text.StringBuilder builder = new();
+        builder.Append(window.FunctionName);
+        builder.Append('(');
+        builder.Append(string.Join(", ", window.Arguments.Select(FormatExpression)));
+        builder.Append(") OVER(");
+
+        bool needsSpace = false;
+        if (window.Window.PartitionBy is { Count: > 0 } partitionBy)
+        {
+            builder.Append("PARTITION BY ");
+            builder.Append(string.Join(", ", partitionBy.Select(FormatExpression)));
+            needsSpace = true;
+        }
+
+        if (window.Window.OrderBy is { Count: > 0 } orderBy)
+        {
+            if (needsSpace) builder.Append(' ');
+            builder.Append("ORDER BY ");
+            builder.Append(string.Join(", ", orderBy.Select(item =>
+            {
+                string direction = item.Direction == SortDirection.Descending ? " DESC" : "";
+                return FormatExpression(item.Expression) + direction;
+            })));
+            needsSpace = true;
+        }
+
+        if (window.Window.Frame is { } frame)
+        {
+            if (needsSpace) builder.Append(' ');
+            builder.Append("ROWS BETWEEN ");
+            builder.Append(FormatFrameBound(frame.Start));
+            builder.Append(" AND ");
+            builder.Append(FormatFrameBound(frame.End));
+        }
+
+        builder.Append(')');
+        return builder.ToString();
+    }
+
+    private static string FormatFrameBound(FrameBound bound)
+    {
+        return bound switch
+        {
+            UnboundedPrecedingBound => "UNBOUNDED PRECEDING",
+            PrecedingBound preceding => $"{preceding.Offset} PRECEDING",
+            CurrentRowBound => "CURRENT ROW",
+            FollowingBound following => $"{following.Offset} FOLLOWING",
+            UnboundedFollowingBound => "UNBOUNDED FOLLOWING",
+            _ => "?",
+        };
     }
 
     private static bool ContainsLike(Expression expression)

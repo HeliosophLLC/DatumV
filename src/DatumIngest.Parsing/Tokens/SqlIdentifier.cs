@@ -17,7 +17,9 @@ public static partial class SqlIdentifier
         "CROSS", "INNER", "ON", "WHERE", "AND", "OR", "NOT", "IN", "BETWEEN",
         "LIKE", "IS", "NULL", "AS", "SHARD", "ORDER", "BY", "ASC", "DESC",
         "LIMIT", "OFFSET", "CAST", "TRUE", "FALSE",
-        "CASE", "WHEN", "THEN", "ELSE", "END"
+        "CASE", "WHEN", "THEN", "ELSE", "END",
+        "OVER", "PARTITION", "ROWS", "UNBOUNDED",
+        "PRECEDING", "FOLLOWING", "CURRENT"
     };
 
     /// <summary>

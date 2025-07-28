@@ -179,6 +179,15 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("ELSE"), SqlToken.Else, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("END"), SqlToken.End, requireDelimiters: true)
 
+            // Window function keywords
+            .Match(Span.EqualToIgnoreCase("OVER"), SqlToken.Over, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("PARTITION"), SqlToken.Partition, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("ROWS"), SqlToken.Rows, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("UNBOUNDED"), SqlToken.Unbounded, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("PRECEDING"), SqlToken.Preceding, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("FOLLOWING"), SqlToken.Following, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("CURRENT"), SqlToken.Current, requireDelimiters: true)
+
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)

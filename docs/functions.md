@@ -23,6 +23,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
 | **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX). |
+| **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, plus aggregates with OVER). |
 
 > **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
 >
@@ -358,6 +359,33 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `AVG` | `AVG(expr)` | Arithmetic mean of non-null `Scalar` values. Nulls excluded from denominator. | 1 |
 | `MIN` | `MIN(expr)` | Minimum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
 | `MAX` | `MAX(expr)` | Maximum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
+
+## Window Functions
+
+Window functions compute a value for each row based on a window of related rows defined by an `OVER` clause. Unlike aggregates with `GROUP BY`, window functions do not collapse rows — every input row produces an output row. See [SQL Reference — Window Functions](sql.md#window-functions) for full syntax.
+
+### Dedicated Window Functions (6)
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|  
+| `ROW_NUMBER` | `ROW_NUMBER() OVER (...)` | Sequential integer 1..N per partition. | 1 |
+| `RANK` | `RANK() OVER (...)` | Rank with gaps on ties (1, 1, 3). Requires ORDER BY. | 1 |
+| `DENSE_RANK` | `DENSE_RANK() OVER (...)` | Rank without gaps (1, 1, 2). Requires ORDER BY. | 1 |
+| `NTILE` | `NTILE(n) OVER (...)` | Distribute rows into `n` roughly equal buckets. | 1 |
+| `LAG` | `LAG(expr [, offset [, default]]) OVER (...)` | Value from `offset` rows before current (default offset 1, default value NULL). | 1 |
+| `LEAD` | `LEAD(expr [, offset [, default]]) OVER (...)` | Value from `offset` rows after current (default offset 1, default value NULL). | 1 |
+
+### Aggregates as Window Functions
+
+All five aggregate functions (COUNT, SUM, AVG, MIN, MAX) can also be used with an OVER clause to produce windowed results instead of grouped results:
+
+```sql
+-- Running sum
+SELECT SUM(amount) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM data
+
+-- Partition-level average alongside each row
+SELECT *, AVG(score) OVER (PARTITION BY category) AS category_avg FROM data
+```
 
 ## Example SQL with functions
 

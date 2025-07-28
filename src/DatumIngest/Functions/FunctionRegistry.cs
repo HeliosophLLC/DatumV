@@ -9,6 +9,7 @@ public sealed class FunctionRegistry
     private readonly Dictionary<string, IScalarFunction> _scalarFunctions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ITableValuedFunction> _tableValuedFunctions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IAggregateFunction> _aggregateFunctions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IWindowFunction> _windowFunctions = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Registers a scalar function.
@@ -47,6 +48,18 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
+    /// Registers a window function.
+    /// </summary>
+    /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
+    public void RegisterWindow(IWindowFunction function)
+    {
+        if (!_windowFunctions.TryAdd(function.Name, function))
+        {
+            throw new ArgumentException($"Window function '{function.Name}' is already registered.");
+        }
+    }
+
+    /// <summary>
     /// Looks up a scalar function by name.
     /// </summary>
     /// <returns>The function, or null if not found.</returns>
@@ -77,6 +90,37 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
+    /// Looks up a dedicated window function by name.
+    /// </summary>
+    /// <returns>The window function, or null if not found.</returns>
+    public IWindowFunction? TryGetWindow(string name)
+    {
+        _windowFunctions.TryGetValue(name, out IWindowFunction? function);
+        return function;
+    }
+
+    /// <summary>
+    /// Resolves a window function by name, checking the dedicated window registry
+    /// first, then falling back to wrapping an aggregate function with
+    /// <see cref="Window.AggregateWindowAdapter"/> if one exists.
+    /// </summary>
+    /// <returns>The window function, or null if neither a window nor aggregate function is found.</returns>
+    public IWindowFunction? TryGetWindowOrAggregate(string name)
+    {
+        if (_windowFunctions.TryGetValue(name, out IWindowFunction? windowFunction))
+        {
+            return windowFunction;
+        }
+
+        if (_aggregateFunctions.TryGetValue(name, out IAggregateFunction? aggregateFunction))
+        {
+            return new Window.AggregateWindowAdapter(aggregateFunction);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Returns all registered scalar function names.
     /// </summary>
     public IEnumerable<string> ScalarFunctionNames => _scalarFunctions.Keys;
@@ -90,6 +134,11 @@ public sealed class FunctionRegistry
     /// Returns all registered aggregate function names.
     /// </summary>
     public IEnumerable<string> AggregateFunctionNames => _aggregateFunctions.Keys;
+
+    /// <summary>
+    /// Returns all registered window function names.
+    /// </summary>
+    public IEnumerable<string> WindowFunctionNames => _windowFunctions.Keys;
 
     /// <summary>
     /// Creates a registry pre-populated with all built-in functions.
@@ -382,6 +431,14 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.AvgFunction());
         registry.RegisterAggregate(new Aggregates.MinFunction());
         registry.RegisterAggregate(new Aggregates.MaxFunction());
+
+        // Window
+        registry.RegisterWindow(new Window.RowNumberFunction());
+        registry.RegisterWindow(new Window.RankFunction());
+        registry.RegisterWindow(new Window.DenseRankFunction());
+        registry.RegisterWindow(new Window.NtileFunction());
+        registry.RegisterWindow(new Window.LagFunction());
+        registry.RegisterWindow(new Window.LeadFunction());
 
         return registry;
     }

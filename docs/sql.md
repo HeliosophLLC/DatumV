@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, FROM, JOIN, WHERE, GROUP BY, HAVING, INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, FROM, JOIN, WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
 
 ## Comments
 
@@ -167,6 +167,103 @@ HAVING AVG(price) > 100
 ### Execution model
 
 GROUP BY uses hash-based aggregation: all groups are accumulated in memory using a hash table keyed by the GROUP BY expressions. This is a blocking operator — all input rows must be consumed before any output rows are emitted.
+
+## Window Functions
+
+Window functions compute a value for each row based on a "window" of related rows, without collapsing groups like GROUP BY. Every window function call requires an `OVER` clause.
+
+```sql
+-- Basic syntax
+function_name(args) OVER (
+    [PARTITION BY expr, ...]
+    [ORDER BY expr [ASC|DESC], ...]
+    [ROWS BETWEEN frame_start AND frame_end]
+)
+```
+
+### Ranking Functions
+
+```sql
+-- Sequential numbering within each group
+SELECT *, ROW_NUMBER() OVER (PARTITION BY category ORDER BY score DESC) AS rn
+FROM data
+
+-- Rank with gaps on ties (1, 1, 3, 4)
+SELECT *, RANK() OVER (ORDER BY score DESC) AS rnk FROM data
+
+-- Rank without gaps on ties (1, 1, 2, 3)
+SELECT *, DENSE_RANK() OVER (ORDER BY score DESC) AS drnk FROM data
+
+-- Distribute rows into N equal buckets
+SELECT *, NTILE(4) OVER (ORDER BY score) AS quartile FROM data
+```
+
+### Offset Functions
+
+```sql
+-- Previous row's value (default offset = 1)
+SELECT *, LAG(price) OVER (ORDER BY date) AS prev_price FROM prices
+
+-- Next row's value with custom offset and default
+SELECT *, LEAD(price, 2, 0) OVER (ORDER BY date) AS price_after_next FROM prices
+```
+
+### Aggregate Functions over Windows
+
+All aggregate functions (COUNT, SUM, AVG, MIN, MAX) can be used with OVER to compute running or partitioned aggregates:
+
+```sql
+-- Running total
+SELECT *, SUM(amount) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total
+FROM transactions
+
+-- Per-category average alongside each row
+SELECT *, AVG(score) OVER (PARTITION BY category) AS category_avg
+FROM data
+
+-- 3-row moving average
+SELECT *, AVG(value) OVER (ORDER BY ts ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS moving_avg
+FROM sensor_data
+```
+
+### Window Frames
+
+Window frames control which rows within the partition are visible to the function. Only `ROWS` frames are supported.
+
+| Bound | Meaning |
+|-------|---------|
+| `UNBOUNDED PRECEDING` | First row of the partition. |
+| `N PRECEDING` | N rows before the current row. |
+| `CURRENT ROW` | The current row. |
+| `N FOLLOWING` | N rows after the current row. |
+| `UNBOUNDED FOLLOWING` | Last row of the partition. |
+
+```sql
+-- Default frame (when ORDER BY is present): ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+-- Default frame (when ORDER BY is absent): entire partition
+
+-- Explicit frame: 3-row trailing window
+SUM(val) OVER (ORDER BY ts ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
+
+-- Full partition frame
+SUM(val) OVER (PARTITION BY group_col ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+```
+
+### Window Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `ROW_NUMBER()` | `ROW_NUMBER() OVER (...)` | Sequential integer starting at 1 per partition. |
+| `RANK()` | `RANK() OVER (...)` | Rank with gaps on ties. Requires ORDER BY. |
+| `DENSE_RANK()` | `DENSE_RANK() OVER (...)` | Rank without gaps on ties. Requires ORDER BY. |
+| `NTILE(n)` | `NTILE(n) OVER (...)` | Distribute rows into `n` roughly equal buckets. |
+| `LAG(expr [, offset [, default]])` | `LAG(...) OVER (...)` | Value from the row `offset` rows before current (default 1). |
+| `LEAD(expr [, offset [, default]])` | `LEAD(...) OVER (...)` | Value from the row `offset` rows after current (default 1). |
+| `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` | `agg(...) OVER (...)` | Any aggregate function used with OVER becomes a window aggregate. |
+
+### Execution model
+
+Window functions are blocking operators — all input rows within each partition must be materialized before results are computed. Rows are hash-partitioned by PARTITION BY expressions, sorted within each partition by ORDER BY, and then each window function is evaluated. The original row order is preserved in the output.
 
 ## INTO
 

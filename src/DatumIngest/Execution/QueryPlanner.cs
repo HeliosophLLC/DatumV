@@ -184,6 +184,31 @@ public sealed class QueryPlanner
             projectionColumns = rewrittenColumns;
         }
 
+        // 3d. Window functions — insert WindowOperator after GROUP BY
+        // (which may reference aggregate output columns) but before projection.
+        bool hasWindowFunctions = HasWindowFunction(projectionColumns, _functionRegistry);
+        if (hasWindowFunctions)
+        {
+            List<WindowColumn> windowColumns = new();
+            List<SelectColumn> windowRewrittenColumns = new();
+
+            foreach (SelectColumn column in projectionColumns)
+            {
+                if (column is SelectAllColumns or SelectTableColumns)
+                {
+                    windowRewrittenColumns.Add(column);
+                    continue;
+                }
+
+                Expression rewritten = RewriteWindowExpression(
+                    column.Expression, _functionRegistry, windowColumns);
+                windowRewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
+            }
+
+            source = new WindowOperator(source, windowColumns);
+            projectionColumns = windowRewrittenColumns;
+        }
+
         // 4. Apply SELECT projection.
         bool hasStarOnly = projectionColumns.Count == 1 && projectionColumns[0] is SelectAllColumns;
         if (!hasStarOnly)
@@ -720,6 +745,165 @@ public sealed class QueryPlanner
 
         Expression? rewrittenElse = caseExpression.ElseResult is not null
             ? RewriteAggregateExpression(caseExpression.ElseResult, functionRegistry, aggregateColumns)
+            : null;
+
+        return new CaseExpression(rewrittenOperand, rewrittenClauses, rewrittenElse, caseExpression.Span);
+    }
+
+    // ────────────────────────────────── Window Functions ──────────────────────────────────
+
+    /// <summary>
+    /// Returns <c>true</c> if any SELECT column contains a window function call
+    /// (a <see cref="WindowFunctionCallExpression"/> node).
+    /// </summary>
+    private static bool HasWindowFunction(
+        IReadOnlyList<SelectColumn> columns,
+        FunctionRegistry functionRegistry)
+    {
+        foreach (SelectColumn column in columns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                continue;
+            }
+
+            if (ExpressionContainsWindowFunction(column.Expression))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively checks whether an expression tree contains a <see cref="WindowFunctionCallExpression"/>.
+    /// </summary>
+    private static bool ExpressionContainsWindowFunction(Expression expression)
+    {
+        return expression switch
+        {
+            WindowFunctionCallExpression => true,
+            BinaryExpression bin => ExpressionContainsWindowFunction(bin.Left)
+                || ExpressionContainsWindowFunction(bin.Right),
+            UnaryExpression unary => ExpressionContainsWindowFunction(unary.Operand),
+            CastExpression cast => ExpressionContainsWindowFunction(cast.Expression),
+            CaseExpression caseExpr => CaseExpressionContainsWindowFunction(caseExpr),
+            FunctionCallExpression func => func.Arguments.Any(ExpressionContainsWindowFunction),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Checks whether a CASE expression contains any window function calls.
+    /// </summary>
+    private static bool CaseExpressionContainsWindowFunction(CaseExpression caseExpression)
+    {
+        if (caseExpression.Operand is not null && ExpressionContainsWindowFunction(caseExpression.Operand))
+        {
+            return true;
+        }
+
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            if (ExpressionContainsWindowFunction(whenClause.Condition)
+                || ExpressionContainsWindowFunction(whenClause.Result))
+            {
+                return true;
+            }
+        }
+
+        return caseExpression.ElseResult is not null
+            && ExpressionContainsWindowFunction(caseExpression.ElseResult);
+    }
+
+    /// <summary>
+    /// Rewrites an expression by replacing <see cref="WindowFunctionCallExpression"/>
+    /// nodes with <see cref="ColumnReference"/> nodes that reference the output columns
+    /// of the <see cref="WindowOperator"/>. Each unique window function call is added
+    /// to <paramref name="windowColumns"/> only once.
+    /// </summary>
+    private static Expression RewriteWindowExpression(
+        Expression expression,
+        FunctionRegistry functionRegistry,
+        List<WindowColumn> windowColumns)
+    {
+        if (expression is WindowFunctionCallExpression windowCall)
+        {
+            string outputName = QueryExplainer.FormatExpression(windowCall);
+
+            // Deduplicate: reuse existing WindowColumn if the same expression already appears.
+            bool alreadyRegistered = false;
+            foreach (WindowColumn existing in windowColumns)
+            {
+                if (string.Equals(existing.OutputName, outputName, StringComparison.OrdinalIgnoreCase))
+                {
+                    alreadyRegistered = true;
+                    break;
+                }
+            }
+
+            if (!alreadyRegistered)
+            {
+                IWindowFunction? windowFunction =
+                    functionRegistry.TryGetWindowOrAggregate(windowCall.FunctionName);
+
+                if (windowFunction is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Unknown window function: '{windowCall.FunctionName}'.");
+                }
+
+                windowColumns.Add(new WindowColumn(
+                    windowFunction,
+                    windowCall.Arguments,
+                    windowCall.Window,
+                    outputName));
+            }
+
+            return new ColumnReference(null, outputName);
+        }
+
+        // Recurse into sub-expressions.
+        return expression switch
+        {
+            BinaryExpression bin => new BinaryExpression(
+                RewriteWindowExpression(bin.Left, functionRegistry, windowColumns),
+                bin.Operator,
+                RewriteWindowExpression(bin.Right, functionRegistry, windowColumns)),
+            UnaryExpression unary => new UnaryExpression(
+                unary.Operator,
+                RewriteWindowExpression(unary.Operand, functionRegistry, windowColumns)),
+            CastExpression cast => new CastExpression(
+                RewriteWindowExpression(cast.Expression, functionRegistry, windowColumns),
+                cast.TargetType),
+            CaseExpression caseExpr => RewriteCaseWindowExpression(caseExpr, functionRegistry, windowColumns),
+            _ => expression,
+        };
+    }
+
+    /// <summary>
+    /// Rewrites window function references inside a CASE expression.
+    /// </summary>
+    private static CaseExpression RewriteCaseWindowExpression(
+        CaseExpression caseExpression,
+        FunctionRegistry functionRegistry,
+        List<WindowColumn> windowColumns)
+    {
+        Expression? rewrittenOperand = caseExpression.Operand is not null
+            ? RewriteWindowExpression(caseExpression.Operand, functionRegistry, windowColumns)
+            : null;
+
+        List<WhenClause> rewrittenClauses = new(caseExpression.WhenClauses.Count);
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            rewrittenClauses.Add(new WhenClause(
+                RewriteWindowExpression(whenClause.Condition, functionRegistry, windowColumns),
+                RewriteWindowExpression(whenClause.Result, functionRegistry, windowColumns)));
+        }
+
+        Expression? rewrittenElse = caseExpression.ElseResult is not null
+            ? RewriteWindowExpression(caseExpression.ElseResult, functionRegistry, windowColumns)
             : null;
 
         return new CaseExpression(rewrittenOperand, rewrittenClauses, rewrittenElse, caseExpression.Span);

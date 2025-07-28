@@ -42,4 +42,7 @@ public enum FunctionCategory
 
     /// <summary>Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX).</summary>
     Aggregate,
+
+    /// <summary>Window (analytical) functions that compute a value per row over a partition (ROW_NUMBER, RANK, LAG, LEAD, etc.).</summary>
+    Window,
 }

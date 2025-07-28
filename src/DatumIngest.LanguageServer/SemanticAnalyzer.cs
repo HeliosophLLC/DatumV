@@ -272,6 +272,36 @@ internal sealed class SemanticAnalyzer
                 diagnostics.AddRange(subDiagnostics);
                 break;
 
+            case WindowFunctionCallExpression windowCall:
+                if (!_functionNames.Contains(windowCall.FunctionName))
+                {
+                    EmitWarning(diagnostics, windowCall.Span,
+                        $"Unknown window function '{windowCall.FunctionName}'.");
+                }
+
+                foreach (Expression argument in windowCall.Arguments)
+                {
+                    AnalyzeExpression(argument, aliasToTable, opaqueAliases, diagnostics);
+                }
+
+                if (windowCall.Window.PartitionBy is not null)
+                {
+                    foreach (Expression partition in windowCall.Window.PartitionBy)
+                    {
+                        AnalyzeExpression(partition, aliasToTable, opaqueAliases, diagnostics);
+                    }
+                }
+
+                if (windowCall.Window.OrderBy is not null)
+                {
+                    foreach (OrderByItem orderByItem in windowCall.Window.OrderBy)
+                    {
+                        AnalyzeExpression(orderByItem.Expression, aliasToTable, opaqueAliases, diagnostics);
+                    }
+                }
+
+                break;
+
             // ErrorExpression — inserted by error recovery; skip validation.
             case ErrorExpression:
                 break;
