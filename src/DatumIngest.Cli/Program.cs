@@ -64,7 +64,7 @@ try
         "query" => await RunQueryAsync(statement, catalog, options),
         "explore" => await RunExploreAsync(statement, catalog, options.Limit),
         "stats" => await RunStatsAsync(statement, catalog),
-        "explain" => await RunExplainAsync(statement, catalog, options.Analyze),
+        "explain" => await RunExplainAsync(statement, catalog, options.Analyze, options.MemoryBudgetBytes),
         "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(statement, catalog),
         _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'cross-manifest'.")
@@ -520,7 +520,8 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
-        catalog);
+        catalog,
+        memoryBudgetBytes: options.MemoryBudgetBytes);
 
     ProgressReporter progress = new();
 
@@ -706,7 +707,7 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
     return 0;
 }
 
-static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog catalog, bool analyze)
+static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog catalog, bool analyze, long? memoryBudgetBytes)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);

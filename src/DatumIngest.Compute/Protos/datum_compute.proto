@@ -78,6 +78,10 @@ message CreateSessionRequest {
   // Maximum Query Units a single query may accumulate.
   // 0 = use server default, positive = override, negative = disable.
   int64 max_query_units = 6;
+
+  // Memory budget in bytes for spill-to-disk joins.
+  // 0 = use server default, positive = override, negative = disable.
+  int64 memory_budget_bytes = 7;
 }
 
 message CreateSessionResponse {

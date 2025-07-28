@@ -69,9 +69,22 @@ public sealed class JoinOperator : IQueryOperator
 
         if (extraction is not null)
         {
-            await foreach (Row row in ExecuteHashJoinAsync(context, extraction).ConfigureAwait(false))
+            if (context.MemoryBudgetBytes is long memoryBudget)
             {
-                yield return row;
+                ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator);
+
+                await foreach (Row row in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
+                {
+                    yield return row;
+                }
+            }
+            else
+            {
+                await foreach (Row row in ExecuteHashJoinAsync(context, extraction).ConfigureAwait(false))
+                {
+                    yield return row;
+                }
             }
         }
         else

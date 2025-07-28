@@ -102,6 +102,7 @@ builder.Services.AddDatumCompute(options => options.ApiKey = "key");
 | `MaxOutputRows` | `long?` | `null` | Server-wide default maximum rows per query. `null` = no limit. |
 | `ThrottleDelayMilliseconds` | `int?` | `null` | Server-wide default throttle delay in ms. `null` = no throttle. |
 | `MaxQueryUnits` | `long?` | `null` | Server-wide default QU budget per query. `null` = no limit. |
+| `MemoryBudgetBytes` | `long?` | `null` | Server-wide default memory budget for spill-to-disk joins in bytes. `null` = keep everything in memory. |
 
 ## Calling with grpcurl
 
@@ -165,6 +166,7 @@ Creates a new session on the compute backend.
 | `max_output_rows` | `int64` | Per-session row budget override. `0` = server default, positive = override, negative = disable. |
 | `throttle_delay_ms` | `int32` | Per-session throttle delay override. `0` = server default, positive = override, negative = disable. |
 | `max_query_units` | `int64` | Per-session QU budget override. `0` = server default, positive = override, negative = disable. |
+| `memory_budget_bytes` | `int64` | Per-session memory budget for spill-to-disk joins. `0` = server default, positive = override (bytes), negative = disable (all in-memory). |
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
@@ -622,15 +624,18 @@ Each governance field in `CreateSessionRequest` follows three-state semantics:
 
 **Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from scalar function invocations. Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-row cost via the `query_units` field on `QueryRow`, and query cumulative session cost via `GetUsage`.
 
+**Memory budget (`memory_budget_bytes`):** The maximum memory (in bytes) the join operator may use before spilling partitions to temporary files on disk. When set, joins use a Grace hash join strategy: both sides are partitioned by hash key, memory usage is sampled, and the largest in-memory partition spills to disk when usage exceeds 75% of the budget. Spilled partitions are joined in a second pass by reading rows back from disk. When the budget is `null` (or explicitly disabled with a negative override), all join data is held in memory as before. Typical values are `512MB`–`2GB` depending on available server RAM.
+
 ### Configuration Example
 
 ```csharp
 builder.Services.AddDatumCompute(options =>
 {
     options.ApiKey = "secret";
-    options.QueryTimeoutSeconds = 300;     // 5-minute default deadline.
-    options.MaxOutputRows = 100_000;       // 100k row budget by default.
-    options.MaxQueryUnits = 1_000_000;      // 1M QU budget by default.
+    options.QueryTimeoutSeconds = 300;           // 5-minute default deadline.
+    options.MaxOutputRows = 100_000;             // 100k row budget by default.
+    options.MaxQueryUnits = 1_000_000;            // 1M QU budget by default.
+    options.MemoryBudgetBytes = 512 * 1024 * 1024; // 512 MB spill-to-disk budget.
     // ThrottleDelayMilliseconds left null — no throttle by default.
 });
 ```
@@ -646,6 +651,18 @@ CreateSessionResponse session = await connection.Client.CreateSessionAsync(
         QueryTimeoutSeconds = -1,
         MaxOutputRows = -1,
         ThrottleDelayMs = 10,
+    });
+```
+
+A data-intensive workload can request a memory budget for spill-to-disk joins:
+
+```csharp
+// Enable spill-to-disk joins with a 1 GB memory budget.
+CreateSessionResponse session = await connection.Client.CreateSessionAsync(
+    new CreateSessionRequest
+    {
+        Role = "user",
+        MemoryBudgetBytes = 1024 * 1024 * 1024,
     });
 ```
 

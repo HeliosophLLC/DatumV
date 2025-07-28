@@ -57,4 +57,13 @@ public sealed class DatumComputeOptions
     /// override per-session via <c>CreateSession</c>.
     /// </summary>
     public long? MaxQueryUnits { get; set; }
+
+    /// <summary>
+    /// Gets or sets the server-wide default memory budget in bytes for
+    /// spill-to-disk joins. When set, hash joins that exceed this budget
+    /// will partition and spill to temporary files instead of failing.
+    /// Set to <see langword="null"/> (the default) for fully in-memory joins.
+    /// Clients may override per-session via <c>CreateSession</c>.
+    /// </summary>
+    public long? MemoryBudgetBytes { get; set; }
 }

@@ -17,16 +17,23 @@ public sealed class ExecutionContext
     /// <param name="functionRegistry">Registry of scalar and table-valued functions.</param>
     /// <param name="catalog">Registry of named tables and provider factories.</param>
     /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
+    /// <param name="memoryBudgetBytes">
+    /// Optional memory budget in bytes for operators that support spill-to-disk (e.g. hash join).
+    /// When <see langword="null"/>, operators keep all intermediate state in memory (current default behavior).
+    /// When set, operators may spill partitions to temporary files when estimated memory usage exceeds this budget.
+    /// </param>
     public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
-        QueryMeter? queryMeter = null)
+        QueryMeter? queryMeter = null,
+        long? memoryBudgetBytes = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
         Catalog = catalog;
         QueryMeter = queryMeter;
+        MemoryBudgetBytes = memoryBudgetBytes;
     }
 
     /// <summary>Cancellation token for cooperative cancellation.</summary>
@@ -43,4 +50,12 @@ public sealed class ExecutionContext
     /// <see langword="null"/> when metering is not active (e.g. CLI execution).
     /// </summary>
     public QueryMeter? QueryMeter { get; }
+
+    /// <summary>
+    /// Optional memory budget in bytes for operators that support spill-to-disk.
+    /// When <see langword="null"/>, operators keep all intermediate state in memory.
+    /// When set, operators such as the hash join may spill partitions to temporary
+    /// files when estimated memory usage exceeds this budget.
+    /// </summary>
+    public long? MemoryBudgetBytes { get; }
 }

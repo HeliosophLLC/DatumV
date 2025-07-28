@@ -123,7 +123,8 @@ public sealed class CommandDispatcher
 
         // Resolve schema from the first row's structure. We create the context
         // and wrap execution so the schema can be captured.
-        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, queryMeter);
+        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, queryMeter,
+            memoryBudgetBytes: session.Governor.MemoryBudgetBytes);
         IAsyncEnumerable<Row> rows = plan.ExecuteAsync(context);
 
         // We need the schema before streaming. Peek at the plan to get column metadata.

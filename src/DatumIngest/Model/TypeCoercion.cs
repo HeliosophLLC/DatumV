@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace DatumIngest.Model;
 
 /// <summary>
@@ -107,5 +109,97 @@ public static class TypeCoercion
             DataKind.Matrix => value.ToTensor(),
             _ => throw new InvalidOperationException($"No widening step exists for {value.Kind}."),
         };
+    }
+
+    /// <summary>
+    /// Attempts to coerce a value to the target kind using implicit conversion rules.
+    /// First tries the standard widening chain; then falls back to string-to-type parsing.
+    /// Returns a typed null when coercion fails, unlike <see cref="Widen"/> which throws.
+    /// Used by CASE expression evaluation to unify mixed-type branch results.
+    /// </summary>
+    public static DataValue CoerceValue(DataValue value, DataKind targetKind)
+    {
+        if (value.Kind == targetKind) return value;
+        if (value.IsNull) return DataValue.Null(targetKind);
+
+        // Standard widening chain always succeeds.
+        if (CanWiden(value.Kind, targetKind))
+        {
+            return Widen(value, targetKind);
+        }
+
+        // String → parseable types: attempt parsing, null on failure.
+        if (value.Kind == DataKind.String)
+        {
+            return TryCoerceString(value.AsString(), targetKind);
+        }
+
+        // No implicit coercion path available.
+        return DataValue.Null(targetKind);
+    }
+
+    /// <summary>
+    /// Returns whether a CASE expression can implicitly coerce String values to
+    /// the specified target kind. Used by type resolution to determine whether
+    /// String + X branch combinations should resolve to X.
+    /// </summary>
+    internal static bool CanCoerceStringTo(DataKind targetKind)
+    {
+        return targetKind is
+            DataKind.Scalar or DataKind.UInt8 or DataKind.Boolean or
+            DataKind.Date or DataKind.DateTime or DataKind.Time or
+            DataKind.Duration or DataKind.Uuid or DataKind.JsonValue;
+    }
+
+    /// <summary>
+    /// Attempts to parse a string into the target kind. Returns a typed null on failure.
+    /// </summary>
+    private static DataValue TryCoerceString(string text, DataKind targetKind)
+    {
+        return targetKind switch
+        {
+            DataKind.Scalar when float.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture, out float scalar) => DataValue.FromScalar(scalar),
+
+            DataKind.UInt8 when byte.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out byte byteValue) => DataValue.FromUInt8(byteValue),
+
+            DataKind.Boolean => TryParseBoolean(text),
+
+            DataKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, out DateOnly date)
+                => DataValue.FromDate(date),
+
+            DataKind.DateTime when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTimeOffset dateTime) => DataValue.FromDateTime(dateTime),
+
+            DataKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out TimeOnly time)
+                => DataValue.FromTime(time),
+
+            DataKind.Duration when TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out TimeSpan duration)
+                => DataValue.FromDuration(duration),
+
+            DataKind.Uuid when Guid.TryParse(text, out Guid uuid)
+                => DataValue.FromUuid(uuid),
+
+            _ => DataValue.Null(targetKind),
+        };
+    }
+
+    /// <summary>
+    /// Parses "true", "false", "1", "0" to Boolean. Returns null for anything else.
+    /// </summary>
+    private static DataValue TryParseBoolean(string text)
+    {
+        if (string.Equals(text, "true", StringComparison.OrdinalIgnoreCase) || text == "1")
+        {
+            return DataValue.FromBoolean(true);
+        }
+
+        if (string.Equals(text, "false", StringComparison.OrdinalIgnoreCase) || text == "0")
+        {
+            return DataValue.FromBoolean(false);
+        }
+
+        return DataValue.Null(DataKind.Boolean);
     }
 }

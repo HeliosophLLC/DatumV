@@ -41,7 +41,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             request.QueryTimeoutSeconds,
             request.MaxOutputRows,
             request.ThrottleDelayMs,
-            request.MaxQueryUnits);
+            request.MaxQueryUnits,
+            request.MemoryBudgetBytes);
 
         Session session;
 

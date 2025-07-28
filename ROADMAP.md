@@ -3,7 +3,7 @@
 The following features are architecturally accounted for but deferred from V1:
 
 - ~~**GROUP BY / Aggregation**: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING~~ ✅
-- **Spill-to-disk joins**: Grace hash join for datasets too large for memory
+- ~~**Spill-to-disk joins**: Grace hash join for datasets too large for memory~~ ✅
 - **Adaptive batch sizing**: Auto-tune based on row size estimates and available memory
 - **Excel provider**: Read .xlsx files (ITableProvider interface is ready)
 - **UNION / INTERSECT / EXCEPT**: Set operations between query results

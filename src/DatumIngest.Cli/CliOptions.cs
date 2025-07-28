@@ -49,6 +49,13 @@ internal sealed class CliOptions
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
 
+    /// <summary>
+    /// Gets or sets the optional memory budget in bytes for operators that support spill-to-disk.
+    /// When <see langword="null"/>, operators keep all intermediate state in memory.
+    /// Accepts raw byte counts or human-readable suffixes (e.g. 512MB, 2GB).
+    /// </summary>
+    public long? MemoryBudgetBytes { get; set; }
+
     /// <summary>Gets or sets the manifest file paths for the cross-manifest command.</summary>
     public List<string> ManifestPaths { get; set; } = new();
 
@@ -171,6 +178,14 @@ internal sealed class CliOptions
                     }
                     break;
 
+                case "--memory-budget":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--memory-budget requires a size argument (e.g. 512MB, 2GB, or raw bytes)");
+                    }
+                    options.MemoryBudgetBytes = ParseByteSize(args[++i]);
+                    break;
+
                 case "--output":
                     if (i + 1 >= args.Length)
                     {
@@ -198,5 +213,43 @@ internal sealed class CliOptions
         }
 
         return options;
+    }
+
+    /// <summary>
+    /// Parses a human-readable byte size string (e.g. "512MB", "2GB", "1048576")
+    /// into a <see langword="long"/> byte count.
+    /// </summary>
+    private static long ParseByteSize(string input)
+    {
+        string trimmed = input.Trim();
+
+        if (long.TryParse(trimmed, out long rawBytes))
+        {
+            return rawBytes;
+        }
+
+        if (trimmed.Length < 3)
+        {
+            throw new ArgumentException($"Invalid byte size: '{input}'. Use a number or a suffixed value like 512MB, 2GB.");
+        }
+
+        string suffix = trimmed[^2..].ToUpperInvariant();
+        string numberPart = trimmed[..^2];
+
+        if (!double.TryParse(numberPart, out double number))
+        {
+            throw new ArgumentException($"Invalid byte size: '{input}'. Use a number or a suffixed value like 512MB, 2GB.");
+        }
+
+        long multiplier = suffix switch
+        {
+            "KB" => 1024L,
+            "MB" => 1024L * 1024,
+            "GB" => 1024L * 1024 * 1024,
+            "TB" => 1024L * 1024 * 1024 * 1024,
+            _ => throw new ArgumentException($"Unknown size suffix '{suffix}'. Use KB, MB, GB, or TB."),
+        };
+
+        return (long)(number * multiplier);
     }
 }

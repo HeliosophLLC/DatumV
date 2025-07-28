@@ -116,4 +116,55 @@ public sealed class QueryGovernorTests
         Assert.Equal(1000, merged.MaxOutputRows);
         Assert.Null(merged.ThrottleDelayMilliseconds);
     }
+
+    // ─────────────────── MemoryBudgetBytes ───────────────────
+
+    /// <summary>
+    /// MemoryBudgetBytes defaults to null on Unlimited.
+    /// </summary>
+    [Fact]
+    public void Unlimited_HasNoMemoryBudget()
+    {
+        Assert.Null(QueryGovernor.Unlimited.MemoryBudgetBytes);
+    }
+
+    /// <summary>
+    /// Zero request value uses server default memory budget.
+    /// </summary>
+    [Fact]
+    public void Merge_MemoryBudget_ZeroUsesServerDefault()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MemoryBudgetBytes: 512 * 1024 * 1024L);
+
+        QueryGovernor merged = QueryGovernor.Merge(serverDefaults, 0, 0, 0, requestMemoryBudgetBytes: 0);
+
+        Assert.Equal(512 * 1024 * 1024L, merged.MemoryBudgetBytes);
+    }
+
+    /// <summary>
+    /// Positive request value overrides server default memory budget.
+    /// </summary>
+    [Fact]
+    public void Merge_MemoryBudget_PositiveOverridesDefault()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MemoryBudgetBytes: 512 * 1024 * 1024L);
+
+        QueryGovernor merged = QueryGovernor.Merge(serverDefaults, 0, 0, 0,
+            requestMemoryBudgetBytes: 1024 * 1024 * 1024L);
+
+        Assert.Equal(1024 * 1024 * 1024L, merged.MemoryBudgetBytes);
+    }
+
+    /// <summary>
+    /// Negative request value explicitly disables memory budget.
+    /// </summary>
+    [Fact]
+    public void Merge_MemoryBudget_NegativeDisables()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MemoryBudgetBytes: 512 * 1024 * 1024L);
+
+        QueryGovernor merged = QueryGovernor.Merge(serverDefaults, 0, 0, 0, requestMemoryBudgetBytes: -1);
+
+        Assert.Null(merged.MemoryBudgetBytes);
+    }
 }

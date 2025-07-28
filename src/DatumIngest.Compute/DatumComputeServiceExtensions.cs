@@ -57,7 +57,8 @@ public static class DatumComputeServiceExtensions
             options.QueryTimeoutSeconds,
             options.MaxOutputRows,
             options.ThrottleDelayMilliseconds,
-            options.MaxQueryUnits));
+            options.MaxQueryUnits,
+            options.MemoryBudgetBytes));
 
         // Wire ApiKeyOptions from the new unified options object.
         services.Configure<ApiKeyOptions>(apiKeyOptions =>

@@ -20,11 +20,17 @@ namespace DatumIngest.Server;
 /// Maximum Query Units a single query may accumulate before the server
 /// rejects it, or <see langword="null"/> for no limit.
 /// </param>
+/// <param name="MemoryBudgetBytes">
+/// Memory budget in bytes for spill-to-disk joins. When set, hash joins
+/// that exceed this budget will partition and spill to temporary files.
+/// <see langword="null"/> means no budget (joins are fully in-memory).
+/// </param>
 public sealed record QueryGovernor(
     int? QueryTimeoutSeconds,
     long? MaxOutputRows,
     int? ThrottleDelayMilliseconds,
-    long? MaxQueryUnits = null)
+    long? MaxQueryUnits = null,
+    long? MemoryBudgetBytes = null)
 {
     /// <summary>
     /// Number of rows between throttle delays. When <see cref="ThrottleDelayMilliseconds"/>
@@ -51,19 +57,22 @@ public sealed record QueryGovernor(
     /// <param name="requestMaxOutputRows">Row budget override from the client request.</param>
     /// <param name="requestThrottleDelayMilliseconds">Throttle override from the client request.</param>
     /// <param name="requestMaxQueryUnits">Query Unit budget override from the client request.</param>
+    /// <param name="requestMemoryBudgetBytes">Memory budget override from the client request.</param>
     /// <returns>A merged governor reflecting the effective limits for the session.</returns>
     public static QueryGovernor Merge(
         QueryGovernor serverDefaults,
         int requestTimeoutSeconds,
         long requestMaxOutputRows,
         int requestThrottleDelayMilliseconds,
-        long requestMaxQueryUnits = 0)
+        long requestMaxQueryUnits = 0,
+        long requestMemoryBudgetBytes = 0)
     {
         return new QueryGovernor(
             ResolveInt(requestTimeoutSeconds, serverDefaults.QueryTimeoutSeconds),
             ResolveLong(requestMaxOutputRows, serverDefaults.MaxOutputRows),
             ResolveInt(requestThrottleDelayMilliseconds, serverDefaults.ThrottleDelayMilliseconds),
-            ResolveLong(requestMaxQueryUnits, serverDefaults.MaxQueryUnits));
+            ResolveLong(requestMaxQueryUnits, serverDefaults.MaxQueryUnits),
+            ResolveLong(requestMemoryBudgetBytes, serverDefaults.MemoryBudgetBytes));
     }
 
     /// <summary>
