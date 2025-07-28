@@ -46,7 +46,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
-- **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, subqueries, quoted identifiers
+- **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, subqueries, quoted identifiers, parameterized queries (`$name`)
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
@@ -55,6 +55,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
 - **Schema introspection** — resolve column metadata without executing (for editor autocomplete)
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with manifest-driven cardinality estimation (NDV-based selectivity) and optional runtime metrics
+- **Parameterized queries** — named `$parameter` placeholders with early binding (AST-level substitution before planning), preserving all optimizer paths
 - **Resource governance** — per-session query deadlines, row budgets, Query Unit metering, and throttle delays for multi-tenant gRPC deployments
 
 ## Why Not DuckDB / Pandas?
@@ -162,6 +163,7 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 | `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |
 | `--checkpoint` | Enable checkpoint-based resume for sharded writes. Requires `SHARD ON`. |
+| `--param <key=value>` | Bind a named parameter. Repeatable. Value types are inferred: numeric → Scalar, `true`/`false` → Boolean, `null` → Null, else → String. |
 | `--index <path>` | Load a pre-built `.datum-index` file for chunk-level query pruning. Repeatable. |
 | `--with-index` | Co-generate a `.datum-index` for each source during query execution. |
 | `--chunk-size <n>` | Rows per index chunk (default: 10,000). |

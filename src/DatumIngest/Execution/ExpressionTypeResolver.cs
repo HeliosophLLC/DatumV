@@ -35,6 +35,7 @@ public static class ExpressionTypeResolver
             IsNullExpression => DataKind.Scalar,
             CastExpression cast => ResolveCast(cast),
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
+            ParameterExpression => null,
             _ => null,
         };
     }

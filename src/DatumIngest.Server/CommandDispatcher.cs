@@ -36,9 +36,11 @@ public sealed class CommandDispatcher
     /// <param name="input">The raw command text (SQL or dot-command).</param>
     /// <param name="cancellationToken">Cancellation token for this operation.</param>
     /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
+    /// <param name="parameters">Optional named parameter bindings to substitute into the query, or <see langword="null"/> for no parameters.</param>
     /// <returns>The result of the command execution.</returns>
     public async Task<CommandResult> DispatchAsync(
-        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter = null)
+        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
+        IReadOnlyDictionary<string, DataValue>? parameters = null)
     {
         session.TouchActivity();
 
@@ -61,7 +63,7 @@ public sealed class CommandDispatcher
                 return await DispatchMetaCommandAsync(session, trimmed, cancellationToken).ConfigureAwait(false);
             }
 
-            return await DispatchSqlAsync(session, trimmed, cancellationToken, queryMeter).ConfigureAwait(false);
+            return await DispatchSqlAsync(session, trimmed, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -107,7 +109,8 @@ public sealed class CommandDispatcher
     }
 
     private async Task<CommandResult> DispatchSqlAsync(
-        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter)
+        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter,
+        IReadOnlyDictionary<string, DataValue>? parameters = null)
     {
         if (!session.IsAuthorized(ServerOperation.Query))
         {
@@ -117,6 +120,12 @@ public sealed class CommandDispatcher
         session.RecordQuery(input);
 
         SelectStatement statement = SqlParser.Parse(input);
+
+        // Bind named parameters ($name) to concrete literal values before planning.
+        if (parameters is not null && parameters.Count > 0)
+        {
+            statement = ParameterBinder.Bind(statement, parameters);
+        }
 
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
         IQueryOperator plan = await planner.PlanAsync(statement, cancellationToken).ConfigureAwait(false);

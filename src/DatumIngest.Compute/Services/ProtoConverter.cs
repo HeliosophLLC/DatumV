@@ -155,4 +155,33 @@ internal static class ProtoConverter
             _ => DataKindValue.DataKindString,
         };
     }
+
+    /// <summary>
+    /// Converts a Protobuf <see cref="DataValueMessage"/> to the domain <see cref="DataValue"/>.
+    /// Used for deserializing parameter values received from gRPC clients.
+    /// </summary>
+    /// <param name="message">The Protobuf data value message.</param>
+    /// <returns>The domain data value.</returns>
+    public static DataValue FromProto(DataValueMessage message)
+    {
+        if (message.IsNull)
+        {
+            return DataValue.Null(DataKind.Scalar);
+        }
+
+        return message.ValueCase switch
+        {
+            DataValueMessage.ValueOneofCase.Uint8Value => DataValue.FromUInt8((byte)message.Uint8Value),
+            DataValueMessage.ValueOneofCase.ScalarValue => DataValue.FromScalar(message.ScalarValue),
+            DataValueMessage.ValueOneofCase.StringValue => DataValue.FromString(message.StringValue),
+            DataValueMessage.ValueOneofCase.BooleanValue => DataValue.FromBoolean(message.BooleanValue),
+            DataValueMessage.ValueOneofCase.DateValue => DataValue.FromDate(DateOnly.Parse(message.DateValue)),
+            DataValueMessage.ValueOneofCase.DateTimeValue => DataValue.FromDateTime(DateTimeOffset.Parse(message.DateTimeValue)),
+            DataValueMessage.ValueOneofCase.TimeValue => DataValue.FromTime(TimeOnly.Parse(message.TimeValue)),
+            DataValueMessage.ValueOneofCase.DurationValue => DataValue.FromDuration(TimeSpan.FromSeconds(message.DurationValue)),
+            DataValueMessage.ValueOneofCase.UuidValue => DataValue.FromUuid(Guid.Parse(message.UuidValue)),
+            DataValueMessage.ValueOneofCase.JsonValue => DataValue.FromJsonValue(message.JsonValue),
+            _ => DataValue.Null(DataKind.Scalar),
+        };
+    }
 }

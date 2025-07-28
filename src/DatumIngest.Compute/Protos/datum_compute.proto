@@ -101,6 +101,9 @@ message DestroySessionResponse {
 message QueryRequest {
   string session_id = 1;
   string sql = 2;
+
+  // Named parameter bindings ($name in SQL) mapped to typed values.
+  map<string, DataValueMessage> parameters = 3;
 }
 
 // Each streamed message contains one result row. The first message

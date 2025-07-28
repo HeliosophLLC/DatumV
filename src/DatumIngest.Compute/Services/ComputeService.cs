@@ -113,8 +113,19 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         // Create a per-query meter for QU cost tracking.
         QueryMeter meter = new(governor.MaxQueryUnits);
 
+        // Convert gRPC parameter bindings to domain DataValue dictionary.
+        Dictionary<string, DataValue>? parameters = null;
+        if (request.Parameters.Count > 0)
+        {
+            parameters = new Dictionary<string, DataValue>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, DataValueMessage> entry in request.Parameters)
+            {
+                parameters[entry.Key] = ProtoConverter.FromProto(entry.Value);
+            }
+        }
+
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, request.Sql, cancellationToken, meter).ConfigureAwait(false);
+            session, request.Sql, cancellationToken, meter, parameters).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {

@@ -276,6 +276,10 @@ internal sealed class SemanticAnalyzer
             case ErrorExpression:
                 break;
 
+            // ParameterExpression — valid placeholder; no validation at parse time.
+            case ParameterExpression:
+                break;
+
             // LiteralExpression — nothing to validate.
         }
     }

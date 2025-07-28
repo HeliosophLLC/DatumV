@@ -61,6 +61,8 @@ public sealed class ExpressionEvaluator
             IsNullExpression isNull => EvaluateIsNull(isNull, row),
             CastExpression cast => EvaluateCast(cast, row),
             CaseExpression caseExpr => EvaluateCase(caseExpr, row),
+            ParameterExpression parameter => throw new InvalidOperationException(
+                $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
             _ => throw new InvalidOperationException(
                 $"Unsupported expression type: {expression.GetType().Name}."),
         };

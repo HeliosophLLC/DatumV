@@ -83,6 +83,16 @@ public static class SqlTokenizer
         return Result.Empty<Unit>(input, "unterminated block comment");
     };
 
+    /// <summary>
+    /// Recognizes a named parameter placeholder: <c>$</c> followed by a C-style identifier.
+    /// The full span (including the <c>$</c> prefix) is captured as a single token.
+    /// </summary>
+    private static readonly TextParser<Unit> ParameterToken =
+        from dollar in Character.EqualTo('$')
+        from first in Character.Letter.Or(Character.EqualTo('_'))
+        from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
+        select Unit.Value;
+
     /// <summary>The singleton tokenizer instance.</summary>
     public static Tokenizer<SqlToken> Instance { get; } =
         new TokenizerBuilder<SqlToken>()
@@ -168,6 +178,10 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("THEN"), SqlToken.Then, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ELSE"), SqlToken.Else, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("END"), SqlToken.End, requireDelimiters: true)
+
+            // Named parameter placeholders ($name) — before numeric literals
+            // and identifiers so the $ prefix is not treated as unexpected input.
+            .Match(ParameterToken, SqlToken.Parameter)
 
             // Numeric literals
             .Match(NumberToken, SqlToken.NumberLiteral, requireDelimiters: true)

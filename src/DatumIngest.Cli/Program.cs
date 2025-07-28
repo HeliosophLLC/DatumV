@@ -59,6 +59,18 @@ try
 
     SelectStatement statement = SqlParser.Parse(options.Sql);
 
+    // Bind named parameters ($name) to concrete values before planning.
+    if (options.Parameters.Count > 0 || ParameterBinder.CollectParameterNames(statement).Count > 0)
+    {
+        Dictionary<string, DataValue> parameterValues = new(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, string> entry in options.Parameters)
+        {
+            parameterValues[entry.Key] = ParameterValueParser.Parse(entry.Value);
+        }
+
+        statement = ParameterBinder.Bind(statement, parameterValues);
+    }
+
     return options.Command switch
     {
         "query" => await RunQueryAsync(statement, catalog, options),

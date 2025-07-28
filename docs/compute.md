@@ -125,6 +125,12 @@ grpcurl -plaintext \
   -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine LIMIT 5"}' \
   localhost:5050 datum_compute.DatumCompute/Query
 
+# Run a query with parameters
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine WHERE quality > $min_quality", "parameters": {"min_quality": {"scalar_value": 6}}}' \
+  localhost:5050 datum_compute.DatumCompute/Query
+
 # List tables
 grpcurl -plaintext \
   -H "x-api-key: my-secret-key" \
@@ -196,6 +202,7 @@ Executes a SQL query and streams result rows back. The first `QueryRow` message 
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID. |
 | `sql` | `string` | SQL query to execute. |
+| `parameters` | `map<string, DataValueMessage>` | Named parameter bindings for `$name` placeholders in the query. Keys are parameter names without the `$` prefix. Values are typed `DataValueMessage` instances. Empty map if the query has no parameters. |
 
 **Stream response (`QueryRow`):**
 
@@ -454,7 +461,11 @@ using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
     new QueryRequest
     {
         SessionId = sessionId,
-        Sql = "SELECT alcohol, quality FROM wine WHERE quality > 6 LIMIT 10",
+        Sql = "SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 10",
+        Parameters =
+        {
+            ["min_quality"] = new DataValueMessage { ScalarValue = 6 },
+        },
     });
 
 SchemaMessage? schema = null;
@@ -575,7 +586,8 @@ stub.AddSource(
 for row in stub.Query(
     datum_compute_pb2.QueryRequest(
         session_id=session_id,
-        sql="SELECT alcohol, quality FROM wine LIMIT 5",
+        sql="SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 5",
+        parameters={"min_quality": datum_compute_pb2.DataValueMessage(scalar_value=6)},
     ),
     metadata=metadata,
 ):

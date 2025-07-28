@@ -143,6 +143,48 @@ Schema? tableSchema = loaded?.Tables["data"];
 
 When a `.datum-schema` sidecar is present, `GetSchemaAsync` returns the cached schema without invoking the provider — eliminating schema inference I/O (e.g., sampling the first 100 rows of a CSV).
 
+## Parameter Binding
+
+Parameterized queries use `$name` placeholders that are substituted before planning. The binding step is a pure AST rewrite — `ParameterExpression` nodes are replaced with `LiteralExpression` values, preserving all downstream optimizations.
+
+```csharp
+SelectStatement statement = SqlParser.Parse(
+    "SELECT * FROM data WHERE score > $threshold AND category = $cat");
+
+// Build the parameter dictionary
+Dictionary<string, DataValue> parameters = new()
+{
+    ["threshold"] = DataValue.FromScalar(0.5f),
+    ["cat"] = DataValue.FromString("electronics"),
+};
+
+// Bind parameters (returns a new statement with literals substituted)
+SelectStatement bound = ParameterBinder.Bind(statement, parameters);
+
+// Plan and execute as usual
+IQueryOperator plan = await planner.PlanAsync(bound, CancellationToken.None);
+```
+
+`ParameterBinder.Bind` validates that all referenced parameters are supplied and all supplied parameters are referenced. If either check fails, it throws `InvalidOperationException` with a diagnostic message.
+
+To inspect which parameters a query requires without binding:
+
+```csharp
+IReadOnlySet<string> names = ParameterBinder.CollectParameterNames(statement);
+// names = { "threshold", "cat" }
+```
+
+### CLI string parsing
+
+`ParameterValueParser.Parse` converts a raw string value (as provided by `--param key=value`) into a `DataValue` with automatic type inference:
+
+```csharp
+DataValue value = ParameterValueParser.Parse("42");      // Scalar(42)
+DataValue flag = ParameterValueParser.Parse("true");      // Boolean(true)
+DataValue text = ParameterValueParser.Parse("hello");     // String("hello")
+DataValue nil = ParameterValueParser.Parse("null");       // Null
+```
+
 ## EXPLAIN
 
 ```csharp

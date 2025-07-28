@@ -115,6 +115,13 @@ public static class SqlParser
         Token.EqualTo(SqlToken.False)
             .Select(_ => (Expression)new LiteralExpression(false));
 
+    /// <summary>Named parameter reference: <c>$threshold</c>.</summary>
+    private static readonly TokenListParser<SqlToken, Expression> ParameterReference =
+        Token.EqualTo(SqlToken.Parameter)
+            .Select(token => (Expression)new ParameterExpression(
+                token.ToStringValue()[1..],
+                ToSpan(token)));
+
     /// <summary>
     /// Function call: identifier ( arg1, arg2, ... )
     /// Must be tried before bare column reference because both start with Identifier.
@@ -211,6 +218,7 @@ public static class SqlParser
             .Or(NullLiteral)
             .Or(TrueLiteral)
             .Or(FalseLiteral)
+            .Or(ParameterReference)
             .Or(NegationExpression)
             .Or(ParenExpression);
 

@@ -199,6 +199,14 @@ public sealed record ColumnReference(string? TableName, string ColumnName, Sourc
 public sealed record LiteralExpression(object? Value) : Expression;
 
 /// <summary>
+/// A named parameter reference such as <c>$threshold</c>.
+/// The <see cref="Name"/> property stores the identifier without the <c>$</c> prefix.
+/// Parameter expressions are replaced with <see cref="LiteralExpression"/> nodes
+/// by the parameter binder before query planning.
+/// </summary>
+public sealed record ParameterExpression(string Name, SourceSpan? Span = null) : Expression;
+
+/// <summary>
 /// A binary operation between two expressions (arithmetic or comparison).
 /// </summary>
 public sealed record BinaryExpression(

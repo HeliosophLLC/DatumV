@@ -59,6 +59,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the manifest file paths for the cross-manifest command.</summary>
     public List<string> ManifestPaths { get; set; } = new();
 
+    /// <summary>Gets or sets the named parameter bindings (name → raw string value).</summary>
+    public Dictionary<string, string> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -200,6 +203,22 @@ internal sealed class CliOptions
                         throw new ArgumentException("--manifest requires a path argument");
                     }
                     options.ManifestPaths.Add(args[++i]);
+                    break;
+
+                case "--param":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--param requires a key=value argument");
+                    }
+                    string paramArg = args[++i];
+                    int equalsIndex = paramArg.IndexOf('=');
+                    if (equalsIndex <= 0)
+                    {
+                        throw new ArgumentException($"--param value must be in key=value format, got: {paramArg}");
+                    }
+                    string paramName = paramArg[..equalsIndex];
+                    string paramValue = paramArg[(equalsIndex + 1)..];
+                    options.Parameters[paramName] = paramValue;
                     break;
 
                 default:

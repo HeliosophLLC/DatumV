@@ -185,4 +185,7 @@ public enum SqlToken
 
     /// <summary>The ^ (caret / power) arithmetic operator.</summary>
     Caret,
+
+    /// <summary>A named parameter placeholder such as <c>$threshold</c>.</summary>
+    Parameter,
 }
