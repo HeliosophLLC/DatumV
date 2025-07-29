@@ -40,7 +40,7 @@ public sealed class ProjectOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         ProjectionSchema? schema = null;
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))

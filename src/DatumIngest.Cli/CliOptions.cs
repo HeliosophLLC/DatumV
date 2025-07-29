@@ -43,8 +43,14 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the column names to build bloom filters for during index creation.</summary>
     public HashSet<string> BloomColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Gets or sets whether to build bloom filters for all columns during index creation.</summary>
+    public bool BloomAllColumns { get; set; }
+
     /// <summary>Gets or sets the column names to build sorted value indexes for during index creation.</summary>
     public HashSet<string> IndexColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Gets or sets whether to build sorted value indexes for all columns during index creation.</summary>
+    public bool IndexAllColumns { get; set; }
 
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
@@ -170,6 +176,10 @@ internal sealed class CliOptions
                     }
                     break;
 
+                case "--bloom-all":
+                    options.BloomAllColumns = true;
+                    break;
+
                 case "--index-columns":
                     if (i + 1 >= args.Length)
                     {
@@ -179,6 +189,10 @@ internal sealed class CliOptions
                     {
                         options.IndexColumns.Add(column);
                     }
+                    break;
+
+                case "--index-all":
+                    options.IndexAllColumns = true;
                     break;
 
                 case "--memory-budget":

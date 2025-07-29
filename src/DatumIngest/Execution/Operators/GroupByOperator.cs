@@ -49,7 +49,7 @@ public sealed class GroupByOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
         bool useSingleKey = _groupByExpressions.Count == 1;
         bool isGlobalAggregation = _groupByExpressions.Count == 0;

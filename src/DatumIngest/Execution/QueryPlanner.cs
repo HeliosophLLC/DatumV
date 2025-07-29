@@ -62,13 +62,46 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Plans the given statement with cost-based late materialization and scalar subquery
+    /// rewriting. Requires an <see cref="ExecutionContext"/> to execute uncorrelated subqueries
+    /// at plan time (constant folding).
+    /// </summary>
+    /// <param name="statement">The parsed SELECT statement.</param>
+    /// <param name="context">Execution context for running uncorrelated scalar subqueries at plan time.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The root operator of the execution plan.</returns>
+    public async Task<IQueryOperator> PlanWithSubqueriesAsync(
+        SelectStatement statement,
+        ExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, DeferredTableColumns>? deferredColumns =
+            await AnalyzeDeferredColumnsAsync(statement, cancellationToken)
+                .ConfigureAwait(false);
+
+        IQueryOperator plan = await PlanCoreWithSubqueriesAsync(
+            statement, deferredColumns, context, cancellationToken)
+            .ConfigureAwait(false);
+
+        return plan;
+    }
+
+    /// <summary>
     /// Core planning logic shared by <see cref="Plan"/> and <see cref="PlanAsync"/>.
     /// When <paramref name="deferredColumns"/> is provided, expensive columns are excluded
     /// from scans and a <see cref="LateMaterializationOperator"/> is injected before projection.
     /// </summary>
+    /// <param name="statement">The parsed SELECT statement.</param>
+    /// <param name="deferredColumns">Columns to defer for late materialization, or <see langword="null"/>.</param>
+    /// <param name="sourceTransform">
+    /// Optional transform applied to the source operator after joins and predicate pushdown
+    /// but before the remaining WHERE filter. Used to inject <see cref="Operators.ScalarSubqueryOperator"/>
+    /// wrappers for correlated subqueries.
+    /// </param>
     private IQueryOperator PlanCore(
         SelectStatement statement,
-        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns)
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
+        Func<IQueryOperator, IQueryOperator>? sourceTransform = null)
     {
         // Compute the set of all referenced columns for projection pushdown.
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
@@ -120,6 +153,13 @@ public sealed class QueryPlanner
         {
             // No joins — push applicable predicates directly to the source.
             source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
+        }
+
+        // 2b. Inject source transforms (e.g. ScalarSubqueryOperator for correlated subqueries)
+        // after joins and predicate pushdown, before the remaining WHERE filter.
+        if (sourceTransform is not null)
+        {
+            source = sourceTransform(source);
         }
 
         // 3. Apply remaining WHERE predicates that could not be pushed down.
@@ -236,6 +276,207 @@ public sealed class QueryPlanner
         }
 
         return source;
+    }
+
+    /// <summary>
+    /// Plans a statement with scalar subquery rewriting. Uncorrelated subqueries are
+    /// constant-folded at plan time. Correlated subqueries are rewritten to synthetic
+    /// column references and injected as <see cref="Operators.ScalarSubqueryOperator"/>
+    /// wrappers around the source operator.
+    /// </summary>
+    private async Task<IQueryOperator> PlanCoreWithSubqueriesAsync(
+        SelectStatement statement,
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
+        ExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        // Determine if the statement contains any SubqueryExpressions.
+        if (!ContainsSubqueryExpression(statement))
+        {
+            return PlanCore(statement, deferredColumns);
+        }
+
+        // Collect outer-scope table aliases for correlation detection.
+        HashSet<string> outerAliases = new(StringComparer.OrdinalIgnoreCase);
+        CollectSourceAliases(statement.From.Source, outerAliases);
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                CollectSourceAliases(join.Source, outerAliases);
+            }
+        }
+
+        // Rewrite all expression clauses that may contain SubqueryExpressions.
+        List<SubqueryRewriter.CorrelatedSubquery> allCorrelated = [];
+
+        Expression? rewrittenWhere = statement.Where;
+        if (rewrittenWhere is not null)
+        {
+            SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
+                rewrittenWhere, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+            rewrittenWhere = result.Expression;
+            allCorrelated.AddRange(result.CorrelatedSubqueries);
+        }
+
+        List<SelectColumn>? rewrittenColumns = null;
+        for (int index = 0; index < statement.Columns.Count; index++)
+        {
+            SelectColumn column = statement.Columns[index];
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                continue;
+            }
+
+            SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
+                column.Expression, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+
+            if (!ReferenceEquals(result.Expression, column.Expression))
+            {
+                rewrittenColumns ??= new List<SelectColumn>(statement.Columns);
+                rewrittenColumns[index] = new SelectColumn(result.Expression, column.Alias);
+                allCorrelated.AddRange(result.CorrelatedSubqueries);
+            }
+        }
+
+        Expression? rewrittenHaving = statement.Having;
+        if (rewrittenHaving is not null)
+        {
+            SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
+                rewrittenHaving, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+            rewrittenHaving = result.Expression;
+            allCorrelated.AddRange(result.CorrelatedSubqueries);
+        }
+
+        IReadOnlyList<JoinClause>? rewrittenJoins = statement.Joins;
+        if (statement.Joins is not null)
+        {
+            List<JoinClause>? joinList = null;
+            for (int index = 0; index < statement.Joins.Count; index++)
+            {
+                JoinClause join = statement.Joins[index];
+                if (join.OnCondition is null)
+                {
+                    continue;
+                }
+
+                SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
+                    join.OnCondition, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+
+                if (!ReferenceEquals(result.Expression, join.OnCondition))
+                {
+                    joinList ??= new List<JoinClause>(statement.Joins);
+                    joinList[index] = new JoinClause(join.Type, join.Source, result.Expression);
+                    allCorrelated.AddRange(result.CorrelatedSubqueries);
+                }
+            }
+
+            if (joinList is not null)
+            {
+                rewrittenJoins = joinList;
+            }
+        }
+
+        // Reconstruct the statement with rewritten expressions.
+        SelectStatement rewrittenStatement = new(
+            rewrittenColumns is not null ? rewrittenColumns : statement.Columns,
+            statement.From,
+            statement.Into,
+            rewrittenJoins,
+            rewrittenWhere,
+            statement.GroupBy,
+            rewrittenHaving,
+            statement.OrderBy,
+            statement.Limit,
+            statement.Offset);
+
+        // Build a source transform that injects ScalarSubqueryOperator wrappers
+        // between the source (Scan+Joins) and the rest of the pipeline (Filter/Project/etc.).
+        // This ensures synthetic columns are available before any operator that references them.
+        Func<IQueryOperator, IQueryOperator>? sourceTransform = null;
+        if (allCorrelated.Count > 0)
+        {
+            sourceTransform = source =>
+            {
+                foreach (SubqueryRewriter.CorrelatedSubquery correlated in allCorrelated)
+                {
+                    IQueryOperator innerPlan = Plan(correlated.InnerQuery);
+                    source = new Operators.ScalarSubqueryOperator(source, innerPlan, correlated.SyntheticColumnName);
+                }
+
+                return source;
+            };
+        }
+
+        // Plan the rewritten statement through the standard pipeline with the source transform.
+        return PlanCore(rewrittenStatement, deferredColumns, sourceTransform);
+    }
+
+    /// <summary>
+    /// Checks whether a <see cref="SelectStatement"/> contains any
+    /// <see cref="SubqueryExpression"/> nodes in its expression clauses.
+    /// </summary>
+    private static bool ContainsSubqueryExpression(SelectStatement statement)
+    {
+        if (statement.Where is not null && ContainsSubquery(statement.Where))
+        {
+            return true;
+        }
+
+        foreach (SelectColumn column in statement.Columns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                continue;
+            }
+
+            if (ContainsSubquery(column.Expression))
+            {
+                return true;
+            }
+        }
+
+        if (statement.Having is not null && ContainsSubquery(statement.Having))
+        {
+            return true;
+        }
+
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                if (join.OnCondition is not null && ContainsSubquery(join.OnCondition))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively checks if an expression tree contains a <see cref="SubqueryExpression"/>.
+    /// </summary>
+    private static bool ContainsSubquery(Expression expression)
+    {
+        return expression switch
+        {
+            SubqueryExpression => true,
+            BinaryExpression binary => ContainsSubquery(binary.Left) || ContainsSubquery(binary.Right),
+            UnaryExpression unary => ContainsSubquery(unary.Operand),
+            FunctionCallExpression function => function.Arguments.Any(ContainsSubquery),
+            InExpression inExpr => ContainsSubquery(inExpr.Expression) || inExpr.Values.Any(ContainsSubquery),
+            BetweenExpression between => ContainsSubquery(between.Expression) ||
+                ContainsSubquery(between.Low) || ContainsSubquery(between.High),
+            IsNullExpression isNull => ContainsSubquery(isNull.Expression),
+            CastExpression cast => ContainsSubquery(cast.Expression),
+            CaseExpression caseExpr => (caseExpr.Operand is not null && ContainsSubquery(caseExpr.Operand)) ||
+                caseExpr.WhenClauses.Any(clause => ContainsSubquery(clause.Condition) || ContainsSubquery(clause.Result)) ||
+                (caseExpr.ElseResult is not null && ContainsSubquery(caseExpr.ElseResult)),
+            _ => false,
+        };
     }
 
     /// <summary>

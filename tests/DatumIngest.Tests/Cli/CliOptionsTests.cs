@@ -291,4 +291,48 @@ public sealed class CliOptionsTests
         Assert.True(options.WithInteractions);
         Assert.Equal("manifest.json", options.OutputPath);
     }
+
+    [Fact]
+    public void Parse_BloomAll_ParsedCorrectly()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv", "--bloom-all"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.True(options.BloomAllColumns);
+        Assert.Empty(options.BloomColumns);
+    }
+
+    [Fact]
+    public void Parse_IndexAll_ParsedCorrectly()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv", "--index-all"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.True(options.IndexAllColumns);
+        Assert.Empty(options.IndexColumns);
+    }
+
+    [Fact]
+    public void Parse_BloomAll_DefaultsFalse()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.False(options.BloomAllColumns);
+        Assert.False(options.IndexAllColumns);
+    }
+
+    [Fact]
+    public void Parse_BloomAllAndIndexAll_BothParsed()
+    {
+        string[] args = ["index", "--source", "csv:data=data.csv", "--bloom-all", "--index-all"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.True(options.BloomAllColumns);
+        Assert.True(options.IndexAllColumns);
+    }
 }

@@ -164,11 +164,27 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
     catalog.DiscoverSidecars();
 }
 
-static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
+static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
 {
+    if (options.BloomAllColumns || options.IndexAllColumns)
+    {
+        if (options.BloomColumns.Count > 0 || options.IndexColumns.Count > 0)
+        {
+            throw new ArgumentException(
+                "Cannot combine --bloom-all/--index-all with --bloom-columns/--index-columns. Use one approach or the other.");
+        }
+
+        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize);
+    }
+
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
     HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
-    SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns, indexColumns);
+    return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns);
+}
+
+static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
+{
+    SourceIndexBuilder builder = CreateIndexBuilder(options);
 
     // Collect descriptors from inline --source definitions.
     List<TableDescriptor> descriptors = new();
@@ -275,9 +291,7 @@ static async Task BuildGroupedIndexAsync(
 
 static async Task<int> RunIndexManifestAsync(TableCatalog catalog, CliOptions options)
 {
-    HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
-    HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
-    SourceIndexBuilder builder = new(options.ChunkSize, bloomColumns, indexColumns);
+    SourceIndexBuilder builder = CreateIndexBuilder(options);
 
     List<TableDescriptor> descriptors = new();
 
@@ -527,13 +541,14 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog,
         memoryBudgetBytes: options.MemoryBudgetBytes);
+
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
 
     ProgressReporter progress = new();
 
@@ -646,12 +661,13 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog);
+
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
 
     int count = 0;
     bool headerPrinted = false;
@@ -683,12 +699,13 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog);
+
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
 
     StatisticsCollector collector = new();
     ProgressReporter progress = new();
@@ -754,12 +771,13 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog);
+
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
 
     StatisticsCollector collector = new();
     ColumnInteractionCollector interactionCollector = new();

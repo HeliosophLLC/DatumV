@@ -71,7 +71,7 @@ public sealed class JoinOperator : IQueryOperator
         {
             if (context.MemoryBudgetBytes is long memoryBudget)
             {
-                ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+                ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                 GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator);
 
                 await foreach (Row row in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
@@ -99,7 +99,7 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<Row> ExecuteHashJoinAsync(
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
 
@@ -259,7 +259,7 @@ public sealed class JoinOperator : IQueryOperator
 
     private async IAsyncEnumerable<Row> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
         // Materialize right side.
         List<Row> rightRows = new();

@@ -16,9 +16,11 @@ public sealed class SourceIndexBuilder
     private readonly int _chunkSize;
     private readonly IReadOnlySet<string>? _bloomColumns;
     private readonly IReadOnlySet<string>? _indexColumns;
+    private readonly bool _bloomAllColumns;
+    private readonly bool _indexAllColumns;
 
     /// <summary>
-    /// Creates a builder with the specified chunk size.
+    /// Creates a builder with the specified chunk size and optional column-specific indexes.
     /// </summary>
     /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
     /// <param name="bloomColumns">Column names to build bloom filters for, or <c>null</c> for no bloom filters.</param>
@@ -31,6 +33,26 @@ public sealed class SourceIndexBuilder
         _chunkSize = chunkSize;
         _bloomColumns = bloomColumns;
         _indexColumns = indexColumns;
+        _bloomAllColumns = false;
+        _indexAllColumns = false;
+    }
+
+    /// <summary>
+    /// Creates a builder that discovers columns from the data and optionally indexes all of them.
+    /// </summary>
+    /// <param name="bloomAllColumns">When <c>true</c>, builds bloom filters for every column discovered in the data.</param>
+    /// <param name="indexAllColumns">When <c>true</c>, builds sorted value indexes for every column discovered in the data.</param>
+    /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
+    public SourceIndexBuilder(
+        bool bloomAllColumns,
+        bool indexAllColumns,
+        int chunkSize = IndexConstants.DefaultChunkSize)
+    {
+        _chunkSize = chunkSize;
+        _bloomColumns = null;
+        _indexColumns = null;
+        _bloomAllColumns = bloomAllColumns;
+        _indexAllColumns = indexAllColumns;
     }
 
     /// <summary>
@@ -96,10 +118,12 @@ public sealed class SourceIndexBuilder
 
         Dictionary<string, ChunkAccumulator> currentAccumulators = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, BloomFilter>? currentBloomFilters = null;
-        List<Dictionary<string, BloomFilter>>? allChunkBloomFilters =
-            _bloomColumns is not null && _bloomColumns.Count > 0 ? new() : null;
+        bool needsBloom = _bloomAllColumns || (_bloomColumns is not null && _bloomColumns.Count > 0);
+        bool needsIndex = _indexAllColumns || (_indexColumns is not null && _indexColumns.Count > 0);
+        List<Dictionary<string, BloomFilter>>? allChunkBloomFilters = needsBloom ? new() : null;
         Dictionary<string, List<ValueIndexEntry>>? indexCollectors =
-            _indexColumns is not null && _indexColumns.Count > 0 ? new(StringComparer.OrdinalIgnoreCase) : null;
+            needsIndex ? new(StringComparer.OrdinalIgnoreCase) : null;
+        IReadOnlySet<string>? effectiveBloomColumns = _bloomColumns;
         int rowsInCurrentChunk = 0;
         int currentChunkIndex = 0;
 
@@ -110,8 +134,10 @@ public sealed class SourceIndexBuilder
             {
                 schema = BuildSchemaFromRow(row);
                 currentAccumulators = CreateAccumulators(row);
-                currentBloomFilters = CreateBloomFilters(_bloomColumns, _chunkSize);
-                InitializeIndexCollectors(indexCollectors, _indexColumns);
+                effectiveBloomColumns = ResolveEffectiveColumns(_bloomColumns, _bloomAllColumns, schema);
+                IReadOnlySet<string>? effectiveIndexColumns = ResolveEffectiveColumns(_indexColumns, _indexAllColumns, schema);
+                currentBloomFilters = CreateBloomFilters(effectiveBloomColumns, _chunkSize);
+                InitializeIndexCollectors(indexCollectors, effectiveIndexColumns);
             }
 
             foreach (string columnName in row.ColumnNames)
@@ -151,7 +177,7 @@ public sealed class SourceIndexBuilder
                 rowsInCurrentChunk = 0;
                 currentChunkIndex++;
                 currentAccumulators = CreateAccumulators(schema);
-                currentBloomFilters = CreateBloomFilters(_bloomColumns, _chunkSize);
+                currentBloomFilters = CreateBloomFilters(effectiveBloomColumns, _chunkSize);
             }
         }
 
@@ -251,7 +277,30 @@ public sealed class SourceIndexBuilder
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
     {
-        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns);
+        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns, _bloomAllColumns, _indexAllColumns);
+    }
+
+    /// <summary>
+    /// Resolves the effective column set for bloom or sorted indexes. When the "all columns"
+    /// flag is set, returns a set of all column names from the discovered schema.
+    /// Otherwise returns the explicitly specified column set.
+    /// </summary>
+    internal static IReadOnlySet<string>? ResolveEffectiveColumns(
+        IReadOnlySet<string>? explicitColumns, bool allColumns, Schema schema)
+    {
+        if (allColumns)
+        {
+            HashSet<string> allColumnNames = new(StringComparer.OrdinalIgnoreCase);
+
+            foreach (ColumnInfo column in schema.Columns)
+            {
+                allColumnNames.Add(column.Name);
+            }
+
+            return allColumnNames;
+        }
+
+        return explicitColumns;
     }
 
     private static Schema BuildSchemaFromRow(Row row)
@@ -526,6 +575,10 @@ public sealed class IncrementalIndexBuilder
     private readonly SourceFingerprint _fingerprint;
     private readonly IReadOnlySet<string>? _bloomColumns;
     private readonly IReadOnlySet<string>? _indexColumns;
+    private readonly bool _bloomAllColumns;
+    private readonly bool _indexAllColumns;
+    private IReadOnlySet<string>? _effectiveBloomColumns;
+    private IReadOnlySet<string>? _effectiveIndexColumns;
     private Schema? _schema;
     private readonly List<IndexChunk> _chunks = new();
     private Dictionary<string, SourceIndexBuilder_ChunkAccumulatorProxy> _currentAccumulators = new(StringComparer.OrdinalIgnoreCase);
@@ -541,14 +594,20 @@ public sealed class IncrementalIndexBuilder
         int chunkSize,
         SourceFingerprint fingerprint,
         IReadOnlySet<string>? bloomColumns = null,
-        IReadOnlySet<string>? indexColumns = null)
+        IReadOnlySet<string>? indexColumns = null,
+        bool bloomAllColumns = false,
+        bool indexAllColumns = false)
     {
         _chunkSize = chunkSize;
         _fingerprint = fingerprint;
         _bloomColumns = bloomColumns;
         _indexColumns = indexColumns;
-        _allChunkBloomFilters = bloomColumns is not null && bloomColumns.Count > 0 ? new() : null;
-        _indexCollectors = indexColumns is not null && indexColumns.Count > 0
+        _bloomAllColumns = bloomAllColumns;
+        _indexAllColumns = indexAllColumns;
+        bool needsBloom = bloomAllColumns || (bloomColumns is not null && bloomColumns.Count > 0);
+        bool needsIndex = indexAllColumns || (indexColumns is not null && indexColumns.Count > 0);
+        _allChunkBloomFilters = needsBloom ? new() : null;
+        _indexCollectors = needsIndex
             ? new(StringComparer.OrdinalIgnoreCase)
             : null;
     }
@@ -564,8 +623,10 @@ public sealed class IncrementalIndexBuilder
         {
             _schema = BuildSchemaFromRow(row);
             InitializeAccumulators(row);
-            _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_bloomColumns, _chunkSize);
-            SourceIndexBuilder.InitializeIndexCollectors(_indexCollectors, _indexColumns);
+            _effectiveBloomColumns = SourceIndexBuilder.ResolveEffectiveColumns(_bloomColumns, _bloomAllColumns, _schema);
+            _effectiveIndexColumns = SourceIndexBuilder.ResolveEffectiveColumns(_indexColumns, _indexAllColumns, _schema);
+            _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_effectiveBloomColumns, _chunkSize);
+            SourceIndexBuilder.InitializeIndexCollectors(_indexCollectors, _effectiveIndexColumns);
         }
 
         foreach (string columnName in row.ColumnNames)
@@ -652,7 +713,7 @@ public sealed class IncrementalIndexBuilder
         if (_schema is not null)
         {
             InitializeAccumulatorsFromSchema();
-            _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_bloomColumns, _chunkSize);
+            _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_effectiveBloomColumns, _chunkSize);
         }
     }
 

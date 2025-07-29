@@ -1,5 +1,6 @@
 using DatumIngest.Catalog;
 using DatumIngest.Functions;
+using DatumIngest.Model;
 
 namespace DatumIngest.Execution;
 
@@ -58,4 +59,30 @@ public sealed class ExecutionContext
     /// files when estimated memory usage exceeds this budget.
     /// </summary>
     public long? MemoryBudgetBytes { get; }
+
+    /// <summary>
+    /// The outer row from a correlated scalar subquery, or <see langword="null"/> when
+    /// not inside a correlated subquery. Used by <see cref="ExpressionEvaluator"/> to
+    /// resolve column references to outer-scope tables.
+    /// </summary>
+    public Row? OuterRow { get; init; }
+
+    /// <summary>
+    /// Returns a new context with the given outer row set for correlated subquery execution.
+    /// All other properties are copied from the current context.
+    /// </summary>
+    /// <param name="outerRow">The outer row providing correlated column values.</param>
+    /// <returns>A new <see cref="ExecutionContext"/> with <see cref="OuterRow"/> set.</returns>
+    public ExecutionContext WithOuterRow(Row outerRow)
+    {
+        return new ExecutionContext(
+            CancellationToken,
+            FunctionRegistry,
+            Catalog,
+            QueryMeter,
+            MemoryBudgetBytes)
+        {
+            OuterRow = outerRow,
+        };
+    }
 }

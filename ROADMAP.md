@@ -7,6 +7,8 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Parameterized queries**: Named `$parameter` syntax with early binding (AST-level substitution before planning). CLI via `--param key=value`, gRPC via `parameters` map on `QueryRequest`.~~ ✅
 - **Adaptive batch sizing**: Auto-tune based on row size estimates and available memory
 - **Excel provider**: Read .xlsx files (ITableProvider interface is ready)
+- **Scalar subqueries**: `SubqueryExpression` is parsed but `ExpressionEvaluator` throws on it. Uncorrelated subqueries constant-fold at plan time; correlated subqueries inject a `ScalarSubqueryOperator` that executes per outer row with `OuterRow` context threading.
+- **NOT IN / NOT EXISTS subqueries**: Semi-join operators for `WHERE x NOT IN (SELECT ...)` and `WHERE NOT EXISTS (SELECT ...)`. Requires new AST nodes (`InSubqueryExpression`, `ExistsExpression`), parser changes, and dedicated `SemiJoinOperator` / `ExistenceOperator`. Shares `OuterRow` plumbing from scalar subqueries.
 - **UNION / INTERSECT / EXCEPT**: Set operations between query results
 - ~~**Window functions**: ROW_NUMBER, RANK, LAG, LEAD with OVER/PARTITION BY~~ ✅
 - **Dataset splitting**: `hash_split(key, seed)` function returning a deterministic float in [0, 1) per row, enabling reproducible train/val/test splits via WHERE clauses. Combined with window functions (ROW_NUMBER + PARTITION BY), supports stratified splitting that preserves class proportions per split. Temporal splits already expressible via WHERE on date columns.

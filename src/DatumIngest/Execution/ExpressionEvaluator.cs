@@ -17,6 +17,7 @@ public sealed class ExpressionEvaluator
 {
     private readonly FunctionRegistry _functions;
     private readonly QueryMeter? _meter;
+    private readonly Row? _outerRow;
 
     /// <summary>
     /// Compiled regex cache for LIKE patterns. Avoids recompiling
@@ -35,10 +36,16 @@ public sealed class ExpressionEvaluator
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
     /// <param name="meter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
-    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null)
+    /// <param name="outerRow">
+    /// Optional outer row from a correlated scalar subquery, or <see langword="null"/> when not inside
+    /// a correlated subquery. Column references that cannot be resolved against the current row
+    /// will fall back to this row.
+    /// </param>
+    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null)
     {
         _functions = functions;
         _meter = meter;
+        _outerRow = outerRow;
     }
 
     /// <summary>
@@ -52,7 +59,7 @@ public sealed class ExpressionEvaluator
         return expression switch
         {
             LiteralExpression literal => EvaluateLiteral(literal),
-            ColumnReference column => EvaluateColumn(column, row),
+            ColumnReference column => EvaluateColumn(column, row, _outerRow),
             BinaryExpression binary => EvaluateBinary(binary, row),
             UnaryExpression unary => EvaluateUnary(unary, row),
             FunctionCallExpression function => EvaluateFunction(function, row),
@@ -114,7 +121,7 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private static DataValue EvaluateColumn(ColumnReference column, Row row)
+    private static DataValue EvaluateColumn(ColumnReference column, Row row, Row? outerRow)
     {
         // For qualified references (table.column), try the full qualified name first,
         // then the unqualified column name.
@@ -129,6 +136,21 @@ public sealed class ExpressionEvaluator
         if (row.TryGetValue(column.ColumnName, out DataValue? value))
         {
             return value!;
+        }
+
+        // Fall back to the outer row for correlated subquery column resolution.
+        if (outerRow is not null)
+        {
+            if (column.QualifiedName is not null &&
+                outerRow.TryGetValue(column.QualifiedName, out DataValue? outerQualifiedValue))
+            {
+                return outerQualifiedValue!;
+            }
+
+            if (outerRow.TryGetValue(column.ColumnName, out DataValue? outerValue))
+            {
+                return outerValue!;
+            }
         }
 
         throw new InvalidOperationException(
