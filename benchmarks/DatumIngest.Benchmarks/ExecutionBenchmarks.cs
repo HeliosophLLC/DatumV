@@ -2,7 +2,6 @@ using BenchmarkDotNet.Attributes;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
-using DatumIngest.Functions.Scalar;
 using DatumIngest.Model;
 using DatumIngest.Parsing;
 using DatumIngest.Parsing.Ast;
@@ -63,12 +62,7 @@ public class ExecutionBenchmarks
 
     private static FunctionRegistry BuildFunctions()
     {
-        FunctionRegistry registry = new();
-        registry.RegisterScalar(new LenFunction());
-        registry.RegisterScalar(new CastFunction());
-        registry.RegisterScalar(new NormalizeFunction());
-        registry.RegisterScalar(new ClampFunction());
-        return registry;
+        return FunctionRegistry.CreateDefault();
     }
 
     [Benchmark(Description = "SELECT * FROM data (10K)")]
@@ -141,6 +135,72 @@ public class ExecutionBenchmarks
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(statement);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Uncorrelated IN subquery (10K x 1K)")]
+    public async Task UncorrelatedInSubquery()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "SELECT id, name FROM data WHERE id IN (SELECT lookup_id FROM lookup WHERE weight > 25)");
+        QueryPlanner planner = new(catalog, functions);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Correlated EXISTS semi-join (10K x 1K)")]
+    public async Task CorrelatedExistsSemiJoin()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "SELECT data.id, data.name FROM data " +
+            "WHERE EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id AND weight > 25)");
+        QueryPlanner planner = new(catalog, functions);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Correlated NOT EXISTS anti-semi-join (10K x 1K)")]
+    public async Task CorrelatedNotExistsAntiSemiJoin()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "SELECT data.id, data.name FROM data " +
+            "WHERE NOT EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id)");
+        QueryPlanner planner = new(catalog, functions);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Correlated scalar subquery (10K x 1K)")]
+    public async Task CorrelatedScalarSubquery()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "SELECT data.id, data.name, (SELECT MAX(weight) FROM lookup WHERE lookup.lookup_id = data.id) AS max_weight FROM data");
+        QueryPlanner planner = new(catalog, functions);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {

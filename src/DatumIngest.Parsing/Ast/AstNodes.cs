@@ -94,6 +94,12 @@ public enum JoinType
 
     /// <summary>Cross join -- cartesian product, no condition.</summary>
     Cross,
+
+    /// <summary>Left semi-join -- rows from the left where a match exists on the right.</summary>
+    LeftSemi,
+
+    /// <summary>Left anti-semi-join -- rows from the left where no match exists on the right.</summary>
+    LeftAntiSemi,
 }
 
 /// <summary>
@@ -318,6 +324,21 @@ public sealed record IsNullExpression(
 /// A subquery used as an expression (correlated or uncorrelated scalar subquery).
 /// </summary>
 public sealed record SubqueryExpression(SelectStatement Query) : Expression;
+
+/// <summary>
+/// The IN subquery predicate: <c>expression [NOT] IN (SELECT ...)</c>.
+/// </summary>
+public sealed record InSubqueryExpression(
+    Expression Expression,
+    SelectStatement Query,
+    bool Negated = false) : Expression;
+
+/// <summary>
+/// The EXISTS predicate: <c>[NOT] EXISTS (SELECT ...)</c>.
+/// </summary>
+public sealed record ExistsExpression(
+    SelectStatement Query,
+    bool Negated = false) : Expression;
 
 /// <summary>
 /// A CAST expression: <c>CAST(expression AS type)</c>.

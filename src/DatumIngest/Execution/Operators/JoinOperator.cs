@@ -6,7 +6,8 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Execution.Operators;
 
 /// <summary>
-/// Join operator supporting INNER, LEFT, RIGHT, FULL OUTER, and CROSS joins.
+/// Join operator supporting INNER, LEFT, RIGHT, FULL OUTER, CROSS,
+/// LEFT SEMI, and LEFT ANTI-SEMI joins.
 /// Uses expression-based hash join for any ON condition containing equality
 /// conjuncts (including function calls and compound keys), with an optional
 /// residual filter for non-equi parts. Falls back to nested-loop only when
@@ -18,6 +19,7 @@ public sealed class JoinOperator : IQueryOperator
     private readonly IQueryOperator _right;
     private readonly JoinType _joinType;
     private readonly Expression? _onCondition;
+    private readonly bool _nullSensitiveAntiSemi;
 
     /// <summary>
     /// Creates a join operator.
@@ -26,16 +28,23 @@ public sealed class JoinOperator : IQueryOperator
     /// <param name="right">The right (build) side operator.</param>
     /// <param name="joinType">The type of join.</param>
     /// <param name="onCondition">The ON condition expression (null for CROSS join).</param>
+    /// <param name="nullSensitiveAntiSemi">
+    /// When true and <paramref name="joinType"/> is <see cref="JoinType.LeftAntiSemi"/>,
+    /// applies SQL-standard NOT IN null semantics: if any right-side key is NULL the
+    /// entire result is empty, and left rows with a NULL key are excluded.
+    /// </param>
     public JoinOperator(
         IQueryOperator left,
         IQueryOperator right,
         JoinType joinType,
-        Expression? onCondition)
+        Expression? onCondition,
+        bool nullSensitiveAntiSemi = false)
     {
         _left = left;
         _right = right;
         _joinType = joinType;
         _onCondition = onCondition;
+        _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
     }
 
     /// <summary>The left (probe) side operator.</summary>
@@ -72,7 +81,7 @@ public sealed class JoinOperator : IQueryOperator
             if (context.MemoryBudgetBytes is long memoryBudget)
             {
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
-                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator);
+                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi);
 
                 await foreach (Row row in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
@@ -102,6 +111,7 @@ public sealed class JoinOperator : IQueryOperator
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
+        bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
         // Build phase: materialize right side into hash table.
         // For single-key joins, use DataValue directly as the key to avoid
@@ -112,6 +122,7 @@ public sealed class JoinOperator : IQueryOperator
             useSingleKey ? null : new();
 
         List<Row> rightRows = new();
+        bool hasNullKey = false;
 
         await foreach (Row rightRow in _right.ExecuteAsync(context).ConfigureAwait(false))
         {
@@ -123,6 +134,7 @@ public sealed class JoinOperator : IQueryOperator
                 DataValue keyValue = evaluator.Evaluate(keyPairs[0].Right, rightRow);
                 if (keyValue.IsNull)
                 {
+                    hasNullKey = true;
                     continue;
                 }
 
@@ -139,6 +151,7 @@ public sealed class JoinOperator : IQueryOperator
                 DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, rightRow, rightSide: true);
                 if (HasNull(parts))
                 {
+                    hasNullKey = true;
                     continue;
                 }
 
@@ -153,10 +166,19 @@ public sealed class JoinOperator : IQueryOperator
             }
         }
 
+        // NOT IN null semantics: if any right key is NULL, the entire result is empty.
+        if (_nullSensitiveAntiSemi && hasNullKey)
+        {
+            yield break;
+        }
+
         // Bloom pruning: if the probe (left) side has a source index with
         // bloom filters and the join key is a simple column reference, push
         // the build-side key values down so entire chunks can be skipped.
-        ApplyBloomPruning(keyPairs, singleKeyTable, compositeKeyTable, useSingleKey);
+        if (!isSemiJoin)
+        {
+            ApplyBloomPruning(keyPairs, singleKeyTable, compositeKeyTable, useSingleKey);
+        }
 
         // Track which right rows have been matched (for RIGHT/FULL OUTER).
         bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
@@ -170,6 +192,26 @@ public sealed class JoinOperator : IQueryOperator
 
         await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
+            // For null-sensitive anti-semi (NOT IN), NULL left keys are excluded.
+            if (_nullSensitiveAntiSemi)
+            {
+                bool leftKeyIsNull;
+                if (useSingleKey)
+                {
+                    leftKeyIsNull = evaluator.Evaluate(keyPairs[0].Left, leftRow).IsNull;
+                }
+                else
+                {
+                    DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, leftRow, rightSide: false);
+                    leftKeyIsNull = HasNull(parts);
+                }
+
+                if (leftKeyIsNull)
+                {
+                    continue;
+                }
+            }
+
             bool hasMatch = false;
             List<(int Index, Row Row)>? matches = null;
 
@@ -195,27 +237,49 @@ public sealed class JoinOperator : IQueryOperator
             {
                 foreach ((int rightIndex, Row rightRow) in matches)
                 {
-                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    Row combinedRow = schema.Combine(leftRow, rightRow);
-
                     // Apply residual filter for non-equi conjuncts.
-                    if (extraction.Residual is not null
-                        && !evaluator.EvaluateAsBoolean(extraction.Residual, combinedRow))
+                    if (extraction.Residual is not null)
                     {
-                        continue;
+                        schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                        Row combinedRow = schema.Combine(leftRow, rightRow);
+                        if (!evaluator.EvaluateAsBoolean(extraction.Residual, combinedRow))
+                        {
+                            continue;
+                        }
                     }
 
                     hasMatch = true;
+
+                    if (isSemiJoin)
+                    {
+                        // Semi-join: emit left row on first match, skip the rest.
+                        break;
+                    }
+
                     if (rightMatched is not null)
                     {
                         rightMatched[rightIndex] = true;
                     }
 
-                    yield return combinedRow;
+                    if (extraction.Residual is null)
+                    {
+                        schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    }
+
+                    yield return schema!.Combine(leftRow, rightRow);
                 }
             }
 
-            if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
+            if (isSemiJoin)
+            {
+                // LeftSemi: emit only when matched. LeftAntiSemi: emit only when not matched.
+                if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                    (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                {
+                    yield return leftRow;
+                }
+            }
+            else if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
             {
                 if (rightRows.Count > 0)
                 {
@@ -260,6 +324,7 @@ public sealed class JoinOperator : IQueryOperator
     private async IAsyncEnumerable<Row> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
         // Materialize right side.
         List<Row> rightRows = new();
@@ -287,6 +352,12 @@ public sealed class JoinOperator : IQueryOperator
                 if (_onCondition is null || evaluator.EvaluateAsBoolean(_onCondition, combinedRow))
                 {
                     hasMatch = true;
+
+                    if (isSemiJoin)
+                    {
+                        break;
+                    }
+
                     if (rightMatched is not null)
                     {
                         rightMatched[index] = true;
@@ -296,7 +367,15 @@ public sealed class JoinOperator : IQueryOperator
                 }
             }
 
-            if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
+            if (isSemiJoin)
+            {
+                if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                    (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                {
+                    yield return leftRow;
+                }
+            }
+            else if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
             {
                 if (rightRows.Count > 0)
                 {

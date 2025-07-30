@@ -272,6 +272,17 @@ internal sealed class SemanticAnalyzer
                 diagnostics.AddRange(subDiagnostics);
                 break;
 
+            case InSubqueryExpression inSubquery:
+                AnalyzeExpression(inSubquery.Expression, aliasToTable, opaqueAliases, diagnostics);
+                Diagnostic[] inSubDiagnostics = Analyze(inSubquery.Query);
+                diagnostics.AddRange(inSubDiagnostics);
+                break;
+
+            case ExistsExpression existsExpr:
+                Diagnostic[] existsDiagnostics = Analyze(existsExpr.Query);
+                diagnostics.AddRange(existsDiagnostics);
+                break;
+
             case WindowFunctionCallExpression windowCall:
                 if (!_functionNames.Contains(windowCall.FunctionName))
                 {

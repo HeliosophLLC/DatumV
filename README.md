@@ -46,7 +46,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
-- **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, window functions (OVER/PARTITION BY), subqueries, quoted identifiers, parameterized queries (`$name`)
+- **SQL interface** — SELECT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), quoted identifiers, parameterized queries (`$name`)
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
@@ -262,7 +262,7 @@ Available benchmark suites:
 |-------|----------|
 | `ParsingBenchmarks` | SQL tokenization and parsing at various complexity levels |
 | `ProviderBenchmarks` | Read throughput for CSV and JSON at 1K and 10K rows |
-| `ExecutionBenchmarks` | Full query execution: scan, filter, project, join, order+limit |
+| `ExecutionBenchmarks` | Full query execution: scan, filter, project, join, order+limit, subqueries |
 | `StatisticsBenchmarks` | Statistics collection overhead and merge performance |
 | `OutputBenchmarks` | CSV write throughput, with and without sharding |
 
@@ -274,9 +274,9 @@ dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*
 
 ### Results
 
-**TL;DR** — Parse a query in **31 μs**, read 10K CSV rows in **7 ms**, execute a full scan in **7 ms**, JOIN 10K × 1K rows in **9 ms**, collect all statistics in **57 ms**, and write 10K rows to CSV in **9 ms**. Memory stays under **9 MB** for a 10K-row end-to-end pipeline.
+**TL;DR** — Parse a query in **32 μs**, read 10K CSV rows in **7 ms**, execute a full scan in **7 ms**, JOIN 10K × 1K rows in **9 ms**, IN subquery in **8 ms**, EXISTS semi-join in **8 ms**, NOT EXISTS in **10 ms**, collect all statistics in **56 ms**, and write 10K rows to CSV in **8 ms**. Memory stays under **9 MB** for a 10K-row end-to-end pipeline.
 
-> BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.8037)
+> BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.8039)
 > Intel Core i9-10900X CPU 3.70GHz, 1 CPU, 20 logical and 10 physical cores
 > .NET SDK 10.0.103, .NET 10.0.3 (10.0.326.7603), X64 RyuJIT AVX-512F+CD+BW+DQ+VL
 
@@ -284,27 +284,30 @@ dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| Tokenize simple SELECT | 5.315 μs | 0.1040 μs | 0.2125 μs | 1.88 KB |
-| Tokenize with WHERE | 14.308 μs | 0.2389 μs | 0.2235 μs | 5.98 KB |
-| Tokenize with JOIN | 31.304 μs | 0.5991 μs | 0.6899 μs | 11.12 KB |
-| Tokenize complex query | 57.552 μs | 1.0592 μs | 1.0402 μs | 25.55 KB |
-| Parse simple SELECT | 31.300 μs | 1.2382 μs | 3.6507 μs | 21.55 KB |
-| Parse with WHERE | 62.387 μs | 1.5408 μs | 4.3206 μs | 45.43 KB |
-| Parse with JOIN | 102.421 μs | 1.1538 μs | 1.0228 μs | 66.17 KB |
-| Parse complex query | 190.105 μs | 3.1820 μs | 2.9765 μs | 132.08 KB |
-| Parse subquery | 93.912 μs | 1.8533 μs | 2.0599 μs | 71.09 KB |
+| Tokenize simple SELECT | 7.255 μs | 0.1449 μs | 0.1780 μs | 1.88 KB |
+| Tokenize with WHERE | 18.506 μs | 0.1849 μs | 0.1729 μs | 6.11 KB |
+| Tokenize with JOIN | 42.385 μs | 0.5861 μs | 0.4576 μs | 11.18 KB |
+| Tokenize complex query | 76.464 μs | 1.4954 μs | 1.5357 μs | 25.74 KB |
+| Parse simple SELECT | 32.191 μs | 0.5282 μs | 0.4941 μs | 25.3 KB |
+| Parse with WHERE | 74.934 μs | 1.0161 μs | 1.3212 μs | 55.45 KB |
+| Parse with JOIN | 123.357 μs | 1.3833 μs | 1.2940 μs | 76.08 KB |
+| Parse complex query | 235.313 μs | 3.0375 μs | 2.8413 μs | 154.45 KB |
+| Parse subquery | 113.451 μs | 1.9299 μs | 1.8053 μs | 85.42 KB |
+| Parse IN subquery | 84.756 μs | 0.8287 μs | 0.7346 μs | 62.33 KB |
+| Parse EXISTS subquery | 99.116 μs | 1.0016 μs | 0.9369 μs | 72.44 KB |
+| Parse scalar subquery | 104.533 μs | 2.0238 μs | 1.8930 μs | 75.79 KB |
 
-Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input.
+Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input. IN/EXISTS subqueries parse faster than derived-table subqueries due to simpler AST structure.
 
 #### Providers
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV 1K rows | 1,548.0 μs | 26.4 μs | 23.4 μs | 941.83 KB |
-| CSV 10K rows | 7,143.0 μs | 103.3 μs | 96.6 μs | 8,711.05 KB |
-| CSV 1K with projection | 1,477.0 μs | 29.4 μs | 85.7 μs | 777.97 KB |
-| JSON 1K rows | 1,647.0 μs | 25.3 μs | 21.2 μs | 491.87 KB |
-| JSON 10K rows | 11,642.0 μs | 73.6 μs | 65.2 μs | 4,514.25 KB |
+| CSV 1K rows | 1,435.0 μs | 26.6 μs | 37.3 μs | 943.99 KB |
+| CSV 10K rows | 7,105.0 μs | 134.3 μs | 192.6 μs | 8,713.27 KB |
+| CSV 1K with projection | 1,386.0 μs | 27.7 μs | 24.5 μs | 780.14 KB |
+| JSON 1K rows | 1,638.0 μs | 23.9 μs | 18.6 μs | 499.82 KB |
+| JSON 10K rows | 12,011.0 μs | 201.7 μs | 188.6 μs | 4,522.19 KB |
 
 All providers share a pre-built column name index across rows, eliminating per-row Dictionary allocations at the source. `DataValue.FromScalar` caches the two most common float values (0 and 1), avoiding heap allocation and boxing for those constants. The CSV parser reuses a thread-local field buffer across rows, eliminating a `List<string>` allocation per line. Projection pushdown on CSV saves ~18% of allocated memory by skipping unreferenced columns.
 
@@ -312,21 +315,27 @@ All providers share a pre-built column name index across rows, eliminating per-r
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| SELECT * FROM data (10K) | 7.040 ms | 0.0902 ms | 0.0753 ms | 8.52 MB |
-| SELECT with WHERE filter (10K) | 7.752 ms | 0.1490 ms | 0.1244 ms | 8.44 MB |
-| SELECT with projection (10K) | 6.288 ms | 0.0740 ms | 0.0656 ms | 7.47 MB |
-| INNER JOIN (10K × 1K) | 9.022 ms | 0.1038 ms | 0.0920 ms | 8.59 MB |
-| ORDER BY + LIMIT (10K) | 8.808 ms | 0.1731 ms | 0.1852 ms | 8.78 MB |
+| SELECT * FROM data (10K) | 7.199 ms | 0.1004 ms | 0.0890 ms | 8.55 MB |
+| SELECT with WHERE filter (10K) | 7.932 ms | 0.1377 ms | 0.1288 ms | 8.48 MB |
+| SELECT with projection (10K) | 6.363 ms | 0.0596 ms | 0.0557 ms | 7.5 MB |
+| INNER JOIN (10K × 1K) | 9.233 ms | 0.1549 ms | 0.1448 ms | 8.64 MB |
+| ORDER BY + LIMIT (10K) | 8.858 ms | 0.0726 ms | 0.0606 ms | 8.82 MB |
+| Uncorrelated IN subquery (10K × 1K) | 8.160 ms | 0.0924 ms | 0.0864 ms | 7.64 MB |
+| Correlated EXISTS semi-join (10K × 1K) | 8.335 ms | 0.1411 ms | 0.1319 ms | 7.69 MB |
+| Correlated NOT EXISTS anti-semi-join (10K × 1K) | 10.045 ms | 0.1438 ms | 0.1275 ms | 8.38 MB |
+| Correlated scalar subquery (10K × 1K) | 13,171.012 ms | 149.4515 ms | 139.7970 ms | 6,385.45 MB |
 
-Full scan of 10K rows allocates 8.52 MB — shared provider schemas and operator schemas eliminated per-row Dictionary and name-array allocations end-to-end. Boolean-valued `DataValue` instances (0 and 1) are cached singletons, eliminating heap allocation and float boxing in every comparison, filter, and join condition evaluation. Qualified column references (`table.column`) cache their pre-computed lookup string on the AST node, avoiding per-row string interpolation. CAST expressions pool their argument arrays and cache target-type `DataValue` wrappers. Function argument arrays are pooled via `ArrayPool`, and LIKE patterns use cached compiled regex. ORDER BY + LIMIT uses a bounded priority queue when LIMIT is present.
+Full scan of 10K rows allocates 8.55 MB — shared provider schemas and operator schemas eliminated per-row Dictionary and name-array allocations end-to-end. Boolean-valued `DataValue` instances (0 and 1) are cached singletons, eliminating heap allocation and float boxing in every comparison, filter, and join condition evaluation. Qualified column references (`table.column`) cache their pre-computed lookup string on the AST node, avoiding per-row string interpolation. CAST expressions pool their argument arrays and cache target-type `DataValue` wrappers. Function argument arrays are pooled via `ArrayPool`, and LIKE patterns use cached compiled regex. ORDER BY + LIMIT uses a bounded priority queue when LIMIT is present.
+
+All subquery types now execute at JOIN-competitive speeds. Uncorrelated IN subqueries are constant-folded to a literal list at plan time, then evaluated via a lazily-built `HashSet<DataValue>` for O(1) lookups per row (~8 ms, on par with WHERE filter). Correlated EXISTS and NOT EXISTS are rewritten into hash-based semi-joins and anti-semi-joins (~8–10 ms). Correlated scalar subqueries are not yet decorrelated — the inner query re-executes for each of the 10K outer rows, producing the expected O(N×M) cost (13.2 s, 6.4 GB allocated). This is a known optimization target (see [ROADMAP.md](ROADMAP.md)).
 
 #### Statistics
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| Collect stats 1K rows | 3.159 ms | 0.0199 ms | 0.0176 ms | 2.36 MB |
-| Collect stats 10K rows | 56.803 ms | 1.1315 ms | 1.6585 ms | 20.79 MB |
-| Merge two 5K collectors | 64.241 ms | 1.2724 ms | 3.6095 ms | 24.95 MB |
+| Collect stats 1K rows | 3.136 ms | 0.0580 ms | 0.0543 ms | 2.36 MB |
+| Collect stats 10K rows | 55.943 ms | 1.1115 ms | 1.4839 ms | 20.79 MB |
+| Merge two 5K collectors | 61.347 ms | 1.1826 ms | 3.0528 ms | 24.94 MB |
 
 Statistics collection runs all accumulators (numeric, string, vector, image, cardinality, entropy, histogram, quantile, top-K) in a single pass. Merge cost is comparable to a fresh 10K collection because both collectors' reservoir samples and HyperLogLog registers must be combined.
 
@@ -334,9 +343,9 @@ Statistics collection runs all accumulators (numeric, string, vector, image, car
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV write 1K rows | 1.528 ms | 0.0240 ms | 0.0224 ms | 124.51 KB |
-| CSV write 10K rows | 8.701 ms | 0.1619 ms | 0.2472 ms | 1,145.59 KB |
-| CSV write 10K rows with sharding (1000/shard) | 16.628 ms | 0.2882 ms | 0.5343 ms | 1,256.27 KB |
+| CSV write 1K rows | 1.388 ms | 0.0272 ms | 0.0363 ms | 124.47 KB |
+| CSV write 10K rows | 8.334 ms | 0.1522 ms | 0.2822 ms | 1,145.62 KB |
+| CSV write 10K rows with sharding (1000/shard) | 17.761 ms | 0.6376 ms | 1.8598 ms | 1,256.29 KB |
 
 CSV writes with minimal allocation overhead (~115 bytes/row). Vector columns use a direct `StringBuilder` loop instead of LINQ enumerable formatting. Sharding adds overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
 

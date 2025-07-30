@@ -146,6 +146,9 @@ public enum SqlToken
     /// <summary>The CURRENT keyword (used with ROW for window frame bound).</summary>
     Current,
 
+    /// <summary>The EXISTS keyword (existence predicate).</summary>
+    Exists,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>

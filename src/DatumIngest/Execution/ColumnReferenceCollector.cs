@@ -150,6 +150,8 @@ public static class ColumnReferenceCollector
                 break;
 
             case SubqueryExpression:
+            case InSubqueryExpression:
+            case ExistsExpression:
                 // Subquery column references are scoped to the inner query;
                 // they do not reference the outer query's tables.
                 break;

@@ -63,25 +63,32 @@ internal sealed class GraceHashJoinExecutor
     private readonly JoinKeyExtractionResult _extraction;
     private readonly long _memoryBudgetBytes;
     private readonly ExpressionEvaluator _evaluator;
+    private readonly bool _nullSensitiveAntiSemi;
     private readonly string _spillDirectory;
 
     /// <summary>
     /// Creates a new Grace hash join executor.
     /// </summary>
-    /// <param name="joinType">The type of join (Inner, Left, Right, FullOuter).</param>
+    /// <param name="joinType">The type of join (Inner, Left, Right, FullOuter, LeftSemi, LeftAntiSemi).</param>
     /// <param name="extraction">The extracted equi-join key pairs and optional residual filter.</param>
     /// <param name="memoryBudgetBytes">The memory budget in bytes for the build side.</param>
     /// <param name="evaluator">The expression evaluator for key and residual evaluation.</param>
+    /// <param name="nullSensitiveAntiSemi">
+    /// When true and <paramref name="joinType"/> is <see cref="JoinType.LeftAntiSemi"/>,
+    /// applies SQL-standard NOT IN null semantics.
+    /// </param>
     internal GraceHashJoinExecutor(
         JoinType joinType,
         JoinKeyExtractionResult extraction,
         long memoryBudgetBytes,
-        ExpressionEvaluator evaluator)
+        ExpressionEvaluator evaluator,
+        bool nullSensitiveAntiSemi = false)
     {
         _joinType = joinType;
         _extraction = extraction;
         _memoryBudgetBytes = memoryBudgetBytes;
         _evaluator = evaluator;
+        _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
         _spillDirectory = Path.Combine(Path.GetTempPath(), $"datum-join-{Guid.NewGuid():N}");
     }
 
@@ -108,10 +115,32 @@ internal sealed class GraceHashJoinExecutor
             // ── Phase 1: Partition the build side ──
             MemoryEstimator buildEstimator = new();
             Row? firstBuildRow = null;
+            bool hasNullKey = false;
 
             await foreach (Row buildRow in rightOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
                 firstBuildRow ??= buildRow;
+
+                // Track null keys for NOT IN null semantics.
+                if (_nullSensitiveAntiSemi && !hasNullKey)
+                {
+                    if (useSingleKey)
+                    {
+                        if (_evaluator.Evaluate(keyPairs[0].Right, buildRow).IsNull)
+                        {
+                            hasNullKey = true;
+                        }
+                    }
+                    else
+                    {
+                        DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: true);
+                        if (HasNull(parts))
+                        {
+                            hasNullKey = true;
+                        }
+                    }
+                }
+
                 int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: true);
                 partitions[partitionIndex].AddBuildRow(buildRow);
 
@@ -132,6 +161,12 @@ internal sealed class GraceHashJoinExecutor
                 {
                     buildEstimator.EscalateToEveryRow();
                 }
+            }
+
+            // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
+            if (_nullSensitiveAntiSemi && hasNullKey)
+            {
+                yield break;
             }
 
             // ── Phase 1b: Partition the probe side ──
@@ -275,6 +310,7 @@ internal sealed class GraceHashJoinExecutor
             }
 
             // Probe the hash table with probe-side rows.
+            bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
             bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
             BitArray? rightMatched = needRightUnmatched ? new BitArray(buildRowList.Count) : null;
             CombinedRowSchema? schema = null;
@@ -307,26 +343,46 @@ internal sealed class GraceHashJoinExecutor
                 {
                     foreach ((int buildIndex, Row buildRow) in matches)
                     {
-                        schema ??= CombinedRowSchema.Build(probeRow, buildRow);
-                        Row combinedRow = schema.Combine(probeRow, buildRow);
-
-                        if (_extraction.Residual is not null
-                            && !_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
+                        if (_extraction.Residual is not null)
                         {
-                            continue;
+                            schema ??= CombinedRowSchema.Build(probeRow, buildRow);
+                            Row combinedRow = schema.Combine(probeRow, buildRow);
+                            if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
+                            {
+                                continue;
+                            }
                         }
 
                         hasMatch = true;
+
+                        if (isSemiJoin)
+                        {
+                            break;
+                        }
+
                         if (rightMatched is not null)
                         {
                             rightMatched[buildIndex] = true;
                         }
 
-                        yield return combinedRow;
+                        if (_extraction.Residual is null)
+                        {
+                            schema ??= CombinedRowSchema.Build(probeRow, buildRow);
+                        }
+
+                        yield return schema!.Combine(probeRow, buildRow);
                     }
                 }
 
-                if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
+                if (isSemiJoin)
+                {
+                    if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                        (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                    {
+                        yield return probeRow;
+                    }
+                }
+                else if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
                 {
                     // Use a null template from this partition's build rows, or fall back to the global template.
                     Row? nullRight = cachedNullRight;

@@ -254,6 +254,10 @@ internal static class SubqueryRewriter
             case ErrorExpression:
             case ParameterExpression:
             case WindowFunctionCallExpression:
+            // Semi-join subquery nodes are handled by SemiJoinRewriter before
+            // this rewriter runs, so they pass through unchanged.
+            case InSubqueryExpression:
+            case ExistsExpression:
                 return expression;
 
             default:
@@ -489,6 +493,8 @@ internal static class SubqueryRewriter
                 break;
 
             case SubqueryExpression:
+            case InSubqueryExpression:
+            case ExistsExpression:
                 // Do not recurse into nested subqueries — they are separate scopes.
                 break;
         }

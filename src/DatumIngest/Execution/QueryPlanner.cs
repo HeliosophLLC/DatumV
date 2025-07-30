@@ -308,10 +308,15 @@ public sealed class QueryPlanner
             }
         }
 
+        // Rewrite semi-join subqueries (IN/NOT IN/EXISTS/NOT EXISTS) in WHERE
+        // before the scalar SubqueryRewriter pass, so these nodes are consumed first.
+        SemiJoinRewriter.RewriteResult semiJoinResult = await SemiJoinRewriter.RewriteAsync(
+            statement.Where, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+
         // Rewrite all expression clauses that may contain SubqueryExpressions.
         List<SubqueryRewriter.CorrelatedSubquery> allCorrelated = [];
 
-        Expression? rewrittenWhere = statement.Where;
+        Expression? rewrittenWhere = semiJoinResult.RemainingWhere;
         if (rewrittenWhere is not null)
         {
             SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
@@ -392,10 +397,11 @@ public sealed class QueryPlanner
             statement.Offset);
 
         // Build a source transform that injects ScalarSubqueryOperator wrappers
-        // between the source (Scan+Joins) and the rest of the pipeline (Filter/Project/etc.).
-        // This ensures synthetic columns are available before any operator that references them.
+        // and semi-join operators between the source (Scan+Joins) and the rest of the
+        // pipeline (Filter/Project/etc.). This ensures synthetic columns and semi-join
+        // filtering are applied before any operator that references them.
         Func<IQueryOperator, IQueryOperator>? sourceTransform = null;
-        if (allCorrelated.Count > 0)
+        if (allCorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0)
         {
             sourceTransform = source =>
             {
@@ -403,6 +409,13 @@ public sealed class QueryPlanner
                 {
                     IQueryOperator innerPlan = Plan(correlated.InnerQuery);
                     source = new Operators.ScalarSubqueryOperator(source, innerPlan, correlated.SyntheticColumnName);
+                }
+
+                foreach (SemiJoinRewriter.SemiJoinDescriptor semiJoin in semiJoinResult.SemiJoins)
+                {
+                    source = new JoinOperator(
+                        source, semiJoin.InnerPlan, semiJoin.JoinType,
+                        semiJoin.OnCondition, semiJoin.NullSensitiveAntiSemi);
                 }
 
                 return source;
@@ -464,6 +477,8 @@ public sealed class QueryPlanner
         return expression switch
         {
             SubqueryExpression => true,
+            InSubqueryExpression => true,
+            ExistsExpression => true,
             BinaryExpression binary => ContainsSubquery(binary.Left) || ContainsSubquery(binary.Right),
             UnaryExpression unary => ContainsSubquery(unary.Operand),
             FunctionCallExpression function => function.Arguments.Any(ContainsSubquery),

@@ -32,6 +32,15 @@ public sealed class ExpressionEvaluator
     private readonly Dictionary<CaseExpression, DataKind?> _caseResolvedKindCache = new();
 
     /// <summary>
+    /// Cached hash set of non-null literal values for each <see cref="InExpression"/> whose
+    /// <see cref="InExpression.Values"/> are all <see cref="LiteralExpression"/>.
+    /// Built on first evaluation to convert O(n) linear scans into O(1) hash lookups.
+    /// The <see langword="bool"/> tracks whether any value in the list was <see langword="null"/>
+    /// (needed for SQL three-valued logic).
+    /// </summary>
+    private readonly Dictionary<InExpression, (HashSet<DataValue> NonNullValues, bool HasNull)> _inValueSetCache = new();
+
+    /// <summary>
     /// Creates an evaluator that can resolve function calls.
     /// </summary>
     /// <param name="functions">Registry of available functions.</param>
@@ -71,6 +80,12 @@ public sealed class ExpressionEvaluator
             WindowFunctionCallExpression window => throw new InvalidOperationException(
                 $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
                 "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
+            SubqueryExpression => throw new InvalidOperationException(
+                "Subquery expression was not rewritten by the query planner."),
+            InSubqueryExpression => throw new InvalidOperationException(
+                "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
+            ExistsExpression => throw new InvalidOperationException(
+                "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
             ParameterExpression parameter => throw new InvalidOperationException(
                 $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
             _ => throw new InvalidOperationException(
@@ -110,6 +125,7 @@ public sealed class ExpressionEvaluator
 
         return literal.Value switch
         {
+            DataValue dataValue => dataValue,
             int intValue => DataValue.FromScalar(intValue),
             long longValue => DataValue.FromScalar(longValue),
             float floatValue => DataValue.FromScalar(floatValue),
@@ -363,13 +379,104 @@ public sealed class ExpressionEvaluator
             return DataValue.Null(DataKind.Scalar);
         }
 
-        foreach (Expression valueExpression in inExpr.Values)
+        // Fast path: when all values are literals (e.g. constant-folded from an
+        // uncorrelated IN subquery), build a HashSet once and do O(1) lookups
+        // instead of O(n) linear scans on every row.
+        if (TryGetOrBuildLiteralValueSet(inExpr, out HashSet<DataValue> valueSet, out bool hasNullCandidate))
         {
-            DataValue candidate = Evaluate(valueExpression, row);
-            if (!candidate.IsNull && target.Equals(candidate))
+            bool found = valueSet.Contains(target);
+
+            if (found)
             {
                 return DataValue.FromScalar(inExpr.Negated ? 0f : 1f);
             }
+
+            if (hasNullCandidate)
+            {
+                return DataValue.Null(DataKind.Scalar);
+            }
+
+            return DataValue.FromScalar(inExpr.Negated ? 1f : 0f);
+        }
+
+        // Slow path: values contain non-literal expressions that depend on the row.
+        return EvaluateInLinear(inExpr, target, row);
+    }
+
+    /// <summary>
+    /// Attempts to retrieve or build a cached <see cref="HashSet{T}"/> of literal values
+    /// for the given <see cref="InExpression"/>. Returns <see langword="false"/> if any
+    /// value is not a <see cref="LiteralExpression"/>, indicating the linear path is needed.
+    /// </summary>
+    private bool TryGetOrBuildLiteralValueSet(
+        InExpression inExpr,
+        out HashSet<DataValue> valueSet,
+        out bool hasNull)
+    {
+        if (_inValueSetCache.TryGetValue(inExpr, out (HashSet<DataValue> NonNullValues, bool HasNull) cached))
+        {
+            valueSet = cached.NonNullValues;
+            hasNull = cached.HasNull;
+            return true;
+        }
+
+        HashSet<DataValue> set = new();
+        bool anyNull = false;
+
+        foreach (Expression valueExpression in inExpr.Values)
+        {
+            if (valueExpression is not LiteralExpression)
+            {
+                valueSet = null!;
+                hasNull = false;
+                return false;
+            }
+
+            DataValue value = EvaluateLiteral((LiteralExpression)valueExpression);
+            if (value.IsNull)
+            {
+                anyNull = true;
+            }
+            else
+            {
+                set.Add(value);
+            }
+        }
+
+        _inValueSetCache[inExpr] = (set, anyNull);
+        valueSet = set;
+        hasNull = anyNull;
+        return true;
+    }
+
+    /// <summary>
+    /// Linear-scan fallback for IN expressions with non-literal values.
+    /// </summary>
+    private DataValue EvaluateInLinear(InExpression inExpr, DataValue target, Row row)
+    {
+        bool hasNullCandidate = false;
+
+        foreach (Expression valueExpression in inExpr.Values)
+        {
+            DataValue candidate = Evaluate(valueExpression, row);
+            if (candidate.IsNull)
+            {
+                hasNullCandidate = true;
+                continue;
+            }
+
+            if (target.Equals(candidate))
+            {
+                return DataValue.FromScalar(inExpr.Negated ? 0f : 1f);
+            }
+        }
+
+        // SQL three-valued logic: if no match was found but a NULL candidate
+        // existed, the result is UNKNOWN (NULL) rather than a definite answer.
+        // For NOT IN, this means rows are filtered out by EvaluateAsBoolean.
+        if (hasNullCandidate)
+        {
+            return DataValue.Null(DataKind.Scalar);
         }
 
         return DataValue.FromScalar(inExpr.Negated ? 1f : 0f);

@@ -421,6 +421,13 @@ public static class ParameterBinder
             case SubqueryExpression subquery:
                 CollectFromStatement(subquery.Query, names);
                 break;
+            case InSubqueryExpression inSubquery:
+                CollectFromExpression(inSubquery.Expression, names);
+                CollectFromStatement(inSubquery.Query, names);
+                break;
+            case ExistsExpression exists:
+                CollectFromStatement(exists.Query, names);
+                break;
         }
     }
 }

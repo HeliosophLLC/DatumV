@@ -300,13 +300,23 @@ public static class SqlParser
         from endKw in Token.EqualTo(SqlToken.End)
         select (Expression)new CaseExpression(operand, whenClauses, elseResult, ToSpan(caseKw, endKw));
 
+    /// <summary>[NOT] EXISTS (SELECT ...) expression.</summary>
+    private static readonly TokenListParser<SqlToken, Expression> ExistsCall =
+        from notKw in Token.EqualTo(SqlToken.Not).OptionalOrDefault()
+        from existsKw in Token.EqualTo(SqlToken.Exists)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from query in SP.Ref(() => SelectStatementParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (Expression)new ExistsExpression(query, Negated: notKw.HasValue);
+
     /// <summary>
     /// Primary expression: the atomic unit in the precedence hierarchy.
     /// Order matters: function call must be tried before column reference
     /// because both start with an Identifier token.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> PrimaryExpression =
-        CaseCall.Try()
+        ExistsCall.Try()
+            .Or(CaseCall.Try())
             .Or(CastCall.Try())
             .Or(FunctionCall.Try())
             .Or(QualifiedColumn)
@@ -361,7 +371,9 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Expression> Comparison =
         from left in Additive
         from postfix in IsNullPostfix.Try()
+            .Or(NotInSubqueryPostfix.Try())
             .Or(NotInPostfix.Try())
+            .Or(InSubqueryPostfix.Try())
             .Or(InPostfix.Try())
             .Or(NotBetweenPostfix.Try())
             .Or(BetweenPostfix.Try())
@@ -377,6 +389,25 @@ public static class SqlParser
         from nullKw in Token.EqualTo(SqlToken.Null)
         select (Func<Expression, Expression>)(expr =>
             new IsNullExpression(expr, Negated: notKw.HasValue));
+
+    /// <summary>IN (SELECT ...) subquery postfix.</summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> InSubqueryPostfix =
+        from inKw in Token.EqualTo(SqlToken.In)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from query in SP.Ref(() => SelectStatementParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (Func<Expression, Expression>)(expr =>
+            new InSubqueryExpression(expr, query));
+
+    /// <summary>NOT IN (SELECT ...) subquery postfix.</summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> NotInSubqueryPostfix =
+        from notKw in Token.EqualTo(SqlToken.Not)
+        from inKw in Token.EqualTo(SqlToken.In)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from query in SP.Ref(() => SelectStatementParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (Func<Expression, Expression>)(expr =>
+            new InSubqueryExpression(expr, query, Negated: true));
 
     /// <summary>IN (value, ...) postfix.</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> InPostfix =

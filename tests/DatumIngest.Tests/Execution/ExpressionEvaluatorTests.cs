@@ -439,6 +439,74 @@ public class ExpressionEvaluatorTests
         Assert.True(result.IsNull);
     }
 
+    [Fact]
+    public void In_NullCandidate_NoMatch_ReturnsNull()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new InExpression(
+                new LiteralExpression(99),
+                [new LiteralExpression(1), new LiteralExpression(null), new LiteralExpression(3)]),
+            MakeRow());
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void In_NullCandidate_WithMatch_ReturnsMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new InExpression(
+                new LiteralExpression(3),
+                [new LiteralExpression(null), new LiteralExpression(3)]),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void In_LiteralHashSet_CachedAcrossRows()
+    {
+        InExpression inExpr = new(
+            new ColumnReference("value"),
+            [new LiteralExpression(10), new LiteralExpression(20), new LiteralExpression(30)]);
+
+        Row row1 = MakeRow(("value", DataValue.FromScalar(20)));
+        Row row2 = MakeRow(("value", DataValue.FromScalar(99)));
+        Row row3 = MakeRow(("value", DataValue.FromScalar(10)));
+
+        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row1).AsScalar());
+        Assert.Equal(0f, _evaluator.Evaluate(inExpr, row2).AsScalar());
+        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row3).AsScalar());
+    }
+
+    [Fact]
+    public void In_LargeValueSet_UsesHashLookup()
+    {
+        List<Expression> values = new();
+        for (int i = 0; i < 1000; i++)
+        {
+            values.Add(new LiteralExpression(i));
+        }
+
+        InExpression inExpr = new(new LiteralExpression(999), values);
+
+        DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void In_Negated_LargeValueSet()
+    {
+        List<Expression> values = new();
+        for (int i = 0; i < 500; i++)
+        {
+            values.Add(new LiteralExpression(i));
+        }
+
+        InExpression inExpr = new(new LiteralExpression(9999), values, Negated: true);
+
+        DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
     // ─────────────── BETWEEN expression ───────────────
 
     [Fact]
