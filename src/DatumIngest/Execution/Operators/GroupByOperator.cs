@@ -69,6 +69,9 @@ public sealed class GroupByOperator : IQueryOperator
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.QueryMeter?.ThrowIfExceeded();
+
             GroupState group;
 
             if (isGlobalAggregation)

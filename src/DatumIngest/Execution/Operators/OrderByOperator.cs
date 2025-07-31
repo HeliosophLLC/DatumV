@@ -79,6 +79,9 @@ public sealed class OrderByOperator : IQueryOperator
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.QueryMeter?.ThrowIfExceeded();
+
             rows.Add(row);
         }
 
@@ -103,6 +106,9 @@ public sealed class OrderByOperator : IQueryOperator
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.QueryMeter?.ThrowIfExceeded();
+
             if (heap.Count < topN)
             {
                 heap.Enqueue(row, row);

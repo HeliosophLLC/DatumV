@@ -57,6 +57,9 @@ public sealed class WindowOperator : IQueryOperator
         List<Row> allRows = new();
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            context.QueryMeter?.ThrowIfExceeded();
+
             allRows.Add(row);
         }
 

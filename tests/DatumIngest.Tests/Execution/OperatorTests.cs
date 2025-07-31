@@ -691,6 +691,100 @@ public class OperatorTests
         Assert.Equal(2f, rows[1]["val"].AsScalar());
     }
 
+    // ─────────────── OrderByOperator governor enforcement ───────────────
+
+    /// <summary>
+    /// When the Query Unit budget is already exceeded, the ORDER BY operator
+    /// throws <see cref="QueryBudgetExceededException"/> during unbounded
+    /// sort materialization instead of consuming the entire input.
+    /// </summary>
+    [Fact]
+    public async Task OrderBy_BudgetExceeded_ThrowsDuringMaterialization()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(3f))),
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(2f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ]);
+
+        // Pre-exceed the budget so the check fires on the first materialized row.
+        QueryMeter meter = new(budget: 5);
+        meter.Add(6);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            meter);
+
+        await Assert.ThrowsAsync<QueryBudgetExceededException>(
+            () => CollectAsync(orderBy, context));
+    }
+
+    /// <summary>
+    /// When the Query Unit budget is already exceeded, the ORDER BY operator
+    /// throws <see cref="QueryBudgetExceededException"/> during top-N collection
+    /// instead of consuming the entire input.
+    /// </summary>
+    [Fact]
+    public async Task OrderBy_BoundedTopN_BudgetExceeded_ThrowsDuringMaterialization()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(3f))),
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(2f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ], topNRows: 2);
+
+        // Pre-exceed the budget so the check fires on the first materialized row.
+        QueryMeter meter = new(budget: 5);
+        meter.Add(6);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            meter);
+
+        await Assert.ThrowsAsync<QueryBudgetExceededException>(
+            () => CollectAsync(orderBy, context));
+    }
+
+    /// <summary>
+    /// When the cancellation token is cancelled, the ORDER BY operator
+    /// throws <see cref="OperationCanceledException"/> during materialization.
+    /// </summary>
+    [Fact]
+    public async Task OrderBy_CancellationToken_ThrowsDuringMaterialization()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(2f))));
+
+        OrderByOperator orderBy = new(source,
+        [
+            new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)
+        ]);
+
+        CancellationTokenSource cancellationTokenSource = new();
+        cancellationTokenSource.Cancel();
+
+        ExecutionContext context = new(
+            cancellationTokenSource.Token,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => CollectAsync(orderBy, context));
+    }
+
     // ─────────────── AliasOperator tests ───────────────
 
     [Fact]

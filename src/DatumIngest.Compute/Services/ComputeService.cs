@@ -199,6 +199,12 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
             throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
         }
+        catch (QueryBudgetExceededException budgetException)
+        {
+            throw new RpcException(new Status(
+                StatusCode.ResourceExhausted,
+                budgetException.Message));
+        }
         catch (RpcException)
         {
             throw;

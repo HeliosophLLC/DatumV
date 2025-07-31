@@ -38,6 +38,20 @@ public sealed class QueryMeter
     public bool IsBudgetExceeded => Budget.HasValue && FunctionQueryUnits > Budget.Value;
 
     /// <summary>
+    /// Throws <see cref="QueryBudgetExceededException"/> if a budget is set
+    /// and the accumulated Query Units exceed it. Mirrors the
+    /// <see cref="CancellationToken.ThrowIfCancellationRequested"/> pattern
+    /// for cooperative budget enforcement inside blocking operators.
+    /// </summary>
+    public void ThrowIfExceeded()
+    {
+        if (IsBudgetExceeded)
+        {
+            throw new QueryBudgetExceededException(Budget!.Value, FunctionQueryUnits);
+        }
+    }
+
+    /// <summary>
     /// Records the cost of a function invocation. Thread-safe.
     /// </summary>
     /// <param name="cost">The Query Unit cost to add.</param>

@@ -280,4 +280,81 @@ public class WindowOperatorTests
         Assert.Equal(10f, results[1]["prev_val"].AsScalar());
         Assert.Equal(20f, results[2]["prev_val"].AsScalar());
     }
+
+    // ─────────────── Governor enforcement during materialization ───────────────
+
+    /// <summary>
+    /// When the Query Unit budget is already exceeded, the window operator
+    /// throws <see cref="QueryBudgetExceededException"/> during materialization
+    /// instead of consuming the entire input.
+    /// </summary>
+    [Fact]
+    public async Task WindowOperator_BudgetExceeded_ThrowsDuringMaterialization()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(2f))));
+
+        WindowSpecification spec = new(
+            PartitionBy: null,
+            OrderBy: [new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)],
+            Frame: null);
+
+        WindowColumn column = new(
+            new RowNumberFunction(),
+            [],
+            spec,
+            "rn");
+
+        WindowOperator window = new(source, [column]);
+
+        // Pre-exceed the budget so the check fires on the first materialized row.
+        QueryMeter meter = new(budget: 5);
+        meter.Add(6);
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            meter);
+
+        await Assert.ThrowsAsync<QueryBudgetExceededException>(
+            () => CollectAsync(window, context));
+    }
+
+    /// <summary>
+    /// When the cancellation token is cancelled, the window operator
+    /// throws <see cref="OperationCanceledException"/> during materialization.
+    /// </summary>
+    [Fact]
+    public async Task WindowOperator_CancellationToken_ThrowsDuringMaterialization()
+    {
+        MockOperator source = new(
+            MakeRow(("val", DataValue.FromScalar(1f))),
+            MakeRow(("val", DataValue.FromScalar(2f))));
+
+        WindowSpecification spec = new(
+            PartitionBy: null,
+            OrderBy: [new OrderByItem(new ColumnReference("val"), SortDirection.Ascending)],
+            Frame: null);
+
+        WindowColumn column = new(
+            new RowNumberFunction(),
+            [],
+            spec,
+            "rn");
+
+        WindowOperator window = new(source, [column]);
+
+        CancellationTokenSource cancellationTokenSource = new();
+        cancellationTokenSource.Cancel();
+
+        ExecutionContext context = new(
+            cancellationTokenSource.Token,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => CollectAsync(window, context));
+    }
 }

@@ -140,4 +140,47 @@ public class QueryMeterTests
 
         Assert.Equal(threadCount * addsPerThread, meter.FunctionQueryUnits);
     }
+
+    // ─────────────── ThrowIfExceeded ───────────────
+
+    /// <summary>
+    /// ThrowIfExceeded does not throw when no budget is set, regardless of accumulation.
+    /// </summary>
+    [Fact]
+    public void ThrowIfExceeded_NoBudget_DoesNotThrow()
+    {
+        QueryMeter meter = new();
+        meter.Add(1_000_000);
+
+        meter.ThrowIfExceeded();
+    }
+
+    /// <summary>
+    /// ThrowIfExceeded does not throw when the accumulated cost is within the budget.
+    /// </summary>
+    [Fact]
+    public void ThrowIfExceeded_WithinBudget_DoesNotThrow()
+    {
+        QueryMeter meter = new(budget: 100);
+        meter.Add(100);
+
+        meter.ThrowIfExceeded();
+    }
+
+    /// <summary>
+    /// ThrowIfExceeded throws <see cref="QueryBudgetExceededException"/> when
+    /// the accumulated cost exceeds the budget.
+    /// </summary>
+    [Fact]
+    public void ThrowIfExceeded_OverBudget_Throws()
+    {
+        QueryMeter meter = new(budget: 10);
+        meter.Add(11);
+
+        QueryBudgetExceededException exception =
+            Assert.Throws<QueryBudgetExceededException>(meter.ThrowIfExceeded);
+
+        Assert.Equal(10, exception.Budget);
+        Assert.Equal(11, exception.Consumed);
+    }
 }
