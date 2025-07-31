@@ -548,6 +548,70 @@ public sealed class SourceIndexBuilderTests
         Assert.Equal(2, restored.Tables["beta"].Schema.TotalRowCount);
     }
 
+    [Fact]
+    public async Task BuildAsync_WithBloomAllColumns_ProducesBloomFiltersForEveryColumn()
+    {
+        Row[] rows = Enumerable.Range(0, 20).Select(i =>
+            MakeRow(("id", DataValue.FromScalar((float)i)),
+                    ("name", DataValue.FromString($"name_{i}")),
+                    ("category", DataValue.FromString(i % 2 == 0 ? "even" : "odd")))).ToArray();
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("bloom-all");
+        SourceIndexBuilder builder = new(bloomAllColumns: true, indexAllColumns: false, chunkSize: 10);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.BloomFilters);
+        Assert.True(index.BloomFilters.HasColumn("id"));
+        Assert.True(index.BloomFilters.HasColumn("name"));
+        Assert.True(index.BloomFilters.HasColumn("category"));
+        Assert.Equal(2, index.BloomFilters.ChunkCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithIndexAllColumns_BuildsSortedIndexesForEveryColumn()
+    {
+        Row[] rows =
+        [
+            MakeRow(("id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("charlie"))),
+            MakeRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("bob"))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("index-all");
+        SourceIndexBuilder builder = new(bloomAllColumns: false, indexAllColumns: true, chunkSize: 100);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.SortedIndexes.HasColumn("id"));
+        Assert.True(index.SortedIndexes.HasColumn("name"));
+    }
+
+    [Fact]
+    public void IncrementalBuilder_WithBloomAllColumns_ProducesBloomFiltersForEveryColumn()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        SourceIndexBuilder builder = new(bloomAllColumns: true, indexAllColumns: false, chunkSize: 5);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        for (int index = 0; index < 10; index++)
+        {
+            incremental.AddRow(MakeRow(
+                ("id", DataValue.FromScalar((float)index)),
+                ("category", DataValue.FromString(index < 5 ? "A" : "B"))));
+        }
+
+        SourceIndex result = incremental.Finalize();
+
+        Assert.NotNull(result.BloomFilters);
+        Assert.True(result.BloomFilters.HasColumn("id"));
+        Assert.True(result.BloomFilters.HasColumn("category"));
+        Assert.Equal(2, result.BloomFilters.ChunkCount);
+    }
+
     // ───────────── Helpers ─────────────
 
     private static TableDescriptor CreateDescriptor(string name)

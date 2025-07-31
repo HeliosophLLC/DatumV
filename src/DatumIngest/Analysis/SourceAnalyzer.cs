@@ -30,10 +30,12 @@ public sealed class SourceAnalyzer
     private readonly int _chunkSize;
     private readonly IReadOnlySet<string>? _bloomColumns;
     private readonly IReadOnlySet<string>? _indexColumns;
+    private readonly bool _bloomAllColumns;
+    private readonly bool _indexAllColumns;
     private readonly bool _withInteractions;
 
     /// <summary>
-    /// Creates a source analyzer with the specified options.
+    /// Creates a source analyzer with the specified options and optional column-specific indexes.
     /// </summary>
     /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
     /// <param name="bloomColumns">Column names to build bloom filters for, or <c>null</c> for none.</param>
@@ -48,6 +50,29 @@ public sealed class SourceAnalyzer
         _chunkSize = chunkSize;
         _bloomColumns = bloomColumns;
         _indexColumns = indexColumns;
+        _bloomAllColumns = false;
+        _indexAllColumns = false;
+        _withInteractions = withInteractions;
+    }
+
+    /// <summary>
+    /// Creates a source analyzer that discovers columns from the data and optionally indexes all of them.
+    /// </summary>
+    /// <param name="bloomAllColumns">When <c>true</c>, builds bloom filters for every column discovered in the data.</param>
+    /// <param name="indexAllColumns">When <c>true</c>, builds sorted value indexes for every column discovered in the data.</param>
+    /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
+    /// <param name="withInteractions">Whether to collect pairwise column interaction statistics.</param>
+    public SourceAnalyzer(
+        bool bloomAllColumns,
+        bool indexAllColumns,
+        int chunkSize = IndexConstants.DefaultChunkSize,
+        bool withInteractions = false)
+    {
+        _chunkSize = chunkSize;
+        _bloomColumns = null;
+        _indexColumns = null;
+        _bloomAllColumns = bloomAllColumns;
+        _indexAllColumns = indexAllColumns;
         _withInteractions = withInteractions;
     }
 
@@ -100,7 +125,9 @@ public sealed class SourceAnalyzer
             ? await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken).ConfigureAwait(false)
             : new SourceFingerprint(0, Array.Empty<byte>());
 
-        SourceIndexBuilder indexBuilder = new(_chunkSize, _bloomColumns, _indexColumns);
+        SourceIndexBuilder indexBuilder = _bloomAllColumns || _indexAllColumns
+            ? new(_bloomAllColumns, _indexAllColumns, _chunkSize)
+            : new SourceIndexBuilder(_chunkSize, _bloomColumns, _indexColumns);
         Dictionary<string, SourceIndex> tableIndexes = new();
         Dictionary<string, QueryResultsManifest> tableManifests = new();
         Dictionary<string, Schema> tableSchemas = new();
