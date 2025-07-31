@@ -187,6 +187,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("PRECEDING"), SqlToken.Preceding, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FOLLOWING"), SqlToken.Following, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CURRENT"), SqlToken.Current, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("DISTINCT"), SqlToken.Distinct, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXISTS"), SqlToken.Exists, requireDelimiters: true)
 
             // Named parameter placeholders ($name) — before numeric literals

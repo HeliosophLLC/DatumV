@@ -42,22 +42,11 @@ internal sealed class GraceHashJoinExecutor
     /// <summary>Default number of rows between memory samples for variable-width schemas.</summary>
     private const int DefaultSampleInterval = 64;
 
-    /// <summary>Budget threshold fraction at which sampling switches to every row.</summary>
-    private const double EscalationThreshold = 0.75;
-
     /// <summary>Maximum number of partitions (guards against degenerate hash distributions).</summary>
     private const int MaxPartitionCount = 256;
 
     /// <summary>Maximum recursion depth for re-partitioning.</summary>
     private const int MaxRecursionDepth = 3;
-
-    /// <summary>
-    /// Per-DataValue object overhead estimate in bytes (reference, kind, isNull, payload pointer, shape pointer).
-    /// </summary>
-    private const long DataValueOverheadBytes = 40;
-
-    /// <summary>Per-dictionary entry overhead estimate in bytes (hash, key ref, value ref, next).</summary>
-    private const long DictionaryEntryOverheadBytes = 48;
 
     private readonly JoinType _joinType;
     private readonly JoinKeyExtractionResult _extraction;
@@ -157,7 +146,7 @@ internal sealed class GraceHashJoinExecutor
                 {
                     SpillLargestPartition(partitions);
                 }
-                else if (estimatedMemory > (long)(_memoryBudgetBytes * EscalationThreshold))
+                else if (estimatedMemory > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
                 {
                     buildEstimator.EscalateToEveryRow();
                 }
@@ -642,157 +631,5 @@ internal sealed class GraceHashJoinExecutor
         }
 
         return new Row(names, values);
-    }
-
-    /// <summary>
-    /// Lightweight memory estimator that tracks row sizes via sampling.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// For fixed-width schemas (all Scalar, UInt8, Boolean, Date, DateTime, Time, Duration,
-    /// Uuid), the row size is computed exactly from the first row and no further sampling
-    /// is needed. For variable-width schemas (any String, Vector, Matrix, Tensor, Image,
-    /// UInt8Array, or JsonValue column), every 64th row is sampled to maintain a running
-    /// average. When the estimate crosses 75% of the budget, sampling escalates to every row.
-    /// </para>
-    /// <para>
-    /// The per-row cost calculation sums payload sizes by kind (Scalar=4B, String=2×len,
-    /// Vector/Matrix/Tensor=4×elementCount, Image/UInt8Array=len, etc.) plus ~40B object
-    /// overhead per DataValue plus ~48B dictionary entry overhead. This is intentionally
-    /// approximate — accuracy within 2× is sufficient for a spill trigger.
-    /// </para>
-    /// </remarks>
-    private sealed class MemoryEstimator
-    {
-        private long _totalRowCount;
-        private long _sampleCount;
-        private long _totalSampledBytes;
-        private bool _isFixedWidth;
-        private bool _fixedWidthDetermined;
-        private long _fixedRowSize;
-        private int _sampleInterval = DefaultSampleInterval;
-
-        /// <summary>Whether the next row should be sampled for size estimation.</summary>
-        internal bool ShouldSample()
-        {
-            if (_fixedWidthDetermined && _isFixedWidth)
-            {
-                return false;
-            }
-
-            return _totalRowCount % _sampleInterval == 0;
-        }
-
-        /// <summary>Records a sampled row's estimated size.</summary>
-        internal void RecordSample(Row row)
-        {
-            long rowBytes = EstimateRowBytes(row);
-
-            if (!_fixedWidthDetermined)
-            {
-                _isFixedWidth = IsFixedWidthRow(row);
-                _fixedWidthDetermined = true;
-
-                if (_isFixedWidth)
-                {
-                    _fixedRowSize = rowBytes;
-                    return;
-                }
-            }
-
-            _sampleCount++;
-            _totalSampledBytes += rowBytes;
-        }
-
-        /// <summary>Increments the total row count (called for every row, not just samples).</summary>
-        internal void IncrementRowCount()
-        {
-            _totalRowCount++;
-        }
-
-        /// <summary>Switches to sampling every row (called when nearing budget threshold).</summary>
-        internal void EscalateToEveryRow()
-        {
-            _sampleInterval = 1;
-        }
-
-        /// <summary>Estimates total memory consumed by all rows seen so far.</summary>
-        internal long EstimateTotalBytes()
-        {
-            if (_totalRowCount == 0)
-            {
-                return 0;
-            }
-
-            if (_fixedWidthDetermined && _isFixedWidth)
-            {
-                return _totalRowCount * _fixedRowSize;
-            }
-
-            if (_sampleCount == 0)
-            {
-                return 0;
-            }
-
-            long averageRowBytes = _totalSampledBytes / _sampleCount;
-            return _totalRowCount * averageRowBytes;
-        }
-
-        private static bool IsFixedWidthRow(Row row)
-        {
-            for (int index = 0; index < row.FieldCount; index++)
-            {
-                DataKind kind = row[index].Kind;
-                if (kind is DataKind.String or DataKind.Vector or DataKind.Matrix
-                    or DataKind.Tensor or DataKind.Image or DataKind.UInt8Array
-                    or DataKind.JsonValue)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private static long EstimateRowBytes(Row row)
-        {
-            long bytes = 0;
-
-            for (int index = 0; index < row.FieldCount; index++)
-            {
-                DataValue value = row[index];
-                bytes += DataValueOverheadBytes;
-
-                if (value.IsNull)
-                {
-                    continue;
-                }
-
-                bytes += value.Kind switch
-                {
-                    DataKind.Scalar => 4,
-                    DataKind.UInt8 => 1,
-                    DataKind.Boolean => 1,
-                    DataKind.Date => 4,
-                    DataKind.DateTime => 10,
-                    DataKind.Time => 8,
-                    DataKind.Duration => 8,
-                    DataKind.Uuid => 16,
-                    DataKind.String => 2L * value.AsString().Length,
-                    DataKind.JsonValue => 2L * value.AsJsonValue().Length,
-                    DataKind.Vector => 4L * value.AsVector().Length,
-                    DataKind.Matrix => 4L * value.AsMatrix(out _, out _).Length,
-                    DataKind.Tensor => 4L * value.AsTensor(out _).Length,
-                    DataKind.UInt8Array => value.AsUInt8Array().Length,
-                    DataKind.Image => value.AsImage().Length,
-                    _ => 8,
-                };
-            }
-
-            // Dictionary entry overhead for this row in the hash table.
-            bytes += DictionaryEntryOverheadBytes;
-
-            return bytes;
-        }
     }
 }

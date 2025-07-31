@@ -149,6 +149,9 @@ public enum SqlToken
     /// <summary>The EXISTS keyword (existence predicate).</summary>
     Exists,
 
+    /// <summary>The DISTINCT keyword (duplicate elimination).</summary>
+    Distinct,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>

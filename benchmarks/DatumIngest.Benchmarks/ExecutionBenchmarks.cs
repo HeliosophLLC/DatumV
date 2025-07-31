@@ -206,4 +206,50 @@ public class ExecutionBenchmarks
         {
         }
     }
+
+    [Benchmark(Description = "SELECT DISTINCT low cardinality (10K)")]
+    public async Task SelectDistinctLowCardinality()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse("SELECT DISTINCT category FROM data");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "SELECT DISTINCT high cardinality (10K)")]
+    public async Task SelectDistinctHighCardinality()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse("SELECT DISTINCT id, category FROM data");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "COUNT(DISTINCT) per group (10K)")]
+    public async Task CountDistinctPerGroup()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "SELECT category, COUNT(DISTINCT name) AS unique_names FROM data GROUP BY category");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
 }

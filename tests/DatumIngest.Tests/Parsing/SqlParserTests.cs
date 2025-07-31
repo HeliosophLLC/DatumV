@@ -1092,4 +1092,82 @@ public class SqlParserTests
         Assert.IsType<CurrentRowBound>(window.Window.Frame.Start);
         Assert.IsType<UnboundedFollowingBound>(window.Window.Frame.End);
     }
+
+    // ───────────────────── DISTINCT ─────────────────────
+
+    [Fact]
+    public void SelectDistinct_SetsDistinctFlag()
+    {
+        SelectStatement result = Parse("SELECT DISTINCT name FROM users");
+
+        Assert.True(result.Distinct);
+        Assert.Single(result.Columns);
+        ColumnReference column = Assert.IsType<ColumnReference>(result.Columns[0].Expression);
+        Assert.Equal("name", column.ColumnName);
+    }
+
+    [Fact]
+    public void SelectWithoutDistinct_DefaultsFalse()
+    {
+        SelectStatement result = Parse("SELECT name FROM users");
+
+        Assert.False(result.Distinct);
+    }
+
+    [Fact]
+    public void SelectDistinct_MultipleColumns()
+    {
+        SelectStatement result = Parse("SELECT DISTINCT a, b, c FROM t");
+
+        Assert.True(result.Distinct);
+        Assert.Equal(3, result.Columns.Count);
+    }
+
+    [Fact]
+    public void FunctionCall_WithDistinct()
+    {
+        SelectStatement result = Parse("SELECT COUNT(DISTINCT name) FROM users");
+
+        Assert.False(result.Distinct);
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("COUNT", func.FunctionName);
+        Assert.True(func.Distinct);
+        Assert.Single(func.Arguments);
+        ColumnReference arg = Assert.IsType<ColumnReference>(func.Arguments[0]);
+        Assert.Equal("name", arg.ColumnName);
+    }
+
+    [Fact]
+    public void FunctionCall_WithoutDistinct_DefaultsFalse()
+    {
+        SelectStatement result = Parse("SELECT COUNT(name) FROM users");
+
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.False(func.Distinct);
+    }
+
+    [Fact]
+    public void SelectDistinct_WithCountDistinct()
+    {
+        SelectStatement result = Parse(
+            "SELECT DISTINCT category, COUNT(DISTINCT name) FROM products GROUP BY category");
+
+        Assert.True(result.Distinct);
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[1].Expression);
+        Assert.True(func.Distinct);
+    }
+
+    [Fact]
+    public void SumDistinct()
+    {
+        SelectStatement result = Parse("SELECT SUM(DISTINCT price) FROM products");
+
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("SUM", func.FunctionName);
+        Assert.True(func.Distinct);
+    }
 }

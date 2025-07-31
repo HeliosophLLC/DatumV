@@ -216,15 +216,18 @@ public static class SqlParser
         .OptionalOrDefault();
 
     /// <summary>
-    /// Function call: identifier ( arg1, arg2, ... ) [OVER window_spec]
+    /// Function call: identifier ( [DISTINCT] arg1, arg2, ... ) [OVER window_spec]
     /// Must be tried before bare column reference because both start with Identifier.
     /// Supports <c>COUNT(*)</c> by treating a bare <c>*</c> inside the argument list
     /// as a sentinel <see cref="LiteralExpression"/> with value <c>"*"</c>.
     /// When followed by an <c>OVER</c> keyword, produces a <see cref="WindowFunctionCallExpression"/>.
+    /// The optional <c>DISTINCT</c> keyword before arguments is used by aggregate
+    /// functions such as <c>COUNT(DISTINCT col)</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
         from name in Token.EqualTo(SqlToken.Identifier)
         from open in Token.EqualTo(SqlToken.LeftParen)
+        from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
         from args in Token.EqualTo(SqlToken.Star)
                 .Select(_ => (Expression)new LiteralExpression("*"))
                 .Or(SP.Ref(() => ExpressionParser!))
@@ -232,8 +235,8 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         from windowSpec in WindowSpecificationParser.OptionalOrDefault()
         select windowSpec is not null
-            ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, ToSpan(name))
-            : (Expression)new FunctionCallExpression(GetTokenText(name), args, ToSpan(name));
+            ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, Span: ToSpan(name))
+            : (Expression)new FunctionCallExpression(GetTokenText(name), args, Distinct: distinct.HasValue, Span: ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =
@@ -702,6 +705,7 @@ public static class SqlParser
     /// <summary>The complete SELECT statement parser.</summary>
     private static readonly TokenListParser<SqlToken, SelectStatement> SelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
+        from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
         from columns in ColumnList
         from fromClause in FromClauseParser
         from joinClauses in JoinClausesParser
@@ -722,7 +726,8 @@ public static class SqlParser
             havingClause,
             orderByClause,
             limitValue,
-            offsetValue);
+            offsetValue,
+            Distinct: distinct.HasValue);
 
     /// <summary>The full statement parser that expects to consume all input.</summary>
     private static readonly TokenListParser<SqlToken, SelectStatement> FullParser =

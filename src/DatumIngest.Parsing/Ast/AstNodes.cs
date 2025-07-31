@@ -23,7 +23,8 @@ public sealed record SelectStatement(
     Expression? Having = null,
     OrderByClause? OrderBy = null,
     int? Limit = null,
-    int? Offset = null);
+    int? Offset = null,
+    bool Distinct = false);
 
 /// <summary>
 /// A single column in the SELECT list, representing either a named expression
@@ -294,6 +295,7 @@ public enum UnaryOperator
 public sealed record FunctionCallExpression(
     string FunctionName,
     IReadOnlyList<Expression> Arguments,
+    bool Distinct = false,
     SourceSpan? Span = null) : Expression;
 
 /// <summary>
@@ -394,6 +396,7 @@ public sealed record WindowFunctionCallExpression(
     string FunctionName,
     IReadOnlyList<Expression> Arguments,
     WindowSpecification Window,
+    bool Distinct = false,
     SourceSpan? Span = null) : Expression;
 
 /// <summary>

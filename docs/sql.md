@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, FROM, JOIN, WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, FROM, JOIN, WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), INTO, ORDER BY, LIMIT, OFFSET, and subqueries.
 
 ## Comments
 
@@ -27,6 +27,30 @@ SELECT col1, col2, col3
 SELECT a.col1, b.col2
 SELECT col1 AS alias, normalize(col2) AS norm_col
 SELECT table_alias.*
+```
+
+### SELECT DISTINCT
+
+Eliminate duplicate rows from the result set. Deduplication is based on all projected columns:
+
+```sql
+-- Unique categories
+SELECT DISTINCT category FROM products
+
+-- Unique combinations
+SELECT DISTINCT department, status FROM employees
+```
+
+`SELECT DISTINCT` uses a streaming hash-based operator. When a memory budget is configured and the in-memory set exceeds the budget, the operator spills unseen rows to hash-partitioned temporary files and deduplicates them in a drain phase. This adds no Query Units (0 QU).
+
+**ORDER BY constraint:** When `SELECT DISTINCT` is combined with `ORDER BY`, every `ORDER BY` expression must appear in the `SELECT` list. This avoids ambiguity because DISTINCT collapses rows before sorting.
+
+```sql
+-- Valid: ORDER BY column is in SELECT list
+SELECT DISTINCT name FROM users ORDER BY name
+
+-- Invalid: age is not projected
+SELECT DISTINCT name FROM users ORDER BY age
 ```
 
 ## FROM
@@ -140,10 +164,15 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 |----------|-------------|
 | `COUNT(*)` | Count all rows in the group. |
 | `COUNT(expr)` | Count non-null values of `expr`. |
+| `COUNT(DISTINCT expr)` | Count distinct non-null values of `expr`. |
 | `SUM(expr)` | Sum of all non-null values. Returns null if all values are null. |
+| `SUM(DISTINCT expr)` | Sum of distinct non-null values. |
 | `AVG(expr)` | Arithmetic mean of non-null values. Returns null if all values are null. |
+| `AVG(DISTINCT expr)` | Mean of distinct non-null values. |
 | `MIN(expr)` | Minimum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
 | `MAX(expr)` | Maximum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
+
+The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions: `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`, `AVG(DISTINCT expr)`, `MIN(DISTINCT expr)`, `MAX(DISTINCT expr)`. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
 
 ### HAVING
 

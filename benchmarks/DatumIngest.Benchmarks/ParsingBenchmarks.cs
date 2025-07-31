@@ -19,6 +19,7 @@ public class ParsingBenchmarks
     private const string InSubqueryQuery = "SELECT id, name FROM data WHERE id IN (SELECT lookup_id FROM lookup WHERE weight > 10)";
     private const string ExistsSubqueryQuery = "SELECT id, name FROM data WHERE EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id AND weight > 10)";
     private const string ScalarSubqueryQuery = "SELECT id, name, (SELECT MAX(weight) FROM lookup WHERE lookup.lookup_id = data.id) AS max_weight FROM data";
+    private const string DistinctAggregateQuery = "SELECT category, COUNT(DISTINCT name) AS unique_names, SUM(DISTINCT value) AS unique_sum FROM data GROUP BY category";
 
     [Benchmark(Description = "Tokenize simple SELECT")]
     public void TokenizeSimple()
@@ -90,5 +91,11 @@ public class ParsingBenchmarks
     public void ParseScalarSubquery()
     {
         SqlParser.Parse(ScalarSubqueryQuery);
+    }
+
+    [Benchmark(Description = "Parse DISTINCT aggregate")]
+    public void ParseDistinctAggregate()
+    {
+        SqlParser.Parse(DistinctAggregateQuery);
     }
 }

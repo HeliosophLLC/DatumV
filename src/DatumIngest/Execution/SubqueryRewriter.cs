@@ -125,7 +125,7 @@ internal static class SubqueryRewriter
 
                 return rewrittenArguments is null
                     ? function
-                    : new FunctionCallExpression(function.FunctionName, rewrittenArguments, function.Span);
+                    : new FunctionCallExpression(function.FunctionName, rewrittenArguments, function.Distinct, function.Span);
             }
 
             case InExpression inExpression:

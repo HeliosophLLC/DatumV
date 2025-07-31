@@ -256,7 +256,20 @@ public sealed class QueryPlanner
             source = new ProjectOperator(source, projectionColumns);
         }
 
-        // 5. Apply ORDER BY — use index scan when a sorted index covers the sort column.
+        // 5. Apply DISTINCT — streaming deduplication on projected output.
+        if (statement.Distinct)
+        {
+            // When SELECT DISTINCT is combined with ORDER BY, every ORDER BY expression
+            // must appear in the SELECT list, otherwise the result is ambiguous.
+            if (statement.OrderBy is not null)
+            {
+                ValidateDistinctOrderBy(statement.Columns, statement.OrderBy);
+            }
+
+            source = new DistinctOperator(source);
+        }
+
+        // 6. Apply ORDER BY — use index scan when a sorted index covers the sort column.
         if (statement.OrderBy is not null)
         {
             if (!TryReplaceWithIndexScan(ref source, statement.OrderBy))
@@ -269,7 +282,7 @@ public sealed class QueryPlanner
             }
         }
 
-        // 6. Apply LIMIT/OFFSET.
+        // 7. Apply LIMIT/OFFSET.
         if (statement.Limit is not null)
         {
             source = new LimitOperator(source, statement.Limit.Value, statement.Offset ?? 0);
@@ -908,6 +921,12 @@ public sealed class QueryPlanner
             if (aggregateFunction is not null)
             {
                 bool isCountStar = IsCountStarCall(func);
+
+                if (func.Distinct && isCountStar)
+                {
+                    throw new InvalidOperationException(
+                        "COUNT(DISTINCT *) is not supported. Use COUNT(DISTINCT column) instead.");
+                }
                 string outputName = QueryExplainer.FormatExpression(func);
 
                 // Deduplicate: reuse existing AggregateColumn if the same aggregate
@@ -929,7 +948,7 @@ public sealed class QueryPlanner
                         : func.Arguments;
 
                     aggregateColumns.Add(new AggregateColumn(
-                        aggregateFunction, arguments, outputName, isCountStar));
+                        aggregateFunction, arguments, outputName, isCountStar, func.Distinct));
                 }
 
                 return new ColumnReference(null, outputName);
@@ -1086,6 +1105,13 @@ public sealed class QueryPlanner
     {
         if (expression is WindowFunctionCallExpression windowCall)
         {
+            if (windowCall.Distinct)
+            {
+                throw new InvalidOperationException(
+                    $"DISTINCT is not supported in window functions: " +
+                    $"'{QueryExplainer.FormatExpression(windowCall)}'.");
+            }
+
             string outputName = QueryExplainer.FormatExpression(windowCall);
 
             // Deduplicate: reuse existing WindowColumn if the same expression already appears.
@@ -1163,6 +1189,47 @@ public sealed class QueryPlanner
             : null;
 
         return new CaseExpression(rewrittenOperand, rewrittenClauses, rewrittenElse, caseExpression.Span);
+    }
+
+    /// <summary>
+    /// Validates that every ORDER BY expression appears in the SELECT list
+    /// when SELECT DISTINCT is active. If an ORDER BY column is not projected,
+    /// the result would be ambiguous because DISTINCT collapses rows before sorting.
+    /// </summary>
+    private static void ValidateDistinctOrderBy(
+        IReadOnlyList<SelectColumn> selectColumns,
+        OrderByClause orderBy)
+    {
+        // Collect the effective output names from the SELECT list.
+        HashSet<string> selectedNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SelectColumn column in selectColumns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                // SELECT * projects everything — any ORDER BY is valid.
+                return;
+            }
+
+            if (column.Alias is not null)
+            {
+                selectedNames.Add(column.Alias);
+            }
+
+            // Also accept the raw expression form (e.g. "t.name") so that
+            // ORDER BY t.name matches SELECT t.name even without an alias.
+            selectedNames.Add(QueryExplainer.FormatExpression(column.Expression));
+        }
+
+        foreach (OrderByItem item in orderBy.Items)
+        {
+            string orderExpression = QueryExplainer.FormatExpression(item.Expression);
+            if (!selectedNames.Contains(orderExpression))
+            {
+                throw new InvalidOperationException(
+                    $"ORDER BY expression '{orderExpression}' must appear in the SELECT list " +
+                    $"when SELECT DISTINCT is specified.");
+            }
+        }
     }
 
     /// <summary>

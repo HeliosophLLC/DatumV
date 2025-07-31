@@ -591,7 +591,7 @@ public static class QueryExplainer
             LiteralExpression lit => FormatLiteral(lit.Value),
             BinaryExpression bin => $"{FormatExpression(bin.Left)} {FormatBinaryOp(bin.Operator)} {FormatExpression(bin.Right)}",
             UnaryExpression unary => FormatUnary(unary),
-            FunctionCallExpression func => $"{func.FunctionName}({string.Join(", ", func.Arguments.Select(FormatExpression))})",
+            FunctionCallExpression func => $"{func.FunctionName}({(func.Distinct ? "DISTINCT " : "")}{string.Join(", ", func.Arguments.Select(FormatExpression))})",
             InExpression inExpr => $"{FormatExpression(inExpr.Expression)} {(inExpr.Negated ? "NOT IN" : "IN")} ({string.Join(", ", inExpr.Values.Select(FormatExpression))})",
             BetweenExpression between => $"{FormatExpression(between.Expression)} {(between.Negated ? "NOT BETWEEN" : "BETWEEN")} {FormatExpression(between.Low)} AND {FormatExpression(between.High)}",
             IsNullExpression isNull => $"{FormatExpression(isNull.Expression)} {(isNull.Negated ? "IS NOT NULL" : "IS NULL")}",
@@ -678,6 +678,10 @@ public static class QueryExplainer
         System.Text.StringBuilder builder = new();
         builder.Append(window.FunctionName);
         builder.Append('(');
+        if (window.Distinct)
+        {
+            builder.Append("DISTINCT ");
+        }
         builder.Append(string.Join(", ", window.Arguments.Select(FormatExpression)));
         builder.Append(") OVER(");
 

@@ -1,4 +1,5 @@
 using DatumIngest.Functions;
+using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -188,7 +189,16 @@ public sealed class GroupByOperator : IQueryOperator
         IAggregateAccumulator[] accumulators = new IAggregateAccumulator[_aggregateColumns.Count];
         for (int index = 0; index < _aggregateColumns.Count; index++)
         {
-            accumulators[index] = _aggregateColumns[index].Function.CreateAccumulator();
+            AggregateColumn column = _aggregateColumns[index];
+            IAggregateAccumulator accumulator = column.Function.CreateAccumulator();
+
+            if (column.Distinct)
+            {
+                accumulator = new DistinctAccumulatorDecorator(
+                    accumulator, column.ArgumentExpressions.Count);
+            }
+
+            accumulators[index] = accumulator;
         }
         return new GroupState { Accumulators = accumulators };
     }
@@ -217,8 +227,10 @@ public sealed class GroupByOperator : IQueryOperator
 /// </param>
 /// <param name="OutputName">The output column name (e.g. <c>COUNT(*)</c>, <c>SUM(price)</c>).</param>
 /// <param name="IsCountStar">Whether this is a <c>COUNT(*)</c> invocation with no arguments.</param>
+/// <param name="Distinct">Whether the aggregate uses <c>DISTINCT</c> to deduplicate values before accumulation.</param>
 public sealed record AggregateColumn(
     IAggregateFunction Function,
     IReadOnlyList<Expression> ArgumentExpressions,
     string OutputName,
-    bool IsCountStar = false);
+    bool IsCountStar = false,
+    bool Distinct = false);
