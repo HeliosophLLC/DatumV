@@ -328,14 +328,17 @@ public sealed class QueryPlanner
 
         // Rewrite all expression clauses that may contain SubqueryExpressions.
         List<SubqueryRewriter.CorrelatedSubquery> allCorrelated = [];
+        List<SubqueryRewriter.DecorrelatedScalarJoin> allDecorrelated = [];
 
         Expression? rewrittenWhere = semiJoinResult.RemainingWhere;
         if (rewrittenWhere is not null)
         {
             SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
-                rewrittenWhere, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+                rewrittenWhere, outerAliases, this, context, _functionRegistry,
+                cancellationToken).ConfigureAwait(false);
             rewrittenWhere = result.Expression;
             allCorrelated.AddRange(result.CorrelatedSubqueries);
+            allDecorrelated.AddRange(result.DecorrelatedScalarJoins);
         }
 
         List<SelectColumn>? rewrittenColumns = null;
@@ -348,13 +351,15 @@ public sealed class QueryPlanner
             }
 
             SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
-                column.Expression, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+                column.Expression, outerAliases, this, context, _functionRegistry,
+                cancellationToken).ConfigureAwait(false);
 
             if (!ReferenceEquals(result.Expression, column.Expression))
             {
                 rewrittenColumns ??= new List<SelectColumn>(statement.Columns);
                 rewrittenColumns[index] = new SelectColumn(result.Expression, column.Alias);
                 allCorrelated.AddRange(result.CorrelatedSubqueries);
+                allDecorrelated.AddRange(result.DecorrelatedScalarJoins);
             }
         }
 
@@ -362,9 +367,11 @@ public sealed class QueryPlanner
         if (rewrittenHaving is not null)
         {
             SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
-                rewrittenHaving, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+                rewrittenHaving, outerAliases, this, context, _functionRegistry,
+                cancellationToken).ConfigureAwait(false);
             rewrittenHaving = result.Expression;
             allCorrelated.AddRange(result.CorrelatedSubqueries);
+            allDecorrelated.AddRange(result.DecorrelatedScalarJoins);
         }
 
         IReadOnlyList<JoinClause>? rewrittenJoins = statement.Joins;
@@ -380,13 +387,15 @@ public sealed class QueryPlanner
                 }
 
                 SubqueryRewriter.RewriteResult result = await SubqueryRewriter.RewriteAsync(
-                    join.OnCondition, outerAliases, this, context, cancellationToken).ConfigureAwait(false);
+                    join.OnCondition, outerAliases, this, context, _functionRegistry,
+                    cancellationToken).ConfigureAwait(false);
 
                 if (!ReferenceEquals(result.Expression, join.OnCondition))
                 {
                     joinList ??= new List<JoinClause>(statement.Joins);
                     joinList[index] = new JoinClause(join.Type, join.Source, result.Expression);
                     allCorrelated.AddRange(result.CorrelatedSubqueries);
+                    allDecorrelated.AddRange(result.DecorrelatedScalarJoins);
                 }
             }
 
@@ -409,15 +418,26 @@ public sealed class QueryPlanner
             statement.Limit,
             statement.Offset);
 
-        // Build a source transform that injects ScalarSubqueryOperator wrappers
-        // and semi-join operators between the source (Scan+Joins) and the rest of the
-        // pipeline (Filter/Project/etc.). This ensures synthetic columns and semi-join
-        // filtering are applied before any operator that references them.
+        // Build a source transform that injects ScalarSubqueryOperator wrappers,
+        // decorrelated LEFT JOINs, and semi-join operators between the source
+        // (Scan+Joins) and the rest of the pipeline (Filter/Project/etc.).
+        // This ensures synthetic columns and semi-join filtering are applied
+        // before any operator that references them.
         Func<IQueryOperator, IQueryOperator>? sourceTransform = null;
-        if (allCorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0)
+        if (allCorrelated.Count > 0 || allDecorrelated.Count > 0 || semiJoinResult.SemiJoins.Count > 0)
         {
             sourceTransform = source =>
             {
+                // Decorrelated scalar subqueries: inject as LEFT JOINs on grouped inner plans.
+                // These must be injected before correlated ScalarSubqueryOperators so that
+                // any remaining correlated subqueries see the decorrelated columns.
+                foreach (SubqueryRewriter.DecorrelatedScalarJoin decorrelated in allDecorrelated)
+                {
+                    source = new JoinOperator(
+                        source, decorrelated.InnerPlan, JoinType.Left,
+                        decorrelated.OnCondition);
+                }
+
                 foreach (SubqueryRewriter.CorrelatedSubquery correlated in allCorrelated)
                 {
                     IQueryOperator innerPlan = Plan(correlated.InnerQuery);

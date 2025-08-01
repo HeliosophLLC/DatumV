@@ -1,3 +1,4 @@
+using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 
@@ -23,6 +24,24 @@ internal static class SubqueryRewriter
     internal sealed record CorrelatedSubquery(string SyntheticColumnName, SelectStatement InnerQuery);
 
     /// <summary>
+    /// Describes a decorrelated scalar subquery that has been rewritten into a
+    /// <c>GROUP BY</c> + <c>LEFT JOIN</c>. The inner plan produces grouped aggregate
+    /// results keyed by the correlation column(s), and the outer query references
+    /// the aggregate result via a synthetic column.
+    /// </summary>
+    /// <param name="SyntheticColumnName">
+    /// The synthetic column name that replaces the original subquery expression.
+    /// </param>
+    /// <param name="InnerPlan">The planned operator tree for the grouped inner query.</param>
+    /// <param name="OnCondition">
+    /// The LEFT JOIN predicate connecting outer key(s) to inner GROUP BY key(s).
+    /// </param>
+    internal sealed record DecorrelatedScalarJoin(
+        string SyntheticColumnName,
+        IQueryOperator InnerPlan,
+        Expression OnCondition);
+
+    /// <summary>
     /// Result of rewriting an expression tree. Contains the rewritten expression
     /// and any correlated subqueries that need per-row execution.
     /// </summary>
@@ -31,9 +50,14 @@ internal static class SubqueryRewriter
     /// Correlated subqueries requiring <see cref="Operators.ScalarSubqueryOperator"/> injection.
     /// Empty when all subqueries were uncorrelated (constant-folded).
     /// </param>
+    /// <param name="DecorrelatedScalarJoins">
+    /// Decorrelated scalar subqueries rewritten as <c>LEFT JOIN</c> on a grouped inner plan.
+    /// Empty when no subqueries qualified for decorrelation.
+    /// </param>
     internal sealed record RewriteResult(
         Expression Expression,
-        IReadOnlyList<CorrelatedSubquery> CorrelatedSubqueries);
+        IReadOnlyList<CorrelatedSubquery> CorrelatedSubqueries,
+        IReadOnlyList<DecorrelatedScalarJoin> DecorrelatedScalarJoins);
 
     /// <summary>
     /// Rewrites all <see cref="SubqueryExpression"/> nodes in the given expression.
@@ -45,6 +69,7 @@ internal static class SubqueryRewriter
     /// <param name="outerAliases">Table aliases available in the outer scope, used to detect correlation.</param>
     /// <param name="planner">The query planner for planning inner subqueries.</param>
     /// <param name="context">Execution context for running uncorrelated subqueries.</param>
+    /// <param name="functionRegistry">Function registry for detecting aggregate functions during decorrelation.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The rewritten expression and any correlated subqueries.</returns>
     internal static async Task<RewriteResult> RewriteAsync(
@@ -52,16 +77,19 @@ internal static class SubqueryRewriter
         HashSet<string> outerAliases,
         QueryPlanner planner,
         ExecutionContext context,
+        FunctionRegistry functionRegistry,
         CancellationToken cancellationToken)
     {
         List<CorrelatedSubquery> correlatedSubqueries = [];
+        List<DecorrelatedScalarJoin> decorrelatedJoins = [];
         int[] subqueryCounter = [0];
 
         Expression rewritten = await RewriteNodeAsync(
-            expression, outerAliases, planner, context, correlatedSubqueries,
+            expression, outerAliases, planner, context, functionRegistry,
+            correlatedSubqueries, decorrelatedJoins,
             subqueryCounter, cancellationToken).ConfigureAwait(false);
 
-        return new RewriteResult(rewritten, correlatedSubqueries);
+        return new RewriteResult(rewritten, correlatedSubqueries, decorrelatedJoins);
     }
 
     private static async Task<Expression> RewriteNodeAsync(
@@ -69,7 +97,9 @@ internal static class SubqueryRewriter
         HashSet<string> outerAliases,
         QueryPlanner planner,
         ExecutionContext context,
+        FunctionRegistry functionRegistry,
         List<CorrelatedSubquery> correlatedSubqueries,
+        List<DecorrelatedScalarJoin> decorrelatedJoins,
         int[] subqueryCounter,
         CancellationToken cancellationToken)
     {
@@ -77,16 +107,19 @@ internal static class SubqueryRewriter
         {
             case SubqueryExpression subquery:
                 return await RewriteSubqueryAsync(
-                    subquery, outerAliases, planner, context, correlatedSubqueries,
+                    subquery, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
             case BinaryExpression binary:
             {
                 Expression left = await RewriteNodeAsync(
-                    binary.Left, outerAliases, planner, context, correlatedSubqueries,
+                    binary.Left, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
                 Expression right = await RewriteNodeAsync(
-                    binary.Right, outerAliases, planner, context, correlatedSubqueries,
+                    binary.Right, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                 return ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right)
@@ -97,7 +130,8 @@ internal static class SubqueryRewriter
             case UnaryExpression unary:
             {
                 Expression operand = await RewriteNodeAsync(
-                    unary.Operand, outerAliases, planner, context, correlatedSubqueries,
+                    unary.Operand, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                 return ReferenceEquals(operand, unary.Operand)
@@ -113,7 +147,8 @@ internal static class SubqueryRewriter
                 {
                     Expression original = function.Arguments[index];
                     Expression rewritten = await RewriteNodeAsync(
-                        original, outerAliases, planner, context, correlatedSubqueries,
+                        original, outerAliases, planner, context, functionRegistry,
+                        correlatedSubqueries, decorrelatedJoins,
                         subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                     if (!ReferenceEquals(rewritten, original))
@@ -131,7 +166,8 @@ internal static class SubqueryRewriter
             case InExpression inExpression:
             {
                 Expression target = await RewriteNodeAsync(
-                    inExpression.Expression, outerAliases, planner, context, correlatedSubqueries,
+                    inExpression.Expression, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                 List<Expression>? rewrittenValues = null;
@@ -140,7 +176,8 @@ internal static class SubqueryRewriter
                 {
                     Expression original = inExpression.Values[index];
                     Expression rewritten = await RewriteNodeAsync(
-                        original, outerAliases, planner, context, correlatedSubqueries,
+                        original, outerAliases, planner, context, functionRegistry,
+                        correlatedSubqueries, decorrelatedJoins,
                         subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                     if (!ReferenceEquals(rewritten, original))
@@ -159,13 +196,16 @@ internal static class SubqueryRewriter
             case BetweenExpression between:
             {
                 Expression target = await RewriteNodeAsync(
-                    between.Expression, outerAliases, planner, context, correlatedSubqueries,
+                    between.Expression, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
                 Expression low = await RewriteNodeAsync(
-                    between.Low, outerAliases, planner, context, correlatedSubqueries,
+                    between.Low, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
                 Expression high = await RewriteNodeAsync(
-                    between.High, outerAliases, planner, context, correlatedSubqueries,
+                    between.High, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                 bool changed = !ReferenceEquals(target, between.Expression) ||
@@ -180,7 +220,8 @@ internal static class SubqueryRewriter
             case IsNullExpression isNull:
             {
                 Expression inner = await RewriteNodeAsync(
-                    isNull.Expression, outerAliases, planner, context, correlatedSubqueries,
+                    isNull.Expression, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                 return ReferenceEquals(inner, isNull.Expression)
@@ -191,7 +232,8 @@ internal static class SubqueryRewriter
             case CastExpression cast:
             {
                 Expression inner = await RewriteNodeAsync(
-                    cast.Expression, outerAliases, planner, context, correlatedSubqueries,
+                    cast.Expression, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
                     subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                 return ReferenceEquals(inner, cast.Expression)
@@ -205,7 +247,8 @@ internal static class SubqueryRewriter
                 if (operand is not null)
                 {
                     operand = await RewriteNodeAsync(
-                        operand, outerAliases, planner, context, correlatedSubqueries,
+                        operand, outerAliases, planner, context, functionRegistry,
+                        correlatedSubqueries, decorrelatedJoins,
                         subqueryCounter, cancellationToken).ConfigureAwait(false);
                 }
 
@@ -215,10 +258,12 @@ internal static class SubqueryRewriter
                 {
                     WhenClause clause = caseExpression.WhenClauses[index];
                     Expression condition = await RewriteNodeAsync(
-                        clause.Condition, outerAliases, planner, context, correlatedSubqueries,
+                        clause.Condition, outerAliases, planner, context, functionRegistry,
+                        correlatedSubqueries, decorrelatedJoins,
                         subqueryCounter, cancellationToken).ConfigureAwait(false);
                     Expression result = await RewriteNodeAsync(
-                        clause.Result, outerAliases, planner, context, correlatedSubqueries,
+                        clause.Result, outerAliases, planner, context, functionRegistry,
+                        correlatedSubqueries, decorrelatedJoins,
                         subqueryCounter, cancellationToken).ConfigureAwait(false);
 
                     if (!ReferenceEquals(condition, clause.Condition) || !ReferenceEquals(result, clause.Result))
@@ -232,7 +277,8 @@ internal static class SubqueryRewriter
                 if (elseResult is not null)
                 {
                     elseResult = await RewriteNodeAsync(
-                        elseResult, outerAliases, planner, context, correlatedSubqueries,
+                        elseResult, outerAliases, planner, context, functionRegistry,
+                        correlatedSubqueries, decorrelatedJoins,
                         subqueryCounter, cancellationToken).ConfigureAwait(false);
                 }
 
@@ -267,13 +313,17 @@ internal static class SubqueryRewriter
 
     /// <summary>
     /// Classifies a subquery as correlated or uncorrelated and rewrites accordingly.
+    /// Correlated subqueries with a single aggregate and equality correlation are
+    /// decorrelated into a <c>GROUP BY</c> + <c>LEFT JOIN</c> for O(N+M) execution.
     /// </summary>
     private static async Task<Expression> RewriteSubqueryAsync(
         SubqueryExpression subquery,
         HashSet<string> outerAliases,
         QueryPlanner planner,
         ExecutionContext context,
+        FunctionRegistry functionRegistry,
         List<CorrelatedSubquery> correlatedSubqueries,
+        List<DecorrelatedScalarJoin> decorrelatedJoins,
         int[] subqueryCounter,
         CancellationToken cancellationToken)
     {
@@ -293,11 +343,33 @@ internal static class SubqueryRewriter
 
         if (isCorrelated)
         {
-            // Correlated: replace with synthetic column reference.
-            // The ScalarSubqueryOperator will populate this column per outer row.
-            // The "__subquery" table qualifier prevents predicate pushdown from
-            // pushing this reference below the ScalarSubqueryOperator, while
-            // ExpressionEvaluator still resolves it via unqualified fallback.
+            // Try decorrelation: rewrite into GROUP BY + LEFT JOIN when the pattern matches.
+            DecorrelatedScalarJoin? decorrelated = TryDecorrelateScalarSubquery(
+                subquery.Query, outerAliases, planner, functionRegistry, subqueryCounter);
+
+            if (decorrelated is not null)
+            {
+                decorrelatedJoins.Add(decorrelated);
+
+                Expression resultReference = new ColumnReference("__subquery", decorrelated.SyntheticColumnName);
+
+                // COUNT produces 0 for empty groups, but LEFT JOIN yields NULL for
+                // non-matching rows. Wrap with CASE WHEN IS NULL THEN 0 ELSE result END.
+                if (subquery.Query.Columns[0].Expression is FunctionCallExpression func
+                    && string.Equals(func.FunctionName, "COUNT", StringComparison.OrdinalIgnoreCase))
+                {
+                    resultReference = new CaseExpression(
+                        Operand: null,
+                        WhenClauses: [new WhenClause(
+                            new IsNullExpression(resultReference, Negated: false),
+                            new LiteralExpression(0f))],
+                        ElseResult: resultReference);
+                }
+
+                return resultReference;
+            }
+
+            // Fallback: per-row execution via ScalarSubqueryOperator.
             string syntheticName = $"__scalar_subquery_{subqueryCounter[0]++}";
             correlatedSubqueries.Add(new CorrelatedSubquery(syntheticName, subquery.Query));
             return new ColumnReference("__subquery", syntheticName);
@@ -498,5 +570,237 @@ internal static class SubqueryRewriter
                 // Do not recurse into nested subqueries — they are separate scopes.
                 break;
         }
+    }
+
+    // ────────────────────────────────── Decorrelation ──────────────────────────────────
+
+    /// <summary>
+    /// Attempts to decorrelate a correlated scalar subquery into a <c>GROUP BY</c> +
+    /// <c>LEFT JOIN</c>. Returns the decorrelated join descriptor, or <see langword="null"/>
+    /// if the subquery does not match the decorrelatable pattern.
+    /// </summary>
+    /// <remarks>
+    /// <para>A subquery is decorrelatable when all of these hold:</para>
+    /// <list type="number">
+    /// <item>Inner SELECT has exactly one column that is a single aggregate function call.</item>
+    /// <item>Inner WHERE contains at least one correlated equality conjunct where both sides
+    /// are simple <see cref="ColumnReference"/> nodes.</item>
+    /// <item>No existing GROUP BY, HAVING, ORDER BY, or LIMIT on the inner query.</item>
+    /// </list>
+    /// <para>
+    /// The rewrite produces:
+    /// <c>SELECT inner_key AS __group_key_N, AGG(args) AS __agg_result_N FROM inner WHERE non_correlated GROUP BY inner_key</c>
+    /// and a LEFT JOIN ON <c>outer_key = __derived.__group_key_N</c>.
+    /// For COUNT aggregates, the replacement expression is wrapped with
+    /// <c>CASE WHEN result IS NULL THEN 0 ELSE result END</c> to preserve
+    /// SQL semantics (empty group → 0, not NULL).
+    /// </para>
+    /// </remarks>
+    private static DecorrelatedScalarJoin? TryDecorrelateScalarSubquery(
+        SelectStatement innerQuery,
+        HashSet<string> outerAliases,
+        QueryPlanner planner,
+        FunctionRegistry functionRegistry,
+        int[] subqueryCounter)
+    {
+        // Guard: no GROUP BY, HAVING, ORDER BY, LIMIT, or OFFSET already present.
+        if (innerQuery.GroupBy is not null || innerQuery.Having is not null
+            || innerQuery.OrderBy is not null || innerQuery.Limit is not null
+            || innerQuery.Offset is not null)
+        {
+            return null;
+        }
+
+        // Guard: exactly one SELECT column that is a single aggregate function call.
+        if (innerQuery.Columns.Count != 1 || innerQuery.Columns[0] is SelectAllColumns or SelectTableColumns)
+        {
+            return null;
+        }
+
+        Expression selectExpression = innerQuery.Columns[0].Expression;
+        if (selectExpression is not FunctionCallExpression aggregateCall
+            || functionRegistry.TryGetAggregate(aggregateCall.FunctionName) is null)
+        {
+            return null;
+        }
+
+        // Separate WHERE into correlated and non-correlated predicates.
+        if (innerQuery.Where is null)
+        {
+            return null;
+        }
+
+        List<Expression> conjuncts = [];
+        FlattenAnd(innerQuery.Where, conjuncts);
+
+        List<(ColumnReference OuterKey, ColumnReference InnerKey)> correlationKeys = [];
+        List<Expression> nonCorrelated = [];
+
+        foreach (Expression conjunct in conjuncts)
+        {
+            if (TryExtractCorrelationEquality(conjunct, outerAliases, out ColumnReference? outerKey, out ColumnReference? innerKey))
+            {
+                correlationKeys.Add((outerKey, innerKey));
+            }
+            else if (ReferencesOuterAlias(conjunct, outerAliases))
+            {
+                // Non-equality correlation (e.g., a.id > b.id) — cannot decorrelate.
+                return null;
+            }
+            else
+            {
+                nonCorrelated.Add(conjunct);
+            }
+        }
+
+        if (correlationKeys.Count == 0)
+        {
+            return null;
+        }
+
+        // Build the derived table: SELECT inner_keys, AGG(args) FROM inner WHERE non_correlated GROUP BY inner_keys
+        int sequenceNumber = subqueryCounter[0]++;
+
+        List<SelectColumn> derivedColumns = new(correlationKeys.Count + 1);
+        List<Expression> groupByExpressions = new(correlationKeys.Count);
+        Expression? onCondition = null;
+
+        for (int index = 0; index < correlationKeys.Count; index++)
+        {
+            (ColumnReference outerKey, ColumnReference innerKey) = correlationKeys[index];
+            string groupKeyAlias = $"__group_key_{sequenceNumber}_{index}";
+
+            derivedColumns.Add(new SelectColumn(innerKey, groupKeyAlias));
+            groupByExpressions.Add(innerKey);
+
+            // ON condition: outer_key = __group_key_N_M (unqualified inner key).
+            Expression equality = new BinaryExpression(
+                outerKey,
+                BinaryOperator.Equal,
+                new ColumnReference(null, groupKeyAlias));
+
+            onCondition = onCondition is null
+                ? equality
+                : new BinaryExpression(onCondition, BinaryOperator.And, equality);
+        }
+
+        string aggregateResultAlias = $"__agg_result_{sequenceNumber}";
+        derivedColumns.Add(new SelectColumn(aggregateCall, aggregateResultAlias));
+
+        Expression? nonCorrelatedWhere = nonCorrelated.Count > 0
+            ? CombineWithAnd(nonCorrelated)
+            : null;
+
+        SelectStatement derivedQuery = new(
+            derivedColumns,
+            innerQuery.From,
+            Joins: innerQuery.Joins,
+            Where: nonCorrelatedWhere,
+            GroupBy: new GroupByClause(groupByExpressions));
+
+        IQueryOperator innerPlan = planner.Plan(derivedQuery);
+
+        // The synthetic column name matches the aggregate output alias so
+        // the ColumnReference resolves via unqualified fallback on the joined row.
+        DecorrelatedScalarJoin join = new(aggregateResultAlias, innerPlan, onCondition!);
+        return join;
+    }
+
+    /// <summary>
+    /// Tries to extract a correlation equality of the form <c>outer.col = inner.col</c>
+    /// from a binary expression. Both sides must be simple <see cref="ColumnReference"/>
+    /// nodes, and exactly one must reference an outer alias.
+    /// </summary>
+    private static bool TryExtractCorrelationEquality(
+        Expression expression,
+        HashSet<string> outerAliases,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ColumnReference? outerKey,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ColumnReference? innerKey)
+    {
+        outerKey = null;
+        innerKey = null;
+
+        if (expression is not BinaryExpression { Operator: BinaryOperator.Equal } equality)
+        {
+            return false;
+        }
+
+        if (equality.Left is not ColumnReference leftColumn || equality.Right is not ColumnReference rightColumn)
+        {
+            return false;
+        }
+
+        bool leftIsOuter = leftColumn.TableName is not null
+            && outerAliases.Contains(leftColumn.TableName);
+        bool rightIsOuter = rightColumn.TableName is not null
+            && outerAliases.Contains(rightColumn.TableName);
+
+        // Exactly one side must reference outer scope.
+        if (leftIsOuter == rightIsOuter)
+        {
+            return false;
+        }
+
+        if (leftIsOuter)
+        {
+            outerKey = leftColumn;
+            innerKey = rightColumn;
+        }
+        else
+        {
+            outerKey = rightColumn;
+            innerKey = leftColumn;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns true if the expression contains any column reference whose table qualifier
+    /// matches one of the outer aliases.
+    /// </summary>
+    private static bool ReferencesOuterAlias(Expression expression, HashSet<string> outerAliases)
+    {
+        HashSet<string> aliases = ColumnReferenceCollector.CollectTableAliases(expression);
+
+        foreach (string alias in aliases)
+        {
+            if (outerAliases.Contains(alias))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively flattens AND-connected expressions into a list of conjuncts.
+    /// </summary>
+    private static void FlattenAnd(Expression expression, List<Expression> conjuncts)
+    {
+        if (expression is BinaryExpression binary && binary.Operator == BinaryOperator.And)
+        {
+            FlattenAnd(binary.Left, conjuncts);
+            FlattenAnd(binary.Right, conjuncts);
+        }
+        else
+        {
+            conjuncts.Add(expression);
+        }
+    }
+
+    /// <summary>
+    /// Combines a list of expressions with AND into a single expression.
+    /// </summary>
+    private static Expression CombineWithAnd(List<Expression> expressions)
+    {
+        Expression result = expressions[0];
+        for (int index = 1; index < expressions.Count; index++)
+        {
+            result = new BinaryExpression(result, BinaryOperator.And, expressions[index]);
+        }
+
+        return result;
     }
 }

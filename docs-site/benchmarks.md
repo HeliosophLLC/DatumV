@@ -18,7 +18,7 @@ Available benchmark suites:
 |-------|----------|
 | `ParsingBenchmarks` | SQL tokenization and parsing at various complexity levels |
 | `ProviderBenchmarks` | Read throughput for CSV and JSON at 1K and 10K rows |
-| `ExecutionBenchmarks` | Full query execution: scan, filter, project, join, order+limit |
+| `ExecutionBenchmarks` | Full query execution: scan, filter, project, join, order+limit, subqueries, DISTINCT |
 | `StatisticsBenchmarks` | Statistics collection overhead and merge performance |
 | `OutputBenchmarks` | CSV write throughput, with and without sharding |
 
