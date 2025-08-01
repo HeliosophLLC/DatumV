@@ -61,6 +61,13 @@ public sealed class ExecutionContext
     public long? MemoryBudgetBytes { get; }
 
     /// <summary>
+    /// Maximum recursion depth for recursive CTEs. Limits how many iterations
+    /// the recursive member executes before the operator raises an error.
+    /// Defaults to <c>1000</c>.
+    /// </summary>
+    public int MaxRecursionDepth { get; init; } = 1000;
+
+    /// <summary>
     /// The outer row from a correlated scalar subquery, or <see langword="null"/> when
     /// not inside a correlated subquery. Used by <see cref="ExpressionEvaluator"/> to
     /// resolve column references to outer-scope tables.

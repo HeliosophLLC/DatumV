@@ -519,9 +519,15 @@ public static class SqlParser
             .Or(StarColumn.Try())
             .Or(ExpressionColumn);
 
-    /// <summary>Comma-delimited list of SELECT columns.</summary>
+    /// <summary>Comma-delimited list of SELECT columns (at least one required).</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn[]> ColumnList =
-        ColumnItem.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma));
+        from first in ColumnItem
+        from rest in (
+            from comma in Token.EqualTo(SqlToken.Comma)
+            from item in ColumnItem
+            select item
+        ).Many()
+        select new SelectColumn[] { first }.Concat(rest).ToArray();
 
     // ───────────────────── FROM clause ─────────────────────
 
@@ -700,14 +706,77 @@ public static class SqlParser
             .Apply(Numerics.DecimalDouble)
         select (int?)value;
 
+    // ───────────────────── Common Table Expressions ─────────────────────
+
+    /// <summary>
+    /// Optional explicit column name list for a CTE: <c>(col1, col2, ...)</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string[]> CommonTableExpressionColumnListParser =
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from names in Token.EqualTo(SqlToken.Identifier)
+            .Select(GetTokenText)
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select names;
+
+    /// <summary>
+    /// Materialization hint: <c>MATERIALIZED</c> or <c>NOT MATERIALIZED</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, MaterializationHint> MaterializationHintParser =
+        (from notKw in Token.EqualTo(SqlToken.Not)
+         from matKw in Token.EqualTo(SqlToken.Materialized)
+         select MaterializationHint.NotMaterialized)
+        .Try()
+        .Or(from matKw in Token.EqualTo(SqlToken.Materialized)
+            select MaterializationHint.Materialized);
+
+    /// <summary>
+    /// A single CTE definition: <c>name [(cols)] AS [MATERIALIZED | NOT MATERIALIZED] ( SELECT ... )</c>.
+    /// For recursive CTEs, the body may contain <c>UNION ALL</c> separating the anchor and
+    /// recursive member queries.
+    /// The <paramref name="isRecursive"/> flag is threaded from the WITH RECURSIVE prefix.
+    /// </summary>
+    private static TokenListParser<SqlToken, CommonTableExpression> SingleCommonTableExpressionParser(bool isRecursive) =>
+        from name in Token.EqualTo(SqlToken.Identifier)
+        from columnNames in CommonTableExpressionColumnListParser.OptionalOrDefault()
+        from asKw in Token.EqualTo(SqlToken.As)
+        from hint in MaterializationHintParser.OptionalOrDefault()
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from anchorQuery in SP.Ref(() => SelectStatementParser!)
+        from recursivePart in (
+            from unionKw in Token.EqualTo(SqlToken.Union)
+            from allKw in Token.EqualTo(SqlToken.All)
+            from recursiveQuery in SP.Ref(() => SelectStatementParser!)
+            select (SelectStatement?)recursiveQuery
+        ).OptionalOrDefault()
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select new CommonTableExpression(
+            GetTokenText(name),
+            anchorQuery,
+            recursivePart,
+            columnNames,
+            isRecursive,
+            hint);
+
+    /// <summary>
+    /// The WITH clause: <c>WITH [RECURSIVE] cte1, cte2, ... SELECT ...</c>.
+    /// Parses one or more comma-separated CTE definitions.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, CommonTableExpression[]> WithClauseParser =
+        from withKw in Token.EqualTo(SqlToken.With)
+        from recursive in Token.EqualTo(SqlToken.Recursive).OptionalOrDefault()
+        from ctes in SP.Ref(() => SingleCommonTableExpressionParser(recursive.HasValue))
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        select ctes;
+
     // ───────────────────── SELECT statement ─────────────────────
 
-    /// <summary>The complete SELECT statement parser.</summary>
+    /// <summary>The core SELECT statement parser (without WITH preamble).</summary>
     private static readonly TokenListParser<SqlToken, SelectStatement> SelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
         from columns in ColumnList
-        from fromClause in FromClauseParser
+        from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
@@ -729,9 +798,20 @@ public static class SqlParser
             offsetValue,
             Distinct: distinct.HasValue);
 
+    /// <summary>
+    /// Top-level statement parser: optional WITH clause followed by SELECT.
+    /// The WITH clause's CTE definitions are threaded into the <see cref="SelectStatement"/>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, SelectStatement> StatementParser =
+        from ctes in WithClauseParser.OptionalOrDefault()
+        from statement in SelectStatementParser
+        select ctes is not null && ctes.Length > 0
+            ? statement with { CommonTableExpressions = ctes }
+            : statement;
+
     /// <summary>The full statement parser that expects to consume all input.</summary>
     private static readonly TokenListParser<SqlToken, SelectStatement> FullParser =
-        SelectStatementParser.AtEnd();
+        StatementParser.AtEnd();
 
     /// <summary>
     /// Set of tokens that begin top-level clauses. Used by the error-recovering
@@ -739,6 +819,8 @@ public static class SqlParser
     /// </summary>
     private static readonly HashSet<SqlToken> ClauseStartTokens =
     [
+        SqlToken.With,
+        SqlToken.Select,
         SqlToken.From,
         SqlToken.Join,
         SqlToken.Inner,
@@ -816,6 +898,26 @@ public static class SqlParser
         Token<SqlToken>[] tokenArray = tokens.ToArray();
         int position = 0;
 
+        // ── WITH clause (CTEs) ──
+        CommonTableExpression[]? commonTableExpressions = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.With)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, CommonTableExpression[]> withResult =
+                WithClauseParser.TryParse(remaining);
+
+            if (!withResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid WITH clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                commonTableExpressions = withResult.Value;
+                position += CountConsumed(tokenArray, position, withResult.Remainder);
+            }
+        }
+
         // ── SELECT columns ──
         SelectColumn[]? columns = null;
         if (position < tokenArray.Length)
@@ -853,9 +955,9 @@ public static class SqlParser
             AddErrorFromToken(errors, tokenArray, position, "Expected SELECT keyword.");
         }
 
-        // ── FROM clause ──
+        // ── FROM clause (optional) ──
         FromClause? fromClause = null;
-        if (position < tokenArray.Length)
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.From)
         {
             TokenList<SqlToken> remaining = new(tokenArray[position..]);
             TokenListParserResult<SqlToken, FromClause> fromResult =
@@ -863,18 +965,14 @@ public static class SqlParser
 
             if (!fromResult.HasValue)
             {
-                AddErrorFromToken(errors, tokenArray, position, "Expected FROM clause.");
-                position = SkipToNextClauseIndex(tokenArray, position);
+                AddErrorFromToken(errors, tokenArray, position, "Invalid FROM clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
             }
             else
             {
                 fromClause = fromResult.Value;
                 position += CountConsumed(tokenArray, position, fromResult.Remainder);
             }
-        }
-        else
-        {
-            AddErrorFromToken(errors, tokenArray, position, "Expected FROM clause.");
         }
 
         // ── JOIN clauses ──
@@ -1045,7 +1143,7 @@ public static class SqlParser
 
         // Build partial AST if we have enough structure.
         SelectStatement? statement = null;
-        if (columns is not null && fromClause is not null)
+        if (columns is not null)
         {
             statement = new SelectStatement(
                 columns,
@@ -1057,23 +1155,8 @@ public static class SqlParser
                 havingClause,
                 orderByClause,
                 limitValue,
-                offsetValue);
-        }
-        else if (columns is not null)
-        {
-            // Partial: we have columns but no FROM — build with a placeholder
-            // source so downstream analysis can at least see the column expressions.
-            statement = new SelectStatement(
-                columns,
-                new FromClause(new TableReference("?", Span: new SourceSpan(1, 1, 0))),
-                intoClause,
-                joinClauses.Count > 0 ? joinClauses.ToArray() : null,
-                whereClause,
-                groupByClause,
-                havingClause,
-                orderByClause,
-                limitValue,
-                offsetValue);
+                offsetValue,
+                CommonTableExpressions: commonTableExpressions);
         }
 
         return new ParseResult(statement, errors);

@@ -15,7 +15,7 @@ public sealed record SourceSpan(int Line, int Column, int Length);
 /// </summary>
 public sealed record SelectStatement(
     IReadOnlyList<SelectColumn> Columns,
-    FromClause From,
+    FromClause? From = null,
     IntoClause? Into = null,
     IReadOnlyList<JoinClause>? Joins = null,
     Expression? Where = null,
@@ -24,7 +24,47 @@ public sealed record SelectStatement(
     OrderByClause? OrderBy = null,
     int? Limit = null,
     int? Offset = null,
-    bool Distinct = false);
+    bool Distinct = false,
+    IReadOnlyList<CommonTableExpression>? CommonTableExpressions = null);
+
+/// <summary>
+/// A single Common Table Expression (CTE) definition within a WITH clause.
+/// </summary>
+/// <param name="Name">The name used to reference this CTE in subsequent FROM/JOIN clauses.</param>
+/// <param name="Query">
+/// The inner SELECT statement defining the CTE result set. For recursive CTEs, this is the
+/// anchor member (the non-recursive seed query).
+/// </param>
+/// <param name="RecursiveQuery">
+/// The recursive member of a recursive CTE (the SELECT that references the CTE itself),
+/// or <see langword="null"/> for non-recursive CTEs. The anchor and recursive member are
+/// connected by UNION ALL in the source SQL.
+/// </param>
+/// <param name="ColumnNames">Optional explicit column list that renames the inner query's output columns.</param>
+/// <param name="IsRecursive">Whether this CTE was declared under a WITH RECURSIVE clause.</param>
+/// <param name="Hint">Materialization hint controlling whether the CTE result is buffered or re-evaluated.</param>
+public sealed record CommonTableExpression(
+    string Name,
+    SelectStatement Query,
+    SelectStatement? RecursiveQuery = null,
+    IReadOnlyList<string>? ColumnNames = null,
+    bool IsRecursive = false,
+    MaterializationHint Hint = MaterializationHint.Default);
+
+/// <summary>
+/// Controls how a CTE's result set is materialized during execution.
+/// </summary>
+public enum MaterializationHint
+{
+    /// <summary>The planner decides based on reference count (>1 → materialized, 1 → inlined).</summary>
+    Default,
+
+    /// <summary>The CTE result is computed once and buffered for all references.</summary>
+    Materialized,
+
+    /// <summary>The CTE is inlined as a subquery at each reference site.</summary>
+    NotMaterialized,
+}
 
 /// <summary>
 /// A single column in the SELECT list, representing either a named expression

@@ -152,6 +152,21 @@ public enum SqlToken
     /// <summary>The DISTINCT keyword (duplicate elimination).</summary>
     Distinct,
 
+    /// <summary>The WITH keyword (common table expression preamble).</summary>
+    With,
+
+    /// <summary>The RECURSIVE keyword (recursive CTE modifier).</summary>
+    Recursive,
+
+    /// <summary>The MATERIALIZED keyword (CTE materialization hint).</summary>
+    Materialized,
+
+    /// <summary>The UNION keyword (set operation).</summary>
+    Union,
+
+    /// <summary>The ALL keyword (used with UNION ALL).</summary>
+    All,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>

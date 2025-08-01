@@ -61,7 +61,20 @@ internal sealed class SemanticAnalyzer
         Dictionary<string, string> aliasToTable = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> opaqueAliases = new(StringComparer.OrdinalIgnoreCase);
 
-        CollectTableSources(statement.From.Source, aliasToTable, opaqueAliases, diagnostics);
+        // Register CTE names as opaque aliases so references in FROM/JOIN
+        // do not produce "Unknown table" warnings.
+        if (statement.CommonTableExpressions is not null)
+        {
+            foreach (CommonTableExpression commonTableExpression in statement.CommonTableExpressions)
+            {
+                opaqueAliases.Add(commonTableExpression.Name);
+            }
+        }
+
+        if (statement.From is not null)
+        {
+            CollectTableSources(statement.From.Source, aliasToTable, opaqueAliases, diagnostics);
+        }
 
         if (statement.Joins is not null)
         {
@@ -137,7 +150,8 @@ internal sealed class SemanticAnalyzer
         switch (source)
         {
             case TableReference tableReference:
-                if (!_tableColumns.ContainsKey(tableReference.Name))
+                if (!_tableColumns.ContainsKey(tableReference.Name) &&
+                    !opaqueAliases.Contains(tableReference.Name))
                 {
                     EmitWarning(diagnostics, tableReference.Span,
                         $"Unknown table '{tableReference.Name}'.");

@@ -98,22 +98,47 @@ public sealed class QueryPlanner
     /// but before the remaining WHERE filter. Used to inject <see cref="Operators.ScalarSubqueryOperator"/>
     /// wrappers for correlated subqueries.
     /// </param>
+    /// <param name="externalCommonTableExpressionOperators">
+    /// Pre-built CTE operators injected by the recursive CTE planner. These are merged
+    /// into the CTE dictionary so the recursive member's FROM clause resolves the self-reference
+    /// to the working table operator.
+    /// </param>
     private IQueryOperator PlanCore(
         SelectStatement statement,
         IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
-        Func<IQueryOperator, IQueryOperator>? sourceTransform = null)
+        Func<IQueryOperator, IQueryOperator>? sourceTransform = null,
+        IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators = null)
     {
+        // 0. Plan Common Table Expressions (WITH clause).
+        Dictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators =
+            PlanCommonTableExpressions(statement);
+
+        // Merge externally provided CTE operators (e.g. recursive working table).
+        if (externalCommonTableExpressionOperators is not null)
+        {
+            commonTableExpressionOperators ??= new(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, CommonTableExpressionOperator> entry in externalCommonTableExpressionOperators)
+            {
+                commonTableExpressionOperators[entry.Key] = entry.Value;
+            }
+        }
+
         // Compute the set of all referenced columns for projection pushdown.
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
             CollectAllReferencedColumns(statement);
 
         // 1. Build the source operator (FROM clause) with projection pushdown.
         bool hasJoins = statement.Joins is not null && statement.Joins.Count > 0;
-        IQueryOperator source = PlanSource(statement.From.Source, allReferencedColumns, deferredColumns, hasJoins);
+        IQueryOperator source = statement.From is not null
+            ? PlanSource(statement.From.Source, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators)
+            : new SingleEmptyRowOperator();
 
         // Track which table aliases are available on the current (left) side.
         HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase);
-        CollectSourceAliases(statement.From.Source, leftAliases);
+        if (statement.From is not null)
+        {
+            CollectSourceAliases(statement.From.Source, leftAliases);
+        }
 
         // 2. Apply JOINs with predicate pushdown.
         List<Expression>? pendingPredicates = null;
@@ -128,7 +153,7 @@ public sealed class QueryPlanner
         {
             foreach (JoinClause join in statement.Joins)
             {
-                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns, hasJoins);
+                IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators);
 
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
@@ -311,7 +336,10 @@ public sealed class QueryPlanner
 
         // Collect outer-scope table aliases for correlation detection.
         HashSet<string> outerAliases = new(StringComparer.OrdinalIgnoreCase);
-        CollectSourceAliases(statement.From.Source, outerAliases);
+        if (statement.From is not null)
+        {
+            CollectSourceAliases(statement.From.Source, outerAliases);
+        }
 
         if (statement.Joins is not null)
         {
@@ -416,7 +444,9 @@ public sealed class QueryPlanner
             rewrittenHaving,
             statement.OrderBy,
             statement.Limit,
-            statement.Offset);
+            statement.Offset,
+            statement.Distinct,
+            statement.CommonTableExpressions);
 
         // Build a source transform that injects ScalarSubqueryOperator wrappers,
         // decorrelated LEFT JOINs, and semi-join operators between the source
@@ -1269,11 +1299,12 @@ public sealed class QueryPlanner
         TableSource source,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
         IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
-        bool hasJoins)
+        bool hasJoins,
+        IReadOnlyDictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators = null)
     {
         return source switch
         {
-            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, deferredColumns, hasJoins),
+            TableReference tableRef => PlanTableReference(tableRef, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators),
             SubquerySource subquery => PlanSubquery(subquery),
             FunctionSource functionSource => PlanFunctionSource(functionSource, hasJoins),
             _ => throw new InvalidOperationException(
@@ -1285,8 +1316,22 @@ public sealed class QueryPlanner
         TableReference tableRef,
         HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
         IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
-        bool hasJoins)
+        bool hasJoins,
+        IReadOnlyDictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators = null)
     {
+        // CTE reference: return the shared CTE operator wrapped with an alias.
+        if (commonTableExpressionOperators is not null &&
+            commonTableExpressionOperators.TryGetValue(tableRef.Name, out CommonTableExpressionOperator? commonTableExpressionOperator))
+        {
+            IQueryOperator cteSource = commonTableExpressionOperator;
+            if (tableRef.Alias is not null || hasJoins)
+            {
+                cteSource = new AliasOperator(cteSource, tableRef.Alias ?? tableRef.Name);
+            }
+
+            return cteSource;
+        }
+
         TableDescriptor descriptor = _catalog.Resolve(tableRef.Name);
 
         // Projection pushdown: compute required columns for this table's alias.
@@ -1408,9 +1453,12 @@ public sealed class QueryPlanner
         Dictionary<string, DeferredTableColumns>? result = null;
 
         // Analyze FROM source.
-        AnalyzeTableSource(
-            statement.From.Source, allReferencedColumns, pipelineColumns,
-            cancellationToken, ref result);
+        if (statement.From is not null)
+        {
+            AnalyzeTableSource(
+                statement.From.Source, allReferencedColumns, pipelineColumns,
+                cancellationToken, ref result);
+        }
 
         // Analyze JOIN sources.
         if (statement.Joins is not null)
@@ -1587,6 +1635,176 @@ public sealed class QueryPlanner
         }
 
         return references;
+    }
+
+    /// <summary>
+    /// Plans all Common Table Expressions from the WITH clause.
+    /// Each CTE body is planned into an operator tree and wrapped in a
+    /// <see cref="CommonTableExpressionOperator"/>. Materialization is determined
+    /// by the explicit hint or by reference counting (auto-materialize when referenced
+    /// more than once).
+    /// </summary>
+    /// <returns>
+    /// A dictionary mapping CTE names to their operators, or <see langword="null"/>
+    /// if the statement has no CTEs.
+    /// </returns>
+    private Dictionary<string, CommonTableExpressionOperator>? PlanCommonTableExpressions(
+        SelectStatement statement)
+    {
+        if (statement.CommonTableExpressions is null || statement.CommonTableExpressions.Count == 0)
+        {
+            return null;
+        }
+
+        Dictionary<string, int> referenceCounts =
+            CountCommonTableExpressionReferences(statement);
+
+        Dictionary<string, CommonTableExpressionOperator> operators = new(
+            statement.CommonTableExpressions.Count, StringComparer.OrdinalIgnoreCase);
+
+        foreach (CommonTableExpression commonTableExpression in statement.CommonTableExpressions)
+        {
+            if (commonTableExpression.IsRecursive && commonTableExpression.RecursiveQuery is not null)
+            {
+                IQueryOperator anchorPlan = PlanCore(
+                    commonTableExpression.Query,
+                    deferredColumns: null,
+                    externalCommonTableExpressionOperators: operators);
+
+                // Capture for the closure. The factory is called at execution time,
+                // once per iteration, with a fresh working-table operator.
+                CommonTableExpression capturedDefinition = commonTableExpression;
+                QueryPlanner capturedPlanner = this;
+
+                RecursiveCommonTableExpressionOperator recursiveOperator = new(
+                    anchorPlan,
+                    workingTableOperator =>
+                    {
+                        // Build a CTE dictionary that maps the self-reference to the
+                        // working table so the recursive member's FROM resolves correctly.
+                        CommonTableExpressionOperator selfReference = new(
+                            workingTableOperator,
+                            capturedDefinition.Name,
+                            isMaterialized: false);
+
+                        Dictionary<string, CommonTableExpressionOperator> selfReferenceOperators = new(
+                            StringComparer.OrdinalIgnoreCase);
+
+                        // Include all previously-built CTEs so the recursive member
+                        // can reference sibling CTEs in addition to itself.
+                        foreach (KeyValuePair<string, CommonTableExpressionOperator> existing in operators)
+                        {
+                            selfReferenceOperators[existing.Key] = existing.Value;
+                        }
+
+                        selfReferenceOperators[capturedDefinition.Name] = selfReference;
+
+                        return capturedPlanner.PlanCore(
+                            capturedDefinition.RecursiveQuery,
+                            deferredColumns: null,
+                            externalCommonTableExpressionOperators: selfReferenceOperators);
+                    },
+                    commonTableExpression.Name,
+                    commonTableExpression.ColumnNames);
+
+                // Wrap recursive operator so PlanTableReference can resolve the CTE by name.
+                CommonTableExpressionOperator wrappedRecursive = new(
+                    recursiveOperator,
+                    commonTableExpression.Name,
+                    isMaterialized: false);
+
+                operators[commonTableExpression.Name] = wrappedRecursive;
+                continue;
+            }
+
+            IQueryOperator innerPlan = PlanCore(
+                commonTableExpression.Query,
+                deferredColumns: null,
+                externalCommonTableExpressionOperators: operators);
+
+            bool shouldMaterialize = commonTableExpression.Hint switch
+            {
+                MaterializationHint.Materialized => true,
+                MaterializationHint.NotMaterialized => false,
+                // Auto-materialize when referenced more than once to avoid redundant computation.
+                _ => referenceCounts.TryGetValue(commonTableExpression.Name, out int count) && count > 1,
+            };
+
+            CommonTableExpressionOperator cteOperator = new(
+                innerPlan,
+                commonTableExpression.Name,
+                shouldMaterialize,
+                commonTableExpression.ColumnNames);
+
+            operators[commonTableExpression.Name] = cteOperator;
+        }
+
+        return operators.Count > 0 ? operators : null;
+    }
+
+    /// <summary>
+    /// Counts how many times each CTE name appears as a table reference in the
+    /// FROM clause and JOIN sources of the statement.
+    /// </summary>
+    private static Dictionary<string, int> CountCommonTableExpressionReferences(
+        SelectStatement statement)
+    {
+        Dictionary<string, int> counts = new(StringComparer.OrdinalIgnoreCase);
+
+        if (statement.CommonTableExpressions is null)
+        {
+            return counts;
+        }
+
+        // Build the set of known CTE names for fast lookup.
+        HashSet<string> cteNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (CommonTableExpression commonTableExpression in statement.CommonTableExpressions)
+        {
+            cteNames.Add(commonTableExpression.Name);
+            counts[commonTableExpression.Name] = 0;
+        }
+
+        // Count references in FROM source.
+        if (statement.From is not null)
+        {
+            CountCommonTableExpressionReferencesInSource(statement.From.Source, cteNames, counts);
+        }
+
+        // Count references in JOIN sources.
+        if (statement.Joins is not null)
+        {
+            foreach (JoinClause join in statement.Joins)
+            {
+                CountCommonTableExpressionReferencesInSource(join.Source, cteNames, counts);
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// Recursively counts CTE name references within a single table source.
+    /// </summary>
+    private static void CountCommonTableExpressionReferencesInSource(
+        TableSource source,
+        IReadOnlySet<string> commonTableExpressionNames,
+        Dictionary<string, int> counts)
+    {
+        switch (source)
+        {
+            case TableReference tableReference:
+                if (commonTableExpressionNames.Contains(tableReference.Name))
+                {
+                    counts[tableReference.Name]++;
+                }
+
+                break;
+
+            case SubquerySource:
+            case FunctionSource:
+                // Subqueries and functions do not reference outer CTEs.
+                break;
+        }
     }
 }
 

@@ -97,7 +97,9 @@ public static class ParameterBinder
             joins = boundJoins;
         }
 
-        FromClause from = new(BindTableSource(statement.From.Source, parameters));
+        FromClause? from = statement.From is not null
+            ? new FromClause(BindTableSource(statement.From.Source, parameters))
+            : null;
 
         GroupByClause? groupBy = null;
         if (statement.GroupBy is not null)
@@ -304,7 +306,10 @@ public static class ParameterBinder
             }
         }
 
-        CollectFromTableSource(statement.From.Source, names);
+        if (statement.From is not null)
+        {
+            CollectFromTableSource(statement.From.Source, names);
+        }
 
         if (statement.Where is not null)
         {

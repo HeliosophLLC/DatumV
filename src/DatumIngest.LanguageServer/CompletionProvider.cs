@@ -33,7 +33,7 @@ public sealed class CompletionProvider
         switch (zone.Kind)
         {
             case CompletionZoneKind.StatementStart:
-                AddKeywords(items, ["SELECT"]);
+                AddKeywords(items, ["SELECT", "WITH"]);
                 break;
 
             case CompletionZoneKind.AfterSelect:

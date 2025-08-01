@@ -190,6 +190,13 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("DISTINCT"), SqlToken.Distinct, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXISTS"), SqlToken.Exists, requireDelimiters: true)
 
+            // CTE keywords
+            .Match(Span.EqualToIgnoreCase("WITH"), SqlToken.With, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("RECURSIVE"), SqlToken.Recursive, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("MATERIALIZED"), SqlToken.Materialized, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("UNION"), SqlToken.Union, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("ALL"), SqlToken.All, requireDelimiters: true)
+
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)

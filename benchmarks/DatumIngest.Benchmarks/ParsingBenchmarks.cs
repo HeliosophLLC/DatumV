@@ -20,6 +20,9 @@ public class ParsingBenchmarks
     private const string ExistsSubqueryQuery = "SELECT id, name FROM data WHERE EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id AND weight > 10)";
     private const string ScalarSubqueryQuery = "SELECT id, name, (SELECT MAX(weight) FROM lookup WHERE lookup.lookup_id = data.id) AS max_weight FROM data";
     private const string DistinctAggregateQuery = "SELECT category, COUNT(DISTINCT name) AS unique_names, SUM(DISTINCT value) AS unique_sum FROM data GROUP BY category";
+    private const string SimpleCommonTableExpressionQuery = "WITH filtered AS (SELECT id, name, value FROM data WHERE value > 100) SELECT id, name FROM filtered";
+    private const string RecursiveCommonTableExpressionQuery = "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM seq WHERE n < 100) SELECT n FROM seq";
+    private const string MultipleCommonTableExpressionQuery = "WITH high AS (SELECT id, name, value FROM data WHERE value > 500), ranked AS (SELECT id, name, ROW_NUMBER() OVER (ORDER BY value DESC) AS rank FROM high) SELECT id, name, rank FROM ranked WHERE rank <= 10";
 
     [Benchmark(Description = "Tokenize simple SELECT")]
     public void TokenizeSimple()
@@ -97,5 +100,23 @@ public class ParsingBenchmarks
     public void ParseDistinctAggregate()
     {
         SqlParser.Parse(DistinctAggregateQuery);
+    }
+
+    [Benchmark(Description = "Parse simple CTE")]
+    public void ParseSimpleCommonTableExpression()
+    {
+        SqlParser.Parse(SimpleCommonTableExpressionQuery);
+    }
+
+    [Benchmark(Description = "Parse recursive CTE")]
+    public void ParseRecursiveCommonTableExpression()
+    {
+        SqlParser.Parse(RecursiveCommonTableExpressionQuery);
+    }
+
+    [Benchmark(Description = "Parse multi-CTE")]
+    public void ParseMultipleCommonTableExpressions()
+    {
+        SqlParser.Parse(MultipleCommonTableExpressionQuery);
     }
 }

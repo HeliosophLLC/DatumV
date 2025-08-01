@@ -41,9 +41,12 @@ public sealed class QuerySchemaResolver
         List<ResolvedColumn> allColumns = new();
 
         // Resolve the primary FROM source.
-        IReadOnlyList<ResolvedColumn> fromColumns =
-            await ResolveSourceAsync(statement.From.Source, cancellationToken).ConfigureAwait(false);
-        allColumns.AddRange(fromColumns);
+        if (statement.From is not null)
+        {
+            IReadOnlyList<ResolvedColumn> fromColumns =
+                await ResolveSourceAsync(statement.From.Source, cancellationToken).ConfigureAwait(false);
+            allColumns.AddRange(fromColumns);
+        }
 
         // Resolve each JOINed source.
         if (statement.Joins is not null)

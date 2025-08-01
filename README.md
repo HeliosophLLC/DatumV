@@ -46,7 +46,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
-- **SQL interface** — SELECT, SELECT DISTINCT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, DISTINCT aggregates (`COUNT(DISTINCT x)`), window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), quoted identifiers, parameterized queries (`$name`)
+- **SQL interface** — SELECT, SELECT DISTINCT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, DISTINCT aggregates (`COUNT(DISTINCT x)`), window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), Common Table Expressions (WITH / WITH RECURSIVE), quoted identifiers, parameterized queries (`$name`)
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
@@ -274,7 +274,7 @@ dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*
 
 ### Results
 
-**TL;DR** — Parse a query in **32 μs**, read 10K CSV rows in **7 ms**, execute a full scan in **8 ms**, JOIN 10K × 1K rows in **9 ms**, SELECT DISTINCT (low cardinality) in **6 ms**, SELECT DISTINCT (high cardinality) in **13 ms**, COUNT(DISTINCT) per group in **8 ms**, IN subquery in **8 ms**, EXISTS semi-join in **8 ms**, NOT EXISTS in **10 ms**, collect all statistics in **53 ms**, and write 10K rows to CSV in **8 ms**. Memory stays under **9 MB** for a 10K-row end-to-end pipeline.
+**TL;DR** — Parse a query in **35 μs**, read 10K CSV rows in **7 ms**, execute a full scan in **9 ms**, JOIN 10K × 1K rows in **11 ms**, SELECT DISTINCT (low cardinality) in **8 ms**, SELECT DISTINCT (high cardinality) in **17 ms**, COUNT(DISTINCT) per group in **11 ms**, IN subquery in **10 ms**, EXISTS semi-join in **10 ms**, NOT EXISTS in **13 ms**, CTE inlined in **11 ms**, CTE materialized multi-ref in **9 ms**, recursive CTE 1K iterations in **2 ms**, collect all statistics in **53 ms**, and write 10K rows to CSV in **11 ms**. Memory stays under **10 MB** for a 10K-row end-to-end pipeline.
 
 > BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.8039)
 > Intel Core i9-10900X CPU 3.70GHz, 1 CPU, 20 logical and 10 physical cores
@@ -284,31 +284,34 @@ dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| Tokenize simple SELECT | 6.903 μs | 0.0919 μs | 0.0814 μs | 1.94 KB |
-| Tokenize with WHERE | 19.181 μs | 0.3513 μs | 0.3286 μs | 6.17 KB |
-| Tokenize with JOIN | 41.414 μs | 0.3485 μs | 0.3089 μs | 11.3 KB |
-| Tokenize complex query | 136.138 μs | 1.2064 μs | 0.9419 μs | 25.87 KB |
-| Parse simple SELECT | 32.080 μs | 0.6109 μs | 0.5416 μs | 26.27 KB |
-| Parse with WHERE | 74.613 μs | 0.5943 μs | 0.4963 μs | 56.41 KB |
-| Parse with JOIN | 119.343 μs | 0.9524 μs | 0.7435 μs | 77.11 KB |
-| Parse complex query | 230.842 μs | 4.0605 μs | 3.7982 μs | 155.5 KB |
-| Parse subquery | 117.005 μs | 1.2940 μs | 1.2104 μs | 87.29 KB |
-| Parse IN subquery | 80.928 μs | 1.4156 μs | 1.2549 μs | 64.2 KB |
-| Parse EXISTS subquery | 100.639 μs | 1.9535 μs | 1.8273 μs | 74.36 KB |
-| Parse scalar subquery | 103.304 μs | 1.2003 μs | 1.0640 μs | 78.62 KB |
-| Parse DISTINCT aggregate | 95.132 μs | 1.8796 μs | 1.9302 μs | 68.21 KB |
+| Tokenize simple SELECT | 8.023 μs | 0.1119 μs | 0.1099 μs | 1.94 KB |
+| Tokenize with WHERE | 20.513 μs | 0.3982 μs | 0.4089 μs | 6.17 KB |
+| Tokenize with JOIN | 45.285 μs | 0.9004 μs | 0.8843 μs | 11.68 KB |
+| Tokenize complex query | 76.549 μs | 1.2165 μs | 1.0158 μs | 26.49 KB |
+| Parse simple SELECT | 35.221 μs | 0.4575 μs | 0.4280 μs | 27.48 KB |
+| Parse with WHERE | 77.097 μs | 0.8246 μs | 0.7310 μs | 57.85 KB |
+| Parse with JOIN | 127.567 μs | 1.2650 μs | 1.1214 μs | 78.92 KB |
+| Parse complex query | 249.788 μs | 3.1862 μs | 2.8245 μs | 157.98 KB |
+| Parse subquery | 118.524 μs | 1.6417 μs | 1.5357 μs | 89.69 KB |
+| Parse IN subquery | 86.864 μs | 1.0486 μs | 0.9808 μs | 66.19 KB |
+| Parse EXISTS subquery | 108.270 μs | 1.6219 μs | 1.3544 μs | 76.36 KB |
+| Parse scalar subquery | 112.067 μs | 0.9919 μs | 0.9278 μs | 80.95 KB |
+| Parse DISTINCT aggregate | 97.216 μs | 1.2072 μs | 1.1292 μs | 69.76 KB |
+| Parse simple CTE | 114.552 μs | 1.5790 μs | 1.4770 μs | 85.56 KB |
+| Parse recursive CTE | 106.174 μs | 1.7036 μs | 1.5936 μs | 77.65 KB |
+| Parse multi-CTE | 235.821 μs | 3.2174 μs | 3.0096 μs | 168.98 KB |
 
-Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input. IN/EXISTS subqueries parse faster than derived-table subqueries due to simpler AST structure. DISTINCT aggregate queries (with multiple `COUNT(DISTINCT …)` / `SUM(DISTINCT …)` columns) parse in ~95 μs — comparable to EXISTS subqueries, since the DISTINCT modifier adds minimal AST overhead per aggregate.
+Parsing scales linearly with query complexity. Tokenization is ~3–5× faster than full parsing for the same input. IN/EXISTS subqueries parse faster than derived-table subqueries due to simpler AST structure. DISTINCT aggregate queries (with multiple `COUNT(DISTINCT …)` / `SUM(DISTINCT …)` columns) parse in ~97 μs — comparable to EXISTS subqueries, since the DISTINCT modifier adds minimal AST overhead per aggregate. Simple and recursive CTEs parse in ~106–115 μs, on par with single subqueries, since the WITH clause adds one definition header plus a standard SELECT body. Multi-CTE queries (~236 μs) scale linearly — three chained definitions cost roughly 3× a single CTE, consistent with the additive nature of definition parsing.
 
 #### Providers
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV 1K rows | 1,393.0 μs | 27.2 μs | 37.2 μs | 944.01 KB |
-| CSV 10K rows | 6,541.0 μs | 98.7 μs | 92.3 μs | 8,713.28 KB |
-| CSV 1K with projection | 1,252.0 μs | 21.8 μs | 19.3 μs | 780.18 KB |
-| JSON 1K rows | 1,611.0 μs | 31.2 μs | 34.7 μs | 499.88 KB |
-| JSON 10K rows | 11,383.0 μs | 52.3 μs | 48.9 μs | 4,522.26 KB |
+| CSV 1K rows | 1,499.0 μs | 28.8 μs | 37.4 μs | 944.01 KB |
+| CSV 10K rows | 6,742.0 μs | 113.8 μs | 106.4 μs | 8,713.25 KB |
+| CSV 1K with projection | 1,358.0 μs | 25.3 μs | 26.0 μs | 780.17 KB |
+| JSON 1K rows | 1,647.0 μs | 21.8 μs | 19.4 μs | 499.88 KB |
+| JSON 10K rows | 11,629.0 μs | 54.3 μs | 42.4 μs | 4,522.21 KB |
 
 All providers share a pre-built column name index across rows, eliminating per-row Dictionary allocations at the source. `DataValue.FromScalar` caches the two most common float values (0 and 1), avoiding heap allocation and boxing for those constants. The CSV parser reuses a thread-local field buffer across rows, eliminating a `List<string>` allocation per line. Projection pushdown on CSV saves ~18% of allocated memory by skipping unreferenced columns.
 
@@ -316,32 +319,39 @@ All providers share a pre-built column name index across rows, eliminating per-r
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| SELECT * FROM data (10K) | 7.727 ms | 0.1535 ms | 0.2769 ms | 8.55 MB |
-| SELECT with WHERE filter (10K) | 7.981 ms | 0.1270 ms | 0.1560 ms | 8.48 MB |
-| SELECT with projection (10K) | 6.775 ms | 0.1266 ms | 0.1122 ms | 7.5 MB |
-| INNER JOIN (10K × 1K) | 8.711 ms | 0.0986 ms | 0.0922 ms | 8.64 MB |
-| ORDER BY + LIMIT (10K) | 8.505 ms | 0.0789 ms | 0.0700 ms | 8.83 MB |
-| Uncorrelated IN subquery (10K × 1K) | 8.127 ms | 0.1612 ms | 0.1856 ms | 7.64 MB |
-| Correlated EXISTS semi-join (10K × 1K) | 7.795 ms | 0.0830 ms | 0.0777 ms | 7.69 MB |
-| Correlated NOT EXISTS anti-semi-join (10K × 1K) | 9.575 ms | 0.0701 ms | 0.0622 ms | 8.38 MB |
-| Correlated scalar subquery (10K × 1K) | 11.071 ms | 0.2204 ms | 0.2624 ms | 9.82 MB |
-| SELECT DISTINCT low cardinality (10K) | 5.797 ms | 0.0311 ms | 0.0276 ms | 6.73 MB |
-| SELECT DISTINCT high cardinality (10K) | 13.194 ms | 0.0994 ms | 0.0830 ms | 8.78 MB |
-| COUNT(DISTINCT) per group (10K) | 8.028 ms | 0.0954 ms | 0.0797 ms | 7.58 MB |
+| SELECT * FROM data (10K) | 9.127 ms | 0.1511 ms | 0.1414 ms | 8.55 MB |
+| SELECT with WHERE filter (10K) | 9.961 ms | 0.1980 ms | 0.2119 ms | 8.49 MB |
+| SELECT with projection (10K) | 8.444 ms | 0.1631 ms | 0.1813 ms | 7.51 MB |
+| INNER JOIN (10K × 1K) | 11.335 ms | 0.2195 ms | 0.2254 ms | 8.64 MB |
+| ORDER BY + LIMIT (10K) | 11.163 ms | 0.2198 ms | 0.3356 ms | 8.83 MB |
+| Uncorrelated IN subquery (10K × 1K) | 10.472 ms | 0.2060 ms | 0.3145 ms | 7.64 MB |
+| Correlated EXISTS semi-join (10K × 1K) | 10.463 ms | 0.2047 ms | 0.2275 ms | 7.69 MB |
+| Correlated NOT EXISTS anti-semi-join (10K × 1K) | 12.579 ms | 0.2447 ms | 0.3881 ms | 8.39 MB |
+| Correlated scalar subquery (10K × 1K) | 13.992 ms | 0.2745 ms | 0.4274 ms | 9.82 MB |
+| SELECT DISTINCT low cardinality (10K) | 7.979 ms | 0.1227 ms | 0.1087 ms | 6.73 MB |
+| SELECT DISTINCT high cardinality (10K) | 17.062 ms | 0.3280 ms | 0.5569 ms | 8.79 MB |
+| COUNT(DISTINCT) per group (10K) | 11.024 ms | 0.2188 ms | 0.4938 ms | 7.58 MB |
+| CTE inlined single ref (10K) | 10.798 ms | 0.1032 ms | 0.1014 ms | 8.92 MB |
+| CTE materialized multi-ref (10K) | 9.190 ms | 0.1784 ms | 0.2124 ms | 7.18 MB |
+| Multi-CTE chained (10K) | 12.241 ms | 0.2441 ms | 0.4644 ms | 9.38 MB |
+| Recursive CTE 100 iterations | 0.337 ms | 0.0122 ms | 0.0334 ms | 0.56 MB |
+| Recursive CTE 1000 iterations | 2.056 ms | 0.0408 ms | 0.0938 ms | 4.59 MB |
 
 Full scan of 10K rows allocates 8.55 MB — shared provider schemas and operator schemas eliminated per-row Dictionary and name-array allocations end-to-end. Boolean-valued `DataValue` instances (0 and 1) are cached singletons, eliminating heap allocation and float boxing in every comparison, filter, and join condition evaluation. Qualified column references (`table.column`) cache their pre-computed lookup string on the AST node, avoiding per-row string interpolation. CAST expressions pool their argument arrays and cache target-type `DataValue` wrappers. Function argument arrays are pooled via `ArrayPool`, and LIKE patterns use cached compiled regex. ORDER BY + LIMIT uses a bounded priority queue when LIMIT is present.
 
-All subquery types now execute at JOIN-competitive speeds. Uncorrelated IN subqueries are constant-folded to a literal list at plan time, then evaluated via a lazily-built `HashSet<DataValue>` for O(1) lookups per row (~8 ms, on par with WHERE filter). Correlated EXISTS and NOT EXISTS are rewritten into hash-based semi-joins and anti-semi-joins (~8–10 ms). Correlated scalar subqueries are decorrelated into hash-based lookups (~11 ms, 9.82 MB).
+All subquery types now execute at JOIN-competitive speeds. Uncorrelated IN subqueries are constant-folded to a literal list at plan time, then evaluated via a lazily-built `HashSet<DataValue>` for O(1) lookups per row (~10 ms, on par with WHERE filter). Correlated EXISTS and NOT EXISTS are rewritten into hash-based semi-joins and anti-semi-joins (~10–13 ms). Correlated scalar subqueries are decorrelated into hash-based lookups (~14 ms, 9.82 MB).
 
-SELECT DISTINCT uses a streaming hash-dedup operator backed by `HashSet<CompositeKey>`. Low-cardinality DISTINCT (5 unique categories from 10K rows) completes in ~6 ms — faster than a full scan because only 5 rows pass through downstream operators. High-cardinality DISTINCT (10K unique combinations) takes ~13 ms, reflecting the cost of hashing and storing every row; the Gen2 GC pressure (234 MB promoted) shows the hash set's large-object overhead. COUNT(DISTINCT) per group runs in ~8 ms via `DistinctAccumulatorDecorator`, which wraps each aggregate accumulator with a per-group `HashSet` filter — comparable to a standard GROUP BY since the dedup cost is amortized across groups.
+SELECT DISTINCT uses a streaming hash-dedup operator backed by `HashSet<CompositeKey>`. Low-cardinality DISTINCT (5 unique categories from 10K rows) completes in ~8 ms — faster than a full scan because only 5 rows pass through downstream operators. High-cardinality DISTINCT (10K unique combinations) takes ~17 ms, reflecting the cost of hashing and storing every row; the Gen2 GC pressure shows the hash set's large-object overhead. COUNT(DISTINCT) per group runs in ~11 ms via `DistinctAccumulatorDecorator`, which wraps each aggregate accumulator with a per-group `HashSet` filter — comparable to a standard GROUP BY since the dedup cost is amortized across groups.
+
+CTEs execute with minimal overhead relative to equivalent inline queries. A single-reference CTE (~11 ms, 8.92 MB) performs on par with a filtered scan, since the planner inlines it directly into the query plan. Multi-reference CTEs (~9 ms, 7.18 MB) benefit from materialization — the CTE result is computed once and served from an in-memory cache on subsequent reads, avoiding redundant scans. Chained multi-CTE queries (~12 ms) scale linearly with the number of definitions. Recursive CTEs demonstrate efficient iteration: 100 iterations complete in ~0.3 ms and 1,000 iterations in ~2 ms, with memory scaling linearly at ~4.7 KB per iteration. The recursive operator uses a queue-based breadth-first expansion with automatic cycle termination.
 
 #### Statistics
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| Collect stats 1K rows | 3.026 ms | 0.0585 ms | 0.0651 ms | 2.36 MB |
-| Collect stats 10K rows | 52.949 ms | 1.0530 ms | 1.5434 ms | 20.79 MB |
-| Merge two 5K collectors | 59.665 ms | 1.1913 ms | 3.0322 ms | 24.94 MB |
+| Collect stats 1K rows | 3.072 ms | 0.0324 ms | 0.0270 ms | 2.36 MB |
+| Collect stats 10K rows | 53.420 ms | 1.0670 ms | 1.1860 ms | 20.79 MB |
+| Merge two 5K collectors | 62.402 ms | 1.2610 ms | 3.7182 ms | 24.95 MB |
 
 Statistics collection runs all accumulators (numeric, string, vector, image, cardinality, entropy, histogram, quantile, top-K) in a single pass. Merge cost is comparable to a fresh 10K collection because both collectors' reservoir samples and HyperLogLog registers must be combined.
 
@@ -349,9 +359,9 @@ Statistics collection runs all accumulators (numeric, string, vector, image, car
 
 | Method | Mean | Error | StdDev | Allocated |
 |--------|-----:|------:|-------:|----------:|
-| CSV write 1K rows | 1.328 ms | 0.0191 ms | 0.0170 ms | 124.45 KB |
-| CSV write 10K rows | 7.870 ms | 0.1306 ms | 0.1222 ms | 1,145.68 KB |
-| CSV write 10K rows with sharding (1000/shard) | 15.026 ms | 0.2995 ms | 0.8148 ms | 1,256.27 KB |
+| CSV write 1K rows | 1.575 ms | 0.0310 ms | 0.0445 ms | 124.34 KB |
+| CSV write 10K rows | 10.817 ms | 0.2125 ms | 0.2909 ms | 1,145.46 KB |
+| CSV write 10K rows with sharding (1000/shard) | 17.966 ms | 0.3435 ms | 0.2868 ms | 1,256.21 KB |
 
 CSV writes with minimal allocation overhead (~115 bytes/row). Vector columns use a direct `StringBuilder` loop instead of LINQ enumerable formatting. Sharding adds overhead due to repeated file creation and header writes, but memory usage increases only ~10% since each shard flushes independently.
 

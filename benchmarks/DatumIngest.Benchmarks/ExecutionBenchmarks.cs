@@ -252,4 +252,87 @@ public class ExecutionBenchmarks
         {
         }
     }
+
+    [Benchmark(Description = "CTE inlined single ref (10K)")]
+    public async Task CommonTableExpressionInlinedSingleReference()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "WITH filtered AS (SELECT id, name, value FROM data WHERE value > 500) SELECT id, name FROM filtered");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "CTE materialized multi-ref (10K)")]
+    public async Task CommonTableExpressionMaterializedMultiReference()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "WITH stats AS (SELECT category, AVG(value) AS avg_val, COUNT(*) AS cnt FROM data GROUP BY category) " +
+            "SELECT a.category, a.avg_val, b.cnt FROM stats AS a INNER JOIN stats AS b ON a.category = b.category");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Multi-CTE chained (10K)")]
+    public async Task MultipleCommonTableExpressionsChained()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "WITH high AS (SELECT id, name, value FROM data WHERE value > 500), " +
+            "top_high AS (SELECT id, name, value FROM high ORDER BY value DESC LIMIT 100) " +
+            "SELECT id, name FROM top_high");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Recursive CTE 100 iterations")]
+    public async Task RecursiveCommonTableExpression100()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM seq WHERE n < 100) SELECT n FROM seq");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Recursive CTE 1000 iterations")]
+    public async Task RecursiveCommonTableExpression1000()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        SelectStatement statement = SqlParser.Parse(
+            "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM seq WHERE n < 1000) SELECT n FROM seq");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(statement);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
 }

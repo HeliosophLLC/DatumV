@@ -66,6 +66,7 @@ public sealed class SourceSpanTests
     {
         SelectStatement result = Parse("SELECT x FROM users");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.NotNull(table.Span);
         Assert.Equal(1, table.Span.Line);
@@ -78,6 +79,7 @@ public sealed class SourceSpanTests
     {
         SelectStatement result = Parse("SELECT x FROM users AS u");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.NotNull(table.Span);
         Assert.Equal("users", table.Name);
@@ -121,6 +123,7 @@ public sealed class SourceSpanTests
     {
         SelectStatement result = Parse("SELECT x FROM read_csv('data.csv')");
 
+        Assert.NotNull(result.From);
         FunctionSource functionSource = Assert.IsType<FunctionSource>(result.From.Source);
         Assert.NotNull(functionSource.Span);
         Assert.Equal(1, functionSource.Span.Line);
@@ -166,6 +169,7 @@ public sealed class SourceSpanTests
         string sql = "SELECT x\nFROM users";
         SelectStatement result = Parse(sql);
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.NotNull(table.Span);
         Assert.Equal(2, table.Span.Line);

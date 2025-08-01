@@ -22,6 +22,7 @@ public class SqlParserTests
         Assert.Equal("name", column.ColumnName);
         Assert.Null(column.TableName);
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("users", table.Name);
     }
@@ -347,6 +348,7 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT a FROM t1 AS x JOIN t2 AS y ON x.id = y.id");
 
+        Assert.NotNull(result.From);
         TableReference from = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("t1", from.Name);
         Assert.Equal("x", from.Alias);
@@ -490,6 +492,7 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT name FROM (SELECT name, age FROM users) AS sub");
 
+        Assert.NotNull(result.From);
         SubquerySource subquery = Assert.IsType<SubquerySource>(result.From.Source);
         Assert.Equal("sub", subquery.Alias);
         Assert.Equal(2, subquery.Query.Columns.Count);
@@ -501,9 +504,11 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT x FROM (SELECT y FROM (SELECT z FROM t) AS inner_q) AS outer_q");
 
+        Assert.NotNull(result.From);
         SubquerySource outer = Assert.IsType<SubquerySource>(result.From.Source);
         Assert.Equal("outer_q", outer.Alias);
 
+        Assert.NotNull(outer.Query.From);
         SubquerySource inner = Assert.IsType<SubquerySource>(outer.Query.From.Source);
         Assert.Equal("inner_q", inner.Alias);
     }
@@ -516,6 +521,7 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT x FROM RANGE(0, 360) AS r");
 
+        Assert.NotNull(result.From);
         FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
         Assert.Equal("RANGE", source.FunctionName);
         Assert.Equal(2, source.Arguments.Count);
@@ -528,6 +534,7 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT x FROM RANGE(0, 10)");
 
+        Assert.NotNull(result.From);
         FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
         Assert.Equal("RANGE", source.FunctionName);
         Assert.Null(source.Alias);
@@ -539,6 +546,7 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT x FROM RANGE(0, 360, 0.5) AS r");
 
+        Assert.NotNull(result.From);
         FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
         Assert.Equal("RANGE", source.FunctionName);
         Assert.Equal(3, source.Arguments.Count);
@@ -551,6 +559,7 @@ public class SqlParserTests
         SelectStatement result = Parse(
             "SELECT a FROM t1 CROSS JOIN RANGE(1, 10) AS r");
 
+        Assert.NotNull(result.From);
         Assert.IsType<TableReference>(result.From.Source);
         Assert.NotNull(result.Joins);
         Assert.Single(result.Joins);
@@ -668,6 +677,7 @@ public class SqlParserTests
 
         Assert.Equal(2, result.Columns.Count);
         Assert.Equal("img", result.Columns[0].Alias);
+        Assert.NotNull(result.From);
         Assert.IsType<SubquerySource>(result.From.Source);
         Assert.NotNull(result.Joins);
         Assert.Single(result.Joins);
@@ -687,6 +697,7 @@ public class SqlParserTests
     {
         SelectStatement result = Parse("SELECT a FROM users AS u");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("users", table.Name);
         Assert.Equal("u", table.Alias);
@@ -724,6 +735,7 @@ public class SqlParserTests
     {
         SelectStatement result = Parse("SELECT * FROM [adult.data]");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("adult.data", table.Name);
     }
@@ -733,6 +745,7 @@ public class SqlParserTests
     {
         SelectStatement result = Parse("SELECT * FROM \"adult.data\"");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("adult.data", table.Name);
     }
@@ -742,6 +755,7 @@ public class SqlParserTests
     {
         SelectStatement result = Parse("SELECT * FROM 'adult.data'");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("adult.data", table.Name);
     }
@@ -751,6 +765,7 @@ public class SqlParserTests
     {
         SelectStatement result = Parse("SELECT a.x FROM [adult.data] AS a");
 
+        Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("adult.data", table.Name);
         Assert.Equal("a", table.Alias);

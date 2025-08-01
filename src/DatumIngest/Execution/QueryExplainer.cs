@@ -43,6 +43,8 @@ public static class QueryExplainer
             SubqueryOperator subquery => BuildSubqueryNode(subquery, stats),
             LateMaterializationOperator lateMat => BuildLateMaterializationNode(lateMat, stats),
             GroupByOperator groupBy => BuildGroupByNode(groupBy, stats),
+            CommonTableExpressionOperator cte => BuildCommonTableExpressionNode(cte, stats),
+            RecursiveCommonTableExpressionOperator recursiveCte => BuildRecursiveCommonTableExpressionNode(recursiveCte, stats),
             _ => new ExplainPlanNode
             {
                 OperatorName = op.GetType().Name,
@@ -268,6 +270,37 @@ public static class QueryExplainer
             Details = $"alias: {subquery.Alias}",
             Children = { child },
             EstimatedRows = child.EstimatedRows,
+        };
+    }
+
+    private static ExplainPlanNode BuildCommonTableExpressionNode(
+        CommonTableExpressionOperator commonTableExpression,
+        IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        ExplainPlanNode child = BuildNode(commonTableExpression.InnerOperator, stats);
+        string mode = commonTableExpression.IsMaterialized ? "materialized" : "inlined";
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "CTE",
+            Details = $"name: {commonTableExpression.Name}, mode: {mode}",
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
+        };
+    }
+
+    private static ExplainPlanNode BuildRecursiveCommonTableExpressionNode(
+        RecursiveCommonTableExpressionOperator recursiveCommonTableExpression,
+        IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        ExplainPlanNode anchorChild = BuildNode(recursiveCommonTableExpression.AnchorOperator, stats);
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "Recursive CTE",
+            Details = $"name: {recursiveCommonTableExpression.Name}",
+            Children = { anchorChild },
+            EstimatedRows = anchorChild.EstimatedRows,
         };
     }
 
@@ -507,6 +540,14 @@ public static class QueryExplainer
 
             case LateMaterializationOperator lateMaterialization:
                 CollectColumnStatisticsCore(lateMaterialization.Child, alias, ref result);
+                break;
+
+            case CommonTableExpressionOperator commonTableExpression:
+                CollectColumnStatisticsCore(commonTableExpression.InnerOperator, alias, ref result);
+                break;
+
+            case RecursiveCommonTableExpressionOperator recursiveCommonTableExpression:
+                CollectColumnStatisticsCore(recursiveCommonTableExpression.AnchorOperator, alias, ref result);
                 break;
         }
     }

@@ -77,34 +77,35 @@ public sealed class ErrorRecoveryTests
     }
 
     [Fact]
-    public void SelectWithoutFrom_ReportsFromError()
+    public void SelectWithoutFrom_IsValidSql()
     {
         ParseResult result = SqlParser.TryParseRecovering("SELECT x");
 
-        Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors, e => e.Message.Contains("FROM"));
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Statement);
+        Assert.Empty(result.Errors);
     }
 
     // ───────────────────── Missing FROM clause ─────────────────────
 
     [Fact]
-    public void SelectColumns_MissingFrom_HasPartialAst()
+    public void SelectColumns_WithoutFrom_IsValidSql()
     {
         ParseResult result = SqlParser.TryParseRecovering("SELECT a, b");
 
-        Assert.False(result.IsSuccess);
-        // Partial AST should have columns but placeholder FROM.
+        Assert.True(result.IsSuccess);
         Assert.NotNull(result.Statement);
         Assert.Equal(2, result.Statement!.Columns.Count);
     }
 
     [Fact]
-    public void SelectColumns_SkipsToWhere_WhenFromMissing()
+    public void SelectWithWhere_WithoutFrom_IsValidSql()
     {
         ParseResult result = SqlParser.TryParseRecovering("SELECT x WHERE x > 1");
 
-        Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors, e => e.Message.Contains("FROM"));
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Statement);
+        Assert.NotNull(result.Statement!.Where);
     }
 
     // ───────────────────── Invalid WHERE expression ─────────────────────
@@ -122,13 +123,13 @@ public sealed class ErrorRecoveryTests
     // ───────────────────── Multiple errors ─────────────────────
 
     [Fact]
-    public void MisspelledSelect_MissingFrom_ReportsMultipleErrors()
+    public void MisspelledSelect_MissingFrom_ReportsErrors()
     {
         ParseResult result = SqlParser.TryParseRecovering("SELEKT");
 
         Assert.False(result.IsSuccess);
-        Assert.True(result.Errors.Count >= 2,
-            $"Expected at least 2 errors but got {result.Errors.Count}: " +
+        Assert.True(result.Errors.Count >= 1,
+            $"Expected at least 1 error but got {result.Errors.Count}: " +
             string.Join("; ", result.Errors.Select(e => e.Message)));
     }
 
@@ -206,6 +207,7 @@ public sealed class ErrorRecoveryTests
             result.Statement!.Columns[0].Expression);
         Assert.Equal("x", column.ColumnName);
 
+        Assert.NotNull(result.Statement.From);
         TableReference table = Assert.IsType<TableReference>(result.Statement.From.Source);
         Assert.Equal("t", table.Name);
     }
@@ -240,6 +242,8 @@ public sealed class ErrorRecoveryTests
         Assert.Equal(expected.Columns.Count, result.Statement!.Columns.Count);
 
         // FROM source should match.
+        Assert.NotNull(expected.From);
+        Assert.NotNull(result.Statement.From);
         TableReference expectedTable = Assert.IsType<TableReference>(expected.From.Source);
         TableReference actualTable = Assert.IsType<TableReference>(result.Statement.From.Source);
         Assert.Equal(expectedTable.Name, actualTable.Name);
