@@ -235,6 +235,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.ArrayContainsFunction());
         registry.RegisterScalar(new Scalar.ArrayPositionFunction());
         registry.RegisterScalar(new Scalar.ArrayConstructorFunction());
+        registry.RegisterScalar(new Scalar.ArraySortFunction());
+        registry.RegisterScalar(new Scalar.ArrayReverseFunction());
+        registry.RegisterScalar(new Scalar.ArrayDistinctFunction());
+        registry.RegisterScalar(new Scalar.ArraySliceFunction());
+        registry.RegisterScalar(new Scalar.ArrayConcatFunction());
 
         // Byte Array
         registry.RegisterScalar(new Scalar.BytesConcatFunction());

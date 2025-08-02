@@ -19,7 +19,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Encoding** | UUID generation/inspection, cryptographic hashing (MD5/SHA/CRC), and base64/hex encoding. |
 | **Categorical** | Categorical encoding: one-hot, label encoding (explicit domain), and feature hashing. |
 | **Json** | JSON path access, existence testing, and array inspection. |
-| **Array** | Typed array construction, inspection, search, and string conversion. |
+| **Array** | Typed array construction, inspection, search, manipulation, and string conversion. |
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
@@ -86,6 +86,11 @@ Every function belongs to a single **category** that describes its operational d
 | `array_join` | `array_join(arr, separator)` | Join elements into a String with separator. Null elements are skipped. String elements used directly; others converted via ToString. | 1 |
 | `array_contains` | `array_contains(arr, value)` | Returns Boolean — whether the array contains the value (by equality). | 1 |
 | `array_position` | `array_position(arr, value)` | 1-based index of the first matching element, or null if not found. | 1 |
+| `array_sort` | `array_sort(arr)` | Sorted copy (ascending). Uses ORDER BY comparison semantics — nulls sort last. Supports Scalar, UInt8, String, Date, DateTime elements. | 1 |
+| `array_reverse` | `array_reverse(arr)` | Reversed copy of the array. | 1 |
+| `array_distinct` | `array_distinct(arr)` | Remove duplicates, preserving first-occurrence order. Uses DataValue equality. | 1 |
+| `array_slice` | `array_slice(arr, start, length)` | Sub-array extraction. 1-based start, clamped to bounds. Returns empty array if out of range. | 1 |
+| `array_concat` | `array_concat(arr1, arr2)` | Concatenate two arrays. Both must share the same element kind. | 1 |
 
 > **Tip:** `len(arr)` also works as an alias for `array_length(arr)` since `len()` supports Array inputs.
 

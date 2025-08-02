@@ -309,6 +309,15 @@ SELECT array(1, 2, 3) AS literal_array,
 FROM products
 GROUP BY category
 
+-- Array manipulation: sort, deduplicate, slice, concatenate, reverse
+SELECT array_sort(ARRAY_AGG(score)) AS sorted_scores,
+       array_distinct(ARRAY_AGG(tag)) AS unique_tags,
+       array_slice(ARRAY_AGG(name ORDER BY name ASC), 1, 3) AS top3_names,
+       array_concat(ARRAY_AGG(tag), array('extra')) AS tags_extended,
+       array_reverse(ARRAY_AGG(name ORDER BY name ASC)) AS names_desc
+FROM products
+GROUP BY category
+
 -- Approximate percentile for large groups (O(1) memory)
 SELECT category, APPROX_PERCENTILE(score, 0.95) AS approx_p95
 FROM reviews
