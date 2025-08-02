@@ -150,6 +150,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("FULL"), SqlToken.Full, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("OUTER"), SqlToken.Outer, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CROSS"), SqlToken.Cross, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("LATERAL"), SqlToken.Lateral, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("APPLY"), SqlToken.Apply, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ON"), SqlToken.On, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("WHERE"), SqlToken.Where, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("BETWEEN"), SqlToken.Between, requireDelimiters: true)

@@ -286,14 +286,23 @@ public sealed class QueryPlanner
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
 
-                // Predicate pushdown: push single-table WHERE predicates below the join.
-                if (pendingPredicates is not null && join.Type == JoinType.Inner)
+                if (join.IsLateral)
                 {
-                    rightSide = PushPredicatesBelow(rightSide, rightAliases, pendingPredicates);
-                    source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
+                    // Lateral joins re-execute the right side per outer row;
+                    // predicate pushdown across the lateral boundary is not safe.
+                    source = new LateralJoinOperator(source, rightSide, join.Type, join.OnCondition);
                 }
+                else
+                {
+                    // Predicate pushdown: push single-table WHERE predicates below the join.
+                    if (pendingPredicates is not null && join.Type == JoinType.Inner)
+                    {
+                        rightSide = PushPredicatesBelow(rightSide, rightAliases, pendingPredicates);
+                        source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
+                    }
 
-                source = new JoinOperator(source, rightSide, join.Type, join.OnCondition);
+                    source = new JoinOperator(source, rightSide, join.Type, join.OnCondition);
+                }
 
                 // After the join, both sides' aliases are available on the left.
                 foreach (string alias in rightAliases)

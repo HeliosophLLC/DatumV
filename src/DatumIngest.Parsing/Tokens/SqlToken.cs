@@ -38,6 +38,12 @@ public enum SqlToken
     /// <summary>The INNER keyword (join modifier).</summary>
     Inner,
 
+    /// <summary>The LATERAL keyword (lateral join modifier).</summary>
+    Lateral,
+
+    /// <summary>The APPLY keyword (T-SQL style lateral join).</summary>
+    Apply,
+
     /// <summary>The ON keyword (join condition).</summary>
     On,
 

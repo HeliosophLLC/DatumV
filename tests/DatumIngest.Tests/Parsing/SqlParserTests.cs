@@ -613,6 +613,97 @@ public class SqlParserTests
         Assert.Equal("r", joined.Alias);
     }
 
+    // ───────────────────── LATERAL / APPLY joins ─────────────────────
+
+    [Fact]
+    public void CrossJoinLateral_FunctionSource()
+    {
+        SelectStatement result = Parse(
+            "SELECT t.a, r.value FROM t CROSS JOIN LATERAL UNNEST(t.arr) AS r");
+
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+        FunctionSource source = Assert.IsType<FunctionSource>(result.Joins[0].Source);
+        Assert.Equal("UNNEST", source.FunctionName);
+        Assert.Equal("r", source.Alias);
+    }
+
+    [Fact]
+    public void LeftJoinLateral_SubquerySource()
+    {
+        SelectStatement result = Parse(
+            "SELECT t.a, sub.x FROM t LEFT JOIN LATERAL (SELECT a AS x FROM u WHERE u.id = t.id) AS sub ON 1 = 1");
+
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins);
+        Assert.Equal(JoinType.Left, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+        SubquerySource source = Assert.IsType<SubquerySource>(result.Joins[0].Source);
+        Assert.Equal("sub", source.Alias);
+        Assert.NotNull(result.Joins[0].OnCondition);
+    }
+
+    [Fact]
+    public void LeftOuterJoinLateral()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t LEFT OUTER JOIN LATERAL UNNEST(t.arr) AS r");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Left, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+    }
+
+    [Fact]
+    public void CrossApply()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t CROSS APPLY UNNEST(t.arr) AS r");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+        FunctionSource source = Assert.IsType<FunctionSource>(result.Joins[0].Source);
+        Assert.Equal("UNNEST", source.FunctionName);
+    }
+
+    [Fact]
+    public void OuterApply()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t OUTER APPLY (SELECT x FROM u WHERE u.id = t.id) AS sub");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Left, result.Joins[0].Type);
+        Assert.True(result.Joins[0].IsLateral);
+        SubquerySource source = Assert.IsType<SubquerySource>(result.Joins[0].Source);
+        Assert.Equal("sub", source.Alias);
+    }
+
+    [Fact]
+    public void CrossJoinWithoutLateral_IsNotLateral()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t1 CROSS JOIN t2");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Cross, result.Joins[0].Type);
+        Assert.False(result.Joins[0].IsLateral);
+    }
+
+    [Fact]
+    public void LeftJoinWithoutLateral_IsNotLateral()
+    {
+        SelectStatement result = Parse(
+            "SELECT a FROM t1 LEFT JOIN t2 ON t1.id = t2.id");
+
+        Assert.NotNull(result.Joins);
+        Assert.Equal(JoinType.Left, result.Joins[0].Type);
+        Assert.False(result.Joins[0].IsLateral);
+    }
+
     // ───────────────────── Arithmetic expressions ─────────────────────
 
     [Fact]

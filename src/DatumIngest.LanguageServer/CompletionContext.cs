@@ -193,6 +193,8 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterFrom;
 
                 case SqlToken.Join:
+                case SqlToken.Lateral:
+                case SqlToken.Apply:
                     return CompletionZoneKind.AfterJoin;
 
                 case SqlToken.On:

@@ -361,6 +361,17 @@ SELECT time_diff(shift_start, shift_end) AS shift_length FROM shifts
 | `unnest` | `unnest(array_col)` | Expand array-valued column into separate rows. Works with Vector, UInt8Array, JsonValue arrays. | 1 |
 | `range` | `range(start, end[, step])` | Generate a sequence of rows with a `Value` column from start to end (inclusive). Default step is 1. | 1 |
 
+Table-valued functions can be used in FROM, CROSS JOIN, and LATERAL JOIN clauses. When used with `CROSS JOIN LATERAL` or `CROSS APPLY`, the function arguments can reference columns from the left-hand table, enabling per-row expansion of array or nested data:
+
+```sql
+-- Expand a vector column per row using lateral join
+SELECT t.name, s.value
+FROM data AS t
+CROSS JOIN LATERAL UNNEST(t.scores) AS s
+```
+
+See [SQL Reference — LATERAL JOIN / APPLY](sql.md#lateral-join--apply) for full syntax and examples.
+
 ## Aggregate Functions
 
 Aggregate functions reduce multiple rows into a single result per group. Used with `GROUP BY` or as global aggregations (see [SQL Reference — GROUP BY](sql.md#group-by--aggregation)).

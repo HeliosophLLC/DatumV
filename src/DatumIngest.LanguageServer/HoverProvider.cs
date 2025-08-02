@@ -200,6 +200,8 @@ public sealed class HoverProvider
             SqlToken.Full => "**FULL** — Full outer join: all rows from both tables.",
             SqlToken.Cross => "**CROSS** — Cross join: cartesian product of both tables.",
             SqlToken.Inner => "**INNER** — Inner join: only rows that match in both tables.",
+            SqlToken.Lateral => "**LATERAL** — Lateral join: re-executes the right-hand source per outer row, allowing it to reference left-side columns. O(N × M) nested-loop execution.",
+            SqlToken.Apply => "**APPLY** — T-SQL style lateral join. CROSS APPLY = CROSS JOIN LATERAL, OUTER APPLY = LEFT JOIN LATERAL.",
             SqlToken.On => "**ON** — Specifies the join condition.",
             SqlToken.Into => "**INTO** — Writes query output to a file. Format inferred from extension (.csv, .parquet, .h5).",
             SqlToken.As => "**AS** — Creates an alias for a table or column.",

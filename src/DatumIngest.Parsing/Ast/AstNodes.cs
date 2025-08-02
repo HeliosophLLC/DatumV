@@ -114,8 +114,10 @@ public sealed record FunctionSource(string FunctionName, IReadOnlyList<Expressio
 
 /// <summary>
 /// A single JOIN clause combining a source with a join condition.
+/// When <see cref="IsLateral"/> is <see langword="true"/>, the right-hand source
+/// is re-executed per outer row and may reference columns from the left side.
 /// </summary>
-public sealed record JoinClause(JoinType Type, TableSource Source, Expression? OnCondition);
+public sealed record JoinClause(JoinType Type, TableSource Source, Expression? OnCondition, bool IsLateral = false);
 
 /// <summary>
 /// The type of join operation.

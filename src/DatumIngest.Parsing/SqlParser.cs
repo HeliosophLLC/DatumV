@@ -662,44 +662,54 @@ public static class SqlParser
 
     // ───────────────────── JOIN clauses ─────────────────────
 
-    /// <summary>Join type keyword combinations.</summary>
-    private static readonly TokenListParser<SqlToken, JoinType> JoinTypeParser =
-        // INNER JOIN or plain JOIN
-        Token.EqualTo(SqlToken.Inner).IgnoreThen(Token.EqualTo(SqlToken.Join))
-            .Select(_ => JoinType.Inner).Try()
-        // LEFT [OUTER] JOIN
-        .Or(Token.EqualTo(SqlToken.Left)
-            .IgnoreThen(Token.EqualTo(SqlToken.Outer).OptionalOrDefault())
-            .IgnoreThen(Token.EqualTo(SqlToken.Join))
-            .Select(_ => JoinType.Left).Try())
+    /// <summary>Join type keyword combinations, including LATERAL and T-SQL APPLY variants.</summary>
+    private static readonly TokenListParser<SqlToken, (JoinType Type, bool IsLateral)> JoinTypeParser =
+        // CROSS APPLY (T-SQL style lateral cross join)
+        Token.EqualTo(SqlToken.Cross)
+            .IgnoreThen(Token.EqualTo(SqlToken.Apply))
+            .Select(_ => (JoinType.Cross, true)).Try()
+        // OUTER APPLY (T-SQL style lateral left join)
+        .Or(Token.EqualTo(SqlToken.Outer)
+            .IgnoreThen(Token.EqualTo(SqlToken.Apply))
+            .Select(_ => (JoinType.Left, true)).Try())
+        // INNER JOIN
+        .Or(Token.EqualTo(SqlToken.Inner).IgnoreThen(Token.EqualTo(SqlToken.Join))
+            .Select(_ => (JoinType.Inner, false)).Try())
+        // LEFT [OUTER] JOIN [LATERAL]
+        .Or(from _ in Token.EqualTo(SqlToken.Left)
+            from __ in Token.EqualTo(SqlToken.Outer).OptionalOrDefault()
+            from ___ in Token.EqualTo(SqlToken.Join)
+            from isLateral in Token.EqualTo(SqlToken.Lateral).Select(t => true).OptionalOrDefault(false)
+            select (JoinType.Left, isLateral))
         // RIGHT [OUTER] JOIN
         .Or(Token.EqualTo(SqlToken.Right)
             .IgnoreThen(Token.EqualTo(SqlToken.Outer).OptionalOrDefault())
             .IgnoreThen(Token.EqualTo(SqlToken.Join))
-            .Select(_ => JoinType.Right).Try())
+            .Select(_ => (JoinType.Right, false)).Try())
         // FULL [OUTER] JOIN
         .Or(Token.EqualTo(SqlToken.Full)
             .IgnoreThen(Token.EqualTo(SqlToken.Outer).OptionalOrDefault())
             .IgnoreThen(Token.EqualTo(SqlToken.Join))
-            .Select(_ => JoinType.FullOuter).Try())
-        // CROSS JOIN
-        .Or(Token.EqualTo(SqlToken.Cross)
-            .IgnoreThen(Token.EqualTo(SqlToken.Join))
-            .Select(_ => JoinType.Cross).Try())
+            .Select(_ => (JoinType.FullOuter, false)).Try())
+        // CROSS JOIN [LATERAL]
+        .Or(from _ in Token.EqualTo(SqlToken.Cross)
+            from __ in Token.EqualTo(SqlToken.Join)
+            from isLateral in Token.EqualTo(SqlToken.Lateral).Select(t => true).OptionalOrDefault(false)
+            select (JoinType.Cross, isLateral))
         // Plain JOIN (defaults to INNER)
         .Or(Token.EqualTo(SqlToken.Join)
-            .Select(_ => JoinType.Inner));
+            .Select(_ => (JoinType.Inner, false)));
 
     /// <summary>A single JOIN clause with source and optional ON condition.</summary>
     private static readonly TokenListParser<SqlToken, JoinClause> JoinClauseParser =
-        from joinType in JoinTypeParser
+        from joinInfo in JoinTypeParser
         from source in TableSourceParser
         from onCondition in (
             from onKw in Token.EqualTo(SqlToken.On)
             from condition in ExpressionParser
             select condition
         ).OptionalOrDefault()
-        select new JoinClause(joinType, source, onCondition);
+        select new JoinClause(joinInfo.Type, source, onCondition, joinInfo.IsLateral);
 
     /// <summary>Zero or more JOIN clauses.</summary>
     private static readonly TokenListParser<SqlToken, JoinClause[]> JoinClausesParser =
