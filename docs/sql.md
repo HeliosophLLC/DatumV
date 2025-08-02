@@ -129,12 +129,34 @@ WHERE col1 = 'value' AND col2 < 100
 WHERE col IN ('a', 'b', 'c')
 WHERE col BETWEEN 10 AND 50
 WHERE col LIKE 'prefix_%'
+WHERE col ILIKE '%pattern%'
+WHERE col REGEXP '^\d{3}-\d{4}$'
 WHERE col IS NULL
 WHERE col IS NOT NULL
 WHERE NOT (col1 > 10 OR col2 < 5)
 ```
 
-Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`, `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`.
+Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`, `ILIKE`, `REGEXP`, `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`.
+
+### Pattern matching
+
+`LIKE` performs case-sensitive pattern matching with `%` (zero or more characters) and `_` (exactly one character) wildcards. `ILIKE` is the case-insensitive variant.
+
+`REGEXP` matches against a .NET regular expression. The match is unanchored (substring match) — use `^` and `$` anchors for full-string matching. Case-sensitive by default; use inline `(?i)` for case-insensitive matching.
+
+```sql
+-- Case-sensitive wildcard matching
+SELECT * FROM logs WHERE message LIKE 'ERROR:%'
+
+-- Case-insensitive wildcard matching
+SELECT * FROM users WHERE name ILIKE '%smith%'
+
+-- Regular expression matching
+SELECT * FROM data WHERE phone REGEXP '^\d{3}-\d{4}$'
+SELECT * FROM logs WHERE line REGEXP '(?i)warning|error'
+```
+
+All three operators support negation via `NOT`: `NOT LIKE`, `NOT ILIKE`, `NOT REGEXP`.
 
 ## GROUP BY / Aggregation
 
@@ -1038,7 +1060,7 @@ The explain plan emits warnings about potential performance issues:
 | ORDER BY materializes all input rows | ORDER BY without LIMIT |
 | CROSS JOIN produces a cartesian product | CROSS JOIN |
 | FULL OUTER JOIN materializes both sides | FULL OUTER JOIN |
-| LIKE predicate requires full scan | LIKE in WHERE |
+| Pattern matching predicate requires full scan | LIKE / ILIKE / REGEXP in WHERE |
 | GroupBy materializes all groups in memory | GROUP BY |
 
 ## Schema Introspection

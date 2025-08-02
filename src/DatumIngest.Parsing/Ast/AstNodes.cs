@@ -309,8 +309,14 @@ public enum BinaryOperator
     /// <summary>Logical OR.</summary>
     Or,
 
-    /// <summary>Pattern matching (LIKE).</summary>
+    /// <summary>Case-sensitive pattern matching (LIKE).</summary>
     Like,
+
+    /// <summary>Case-insensitive pattern matching (ILIKE).</summary>
+    ILike,
+
+    /// <summary>Regular expression matching (REGEXP).</summary>
+    Regexp,
 }
 
 /// <summary>

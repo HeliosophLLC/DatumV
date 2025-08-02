@@ -89,10 +89,10 @@ public static class QueryExplainer
             EstimatedRows = EstimateFilterRows(child.EstimatedRows, filter.Predicate, stats),
         };
 
-        // Warn about LIKE predicates (no index, full scan).
-        if (ContainsLike(filter.Predicate))
+        // Warn about pattern matching predicates (no index, full scan).
+        if (ContainsPatternMatch(filter.Predicate))
         {
-            node.Warnings.Add("LIKE predicate requires full scan of input rows.");
+            node.Warnings.Add("Pattern matching predicate requires full scan of input rows.");
         }
 
         return node;
@@ -409,6 +409,8 @@ public static class QueryExplainer
             BinaryExpression { Operator: BinaryOperator.NotEqual } neq
                 => 1.0 - EstimateEqualitySelectivity(neq, stats),
             BinaryExpression { Operator: BinaryOperator.Like } => 0.25,
+            BinaryExpression { Operator: BinaryOperator.ILike } => 0.25,
+            BinaryExpression { Operator: BinaryOperator.Regexp } => 0.10,
             IsNullExpression isNull => EstimateIsNullSelectivity(isNull, stats),
             InExpression inExpr => EstimateInSelectivity(inExpr, stats),
             BetweenExpression => 0.25,
@@ -699,6 +701,8 @@ public static class QueryExplainer
             BinaryOperator.And => "AND",
             BinaryOperator.Or => "OR",
             BinaryOperator.Like => "LIKE",
+            BinaryOperator.ILike => "ILIKE",
+            BinaryOperator.Regexp => "REGEXP",
             _ => op.ToString(),
         };
     }
@@ -800,14 +804,16 @@ public static class QueryExplainer
         };
     }
 
-    private static bool ContainsLike(Expression expression)
+    private static bool ContainsPatternMatch(Expression expression)
     {
         return expression switch
         {
-            BinaryExpression bin => bin.Operator == BinaryOperator.Like
-                || ContainsLike(bin.Left)
-                || ContainsLike(bin.Right),
-            UnaryExpression unary => ContainsLike(unary.Operand),
+            BinaryExpression bin => bin.Operator is BinaryOperator.Like
+                    or BinaryOperator.ILike
+                    or BinaryOperator.Regexp
+                || ContainsPatternMatch(bin.Left)
+                || ContainsPatternMatch(bin.Right),
+            UnaryExpression unary => ContainsPatternMatch(unary.Operand),
             _ => false,
         };
     }

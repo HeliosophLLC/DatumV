@@ -221,6 +221,50 @@ public class SqlParserTests
     }
 
     [Fact]
+    public void WhereILike()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE name ILIKE '%test%'");
+
+        Assert.NotNull(result.Where);
+        BinaryExpression ilike = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.ILike, ilike.Operator);
+    }
+
+    [Fact]
+    public void WhereRegexp()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE phone REGEXP '^\\d{3}-\\d{4}$'");
+
+        Assert.NotNull(result.Where);
+        BinaryExpression regexp = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.Regexp, regexp.Operator);
+    }
+
+    [Fact]
+    public void WhereNotILike()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE NOT name ILIKE '%test%'");
+
+        Assert.NotNull(result.Where);
+        UnaryExpression notExpr = Assert.IsType<UnaryExpression>(result.Where);
+        Assert.Equal(UnaryOperator.Not, notExpr.Operator);
+        BinaryExpression ilike = Assert.IsType<BinaryExpression>(notExpr.Operand);
+        Assert.Equal(BinaryOperator.ILike, ilike.Operator);
+    }
+
+    [Fact]
+    public void WhereNotRegexp()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE NOT phone REGEXP '^\\d+$'");
+
+        Assert.NotNull(result.Where);
+        UnaryExpression notExpr = Assert.IsType<UnaryExpression>(result.Where);
+        Assert.Equal(UnaryOperator.Not, notExpr.Operator);
+        BinaryExpression regexp = Assert.IsType<BinaryExpression>(notExpr.Operand);
+        Assert.Equal(BinaryOperator.Regexp, regexp.Operator);
+    }
+
+    [Fact]
     public void WhereIn()
     {
         SelectStatement result = Parse("SELECT a FROM t WHERE x IN (1, 2, 3)");

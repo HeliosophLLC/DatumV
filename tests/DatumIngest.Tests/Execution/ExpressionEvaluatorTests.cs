@@ -640,6 +640,142 @@ public class ExpressionEvaluatorTests
         Assert.Equal(0f, result.AsScalar());
     }
 
+    [Fact]
+    public void Like_CaseSensitive_NoMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("HELLO"),
+                BinaryOperator.Like,
+                new LiteralExpression("hello")),
+            MakeRow());
+        Assert.Equal(0f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Like_CaseSensitive_ExactMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("Hello"),
+                BinaryOperator.Like,
+                new LiteralExpression("Hello")),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    // ─────────────── ILIKE ───────────────
+
+    [Fact]
+    public void ILike_CaseInsensitive_Match()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("HELLO WORLD"),
+                BinaryOperator.ILike,
+                new LiteralExpression("hello%")),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ILike_Wildcards()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("Cat"),
+                BinaryOperator.ILike,
+                new LiteralExpression("c_t")),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ILike_NoMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("dog"),
+                BinaryOperator.ILike,
+                new LiteralExpression("c_t")),
+            MakeRow());
+        Assert.Equal(0f, result.AsScalar());
+    }
+
+    // ─────────────── REGEXP ───────────────
+
+    [Fact]
+    public void Regexp_SubstringMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("abc123def"),
+                BinaryOperator.Regexp,
+                new LiteralExpression("\\d+")),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Regexp_Anchored()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("555-1234"),
+                BinaryOperator.Regexp,
+                new LiteralExpression("^\\d{3}-\\d{4}$")),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Regexp_NoMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("hello"),
+                BinaryOperator.Regexp,
+                new LiteralExpression("^\\d+$")),
+            MakeRow());
+        Assert.Equal(0f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Regexp_CaseSensitive()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("HELLO"),
+                BinaryOperator.Regexp,
+                new LiteralExpression("hello")),
+            MakeRow());
+        Assert.Equal(0f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Regexp_InlineIgnoreCase()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new BinaryExpression(
+                new LiteralExpression("HELLO"),
+                BinaryOperator.Regexp,
+                new LiteralExpression("(?i)hello")),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void Regexp_InvalidPattern_Throws()
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            _evaluator.Evaluate(
+                new BinaryExpression(
+                    new LiteralExpression("test"),
+                    BinaryOperator.Regexp,
+                    new LiteralExpression("[invalid")),
+                MakeRow()));
+    }
+
     // ─────────────── Function calls ───────────────
 
     [Fact]

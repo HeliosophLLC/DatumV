@@ -20,10 +20,20 @@ public sealed class ExpressionEvaluator
     private readonly Row? _outerRow;
 
     /// <summary>
-    /// Compiled regex cache for LIKE patterns. Avoids recompiling
+    /// Compiled regex cache for case-sensitive LIKE patterns. Avoids recompiling
     /// the same SQL LIKE pattern on every row comparison.
     /// </summary>
     private readonly Dictionary<string, Regex> _likeRegexCache = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Compiled regex cache for case-insensitive ILIKE patterns.
+    /// </summary>
+    private readonly Dictionary<string, Regex> _iLikeRegexCache = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Compiled regex cache for REGEXP patterns (user-supplied regular expressions).
+    /// </summary>
+    private readonly Dictionary<string, Regex> _regexpCache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Cached resolved DataKind for each CASE expression, computed once on first evaluation.
@@ -241,6 +251,8 @@ public sealed class ExpressionEvaluator
                 BinaryOperator.LessThanOrEqual => CompareValuesLe(left, right),
                 BinaryOperator.GreaterThanOrEqual => CompareValuesGe(left, right),
                 BinaryOperator.Like => EvaluateLike(left, right),
+                BinaryOperator.ILike => EvaluateILike(left, right),
+                BinaryOperator.Regexp => EvaluateRegexp(left, right),
                 _ => throw new InvalidOperationException(
                     $"Unsupported binary operator: {binary.Operator}."),
             };
@@ -826,8 +838,12 @@ public sealed class ExpressionEvaluator
         return leftValue.CompareTo(rightValue);
     }
 
-    // ──────────────────── LIKE pattern matching ────────────────────
+    // ──────────────────── LIKE / ILIKE / REGEXP pattern matching ────────────────────
 
+    /// <summary>
+    /// Evaluates a case-sensitive LIKE expression. Converts SQL wildcards
+    /// (<c>%</c> and <c>_</c>) into a regex pattern.
+    /// </summary>
     private DataValue EvaluateLike(DataValue left, DataValue right)
     {
         if (left.Kind != DataKind.String || right.Kind != DataKind.String)
@@ -844,8 +860,62 @@ public sealed class ExpressionEvaluator
                 .Replace("%", ".*", StringComparison.Ordinal)
                 .Replace("_", ".", StringComparison.Ordinal) + "$";
 
-            regex = new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            regex = new Regex(regexPattern, RegexOptions.Compiled | RegexOptions.CultureInvariant);
             _likeRegexCache[pattern] = regex;
+        }
+
+        bool matches = regex.IsMatch(input);
+        return DataValue.FromScalar(matches ? 1f : 0f);
+    }
+
+    /// <summary>
+    /// Evaluates a case-insensitive ILIKE expression. Same wildcard conversion
+    /// as LIKE but with <see cref="RegexOptions.IgnoreCase"/>.
+    /// </summary>
+    private DataValue EvaluateILike(DataValue left, DataValue right)
+    {
+        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
+        {
+            throw new InvalidOperationException("ILIKE requires string operands.");
+        }
+
+        string input = left.AsString();
+        string pattern = right.AsString();
+
+        if (!_iLikeRegexCache.TryGetValue(pattern, out Regex? regex))
+        {
+            string regexPattern = "^" + Regex.Escape(pattern)
+                .Replace("%", ".*", StringComparison.Ordinal)
+                .Replace("_", ".", StringComparison.Ordinal) + "$";
+
+            regex = new Regex(regexPattern, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            _iLikeRegexCache[pattern] = regex;
+        }
+
+        bool matches = regex.IsMatch(input);
+        return DataValue.FromScalar(matches ? 1f : 0f);
+    }
+
+    /// <summary>
+    /// Evaluates a REGEXP expression. The right operand is a user-supplied regular
+    /// expression used for substring matching (unanchored). Uses
+    /// <see cref="RegexOptions.NonBacktracking"/> to prevent catastrophic
+    /// backtracking on adversarial patterns.
+    /// </summary>
+    private DataValue EvaluateRegexp(DataValue left, DataValue right)
+    {
+        if (left.Kind != DataKind.String || right.Kind != DataKind.String)
+        {
+            throw new InvalidOperationException("REGEXP requires string operands.");
+        }
+
+        string input = left.AsString();
+        string pattern = right.AsString();
+
+        if (!_regexpCache.TryGetValue(pattern, out Regex? regex))
+        {
+            regex = new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
+            _regexpCache[pattern] = regex;
         }
 
         bool matches = regex.IsMatch(input);

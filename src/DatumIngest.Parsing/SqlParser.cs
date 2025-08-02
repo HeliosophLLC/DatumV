@@ -445,6 +445,8 @@ public static class SqlParser
             .Or(NotBetweenPostfix.Try())
             .Or(BetweenPostfix.Try())
             .Or(LikePostfix.Try())
+            .Or(ILikePostfix.Try())
+            .Or(RegexpPostfix.Try())
             .Or(ComparisonPostfix)
             .OptionalOrDefault()
         select postfix is not null ? postfix(left) : left;
@@ -516,12 +518,26 @@ public static class SqlParser
         select (Func<Expression, Expression>)(expr =>
             new BetweenExpression(expr, low, high, Negated: true));
 
-    /// <summary>LIKE pattern postfix.</summary>
+    /// <summary>LIKE pattern postfix (case-sensitive).</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> LikePostfix =
         from likeKw in Token.EqualTo(SqlToken.Like)
         from pattern in SP.Ref(() => ExpressionParser!)
         select (Func<Expression, Expression>)(expr =>
             new BinaryExpression(expr, BinaryOperator.Like, pattern));
+
+    /// <summary>ILIKE pattern postfix (case-insensitive).</summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> ILikePostfix =
+        from ilikeKw in Token.EqualTo(SqlToken.ILike)
+        from pattern in SP.Ref(() => ExpressionParser!)
+        select (Func<Expression, Expression>)(expr =>
+            new BinaryExpression(expr, BinaryOperator.ILike, pattern));
+
+    /// <summary>REGEXP pattern postfix (regular expression matching).</summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> RegexpPostfix =
+        from regexpKw in Token.EqualTo(SqlToken.Regexp)
+        from pattern in SP.Ref(() => ExpressionParser!)
+        select (Func<Expression, Expression>)(expr =>
+            new BinaryExpression(expr, BinaryOperator.Regexp, pattern));
 
     /// <summary>Infix comparison operators: =, !=, &lt;, &gt;, &lt;=, &gt;=.</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> ComparisonPostfix =

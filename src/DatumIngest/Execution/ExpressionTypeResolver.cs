@@ -200,7 +200,9 @@ public static class ExpressionTypeResolver
             or BinaryOperator.GreaterThanOrEqual
             or BinaryOperator.And
             or BinaryOperator.Or
-            or BinaryOperator.Like;
+            or BinaryOperator.Like
+            or BinaryOperator.ILike
+            or BinaryOperator.Regexp;
     }
 
     /// <summary>

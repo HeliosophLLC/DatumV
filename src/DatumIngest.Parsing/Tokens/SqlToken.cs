@@ -59,8 +59,14 @@ public enum SqlToken
     /// <summary>The BETWEEN keyword (range predicate).</summary>
     Between,
 
-    /// <summary>The LIKE keyword (pattern matching).</summary>
+    /// <summary>The LIKE keyword (case-sensitive pattern matching).</summary>
     Like,
+
+    /// <summary>The ILIKE keyword (case-insensitive pattern matching).</summary>
+    ILike,
+
+    /// <summary>The REGEXP keyword (regular expression matching).</summary>
+    Regexp,
 
     /// <summary>The IS keyword (null testing).</summary>
     Is,

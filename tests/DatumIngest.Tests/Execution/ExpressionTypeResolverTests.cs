@@ -96,6 +96,8 @@ public sealed class ExpressionTypeResolverTests
     [InlineData(BinaryOperator.And)]
     [InlineData(BinaryOperator.Or)]
     [InlineData(BinaryOperator.Like)]
+    [InlineData(BinaryOperator.ILike)]
+    [InlineData(BinaryOperator.Regexp)]
     public void ResolveBinary_ComparisonOrLogical_ReturnsScalar(BinaryOperator op)
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(

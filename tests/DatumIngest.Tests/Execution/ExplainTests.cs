@@ -279,7 +279,47 @@ public class ExplainTests
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
 
-        Assert.Contains(node.Warnings, w => w.Contains("LIKE"));
+        Assert.Contains(node.Warnings, w => w.Contains("full scan"));
+    }
+
+    [Fact]
+    public void Explain_FilterWithILike_WarnsAboutFullScan()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("name"),
+                BinaryOperator.ILike,
+                new LiteralExpression("%test%")));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Contains(node.Warnings, w => w.Contains("full scan"));
+    }
+
+    [Fact]
+    public void Explain_FilterWithRegexp_WarnsAboutFullScan()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("data", "test.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            Where: new BinaryExpression(
+                new ColumnReference("name"),
+                BinaryOperator.Regexp,
+                new LiteralExpression("^test")));
+
+        IQueryOperator plan = planner.Plan(statement);
+        ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        Assert.Contains(node.Warnings, w => w.Contains("full scan"));
     }
 
     [Fact]
