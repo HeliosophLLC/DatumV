@@ -1190,7 +1190,9 @@ public sealed class QueryPlanner
                     windowFunction,
                     windowCall.Arguments,
                     windowCall.Window,
-                    outputName));
+                    outputName,
+                    windowCall.NullHandling,
+                    windowCall.FromLast));
             }
 
             return new ColumnReference(null, outputName);

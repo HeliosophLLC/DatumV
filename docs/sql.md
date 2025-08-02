@@ -253,6 +253,38 @@ SELECT *, LAG(price) OVER (ORDER BY date) AS prev_price FROM prices
 SELECT *, LEAD(price, 2, 0) OVER (ORDER BY date) AS price_after_next FROM prices
 ```
 
+### Value Functions
+
+```sql
+-- First value per partition
+SELECT *, FIRST_VALUE(price) OVER (PARTITION BY product ORDER BY date) AS first_price
+FROM prices
+
+-- Last value with explicit frame (default frame returns current row)
+SELECT *, LAST_VALUE(price) OVER (
+    PARTITION BY product ORDER BY date
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+) AS last_price
+FROM prices
+
+-- Nth value from the end of the frame
+SELECT *, NTH_VALUE(reading, 2) FROM LAST OVER (ORDER BY ts) AS second_to_last
+FROM sensor_data
+
+-- First non-null value (skip nulls)
+SELECT *, FIRST_VALUE(status) IGNORE NULLS OVER (ORDER BY ts) AS first_status
+FROM events
+```
+
+Value functions support two optional modifiers between the closing `)` and `OVER`:
+
+| Modifier | Applies to | Description |
+|----------|-----------|-------------|
+| `FROM FIRST` (default) | `NTH_VALUE` | Count from the beginning of the frame. |
+| `FROM LAST` | `NTH_VALUE` | Count from the end of the frame. |
+| `RESPECT NULLS` (default) | All three | Include NULL values when searching. |
+| `IGNORE NULLS` | All three | Skip NULL values when searching. |
+
 ### Aggregate Functions over Windows
 
 All aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates:
@@ -304,6 +336,9 @@ SUM(val) OVER (PARTITION BY group_col ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOU
 | `NTILE(n)` | `NTILE(n) OVER (...)` | Distribute rows into `n` roughly equal buckets. |
 | `LAG(expr [, offset [, default]])` | `LAG(...) OVER (...)` | Value from the row `offset` rows before current (default 1). |
 | `LEAD(expr [, offset [, default]])` | `LEAD(...) OVER (...)` | Value from the row `offset` rows after current (default 1). |
+| `FIRST_VALUE(expr)` | `FIRST_VALUE(expr) [IGNORE NULLS] OVER (...)` | First value in the window frame. |
+| `LAST_VALUE(expr)` | `LAST_VALUE(expr) [IGNORE NULLS] OVER (...)` | Last value in the window frame. |
+| `NTH_VALUE(expr, n)` | `NTH_VALUE(expr, n) [FROM FIRST \| FROM LAST] [IGNORE NULLS] OVER (...)` | Nth value (1-based) in the window frame. |
 | `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` | `agg(...) OVER (...)` | Any aggregate function used with OVER becomes a window aggregate. |
 
 ### Execution model

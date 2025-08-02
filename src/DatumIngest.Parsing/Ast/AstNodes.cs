@@ -446,6 +446,8 @@ public sealed record WindowFunctionCallExpression(
     IReadOnlyList<Expression> Arguments,
     WindowSpecification Window,
     bool Distinct = false,
+    NullHandling NullHandling = NullHandling.RespectNulls,
+    bool FromLast = false,
     SourceSpan? Span = null) : Expression;
 
 /// <summary>
@@ -487,6 +489,19 @@ public enum WindowFrameType
 {
     /// <summary>Frame boundaries are expressed as row offsets from the current row.</summary>
     Rows,
+}
+
+/// <summary>
+/// Controls whether NULL values are skipped or included by value window
+/// functions (FIRST_VALUE, LAST_VALUE, NTH_VALUE).
+/// </summary>
+public enum NullHandling
+{
+    /// <summary>Include NULL values (the default SQL behavior).</summary>
+    RespectNulls,
+
+    /// <summary>Skip NULL values when searching for the target row.</summary>
+    IgnoreNulls,
 }
 
 /// <summary>

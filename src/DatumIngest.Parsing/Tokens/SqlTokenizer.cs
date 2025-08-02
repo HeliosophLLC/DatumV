@@ -188,6 +188,9 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("FOLLOWING"), SqlToken.Following, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CURRENT"), SqlToken.Current, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DISTINCT"), SqlToken.Distinct, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("IGNORE"), SqlToken.Ignore, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("RESPECT"), SqlToken.Respect, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("NULLS"), SqlToken.Nulls, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXISTS"), SqlToken.Exists, requireDelimiters: true)
 
             // CTE keywords

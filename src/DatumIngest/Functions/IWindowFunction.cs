@@ -55,11 +55,21 @@ public interface IWindowComputation
     /// Pre-allocated array of the same length as <paramref name="partitionRows"/>.
     /// The computation must write exactly one <see cref="DataValue"/> per row.
     /// </param>
+    /// <param name="nullHandling">
+    /// Whether to skip or include NULLs when locating the target value.
+    /// Used by value window functions (FIRST_VALUE, LAST_VALUE, NTH_VALUE).
+    /// </param>
+    /// <param name="fromLast">
+    /// When <see langword="true"/>, NTH_VALUE counts from the end of the frame
+    /// instead of the beginning.
+    /// </param>
     void Compute(
         IReadOnlyList<Row> partitionRows,
         IReadOnlyList<Expression> argumentExpressions,
         ExpressionEvaluator evaluator,
         IReadOnlyList<OrderByItem>? orderByItems,
         WindowFrame? frame,
-        DataValue[] results);
+        DataValue[] results,
+        NullHandling nullHandling = NullHandling.RespectNulls,
+        bool fromLast = false);
 }

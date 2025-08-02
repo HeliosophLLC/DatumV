@@ -36,7 +36,9 @@ public sealed class RankFunction : IWindowFunction
             ExpressionEvaluator evaluator,
             IReadOnlyList<OrderByItem>? orderByItems,
             WindowFrame? frame,
-            DataValue[] results)
+            DataValue[] results,
+            NullHandling nullHandling = NullHandling.RespectNulls,
+            bool fromLast = false)
         {
             if (partitionRows.Count == 0)
             {

@@ -152,6 +152,15 @@ public enum SqlToken
     /// <summary>The DISTINCT keyword (duplicate elimination).</summary>
     Distinct,
 
+    /// <summary>The IGNORE keyword (null handling modifier for value window functions).</summary>
+    Ignore,
+
+    /// <summary>The RESPECT keyword (null handling modifier for value window functions).</summary>
+    Respect,
+
+    /// <summary>The NULLS keyword (used with IGNORE/RESPECT for null handling).</summary>
+    Nulls,
+
     /// <summary>The WITH keyword (common table expression preamble).</summary>
     With,
 

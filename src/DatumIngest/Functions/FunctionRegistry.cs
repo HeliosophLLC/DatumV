@@ -455,6 +455,9 @@ public sealed class FunctionRegistry
         registry.RegisterWindow(new Window.NtileFunction());
         registry.RegisterWindow(new Window.LagFunction());
         registry.RegisterWindow(new Window.LeadFunction());
+        registry.RegisterWindow(new Window.FirstValueFunction());
+        registry.RegisterWindow(new Window.LastValueFunction());
+        registry.RegisterWindow(new Window.NthValueFunction());
 
         return registry;
     }

@@ -42,7 +42,9 @@ public sealed class LeadFunction : IWindowFunction
             ExpressionEvaluator evaluator,
             IReadOnlyList<OrderByItem>? orderByItems,
             WindowFrame? frame,
-            DataValue[] results)
+            DataValue[] results,
+            NullHandling nullHandling = NullHandling.RespectNulls,
+            bool fromLast = false)
         {
             // Determine offset (default 1).
             int offset = 1;

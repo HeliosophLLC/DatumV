@@ -35,7 +35,9 @@ public sealed class RowNumberFunction : IWindowFunction
             ExpressionEvaluator evaluator,
             IReadOnlyList<OrderByItem>? orderByItems,
             WindowFrame? frame,
-            DataValue[] results)
+            DataValue[] results,
+            NullHandling nullHandling = NullHandling.RespectNulls,
+            bool fromLast = false)
         {
             for (int i = 0; i < partitionRows.Count; i++)
             {

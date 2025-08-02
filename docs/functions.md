@@ -23,7 +23,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
 | **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, PERCENTILE_CONT). |
-| **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, plus aggregates with OVER). |
+| **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, plus aggregates with OVER). |
 
 > **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
 >
@@ -382,7 +382,7 @@ All aggregate functions support the `DISTINCT` modifier (e.g. `COUNT(DISTINCT ex
 
 Window functions compute a value for each row based on a window of related rows defined by an `OVER` clause. Unlike aggregates with `GROUP BY`, window functions do not collapse rows — every input row produces an output row. See [SQL Reference — Window Functions](sql.md#window-functions) for full syntax.
 
-### Dedicated Window Functions (6)
+### Dedicated Window Functions (9)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|  
@@ -392,6 +392,9 @@ Window functions compute a value for each row based on a window of related rows 
 | `NTILE` | `NTILE(n) OVER (...)` | Distribute rows into `n` roughly equal buckets. | 1 |
 | `LAG` | `LAG(expr [, offset [, default]]) OVER (...)` | Value from `offset` rows before current (default offset 1, default value NULL). | 1 |
 | `LEAD` | `LEAD(expr [, offset [, default]]) OVER (...)` | Value from `offset` rows after current (default offset 1, default value NULL). | 1 |
+| `FIRST_VALUE` | `FIRST_VALUE(expr) [IGNORE NULLS] OVER (...)` | Value from the first row in the window frame. `IGNORE NULLS` skips null values. | 1 |
+| `LAST_VALUE` | `LAST_VALUE(expr) [IGNORE NULLS] OVER (...)` | Value from the last row in the window frame. `IGNORE NULLS` skips null values. | 1 |
+| `NTH_VALUE` | `NTH_VALUE(expr, n) [FROM FIRST \| FROM LAST] [IGNORE NULLS] OVER (...)` | Value from the Nth row (1-based) in the window frame. `FROM LAST` counts from the end. | 1 |
 
 ### Aggregates as Window Functions
 

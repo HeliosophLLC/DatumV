@@ -1200,6 +1200,33 @@ public static class FunctionDocumentation
             IsWindowFunction = true,
             Category = FunctionCategory.Window,
         });
+        Register(new FunctionSignature
+        {
+            Name = "FIRST_VALUE",
+            Parameters = [Parameter("expression", "Any")],
+            ReturnType = "Any",
+            Description = "Returns the value of the expression from the first row in the window frame. Supports IGNORE NULLS to skip null values.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "LAST_VALUE",
+            Parameters = [Parameter("expression", "Any")],
+            ReturnType = "Any",
+            Description = "Returns the value of the expression from the last row in the window frame. Supports IGNORE NULLS to skip null values.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "NTH_VALUE",
+            Parameters = [Parameter("expression", "Any"), Parameter("n", "Scalar")],
+            ReturnType = "Any",
+            Description = "Returns the value of the expression from the Nth row (1-based) in the window frame. Supports FROM FIRST/LAST and IGNORE NULLS.",
+            IsWindowFunction = true,
+            Category = FunctionCategory.Window,
+        });
     }
 
     /// <summary>Registers a standard unary numeric function (operates element-wise on Scalar/Vector/Tensor).</summary>

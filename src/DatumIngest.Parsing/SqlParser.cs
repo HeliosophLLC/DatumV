@@ -216,7 +216,8 @@ public static class SqlParser
         .OptionalOrDefault();
 
     /// <summary>
-    /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] ) [OVER window_spec]
+    /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] )
+    /// [FROM FIRST | FROM LAST] [IGNORE NULLS | RESPECT NULLS] [OVER window_spec]
     /// Must be tried before bare column reference because both start with Identifier.
     /// Supports <c>COUNT(*)</c> by treating a bare <c>*</c> inside the argument list
     /// as a sentinel <see cref="LiteralExpression"/> with value <c>"*"</c>.
@@ -225,6 +226,11 @@ public static class SqlParser
     /// functions such as <c>COUNT(DISTINCT col)</c>.
     /// The optional <c>ORDER BY</c> before the closing paren is used by
     /// <c>STRING_AGG(expr, separator ORDER BY expr [ASC|DESC])</c>.
+    /// The optional <c>FROM FIRST</c> / <c>FROM LAST</c> clause controls the search
+    /// direction for <c>NTH_VALUE</c>. <c>FIRST</c> and <c>LAST</c> are parsed as
+    /// contextual identifiers — they are not reserved keywords.
+    /// The optional <c>IGNORE NULLS</c> / <c>RESPECT NULLS</c> clause controls
+    /// null handling for value window functions (FIRST_VALUE, LAST_VALUE, NTH_VALUE).
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
         from name in Token.EqualTo(SqlToken.Identifier)
@@ -236,9 +242,26 @@ public static class SqlParser
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from orderBy in WindowOrderByParser.OptionalOrDefault()
         from close in Token.EqualTo(SqlToken.RightParen)
+        from fromLast in
+            (from _from in Token.EqualTo(SqlToken.From)
+             from direction in Token.EqualTo(SqlToken.Identifier)
+                 .Where(token => string.Equals(token.ToStringValue(), "FIRST", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(token.ToStringValue(), "LAST", StringComparison.OrdinalIgnoreCase))
+             select string.Equals(direction.ToStringValue(), "LAST", StringComparison.OrdinalIgnoreCase))
+            .Try().OptionalOrDefault()
+        from nullHandling in
+            (from _ignore in Token.EqualTo(SqlToken.Ignore)
+             from _nulls in Token.EqualTo(SqlToken.Nulls)
+             select NullHandling.IgnoreNulls)
+            .Try()
+            .Or(
+             from _respect in Token.EqualTo(SqlToken.Respect)
+             from _nulls in Token.EqualTo(SqlToken.Nulls)
+             select NullHandling.RespectNulls)
+            .Try().OptionalOrDefault()
         from windowSpec in WindowSpecificationParser.OptionalOrDefault()
         select windowSpec is not null
-            ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, Span: ToSpan(name))
+            ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
             : (Expression)new FunctionCallExpression(GetTokenText(name), args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>

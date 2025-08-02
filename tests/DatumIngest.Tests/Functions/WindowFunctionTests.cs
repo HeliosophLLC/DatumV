@@ -34,7 +34,9 @@ public class WindowFunctionTests
         IReadOnlyList<Row> partitionRows,
         IReadOnlyList<Expression>? argumentExpressions = null,
         IReadOnlyList<OrderByItem>? orderByItems = null,
-        WindowFrame? frame = null)
+        WindowFrame? frame = null,
+        NullHandling nullHandling = NullHandling.RespectNulls,
+        bool fromLast = false)
     {
         ExpressionEvaluator evaluator = CreateEvaluator();
         IWindowComputation computation = function.CreateComputation();
@@ -45,7 +47,9 @@ public class WindowFunctionTests
             evaluator,
             orderByItems,
             frame,
-            results);
+            results,
+            nullHandling,
+            fromLast);
         return results;
     }
 
@@ -491,6 +495,9 @@ public class WindowFunctionTests
         Assert.NotNull(registry.TryGetWindow("NTILE"));
         Assert.NotNull(registry.TryGetWindow("LAG"));
         Assert.NotNull(registry.TryGetWindow("LEAD"));
+        Assert.NotNull(registry.TryGetWindow("FIRST_VALUE"));
+        Assert.NotNull(registry.TryGetWindow("LAST_VALUE"));
+        Assert.NotNull(registry.TryGetWindow("NTH_VALUE"));
     }
 
     [Fact]
@@ -534,5 +541,451 @@ public class WindowFunctionTests
         Assert.Contains("NTILE", names);
         Assert.Contains("LAG", names);
         Assert.Contains("LEAD", names);
+        Assert.Contains("FIRST_VALUE", names);
+        Assert.Contains("LAST_VALUE", names);
+        Assert.Contains("NTH_VALUE", names);
+    }
+
+    // ─────────────── FIRST_VALUE ───────────────
+
+    [Fact]
+    public void FirstValue_WholePartition_ReturnsFirstRow()
+    {
+        FirstValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        Assert.Equal(10f, results[0].AsScalar());
+        Assert.Equal(10f, results[1].AsScalar());
+        Assert.Equal(10f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void FirstValue_WithRunningFrame_ReturnsFirstOfFrame()
+    {
+        FirstValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+
+        // ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        WindowFrame frame = new(
+            WindowFrameType.Rows,
+            new UnboundedPrecedingBound(),
+            new CurrentRowBound());
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+
+        // First value of the running frame is always the first partition row.
+        Assert.Equal(10f, results[0].AsScalar());
+        Assert.Equal(10f, results[1].AsScalar());
+        Assert.Equal(10f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void FirstValue_WithSlidingFrame_ReturnsFirstOfEachFrame()
+    {
+        FirstValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromScalar(40f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+
+        // ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+        WindowFrame frame = new(
+            WindowFrameType.Rows,
+            new PrecedingBound(1),
+            new FollowingBound(1));
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+
+        // Row 0: frame [0,1] → first = 10
+        Assert.Equal(10f, results[0].AsScalar());
+        // Row 1: frame [0,2] → first = 10
+        Assert.Equal(10f, results[1].AsScalar());
+        // Row 2: frame [1,3] → first = 20
+        Assert.Equal(20f, results[2].AsScalar());
+        // Row 3: frame [2,3] → first = 30
+        Assert.Equal(30f, results[3].AsScalar());
+    }
+
+    [Fact]
+    public void FirstValue_IgnoreNulls_SkipsNullValues()
+    {
+        FirstValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromScalar(40f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+            nullHandling: NullHandling.IgnoreNulls);
+
+        Assert.Equal(30f, results[0].AsScalar());
+        Assert.Equal(30f, results[1].AsScalar());
+        Assert.Equal(30f, results[2].AsScalar());
+        Assert.Equal(30f, results[3].AsScalar());
+    }
+
+    [Fact]
+    public void FirstValue_IgnoreNulls_AllNulls_ReturnsNull()
+    {
+        FirstValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+            nullHandling: NullHandling.IgnoreNulls);
+
+        Assert.True(results[0].IsNull);
+        Assert.True(results[1].IsNull);
+    }
+
+    [Fact]
+    public void FirstValue_SingleRow()
+    {
+        FirstValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(42f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        Assert.Equal(42f, results[0].AsScalar());
+    }
+
+    [Fact]
+    public void FirstValue_InvalidArgumentCount_Throws()
+    {
+        FirstValueFunction function = new();
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([]));
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+    }
+
+    // ─────────────── LAST_VALUE ───────────────
+
+    [Fact]
+    public void LastValue_WholePartition_ReturnsLastRow()
+    {
+        LastValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        Assert.Equal(30f, results[0].AsScalar());
+        Assert.Equal(30f, results[1].AsScalar());
+        Assert.Equal(30f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void LastValue_WithRunningFrame_ReturnsCurrentRow()
+    {
+        LastValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+
+        // ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW — last value = current row
+        WindowFrame frame = new(
+            WindowFrameType.Rows,
+            new UnboundedPrecedingBound(),
+            new CurrentRowBound());
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+
+        Assert.Equal(10f, results[0].AsScalar());
+        Assert.Equal(20f, results[1].AsScalar());
+        Assert.Equal(30f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void LastValue_IgnoreNulls_SkipsNullValues()
+    {
+        LastValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+            nullHandling: NullHandling.IgnoreNulls);
+
+        Assert.Equal(20f, results[0].AsScalar());
+        Assert.Equal(20f, results[1].AsScalar());
+        Assert.Equal(20f, results[2].AsScalar());
+        Assert.Equal(20f, results[3].AsScalar());
+    }
+
+    [Fact]
+    public void LastValue_SingleRow()
+    {
+        LastValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(99f))),
+        ];
+
+        IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        Assert.Equal(99f, results[0].AsScalar());
+    }
+
+    [Fact]
+    public void LastValue_InvalidArgumentCount_Throws()
+    {
+        LastValueFunction function = new();
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([]));
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+    }
+
+    // ─────────────── NTH_VALUE ───────────────
+
+    [Fact]
+    public void NthValue_ReturnsNthRow()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        // NTH_VALUE(val, 2)
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(2),
+        ];
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        // All rows see the same whole-partition frame, so 2nd value = 20 for all.
+        Assert.Equal(20f, results[0].AsScalar());
+        Assert.Equal(20f, results[1].AsScalar());
+        Assert.Equal(20f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void NthValue_N1_EqualsFirstValue()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+        ];
+
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(1),
+        ];
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        Assert.Equal(10f, results[0].AsScalar());
+        Assert.Equal(10f, results[1].AsScalar());
+    }
+
+    [Fact]
+    public void NthValue_ExceedsFrameSize_ReturnsNull()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+        ];
+
+        // NTH_VALUE(val, 5) — only 2 rows
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(5),
+        ];
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
+
+        Assert.True(results[0].IsNull);
+        Assert.True(results[1].IsNull);
+    }
+
+    [Fact]
+    public void NthValue_FromLast_CountsBackward()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        // NTH_VALUE(val, 1) FROM LAST → last row = 30
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(1),
+        ];
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+            fromLast: true);
+
+        Assert.Equal(30f, results[0].AsScalar());
+        Assert.Equal(30f, results[1].AsScalar());
+        Assert.Equal(30f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void NthValue_FromLast_N2_ReturnsSecondToLast()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+        ];
+
+        // NTH_VALUE(val, 2) FROM LAST → second-to-last = 20
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(2),
+        ];
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+            fromLast: true);
+
+        Assert.Equal(20f, results[0].AsScalar());
+        Assert.Equal(20f, results[1].AsScalar());
+        Assert.Equal(20f, results[2].AsScalar());
+    }
+
+    [Fact]
+    public void NthValue_IgnoreNulls_SkipsNullValues()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+        ];
+
+        // NTH_VALUE(val, 2) IGNORE NULLS → 2nd non-null = 20
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(2),
+        ];
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
+            nullHandling: NullHandling.IgnoreNulls);
+
+        Assert.Equal(20f, results[0].AsScalar());
+        Assert.Equal(20f, results[1].AsScalar());
+        Assert.Equal(20f, results[2].AsScalar());
+        Assert.Equal(20f, results[3].AsScalar());
+    }
+
+    [Fact]
+    public void NthValue_WithFrame_RespectsFrameBounds()
+    {
+        NthValueFunction function = new();
+        List<Row> rows =
+        [
+            MakeRow(("val", DataValue.FromScalar(10f))),
+            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromScalar(40f))),
+        ];
+
+        // NTH_VALUE(val, 2) with ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        IReadOnlyList<Expression> arguments =
+        [
+            new ColumnReference("val"),
+            new LiteralExpression(2),
+        ];
+
+        WindowFrame frame = new(
+            WindowFrameType.Rows,
+            new CurrentRowBound(),
+            new UnboundedFollowingBound());
+
+        DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
+
+        // Row 0: frame [0,3], 2nd = 20
+        Assert.Equal(20f, results[0].AsScalar());
+        // Row 1: frame [1,3], 2nd = 30
+        Assert.Equal(30f, results[1].AsScalar());
+        // Row 2: frame [2,3], 2nd = 40
+        Assert.Equal(40f, results[2].AsScalar());
+        // Row 3: frame [3,3], only 1 row, 2nd = NULL
+        Assert.True(results[3].IsNull);
+    }
+
+    [Fact]
+    public void NthValue_InvalidArgumentCount_Throws()
+    {
+        NthValueFunction function = new();
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]));
+    }
+
+    [Fact]
+    public void NthValue_NonScalarN_Throws()
+    {
+        NthValueFunction function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Scalar, DataKind.String]));
     }
 }

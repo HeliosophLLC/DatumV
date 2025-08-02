@@ -202,7 +202,9 @@ public sealed class WindowOperator : IQueryOperator
                     evaluator,
                     spec.OrderBy,
                     spec.Frame,
-                    partitionResults);
+                    partitionResults,
+                    column.NullHandling,
+                    column.FromLast);
 
                 // Write results back to the correct original row positions.
                 for (int i = 0; i < count; i++)
@@ -403,8 +405,12 @@ public sealed class WindowOperator : IQueryOperator
 /// <param name="ArgumentExpressions">The argument expressions to evaluate per row.</param>
 /// <param name="WindowSpecification">The OVER clause specification (PARTITION BY, ORDER BY, frame).</param>
 /// <param name="OutputName">The name of the output column.</param>
+/// <param name="NullHandling">RESPECT NULLS (default) or IGNORE NULLS modifier for value window functions.</param>
+/// <param name="FromLast">When true, NTH_VALUE counts from the end of the frame instead of the beginning.</param>
 public sealed record WindowColumn(
     IWindowFunction Function,
     IReadOnlyList<Expression> ArgumentExpressions,
     WindowSpecification WindowSpecification,
-    string OutputName);
+    string OutputName,
+    NullHandling NullHandling = NullHandling.RespectNulls,
+    bool FromLast = false);
