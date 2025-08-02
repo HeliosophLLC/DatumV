@@ -4,7 +4,7 @@ namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Returns the length of a string or collection.
-/// <c>len(val)</c> works on String, Vector, UInt8Array, Matrix, and Tensor.
+/// <c>len(val)</c> works on String, Vector, UInt8Array, Matrix, Tensor, JsonValue, and Array.
 /// </summary>
 public sealed class LenFunction : IScalarFunction
 {
@@ -20,7 +20,7 @@ public sealed class LenFunction : IScalarFunction
         }
 
         DataKind inputKind = argumentKinds[0];
-        if (inputKind is not (DataKind.String or DataKind.Vector or DataKind.UInt8Array or DataKind.Matrix or DataKind.Tensor or DataKind.JsonValue))
+        if (inputKind is not (DataKind.String or DataKind.Vector or DataKind.UInt8Array or DataKind.Matrix or DataKind.Tensor or DataKind.JsonValue or DataKind.Array))
         {
             throw new ArgumentException($"len() does not support {inputKind}.");
         }
@@ -67,6 +67,9 @@ public sealed class LenFunction : IScalarFunction
 
             case DataKind.JsonValue:
                 return DataValue.FromScalar(input.AsJsonValue().Length);
+
+            case DataKind.Array:
+                return DataValue.FromScalar(input.AsArray().Length);
 
             default:
                 throw new InvalidOperationException($"len() does not support {input.Kind}.");

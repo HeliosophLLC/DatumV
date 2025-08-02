@@ -228,6 +228,13 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.JsonExistsFunction());
         registry.RegisterScalar(new Scalar.JsonArrayLengthFunction());
 
+        // Array
+        registry.RegisterScalar(new Scalar.ArrayLengthFunction());
+        registry.RegisterScalar(new Scalar.ArrayJoinFunction());
+        registry.RegisterScalar(new Scalar.ArrayContainsFunction());
+        registry.RegisterScalar(new Scalar.ArrayPositionFunction());
+        registry.RegisterScalar(new Scalar.ArrayConstructorFunction());
+
         // Byte Array
         registry.RegisterScalar(new Scalar.BytesConcatFunction());
         registry.RegisterScalar(new Scalar.BytesSliceFunction());

@@ -19,6 +19,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Encoding** | UUID generation/inspection, cryptographic hashing (MD5/SHA/CRC), and base64/hex encoding. |
 | **Categorical** | Categorical encoding: one-hot, label encoding (explicit domain), and feature hashing. |
 | **Json** | JSON path access, existence testing, and array inspection. |
+| **Array** | Typed array construction, inspection, search, and string conversion. |
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
@@ -42,7 +43,7 @@ Every function belongs to a single **category** that describes its operational d
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `len` | `len(val)` | Length of string or collection. | 1 |
+| `len` | `len(val)` | Length of string, collection, or array. | 1 |
 | `mid` | `mid(str, start, length)` | Extract substring by position and length (0-based). | 1 |
 | `substring` | `substring(str, start, [length])` | Extract substring from start position (0-based). | 1 |
 | `upper` | `upper(str)` | Convert to uppercase (invariant). | 1 |
@@ -74,6 +75,18 @@ Every function belongs to a single **category** that describes its operational d
 | `json_query` | `json_query(col, path)` | Extract JSON fragment (array/object). Returns JsonValue or Vector if all-numeric. | 5 |
 | `json_exists` | `json_exists(col, path)` | Returns 1.0 if path exists in JSON, 0.0 otherwise. | 5 |
 | `json_array_length` | `json_array_length(col, [path])` | Count elements in JSON array at root or path. | 5 |
+
+## Array Functions
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|  
+| `array` | `array(a, b, c, ...)` | Construct a typed Array from one or more values. All arguments must share the same data kind. | 1 |
+| `array_length` | `array_length(arr)` | Number of elements in the array. | 1 |
+| `array_join` | `array_join(arr, separator)` | Join elements into a String with separator. Null elements are skipped. String elements used directly; others converted via ToString. | 1 |
+| `array_contains` | `array_contains(arr, value)` | Returns Boolean — whether the array contains the value (by equality). | 1 |
+| `array_position` | `array_position(arr, value)` | 1-based index of the first matching element, or null if not found. | 1 |
+
+> **Tip:** `len(arr)` also works as an alias for `array_length(arr)` since `len()` supports Array inputs.
 
 ## Type Conversion
 
