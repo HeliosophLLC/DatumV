@@ -59,7 +59,7 @@ public sealed class ParameterTests
 
     private static SelectStatement Parse(string sql)
     {
-        return SqlParser.Parse(sql);
+        return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
     }
 
     [Fact]

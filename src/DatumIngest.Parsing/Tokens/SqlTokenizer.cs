@@ -198,6 +198,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("RECURSIVE"), SqlToken.Recursive, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("MATERIALIZED"), SqlToken.Materialized, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("UNION"), SqlToken.Union, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("INTERSECT"), SqlToken.Intersect, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("EXCEPT"), SqlToken.Except, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ALL"), SqlToken.All, requireDelimiters: true)
 
             // Named parameter placeholders ($name) — before numeric literals

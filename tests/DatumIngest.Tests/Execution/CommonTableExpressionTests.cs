@@ -28,9 +28,9 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_SimpleCte_ProducesCommonTableExpression()
     {
-        SelectStatement result = SqlParser.Parse(
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
             "WITH stats AS (SELECT user_id, COUNT(amount) FROM orders GROUP BY user_id) " +
-            "SELECT * FROM stats");
+            "SELECT * FROM stats")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         Assert.Single(result.CommonTableExpressions);
@@ -46,10 +46,10 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_MultipleCtes_ParsesAll()
     {
-        SelectStatement result = SqlParser.Parse(
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
             "WITH a AS (SELECT x FROM t1), " +
             "b AS (SELECT y FROM t2) " +
-            "SELECT * FROM a JOIN b ON a.x = b.y");
+            "SELECT * FROM a JOIN b ON a.x = b.y")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         Assert.Equal(2, result.CommonTableExpressions.Count);
@@ -63,9 +63,9 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_CteWithColumnNames_CapturesColumns()
     {
-        SelectStatement result = SqlParser.Parse(
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
             "WITH stats(uid, total) AS (SELECT user_id, SUM(amount) FROM orders GROUP BY user_id) " +
-            "SELECT * FROM stats");
+            "SELECT * FROM stats")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         CommonTableExpression commonTableExpression = result.CommonTableExpressions[0];
@@ -81,8 +81,8 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_MaterializedHint_Captured()
     {
-        SelectStatement result = SqlParser.Parse(
-            "WITH stats AS MATERIALIZED (SELECT x FROM t) SELECT * FROM stats");
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH stats AS MATERIALIZED (SELECT x FROM t) SELECT * FROM stats")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         Assert.Equal(MaterializationHint.Materialized, result.CommonTableExpressions[0].Hint);
@@ -94,8 +94,8 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_NotMaterializedHint_Captured()
     {
-        SelectStatement result = SqlParser.Parse(
-            "WITH stats AS NOT MATERIALIZED (SELECT x FROM t) SELECT * FROM stats");
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH stats AS NOT MATERIALIZED (SELECT x FROM t) SELECT * FROM stats")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         Assert.Equal(MaterializationHint.NotMaterialized, result.CommonTableExpressions[0].Hint);
@@ -107,9 +107,9 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_WithRecursive_SetsFlag()
     {
-        SelectStatement result = SqlParser.Parse(
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
             "WITH RECURSIVE nums AS (SELECT 1 AS n FROM dual UNION ALL SELECT n FROM nums WHERE n < 5) " +
-            "SELECT * FROM nums");
+            "SELECT * FROM nums")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         Assert.True(result.CommonTableExpressions[0].IsRecursive);
@@ -121,12 +121,12 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Parse_RecursiveCteBody_SplitsAnchorAndRecursive()
     {
-        SelectStatement result = SqlParser.Parse(
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
             "WITH RECURSIVE chain AS (" +
             "SELECT id, parent_id FROM nodes WHERE parent_id IS NULL " +
             "UNION ALL " +
             "SELECT n.id, n.parent_id FROM nodes AS n JOIN chain ON n.parent_id = chain.id" +
-            ") SELECT * FROM chain");
+            ") SELECT * FROM chain")).Statement;
 
         Assert.NotNull(result.CommonTableExpressions);
         CommonTableExpression commonTableExpression = result.CommonTableExpressions[0];
@@ -307,12 +307,12 @@ public sealed class CommonTableExpressionTests
             MaxRecursionDepth = 3,
         };
 
-        SelectStatement statement = SqlParser.Parse(
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
             "WITH RECURSIVE nums AS (" +
             "SELECT 1 AS n FROM dual " +
             "UNION ALL " +
             "SELECT n + 1 AS n FROM nums WHERE n < 100" +
-            ") SELECT n FROM nums");
+            ") SELECT n FROM nums")).Statement;
 
         QueryPlanner planner = new(catalog, DefaultFunctions);
         IQueryOperator plan = planner.Plan(statement);
@@ -421,8 +421,8 @@ public sealed class CommonTableExpressionTests
         TableCatalog catalog = CreateCatalog(("t", data));
         QueryPlanner planner = new(catalog, DefaultFunctions);
 
-        SelectStatement statement = SqlParser.Parse(
-            "WITH cte AS (SELECT x FROM t) SELECT * FROM cte");
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH cte AS (SELECT x FROM t) SELECT * FROM cte")).Statement;
 
         IQueryOperator plan = planner.Plan(statement);
 
@@ -488,7 +488,7 @@ public sealed class CommonTableExpressionTests
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {
-        SelectStatement statement = SqlParser.Parse(sql);
+        QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, DefaultFunctions);
 
         ExecutionContext context = new(
@@ -496,7 +496,7 @@ public sealed class CommonTableExpressionTests
             DefaultFunctions,
             catalog);
 
-        IQueryOperator plan = planner.Plan(statement);
+        IQueryOperator plan = planner.Plan(query);
 
         List<Row> rows = [];
         await foreach (Row row in plan.ExecuteAsync(context))

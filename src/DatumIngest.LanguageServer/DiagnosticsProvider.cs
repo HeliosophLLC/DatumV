@@ -64,10 +64,10 @@ public static class DiagnosticsProvider
 
         // Run semantic analysis on the (possibly partial) AST if a manifest
         // is available and the parser produced a tree.
-        if (manifest is not null && parseResult.Statement is not null)
+        if (manifest is not null && parseResult.Query is not null)
         {
             SemanticAnalyzer analyzer = new(manifest);
-            Diagnostic[] semanticDiagnostics = analyzer.Analyze(parseResult.Statement);
+            Diagnostic[] semanticDiagnostics = analyzer.Analyze(parseResult.Query);
             diagnostics.AddRange(semanticDiagnostics);
         }
 

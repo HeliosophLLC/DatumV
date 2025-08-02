@@ -523,3 +523,61 @@ public sealed record FollowingBound(int Offset) : FrameBound;
 
 /// <summary>UNBOUNDED FOLLOWING — the frame extends to the last row of the partition.</summary>
 public sealed record UnboundedFollowingBound() : FrameBound;
+
+// ──────────────────────── Set operations ────────────────────────
+
+/// <summary>
+/// The type of set operation combining two query results.
+/// </summary>
+public enum SetOperationType
+{
+    /// <summary>Combines results from both queries, optionally removing duplicates.</summary>
+    Union,
+
+    /// <summary>Returns only rows present in both query results.</summary>
+    Intersect,
+
+    /// <summary>Returns rows from the left query that are not in the right query.</summary>
+    Except,
+}
+
+/// <summary>
+/// Base type for top-level query expressions. A query expression is either
+/// a single <see cref="SelectQueryExpression"/> or a compound
+/// <see cref="CompoundQueryExpression"/> combining two query expressions
+/// with a set operation (UNION, INTERSECT, EXCEPT).
+/// </summary>
+public abstract record QueryExpression;
+
+/// <summary>
+/// A query expression wrapping a single <see cref="SelectStatement"/>.
+/// </summary>
+public sealed record SelectQueryExpression(SelectStatement Statement) : QueryExpression;
+
+/// <summary>
+/// A compound query expression combining two sub-expressions with a set operation.
+/// <para>
+/// ORDER BY, LIMIT, OFFSET, and INTO apply to the final combined result
+/// and live on the outermost compound node only.
+/// </para>
+/// </summary>
+/// <param name="Left">The left-hand query expression.</param>
+/// <param name="OperationType">The set operation (UNION, INTERSECT, EXCEPT).</param>
+/// <param name="All">
+/// When <see langword="true"/>, duplicates are preserved (e.g. UNION ALL).
+/// When <see langword="false"/>, duplicates are removed (e.g. UNION DISTINCT).
+/// </param>
+/// <param name="Right">The right-hand query expression.</param>
+/// <param name="OrderBy">Optional ORDER BY applied to the combined result.</param>
+/// <param name="Limit">Optional LIMIT applied to the combined result.</param>
+/// <param name="Offset">Optional OFFSET applied to the combined result.</param>
+/// <param name="Into">Optional INTO clause for output of the combined result.</param>
+public sealed record CompoundQueryExpression(
+    QueryExpression Left,
+    SetOperationType OperationType,
+    bool All,
+    QueryExpression Right,
+    OrderByClause? OrderBy = null,
+    int? Limit = null,
+    int? Offset = null,
+    IntoClause? Into = null) : QueryExpression;

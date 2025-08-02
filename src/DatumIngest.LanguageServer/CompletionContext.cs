@@ -235,6 +235,11 @@ public static class CompletionContext
                 case SqlToken.Into:
                     return CompletionZoneKind.AfterInto;
 
+                case SqlToken.Union:
+                case SqlToken.Intersect:
+                case SqlToken.Except:
+                    return CompletionZoneKind.AfterSetOperation;
+
                 case SqlToken.And:
                 case SqlToken.Or:
                 case SqlToken.Not:
@@ -341,4 +346,7 @@ public enum CompletionZoneKind
 
     /// <summary>Inside OVER clause — offer PARTITION BY, ORDER BY, ROWS BETWEEN.</summary>
     InsideOver,
+
+    /// <summary>After UNION, INTERSECT, or EXCEPT — offer ALL and SELECT.</summary>
+    AfterSetOperation,
 }

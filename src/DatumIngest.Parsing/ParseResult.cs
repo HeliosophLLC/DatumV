@@ -9,12 +9,19 @@ using DatumIngest.Parsing.Ast;
 public sealed class ParseResult
 {
     /// <summary>
-    /// The parsed AST. May be <see langword="null"/> if parsing failed entirely
+    /// The parsed query expression. May be <see langword="null"/> if parsing failed entirely
     /// and no partial tree could be recovered. When errors are present, the tree
     /// may contain <see cref="ErrorExpression"/> placeholder nodes where recovery
     /// skipped unparseable input.
     /// </summary>
-    public SelectStatement? Statement { get; }
+    public QueryExpression? Query { get; }
+
+    /// <summary>
+    /// The parsed AST as a <see cref="SelectStatement"/>, for backward compatibility.
+    /// Returns the statement from a <see cref="SelectQueryExpression"/>, or <see langword="null"/>
+    /// if the query is a compound expression or parsing failed.
+    /// </summary>
+    public SelectStatement? Statement => Query is SelectQueryExpression select ? select.Statement : null;
 
     /// <summary>
     /// Parse errors encountered during analysis. Empty for valid SQL.
@@ -23,19 +30,19 @@ public sealed class ParseResult
     public IReadOnlyList<ParseError> Errors { get; }
 
     /// <summary>Whether the input was parsed without any errors.</summary>
-    public bool IsSuccess => Errors.Count == 0 && Statement is not null;
+    public bool IsSuccess => Errors.Count == 0 && Query is not null;
 
     /// <summary>Creates a successful parse result with no errors.</summary>
-    internal ParseResult(SelectStatement statement)
+    internal ParseResult(QueryExpression query)
     {
-        Statement = statement;
+        Query = query;
         Errors = [];
     }
 
     /// <summary>Creates a parse result with a partial or null AST and one or more errors.</summary>
-    internal ParseResult(SelectStatement? statement, IReadOnlyList<ParseError> errors)
+    internal ParseResult(QueryExpression? query, IReadOnlyList<ParseError> errors)
     {
-        Statement = statement;
+        Query = query;
         Errors = errors;
     }
 }

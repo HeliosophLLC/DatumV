@@ -57,10 +57,10 @@ try
         return await RunCrossManifestAsync(catalog, options);
     }
 
-    SelectStatement statement = SqlParser.Parse(options.Sql);
+    QueryExpression query = SqlParser.Parse(options.Sql);
 
     // Bind named parameters ($name) to concrete values before planning.
-    if (options.Parameters.Count > 0 || ParameterBinder.CollectParameterNames(statement).Count > 0)
+    if (options.Parameters.Count > 0 || ParameterBinder.CollectParameterNames(query).Count > 0)
     {
         Dictionary<string, DataValue> parameterValues = new(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, string> entry in options.Parameters)
@@ -68,17 +68,17 @@ try
             parameterValues[entry.Key] = ParameterValueParser.Parse(entry.Value);
         }
 
-        statement = ParameterBinder.Bind(statement, parameterValues);
+        query = ParameterBinder.Bind(query, parameterValues);
     }
 
     return options.Command switch
     {
-        "query" => await RunQueryAsync(statement, catalog, options),
-        "explore" => await RunExploreAsync(statement, catalog, options.Limit),
-        "stats" => await RunStatsAsync(statement, catalog),
-        "explain" => await RunExplainAsync(statement, catalog, options.Analyze, options.MemoryBudgetBytes),
-        "manifest" => await RunManifestAsync(statement, catalog, options.OutputPath),
-        "schema" => await RunSchemaAsync(statement, catalog),
+        "query" => await RunQueryAsync(query, catalog, options),
+        "explore" => await RunExploreAsync(query, catalog, options.Limit),
+        "stats" => await RunStatsAsync(query, catalog),
+        "explain" => await RunExplainAsync(query, catalog, options.Analyze, options.MemoryBudgetBytes),
+        "manifest" => await RunManifestAsync(query, catalog, options.OutputPath),
+        "schema" => await RunSchemaAsync(query, catalog),
         _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'cross-manifest'.")
     };
 }
@@ -537,7 +537,7 @@ static TableDescriptor ParseSourceDefinition(string source)
     return new TableDescriptor(provider, name, filePath, options);
 }
 
-static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog catalog, CliOptions options)
+static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog, CliOptions options)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
@@ -548,24 +548,25 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
         catalog,
         memoryBudgetBytes: options.MemoryBudgetBytes);
 
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
+    IntoClause? intoClause = ExtractIntoClause(query);
 
     ProgressReporter progress = new();
 
     // Checkpoint setup
-    bool checkpointEnabled = options.Checkpoint && statement.Into?.Shard is not null;
+    bool checkpointEnabled = options.Checkpoint && intoClause?.Shard is not null;
     CheckpointManager? checkpointManager = null;
     IReadOnlyList<CheckpointFingerprint>? sourceFingerprints = null;
     int startShardIndex = 0;
 
-    if (options.Checkpoint && statement.Into?.Shard is null)
+    if (options.Checkpoint && intoClause?.Shard is null)
     {
         Console.Error.WriteLine("Warning: --checkpoint requires SHARD ON; checkpointing disabled.");
     }
 
-    if (checkpointEnabled && statement.Into is not null)
+    if (checkpointEnabled && intoClause is not null)
     {
-        checkpointManager = new CheckpointManager(statement.Into.Path);
+        checkpointManager = new CheckpointManager(intoClause.Path);
         sourceFingerprints = SourceFingerprintCollector.Collect(catalog);
 
         IReadOnlyList<CheckpointMarker> existingCheckpoints =
@@ -599,11 +600,11 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
         }
     }
 
-    if (statement.Into is not null)
+    if (intoClause is not null)
     {
         IOutputWriter outputWriter = checkpointEnabled
-            ? CreateCheckpointedOutputWriter(statement.Into, checkpointManager!, sourceFingerprints!, startShardIndex)
-            : CreateOutputWriter(statement.Into);
+            ? CreateCheckpointedOutputWriter(intoClause, checkpointManager!, sourceFingerprints!, startShardIndex)
+            : CreateOutputWriter(intoClause);
         await using IOutputWriter writer = outputWriter;
 
         // Infer schema from first row, write all rows
@@ -657,7 +658,7 @@ static async Task<int> RunQueryAsync(SelectStatement statement, TableCatalog cat
     return 0;
 }
 
-static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog catalog, int limit)
+static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catalog, int limit)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
@@ -667,7 +668,7 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
         functionRegistry,
         catalog);
 
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
     int count = 0;
     bool headerPrinted = false;
@@ -695,7 +696,7 @@ static async Task<int> RunExploreAsync(SelectStatement statement, TableCatalog c
     return 0;
 }
 
-static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog catalog)
+static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
@@ -705,7 +706,7 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
         functionRegistry,
         catalog);
 
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
     StatisticsCollector collector = new();
     ProgressReporter progress = new();
@@ -736,11 +737,11 @@ static async Task<int> RunStatsAsync(SelectStatement statement, TableCatalog cat
     return 0;
 }
 
-static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog catalog, bool analyze, long? memoryBudgetBytes)
+static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catalog, bool analyze, long? memoryBudgetBytes)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
-    IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
+    IQueryOperator plan = await planner.PlanAsync(query, CancellationToken.None);
 
     // Build the static explain plan from the original operator tree.
     ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
@@ -767,7 +768,7 @@ static async Task<int> RunExplainAsync(SelectStatement statement, TableCatalog c
     return 0;
 }
 
-static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog catalog, string? outputPath)
+static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog catalog, string? outputPath)
 {
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
@@ -777,7 +778,7 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
         functionRegistry,
         catalog);
 
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
     StatisticsCollector collector = new();
     ColumnInteractionCollector interactionCollector = new();
@@ -823,11 +824,17 @@ static async Task<int> RunManifestAsync(SelectStatement statement, TableCatalog 
     return 0;
 }
 
-static async Task<int> RunSchemaAsync(SelectStatement statement, TableCatalog catalog)
+static async Task<int> RunSchemaAsync(QueryExpression query, TableCatalog catalog)
 {
+    if (query is not SelectQueryExpression selectQuery)
+    {
+        Console.Error.WriteLine("Error: 'schema' command requires a simple SELECT statement.");
+        return 1;
+    }
+
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QuerySchemaResolver resolver = new(catalog, functionRegistry);
-    ResolvedQuerySchema schema = await resolver.ResolveAsync(statement, CancellationToken.None);
+    ResolvedQuerySchema schema = await resolver.ResolveAsync(selectQuery.Statement, CancellationToken.None);
 
     // Print header.
     Console.WriteLine($"{"Column",-30} {"Type",-12} {"Nullable",-10} {"Source"}");
@@ -1018,6 +1025,18 @@ static IOutputWriter CreateBaseWriter(OutputFormat format, string path)
         OutputFormat.Hdf5 => new Hdf5OutputWriter(path),
         OutputFormat.Parquet => new ParquetOutputWriter(path),
         _ => throw new ArgumentException($"Unsupported output format: {format}")
+    };
+}
+
+// Extracts the INTO clause from a query expression, regardless of whether it is
+// a simple SELECT or a compound set operation.
+static IntoClause? ExtractIntoClause(QueryExpression query)
+{
+    return query switch
+    {
+        SelectQueryExpression select => select.Statement.Into,
+        CompoundQueryExpression compound => compound.Into,
+        _ => null,
     };
 }
 

@@ -48,6 +48,7 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterJoin:
                 AddTables(items);
                 AddTableValuedFunctions(items);
+                AddKeywords(items, ["UNION", "INTERSECT", "EXCEPT"]);
                 break;
 
             case CompletionZoneKind.AfterWhere:
@@ -60,7 +61,7 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterOrderBy:
                 AddColumns(items, allTables: true);
-                AddKeywords(items, ["ASC", "DESC"]);
+                AddKeywords(items, ["ASC", "DESC", "UNION", "INTERSECT", "EXCEPT"]);
                 break;
 
             case CompletionZoneKind.AfterGroupBy:
@@ -88,6 +89,10 @@ public sealed class CompletionProvider
                 {
                     AddQualifiedColumns(items, zone.TableQualifier);
                 }
+                break;
+
+            case CompletionZoneKind.AfterSetOperation:
+                AddKeywords(items, ["ALL", "SELECT"]);
                 break;
 
             case CompletionZoneKind.AfterInto:

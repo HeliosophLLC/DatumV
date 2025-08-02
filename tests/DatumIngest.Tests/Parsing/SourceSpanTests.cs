@@ -11,7 +11,7 @@ public sealed class SourceSpanTests
 {
     private static SelectStatement Parse(string sql)
     {
-        return SqlParser.Parse(sql);
+        return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
     }
 
     // ───────────────────── Column references ─────────────────────

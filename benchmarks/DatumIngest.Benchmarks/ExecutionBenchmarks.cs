@@ -19,6 +19,7 @@ public class ExecutionBenchmarks
     private string _tempDirectory = null!;
     private string _csvPath = null!;
     private string _lookupCsvPath = null!;
+    private string _dataSecondCsvPath = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -38,6 +39,9 @@ public class ExecutionBenchmarks
             writer.WriteLine($"{i},desc_{i:D6},{random.NextDouble() * 50.0:F4}");
         }
         _lookupCsvPath = lookupPath;
+
+        // Generate a second data CSV with overlapping rows for set operation benchmarks
+        _dataSecondCsvPath = SyntheticDataGenerator.GenerateCsv(_tempDirectory, 10_000, seed: 99, fileNameSuffix: "_b");
     }
 
     [GlobalCleanup]
@@ -49,13 +53,17 @@ public class ExecutionBenchmarks
         }
     }
 
-    private static TableCatalog BuildCatalog(string dataPath, string? lookupPath = null)
+    private static TableCatalog BuildCatalog(string dataPath, string? lookupPath = null, string? dataSecondPath = null)
     {
         TableCatalog catalog = new();
         catalog.Register(new TableDescriptor("csv", "data", dataPath, new Dictionary<string, string>()));
         if (lookupPath is not null)
         {
             catalog.Register(new TableDescriptor("csv", "lookup", lookupPath, new Dictionary<string, string>()));
+        }
+        if (dataSecondPath is not null)
+        {
+            catalog.Register(new TableDescriptor("csv", "data_b", dataSecondPath, new Dictionary<string, string>()));
         }
         return catalog;
     }
@@ -70,9 +78,9 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse("SELECT * FROM data");
+        QueryExpression query = SqlParser.Parse("SELECT * FROM data");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -85,9 +93,9 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse("SELECT id, name, value FROM data WHERE value > 500");
+        QueryExpression query = SqlParser.Parse("SELECT id, name, value FROM data WHERE value > 500");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -100,9 +108,9 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse("SELECT id, name FROM data");
+        QueryExpression query = SqlParser.Parse("SELECT id, name FROM data");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -115,10 +123,10 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "SELECT a.id, a.name, b.description FROM data AS a INNER JOIN lookup AS b ON a.id = b.lookup_id");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -131,9 +139,9 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse("SELECT id, name, value FROM data ORDER BY value DESC LIMIT 100");
+        QueryExpression query = SqlParser.Parse("SELECT id, name, value FROM data ORDER BY value DESC LIMIT 100");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -146,11 +154,11 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "SELECT id, name FROM data WHERE id IN (SELECT lookup_id FROM lookup WHERE weight > 25)");
         QueryPlanner planner = new(catalog, functions);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
-        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -162,12 +170,12 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "SELECT data.id, data.name FROM data " +
             "WHERE EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id AND weight > 25)");
         QueryPlanner planner = new(catalog, functions);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
-        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -179,12 +187,12 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "SELECT data.id, data.name FROM data " +
             "WHERE NOT EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id)");
         QueryPlanner planner = new(catalog, functions);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
-        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -196,11 +204,11 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath, _lookupCsvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "SELECT data.id, data.name, (SELECT MAX(weight) FROM lookup WHERE lookup.lookup_id = data.id) AS max_weight FROM data");
         QueryPlanner planner = new(catalog, functions);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
-        IQueryOperator root = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+        IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -212,9 +220,9 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse("SELECT DISTINCT category FROM data");
+        QueryExpression query = SqlParser.Parse("SELECT DISTINCT category FROM data");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -227,9 +235,9 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse("SELECT DISTINCT id, category FROM data");
+        QueryExpression query = SqlParser.Parse("SELECT DISTINCT id, category FROM data");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -242,10 +250,10 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "SELECT category, COUNT(DISTINCT name) AS unique_names FROM data GROUP BY category");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -258,10 +266,10 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "WITH filtered AS (SELECT id, name, value FROM data WHERE value > 500) SELECT id, name FROM filtered");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -274,11 +282,11 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "WITH stats AS (SELECT category, AVG(value) AS avg_val, COUNT(*) AS cnt FROM data GROUP BY category) " +
             "SELECT a.category, a.avg_val, b.cnt FROM stats AS a INNER JOIN stats AS b ON a.category = b.category");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -291,12 +299,12 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "WITH high AS (SELECT id, name, value FROM data WHERE value > 500), " +
             "top_high AS (SELECT id, name, value FROM high ORDER BY value DESC LIMIT 100) " +
             "SELECT id, name FROM top_high");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -309,10 +317,10 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM seq WHERE n < 100) SELECT n FROM seq");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -325,10 +333,110 @@ public class ExecutionBenchmarks
     {
         TableCatalog catalog = BuildCatalog(_csvPath);
         FunctionRegistry functions = BuildFunctions();
-        SelectStatement statement = SqlParser.Parse(
+        QueryExpression query = SqlParser.Parse(
             "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM seq WHERE n < 1000) SELECT n FROM seq");
         QueryPlanner planner = new(catalog, functions);
-        IQueryOperator root = planner.Plan(statement);
+        IQueryOperator root = planner.Plan(query);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "UNION ALL two tables (10K + 10K)")]
+    public async Task UnionAllTwoTables()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, dataSecondPath: _dataSecondCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        QueryExpression query = SqlParser.Parse(
+            "SELECT id, name, value FROM data UNION ALL SELECT id, name, value FROM data_b");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(query);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "UNION DISTINCT two tables (10K + 10K)")]
+    public async Task UnionDistinctTwoTables()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, dataSecondPath: _dataSecondCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        QueryExpression query = SqlParser.Parse(
+            "SELECT id, name, value FROM data UNION SELECT id, name, value FROM data_b");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(query);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "INTERSECT DISTINCT two tables (10K x 10K)")]
+    public async Task IntersectDistinctTwoTables()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, dataSecondPath: _dataSecondCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        QueryExpression query = SqlParser.Parse(
+            "SELECT category FROM data INTERSECT SELECT category FROM data_b");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(query);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "EXCEPT DISTINCT two tables (10K \\ 10K)")]
+    public async Task ExceptDistinctTwoTables()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, dataSecondPath: _dataSecondCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        QueryExpression query = SqlParser.Parse(
+            "SELECT id, name FROM data EXCEPT SELECT id, name FROM data_b");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(query);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "UNION ALL same table filtered (10K)")]
+    public async Task UnionAllSameTableFiltered()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath);
+        FunctionRegistry functions = BuildFunctions();
+        QueryExpression query = SqlParser.Parse(
+            "SELECT id, name, value FROM data WHERE value > 800 " +
+            "UNION ALL " +
+            "SELECT id, name, value FROM data WHERE value < 200");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(query);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+
+        await foreach (Row _ in root.ExecuteAsync(context))
+        {
+        }
+    }
+
+    [Benchmark(Description = "Chained UNION ALL three-way (10K + 10K + 10K)")]
+    public async Task ChainedUnionAllThreeWay()
+    {
+        TableCatalog catalog = BuildCatalog(_csvPath, dataSecondPath: _dataSecondCsvPath);
+        FunctionRegistry functions = BuildFunctions();
+        QueryExpression query = SqlParser.Parse(
+            "SELECT id, name FROM data " +
+            "UNION ALL SELECT id, name FROM data_b " +
+            "UNION ALL SELECT id, name FROM data");
+        QueryPlanner planner = new(catalog, functions);
+        IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog);
 
         await foreach (Row _ in root.ExecuteAsync(context))

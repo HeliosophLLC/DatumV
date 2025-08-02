@@ -764,7 +764,7 @@ public sealed class ScalarSubqueryTests
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {
-        SelectStatement statement = SqlParser.Parse(sql);
+        QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, DefaultFunctions);
 
         ExecutionContext context = new(
@@ -772,7 +772,7 @@ public sealed class ScalarSubqueryTests
             DefaultFunctions,
             catalog);
 
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         List<Row> rows = [];
         await foreach (Row row in plan.ExecuteAsync(context))

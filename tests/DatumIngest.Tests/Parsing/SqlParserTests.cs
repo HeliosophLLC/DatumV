@@ -7,7 +7,7 @@ public class SqlParserTests
 {
     private static SelectStatement Parse(string sql)
     {
-        return SqlParser.Parse(sql);
+        return ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
     }
 
     // ───────────────────── Simple SELECT ─────────────────────

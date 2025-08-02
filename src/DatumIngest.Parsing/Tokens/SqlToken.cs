@@ -173,8 +173,14 @@ public enum SqlToken
     /// <summary>The UNION keyword (set operation).</summary>
     Union,
 
-    /// <summary>The ALL keyword (used with UNION ALL).</summary>
+    /// <summary>The ALL keyword (used with UNION ALL, INTERSECT ALL, EXCEPT ALL).</summary>
     All,
+
+    /// <summary>The INTERSECT keyword (set operation).</summary>
+    Intersect,
+
+    /// <summary>The EXCEPT keyword (set operation).</summary>
+    Except,
 
     // ───────────────────── Identifiers & Literals ─────────────────────
 

@@ -30,6 +30,23 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Plans the given query expression into an operator tree ready for execution.
+    /// Dispatches to the appropriate planning method based on whether the query
+    /// is a single SELECT or a compound set operation.
+    /// </summary>
+    /// <param name="query">The parsed query expression.</param>
+    /// <returns>The root operator of the execution plan.</returns>
+    public IQueryOperator Plan(QueryExpression query)
+    {
+        return query switch
+        {
+            SelectQueryExpression select => Plan(select.Statement),
+            CompoundQueryExpression compound => PlanCompound(compound),
+            _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
+        };
+    }
+
+    /// <summary>
     /// Plans the given statement into an operator tree ready for execution.
     /// </summary>
     /// <param name="statement">The parsed SELECT statement.</param>
@@ -37,6 +54,26 @@ public sealed class QueryPlanner
     public IQueryOperator Plan(SelectStatement statement)
     {
         return PlanCore(statement, deferredColumns: null);
+    }
+
+    /// <summary>
+    /// Plans the given query expression with cost-based late materialization of expensive columns.
+    /// Dispatches to the appropriate planning method based on whether the query
+    /// is a single SELECT or a compound set operation.
+    /// </summary>
+    /// <param name="query">The parsed query expression.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The root operator of the execution plan.</returns>
+    public async Task<IQueryOperator> PlanAsync(
+        QueryExpression query,
+        CancellationToken cancellationToken)
+    {
+        return query switch
+        {
+            SelectQueryExpression select => await PlanAsync(select.Statement, cancellationToken).ConfigureAwait(false),
+            CompoundQueryExpression compound => await PlanCompoundAsync(compound, cancellationToken).ConfigureAwait(false),
+            _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
+        };
     }
 
     /// <summary>
@@ -59,6 +96,30 @@ public sealed class QueryPlanner
         IQueryOperator plan = PlanCore(statement, deferredColumns);
 
         return plan;
+    }
+
+    /// <summary>
+    /// Plans the given query expression with cost-based late materialization and scalar subquery
+    /// rewriting. Dispatches to the appropriate planning method based on whether the query
+    /// is a single SELECT or a compound set operation.
+    /// </summary>
+    /// <param name="query">The parsed query expression.</param>
+    /// <param name="context">Execution context for running uncorrelated scalar subqueries at plan time.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The root operator of the execution plan.</returns>
+    public async Task<IQueryOperator> PlanWithSubqueriesAsync(
+        QueryExpression query,
+        ExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        return query switch
+        {
+            SelectQueryExpression select =>
+                await PlanWithSubqueriesAsync(select.Statement, context, cancellationToken).ConfigureAwait(false),
+            CompoundQueryExpression compound =>
+                await PlanCompoundWithSubqueriesAsync(compound, context, cancellationToken).ConfigureAwait(false),
+            _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
+        };
     }
 
     /// <summary>
@@ -87,7 +148,74 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
-    /// Core planning logic shared by <see cref="Plan"/> and <see cref="PlanAsync"/>.
+    /// Plans a compound set operation (UNION, INTERSECT, EXCEPT) by recursively
+    /// planning both branches and combining them with a <see cref="SetOperationOperator"/>.
+    /// ORDER BY, LIMIT, and OFFSET on the compound are applied on top.
+    /// </summary>
+    private IQueryOperator PlanCompound(CompoundQueryExpression compound)
+    {
+        IQueryOperator left = Plan(compound.Left);
+        IQueryOperator right = Plan(compound.Right);
+        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+
+        result = ApplyCompoundTrailingClauses(result, compound);
+        return result;
+    }
+
+    /// <summary>
+    /// Async variant of <see cref="PlanCompound"/> with late materialization.
+    /// </summary>
+    private async Task<IQueryOperator> PlanCompoundAsync(
+        CompoundQueryExpression compound, CancellationToken cancellationToken)
+    {
+        IQueryOperator left = await PlanAsync(compound.Left, cancellationToken).ConfigureAwait(false);
+        IQueryOperator right = await PlanAsync(compound.Right, cancellationToken).ConfigureAwait(false);
+        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+
+        result = ApplyCompoundTrailingClauses(result, compound);
+        return result;
+    }
+
+    /// <summary>
+    /// Async variant of <see cref="PlanCompound"/> with subquery rewriting.
+    /// </summary>
+    private async Task<IQueryOperator> PlanCompoundWithSubqueriesAsync(
+        CompoundQueryExpression compound, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        IQueryOperator left = await PlanWithSubqueriesAsync(compound.Left, context, cancellationToken).ConfigureAwait(false);
+        IQueryOperator right = await PlanWithSubqueriesAsync(compound.Right, context, cancellationToken).ConfigureAwait(false);
+        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+
+        result = ApplyCompoundTrailingClauses(result, compound);
+        return result;
+    }
+
+    /// <summary>
+    /// Applies ORDER BY, LIMIT/OFFSET from a compound query expression to the
+    /// combined operator. Mirrors the trailing-clause logic in <see cref="PlanCore"/>.
+    /// </summary>
+    private static IQueryOperator ApplyCompoundTrailingClauses(
+        IQueryOperator source, CompoundQueryExpression compound)
+    {
+        if (compound.OrderBy is not null)
+        {
+            int? topNRows = compound.Limit is not null
+                ? compound.Limit.Value + (compound.Offset ?? 0)
+                : null;
+
+            source = new OrderByOperator(source, compound.OrderBy.Items, topNRows);
+        }
+
+        if (compound.Limit is not null)
+        {
+            source = new LimitOperator(source, compound.Limit.Value, compound.Offset ?? 0);
+        }
+
+        return source;
+    }
+
+    /// <summary>
+    /// Core planning logic shared by <see cref="Plan(SelectStatement)"/> and <see cref="PlanAsync(SelectStatement, CancellationToken)"/>.
     /// When <paramref name="deferredColumns"/> is provided, expensive columns are excluded
     /// from scans and a <see cref="LateMaterializationOperator"/> is injected before projection.
     /// </summary>

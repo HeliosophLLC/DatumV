@@ -10,7 +10,7 @@ using SP = Superpower.Parse;
 namespace DatumIngest.Parsing;
 
 /// <summary>
-/// Parses tokenized SQL into an AST rooted at <see cref="SelectStatement"/>.
+/// Parses tokenized SQL into an AST rooted at <see cref="QueryExpression"/>.
 /// Uses Superpower's <see cref="TokenListParser{TKind,T}"/> combinators to implement
 /// a recursive-descent parser with proper operator precedence.
 /// </summary>
@@ -70,6 +70,44 @@ public static class SqlParser
         string inner = raw[1..^1];
         // Un-escape '' -> '
         return inner.Replace("''", "'");
+    }
+
+    /// <summary>
+    /// Attaches trailing ORDER BY, LIMIT, OFFSET, and INTO clauses to a compound
+    /// query expression. For a single SELECT these clauses are already parsed on
+    /// the <see cref="SelectStatement"/> itself and no lifting is needed.
+    /// </summary>
+    private static QueryExpression ApplyTrailingClauses(
+        QueryExpression query,
+        OrderByClause? orderBy,
+        int? limit,
+        int? offset,
+        IntoClause? into)
+    {
+        bool hasTrailing = orderBy is not null || limit is not null || offset is not null || into is not null;
+        if (!hasTrailing)
+        {
+            return query;
+        }
+
+        if (query is CompoundQueryExpression compound)
+        {
+            return compound with { OrderBy = orderBy, Limit = limit, Offset = offset, Into = into };
+        }
+
+        if (query is SelectQueryExpression selectQuery)
+        {
+            return new SelectQueryExpression(
+                selectQuery.Statement with
+                {
+                    OrderBy = orderBy ?? selectQuery.Statement.OrderBy,
+                    Limit = limit ?? selectQuery.Statement.Limit,
+                    Offset = offset ?? selectQuery.Statement.Offset,
+                    Into = into ?? selectQuery.Statement.Into,
+                });
+        }
+
+        return query;
     }
 
     // ───────────────────── Atomic expressions ─────────────────────
@@ -825,8 +863,40 @@ public static class SqlParser
             Distinct: distinct.HasValue);
 
     /// <summary>
+    /// Bare SELECT parser: same as <see cref="SelectStatementParser"/> but stops
+    /// before ORDER BY, LIMIT, and OFFSET. INTO is still parsed here since it is
+    /// a DatumIngest-specific output clause that applies to individual SELECTs.
+    /// Used by <see cref="QueryPrimary"/> so that trailing ORDER BY/LIMIT/OFFSET
+    /// bind to the compound level rather than to an individual SELECT branch
+    /// in set operations.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, SelectStatement> BareSelectStatementParser =
+        from selectKw in Token.EqualTo(SqlToken.Select)
+        from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
+        from columns in ColumnList
+        from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
+        from joinClauses in JoinClausesParser
+        from whereClause in WhereClauseParser.OptionalOrDefault()
+        from groupByClause in GroupByClauseParser.OptionalOrDefault()
+        from havingClause in HavingClauseParser.OptionalOrDefault()
+        from intoClause in IntoClauseParser.OptionalOrDefault()
+        select new SelectStatement(
+            columns,
+            fromClause,
+            intoClause,
+            joinClauses.Length > 0 ? joinClauses : null,
+            whereClause,
+            groupByClause,
+            havingClause,
+            OrderBy: null,
+            Limit: null,
+            Offset: null,
+            Distinct: distinct.HasValue);
+
+    /// <summary>
     /// Top-level statement parser: optional WITH clause followed by SELECT.
     /// The WITH clause's CTE definitions are threaded into the <see cref="SelectStatement"/>.
+    /// Used only for backward-compatible direct statement parsing.
     /// </summary>
     private static readonly TokenListParser<SqlToken, SelectStatement> StatementParser =
         from ctes in WithClauseParser.OptionalOrDefault()
@@ -835,9 +905,79 @@ public static class SqlParser
             ? statement with { CommonTableExpressions = ctes }
             : statement;
 
-    /// <summary>The full statement parser that expects to consume all input.</summary>
-    private static readonly TokenListParser<SqlToken, SelectStatement> FullParser =
-        StatementParser.AtEnd();
+    /// <summary>
+    /// Bare statement parser: optional WITH clause followed by a SELECT without
+    /// trailing ORDER BY/LIMIT/OFFSET/INTO. Used for set operation branches.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, SelectStatement> BareStatementParser =
+        from ctes in WithClauseParser.OptionalOrDefault()
+        from statement in BareSelectStatementParser
+        select ctes is not null && ctes.Length > 0
+            ? statement with { CommonTableExpressions = ctes }
+            : statement;
+
+    // ───────────────────── Compound query (set operations) ─────────────────────
+
+    /// <summary>
+    /// A single SELECT statement (with optional WITH preamble) as a query primary.
+    /// Uses the bare parser to avoid consuming trailing clauses that should bind
+    /// to the compound level.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, QueryExpression> QueryPrimary =
+        from statement in BareStatementParser
+        select (QueryExpression)new SelectQueryExpression(statement);
+
+    /// <summary>
+    /// Parses a query term: one or more query primaries combined by INTERSECT [ALL].
+    /// INTERSECT binds tighter than UNION/EXCEPT per SQL standard.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, QueryExpression> QueryTerm =
+        from first in QueryPrimary
+        from rest in (
+            from intersectKw in Token.EqualTo(SqlToken.Intersect)
+            from all in Token.EqualTo(SqlToken.All).OptionalOrDefault()
+            from right in QueryPrimary
+            select (All: all.HasValue, Right: right)
+        ).Many()
+        select rest.Aggregate(
+            first,
+            (left, pair) => new CompoundQueryExpression(
+                left, SetOperationType.Intersect, pair.All, pair.Right));
+
+    /// <summary>
+    /// Parses a full compound query: one or more query terms combined by UNION [ALL] or EXCEPT [ALL].
+    /// UNION and EXCEPT have equal precedence, lower than INTERSECT.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, QueryExpression> CompoundQueryParser =
+        from first in QueryTerm
+        from rest in (
+            from op in Token.EqualTo(SqlToken.Union).Value(SetOperationType.Union)
+                .Or(Token.EqualTo(SqlToken.Except).Value(SetOperationType.Except))
+            from all in Token.EqualTo(SqlToken.All).OptionalOrDefault()
+            from right in QueryTerm
+            select (OperationType: op, All: all.HasValue, Right: right)
+        ).Many()
+        select rest.Aggregate(
+            first,
+            (left, pair) => new CompoundQueryExpression(
+                left, pair.OperationType, pair.All, pair.Right));
+
+    /// <summary>
+    /// Full query expression parser: compound query optionally followed by ORDER BY, LIMIT,
+    /// OFFSET, and INTO that apply to the entire combined result. For a single SELECT without
+    /// set operations, these trailing clauses are already parsed on the SelectStatement itself.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, QueryExpression> QueryExpressionParser =
+        from query in CompoundQueryParser
+        from orderBy in OrderByClauseParser.OptionalOrDefault()
+        from limit in LimitParser.OptionalOrDefault()
+        from offset in OffsetParser.OptionalOrDefault()
+        from intoClause in IntoClauseParser.OptionalOrDefault()
+        select ApplyTrailingClauses(query, orderBy, limit, offset, intoClause);
+
+    /// <summary>The full query expression parser that expects to consume all input.</summary>
+    private static readonly TokenListParser<SqlToken, QueryExpression> FullParser =
+        QueryExpressionParser.AtEnd();
 
     /// <summary>
     /// Set of tokens that begin top-level clauses. Used by the error-recovering
@@ -861,20 +1001,23 @@ public static class SqlParser
         SqlToken.Order,
         SqlToken.Limit,
         SqlToken.Offset,
+        SqlToken.Union,
+        SqlToken.Intersect,
+        SqlToken.Except,
     ];
 
     // ───────────────────── Public API ─────────────────────
 
     /// <summary>
-    /// Parses a SQL string into a <see cref="SelectStatement"/> AST.
+    /// Parses a SQL string into a <see cref="QueryExpression"/> AST.
     /// </summary>
     /// <param name="sql">The SQL query text.</param>
     /// <returns>The parsed AST.</returns>
     /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
-    public static SelectStatement Parse(string sql)
+    public static QueryExpression Parse(string sql)
     {
         TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
-        TokenListParserResult<SqlToken, SelectStatement> result = FullParser.TryParse(tokens);
+        TokenListParserResult<SqlToken, QueryExpression> result = FullParser.TryParse(tokens);
 
         if (!result.HasValue)
         {
@@ -903,7 +1046,7 @@ public static class SqlParser
         TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
 
         // Fast path: try the full parser first. If it succeeds, no recovery needed.
-        TokenListParserResult<SqlToken, SelectStatement> fullResult = FullParser.TryParse(tokens);
+        TokenListParserResult<SqlToken, QueryExpression> fullResult = FullParser.TryParse(tokens);
         if (fullResult.HasValue)
         {
             return new ParseResult(fullResult.Value);
@@ -1168,10 +1311,10 @@ public static class SqlParser
         }
 
         // Build partial AST if we have enough structure.
-        SelectStatement? statement = null;
+        QueryExpression? query = null;
         if (columns is not null)
         {
-            statement = new SelectStatement(
+            SelectStatement statement = new(
                 columns,
                 fromClause,
                 intoClause,
@@ -1183,9 +1326,10 @@ public static class SqlParser
                 limitValue,
                 offsetValue,
                 CommonTableExpressions: commonTableExpressions);
+            query = new SelectQueryExpression(statement);
         }
 
-        return new ParseResult(statement, errors);
+        return new ParseResult(query, errors);
     }
 
     /// <summary>

@@ -12,13 +12,13 @@ public static class SyntheticDataGenerator
     /// Generates a CSV file with the specified number of rows.
     /// Columns: id (int), name (string), value (float), category (string), score (float).
     /// </summary>
-    public static string GenerateCsv(string directory, int rowCount)
+    public static string GenerateCsv(string directory, int rowCount, int seed = 42, string fileNameSuffix = "")
     {
-        string filePath = Path.Combine(directory, $"synthetic_{rowCount}.csv");
+        string filePath = Path.Combine(directory, $"synthetic_{rowCount}{fileNameSuffix}.csv");
         using StreamWriter writer = new(filePath);
         writer.WriteLine("id,name,value,category,score");
 
-        Random random = new(42);
+        Random random = new(seed);
         string[] categories = ["alpha", "beta", "gamma", "delta", "epsilon"];
 
         for (int i = 0; i < rowCount; i++)

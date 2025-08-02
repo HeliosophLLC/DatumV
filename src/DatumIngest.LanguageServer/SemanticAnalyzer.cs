@@ -54,6 +54,38 @@ internal sealed class SemanticAnalyzer
     public Diagnostic[] Analyze(SelectStatement statement)
     {
         List<Diagnostic> diagnostics = new();
+        AnalyzeStatement(statement, diagnostics);
+        return diagnostics.ToArray();
+    }
+
+    /// <summary>
+    /// Analyzes a <see cref="QueryExpression"/> tree, recursively walking compound
+    /// set operations and producing semantic warnings for each branch.
+    /// </summary>
+    public Diagnostic[] Analyze(QueryExpression queryExpression)
+    {
+        List<Diagnostic> diagnostics = new();
+
+        switch (queryExpression)
+        {
+            case SelectQueryExpression selectQuery:
+                AnalyzeStatement(selectQuery.Statement, diagnostics);
+                break;
+
+            case CompoundQueryExpression compound:
+                diagnostics.AddRange(Analyze(compound.Left));
+                diagnostics.AddRange(Analyze(compound.Right));
+                break;
+        }
+
+        return diagnostics.ToArray();
+    }
+
+    /// <summary>
+    /// Core analysis logic for a single SELECT statement.
+    /// </summary>
+    private void AnalyzeStatement(SelectStatement statement, List<Diagnostic> diagnostics)
+    {
 
         // Collect all table sources to build the scope of available columns.
         // Aliases map to the underlying table's columns; subqueries and
@@ -133,8 +165,6 @@ internal sealed class SemanticAnalyzer
         {
             AnalyzeExpression(statement.Having, aliasToTable, opaqueAliases, diagnostics);
         }
-
-        return diagnostics.ToArray();
     }
 
     /// <summary>

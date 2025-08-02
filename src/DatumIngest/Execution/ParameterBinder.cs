@@ -13,6 +13,52 @@ namespace DatumIngest.Execution;
 public static class ParameterBinder
 {
     /// <summary>
+    /// Binds named parameters in a <see cref="QueryExpression"/> to concrete values.
+    /// For a <see cref="SelectQueryExpression"/>, binds the inner statement.
+    /// For a <see cref="CompoundQueryExpression"/>, recursively binds both branches.
+    /// </summary>
+    /// <param name="query">The parsed query expression containing parameter references.</param>
+    /// <param name="parameters">A dictionary mapping parameter names to values.</param>
+    /// <returns>A new query expression with all parameters substituted.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when a parameter referenced in the query is not present in <paramref name="parameters"/>,
+    /// or when <paramref name="parameters"/> contains names not referenced by the query.
+    /// </exception>
+    public static QueryExpression Bind(
+        QueryExpression query,
+        IReadOnlyDictionary<string, DataValue> parameters)
+    {
+        HashSet<string> referenced = CollectParameterNames(query);
+
+        if (referenced.Count == 0 && parameters.Count == 0)
+        {
+            return query;
+        }
+
+        // Validate: all referenced parameters must be supplied.
+        foreach (string name in referenced)
+        {
+            if (!parameters.ContainsKey(name))
+            {
+                throw new ArgumentException(
+                    $"Query references parameter '${name}' but no value was supplied.");
+            }
+        }
+
+        // Validate: all supplied parameters must be referenced.
+        foreach (string name in parameters.Keys)
+        {
+            if (!referenced.Contains(name))
+            {
+                throw new ArgumentException(
+                    $"Parameter '${name}' was supplied but is not referenced in the query.");
+            }
+        }
+
+        return BindQueryExpression(query, parameters);
+    }
+
+    /// <summary>
     /// Binds named parameters in a <see cref="SelectStatement"/> to concrete values.
     /// Returns a new <see cref="SelectStatement"/> with all <see cref="ParameterExpression"/>
     /// nodes replaced by <see cref="LiteralExpression"/> nodes.
@@ -56,6 +102,19 @@ public static class ParameterBinder
         }
 
         return BindStatement(statement, parameters);
+    }
+
+    /// <summary>
+    /// Collects all distinct parameter names referenced in a query expression,
+    /// recursively traversing compound set operation branches.
+    /// </summary>
+    /// <param name="query">The parsed query expression to scan.</param>
+    /// <returns>A set of parameter names (without the <c>$</c> prefix).</returns>
+    public static HashSet<string> CollectParameterNames(QueryExpression query)
+    {
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        CollectFromQueryExpression(query, names);
+        return names;
     }
 
     /// <summary>
@@ -434,5 +493,62 @@ public static class ParameterBinder
                 CollectFromStatement(exists.Query, names);
                 break;
         }
+    }
+
+    private static void CollectFromQueryExpression(QueryExpression query, HashSet<string> names)
+    {
+        switch (query)
+        {
+            case SelectQueryExpression select:
+                CollectFromStatement(select.Statement, names);
+                break;
+            case CompoundQueryExpression compound:
+                CollectFromQueryExpression(compound.Left, names);
+                CollectFromQueryExpression(compound.Right, names);
+                if (compound.OrderBy is not null)
+                {
+                    foreach (OrderByItem item in compound.OrderBy.Items)
+                    {
+                        CollectFromExpression(item.Expression, names);
+                    }
+                }
+
+                break;
+        }
+    }
+
+    private static QueryExpression BindQueryExpression(
+        QueryExpression query,
+        IReadOnlyDictionary<string, DataValue> parameters)
+    {
+        return query switch
+        {
+            SelectQueryExpression select =>
+                new SelectQueryExpression(BindStatement(select.Statement, parameters)),
+            CompoundQueryExpression compound =>
+                compound with
+                {
+                    Left = BindQueryExpression(compound.Left, parameters),
+                    Right = BindQueryExpression(compound.Right, parameters),
+                    OrderBy = compound.OrderBy is not null
+                        ? BindOrderByClause(compound.OrderBy, parameters)
+                        : null,
+                },
+            _ => query,
+        };
+    }
+
+    private static OrderByClause BindOrderByClause(
+        OrderByClause orderBy,
+        IReadOnlyDictionary<string, DataValue> parameters)
+    {
+        OrderByItem[] orderItems = new OrderByItem[orderBy.Items.Count];
+        for (int i = 0; i < orderBy.Items.Count; i++)
+        {
+            OrderByItem item = orderBy.Items[i];
+            orderItems[i] = new OrderByItem(BindExpression(item.Expression, parameters), item.Direction);
+        }
+
+        return new OrderByClause(orderItems);
     }
 }

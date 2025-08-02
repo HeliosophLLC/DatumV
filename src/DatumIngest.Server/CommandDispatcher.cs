@@ -119,23 +119,24 @@ public sealed class CommandDispatcher
 
         session.RecordQuery(input);
 
-        SelectStatement statement = SqlParser.Parse(input);
+        QueryExpression query = SqlParser.Parse(input);
 
         // Bind named parameters ($name) to concrete literal values before planning.
         if (parameters is not null && parameters.Count > 0)
         {
-            statement = ParameterBinder.Bind(statement, parameters);
+            query = ParameterBinder.Bind(query, parameters);
         }
 
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
         ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes);
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, cancellationToken).ConfigureAwait(false);
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
 
         IAsyncEnumerable<Row> rows = plan.ExecuteAsync(context);
 
-        // We need the schema before streaming. Peek at the plan to get column metadata.
-        Schema schema = await ResolveQuerySchemaAsync(session, statement, cancellationToken).ConfigureAwait(false);
+        // We need the schema before streaming. Use the leftmost SELECT for column metadata.
+        SelectStatement schemaStatement = ExtractLeftmostStatement(query);
+        Schema schema = await ResolveQuerySchemaAsync(session, schemaStatement, cancellationToken).ConfigureAwait(false);
 
         return CommandResult.StreamingRows(rows, schema);
     }
@@ -383,9 +384,9 @@ public sealed class CommandDispatcher
             return CommandResult.Error("Usage: .explain <sql_query>");
         }
 
-        SelectStatement statement = SqlParser.Parse(sql);
+        QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
-        IQueryOperator plan = await planner.PlanAsync(statement, cancellationToken).ConfigureAwait(false);
+        IQueryOperator plan = await planner.PlanAsync(query, cancellationToken).ConfigureAwait(false);
 
         ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
         return CommandResult.ExplainResult(explainPlan.Render(), explainPlan);
@@ -604,5 +605,21 @@ public sealed class CommandDispatcher
             _ => throw new ArgumentException(
                 $"Cannot detect provider for '{filePath}'. Use explicit format: provider:name=path"),
         };
+    }
+
+    /// <summary>
+    /// Extracts the leftmost <see cref="SelectStatement"/> from a query expression
+    /// tree by walking the left branch of compound expressions. Used to derive the
+    /// output schema (SQL set operations use the left branch's column names).
+    /// </summary>
+    private static SelectStatement ExtractLeftmostStatement(QueryExpression query)
+    {
+        QueryExpression current = query;
+        while (current is CompoundQueryExpression compound)
+        {
+            current = compound.Left;
+        }
+
+        return ((SelectQueryExpression)current).Statement;
     }
 }

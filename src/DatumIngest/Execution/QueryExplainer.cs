@@ -45,6 +45,7 @@ public static class QueryExplainer
             GroupByOperator groupBy => BuildGroupByNode(groupBy, stats),
             CommonTableExpressionOperator cte => BuildCommonTableExpressionNode(cte, stats),
             RecursiveCommonTableExpressionOperator recursiveCte => BuildRecursiveCommonTableExpressionNode(recursiveCte, stats),
+            SetOperationOperator setOp => BuildSetOperationNode(setOp, stats),
             _ => new ExplainPlanNode
             {
                 OperatorName = op.GetType().Name,
@@ -344,6 +345,33 @@ public static class QueryExplainer
         node.Warnings.Add("GroupBy materializes all groups in memory.");
 
         return node;
+    }
+
+    private static ExplainPlanNode BuildSetOperationNode(
+        SetOperationOperator setOp, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        string operationName = setOp.OperationType switch
+        {
+            SetOperationType.Union => "UNION",
+            SetOperationType.Intersect => "INTERSECT",
+            SetOperationType.Except => "EXCEPT",
+            _ => setOp.OperationType.ToString(),
+        };
+
+        if (setOp.All)
+        {
+            operationName += " ALL";
+        }
+
+        ExplainPlanNode leftChild = BuildNode(setOp.Left, stats);
+        ExplainPlanNode rightChild = BuildNode(setOp.Right, stats);
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "SetOperation",
+            Details = operationName,
+            Children = { leftChild, rightChild },
+        };
     }
 
     // ──────────────── Cardinality estimation ────────────────

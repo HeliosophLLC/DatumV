@@ -232,7 +232,7 @@ public sealed class ErrorRecoveryTests
     [InlineData("SELECT x FROM t ORDER BY x LIMIT 10 OFFSET 5")]
     public void ValidSql_MatchesParseBehavior(string sql)
     {
-        SelectStatement expected = SqlParser.Parse(sql);
+        SelectStatement expected = ((SelectQueryExpression)SqlParser.Parse(sql)).Statement;
         ParseResult result = SqlParser.TryParseRecovering(sql);
 
         Assert.True(result.IsSuccess);

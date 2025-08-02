@@ -444,8 +444,8 @@ public sealed class SemiJoinSubqueryTests
     [Fact]
     public void Parser_InSubquery_ParsesCorrectly()
     {
-        SelectStatement statement = SqlParser.Parse(
-            "SELECT x FROM t WHERE x IN (SELECT id FROM s)");
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "SELECT x FROM t WHERE x IN (SELECT id FROM s)")).Statement;
 
         Assert.NotNull(statement.Where);
         InSubqueryExpression inSubquery = Assert.IsType<InSubqueryExpression>(statement.Where);
@@ -462,8 +462,8 @@ public sealed class SemiJoinSubqueryTests
     [Fact]
     public void Parser_NotInSubquery_ParsesCorrectly()
     {
-        SelectStatement statement = SqlParser.Parse(
-            "SELECT x FROM t WHERE x NOT IN (SELECT id FROM s)");
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "SELECT x FROM t WHERE x NOT IN (SELECT id FROM s)")).Statement;
 
         Assert.NotNull(statement.Where);
         InSubqueryExpression inSubquery = Assert.IsType<InSubqueryExpression>(statement.Where);
@@ -476,8 +476,8 @@ public sealed class SemiJoinSubqueryTests
     [Fact]
     public void Parser_Exists_ParsesCorrectly()
     {
-        SelectStatement statement = SqlParser.Parse(
-            "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM s)");
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "SELECT x FROM t WHERE EXISTS (SELECT 1 FROM s)")).Statement;
 
         Assert.NotNull(statement.Where);
         ExistsExpression exists = Assert.IsType<ExistsExpression>(statement.Where);
@@ -490,8 +490,8 @@ public sealed class SemiJoinSubqueryTests
     [Fact]
     public void Parser_NotExists_ParsesCorrectly()
     {
-        SelectStatement statement = SqlParser.Parse(
-            "SELECT x FROM t WHERE NOT EXISTS (SELECT 1 FROM s)");
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "SELECT x FROM t WHERE NOT EXISTS (SELECT 1 FROM s)")).Statement;
 
         Assert.NotNull(statement.Where);
         // NOT EXISTS is parsed as UnaryExpression(NOT, ExistsExpression) because
@@ -508,8 +508,8 @@ public sealed class SemiJoinSubqueryTests
     [Fact]
     public void Parser_InLiteralList_StillWorks()
     {
-        SelectStatement statement = SqlParser.Parse(
-            "SELECT x FROM t WHERE x IN (1, 2, 3)");
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "SELECT x FROM t WHERE x IN (1, 2, 3)")).Statement;
 
         Assert.NotNull(statement.Where);
         InExpression inExpr = Assert.IsType<InExpression>(statement.Where);
@@ -542,7 +542,7 @@ public sealed class SemiJoinSubqueryTests
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
     {
-        SelectStatement statement = SqlParser.Parse(sql);
+        QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, DefaultFunctions);
 
         ExecutionContext context = new(
@@ -550,7 +550,7 @@ public sealed class SemiJoinSubqueryTests
             DefaultFunctions,
             catalog);
 
-        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(statement, context, CancellationToken.None);
+        IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         List<Row> rows = [];
         await foreach (Row row in plan.ExecuteAsync(context))
