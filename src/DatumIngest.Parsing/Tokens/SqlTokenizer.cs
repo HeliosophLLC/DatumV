@@ -167,6 +167,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("ILIKE"), SqlToken.ILike, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("LIKE"), SqlToken.Like, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("REGEXP"), SqlToken.Regexp, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("ESCAPE"), SqlToken.Escape, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IS"), SqlToken.Is, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("AS"), SqlToken.As, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("SHARD"), SqlToken.Shard, requireDelimiters: true)

@@ -776,6 +776,99 @@ public class ExpressionEvaluatorTests
                 MakeRow()));
     }
 
+    // ─────────────── LIKE ESCAPE ───────────────
+
+    [Fact]
+    public void LikeEscape_LiteralPercent_Matches()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new LikeExpression(
+                new LiteralExpression("100%"),
+                new LiteralExpression("100\\%"),
+                new LiteralExpression("\\"),
+                CaseInsensitive: false),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void LikeEscape_LiteralPercent_NoMatch()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new LikeExpression(
+                new LiteralExpression("10099"),
+                new LiteralExpression("100\\%"),
+                new LiteralExpression("\\"),
+                CaseInsensitive: false),
+            MakeRow());
+        Assert.Equal(0f, result.AsScalar());
+    }
+
+    [Fact]
+    public void LikeEscape_LiteralUnderscore_Matches()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new LikeExpression(
+                new LiteralExpression("_test"),
+                new LiteralExpression("!_test"),
+                new LiteralExpression("!"),
+                CaseInsensitive: false),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void LikeEscape_MixedWildcardsAndEscape()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new LikeExpression(
+                new LiteralExpression("50% off sale"),
+                new LiteralExpression("%\\%%"),
+                new LiteralExpression("\\"),
+                CaseInsensitive: false),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ILikeEscape_CaseInsensitive()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new LikeExpression(
+                new LiteralExpression("100%"),
+                new LiteralExpression("100\\%"),
+                new LiteralExpression("\\"),
+                CaseInsensitive: true),
+            MakeRow());
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void LikeEscape_NullInput_ReturnsNull()
+    {
+        DataValue result = _evaluator.Evaluate(
+            new LikeExpression(
+                new LiteralExpression(null),
+                new LiteralExpression("pattern"),
+                new LiteralExpression("\\"),
+                CaseInsensitive: false),
+            MakeRow());
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void LikeEscape_InvalidEscapeChar_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            _evaluator.Evaluate(
+                new LikeExpression(
+                    new LiteralExpression("test"),
+                    new LiteralExpression("te\\st"),
+                    new LiteralExpression("ab"),
+                    CaseInsensitive: false),
+                MakeRow()));
+    }
+
     // ─────────────── Function calls ───────────────
 
     [Fact]

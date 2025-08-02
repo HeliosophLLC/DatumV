@@ -74,6 +74,9 @@ public enum SqlToken
     /// <summary>The REGEXP keyword (regular expression matching).</summary>
     Regexp,
 
+    /// <summary>The ESCAPE keyword (escape character for LIKE/ILIKE patterns).</summary>
+    Escape,
+
     /// <summary>The IS keyword (null testing).</summary>
     Is,
 

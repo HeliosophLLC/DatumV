@@ -518,19 +518,29 @@ public static class SqlParser
         select (Func<Expression, Expression>)(expr =>
             new BetweenExpression(expr, low, high, Negated: true));
 
-    /// <summary>LIKE pattern postfix (case-sensitive).</summary>
+    /// <summary>LIKE pattern postfix (case-sensitive), with optional ESCAPE clause.</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> LikePostfix =
         from likeKw in Token.EqualTo(SqlToken.Like)
         from pattern in SP.Ref(() => ExpressionParser!)
+        from escape in Token.EqualTo(SqlToken.Escape)
+            .IgnoreThen(SP.Ref(() => ExpressionParser!))
+            .OptionalOrDefault()
         select (Func<Expression, Expression>)(expr =>
-            new BinaryExpression(expr, BinaryOperator.Like, pattern));
+            escape is not null
+                ? new LikeExpression(expr, pattern, escape, CaseInsensitive: false)
+                : new BinaryExpression(expr, BinaryOperator.Like, pattern));
 
-    /// <summary>ILIKE pattern postfix (case-insensitive).</summary>
+    /// <summary>ILIKE pattern postfix (case-insensitive), with optional ESCAPE clause.</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> ILikePostfix =
         from ilikeKw in Token.EqualTo(SqlToken.ILike)
         from pattern in SP.Ref(() => ExpressionParser!)
+        from escape in Token.EqualTo(SqlToken.Escape)
+            .IgnoreThen(SP.Ref(() => ExpressionParser!))
+            .OptionalOrDefault()
         select (Func<Expression, Expression>)(expr =>
-            new BinaryExpression(expr, BinaryOperator.ILike, pattern));
+            escape is not null
+                ? new LikeExpression(expr, pattern, escape, CaseInsensitive: true)
+                : new BinaryExpression(expr, BinaryOperator.ILike, pattern));
 
     /// <summary>REGEXP pattern postfix (regular expression matching).</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> RegexpPostfix =

@@ -66,6 +66,7 @@ Every function belongs to a single **category** that describes its operational d
 | `get_filename` | `get_filename(path)` | Return file name with extension from path. | 1 |
 | `get_file_extension` | `get_file_extension(path)` | Return extension (with dot) from path. | 1 |
 | `get_path` | `get_path(path)` | Return directory portion of path. | 1 |
+| `regexp_extract` | `regexp_extract(str, pattern, [group])` | Extract first regex match. Optional 1-based group index returns a capture group. NULL if no match. | 1 |
 
 ## JSON Column Functions
 

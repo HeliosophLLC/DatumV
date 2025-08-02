@@ -33,6 +33,7 @@ public static class ExpressionTypeResolver
             InExpression => DataKind.Scalar,
             BetweenExpression => DataKind.Scalar,
             IsNullExpression => DataKind.Scalar,
+            LikeExpression => DataKind.Scalar,
             CastExpression cast => ResolveCast(cast),
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),

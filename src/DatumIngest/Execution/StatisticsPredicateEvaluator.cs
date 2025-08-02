@@ -43,6 +43,7 @@ public static class StatisticsPredicateEvaluator
             InExpression inExpression => CanSkipIn(inExpression, statistics),
             BetweenExpression between => CanSkipBetween(between, statistics),
             IsNullExpression isNull => CanSkipIsNull(isNull, statistics),
+            LikeExpression => false, // Cannot prune partitions for LIKE with ESCAPE.
             _ => false, // Conservative: unknown expression → do not skip.
         };
     }

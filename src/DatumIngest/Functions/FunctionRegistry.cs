@@ -177,6 +177,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.RightFunction());
         registry.RegisterScalar(new Scalar.LpadFunction());
         registry.RegisterScalar(new Scalar.RpadFunction());
+        registry.RegisterScalar(new Scalar.RegexpExtractFunction());
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());

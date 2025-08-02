@@ -265,6 +265,40 @@ public class SqlParserTests
     }
 
     [Fact]
+    public void WhereLikeEscape()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE value LIKE '100\\%' ESCAPE '\\'");
+
+        Assert.NotNull(result.Where);
+        LikeExpression like = Assert.IsType<LikeExpression>(result.Where);
+        Assert.False(like.CaseInsensitive);
+        LiteralExpression pattern = Assert.IsType<LiteralExpression>(like.Pattern);
+        Assert.Equal("100\\%", pattern.Value);
+        LiteralExpression escape = Assert.IsType<LiteralExpression>(like.EscapeCharacter);
+        Assert.Equal("\\", escape.Value);
+    }
+
+    [Fact]
+    public void WhereILikeEscape()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE name ILIKE '\\_test%' ESCAPE '\\'");
+
+        Assert.NotNull(result.Where);
+        LikeExpression like = Assert.IsType<LikeExpression>(result.Where);
+        Assert.True(like.CaseInsensitive);
+    }
+
+    [Fact]
+    public void WhereLikeWithoutEscapeProducesBinaryExpression()
+    {
+        SelectStatement result = Parse("SELECT a FROM t WHERE name LIKE '%test%'");
+
+        Assert.NotNull(result.Where);
+        BinaryExpression like = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.Like, like.Operator);
+    }
+
+    [Fact]
     public void WhereIn()
     {
         SelectStatement result = Parse("SELECT a FROM t WHERE x IN (1, 2, 3)");

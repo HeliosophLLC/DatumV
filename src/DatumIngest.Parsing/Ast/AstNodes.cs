@@ -322,6 +322,17 @@ public enum BinaryOperator
 }
 
 /// <summary>
+/// A LIKE or ILIKE pattern match with an explicit ESCAPE character.
+/// Produced only when the <c>ESCAPE</c> clause is present; the common case
+/// without <c>ESCAPE</c> uses <see cref="BinaryExpression"/> instead.
+/// </summary>
+public sealed record LikeExpression(
+    Expression Expression,
+    Expression Pattern,
+    Expression EscapeCharacter,
+    bool CaseInsensitive) : Expression;
+
+/// <summary>
 /// Unary operation (e.g. NOT, unary minus).
 /// </summary>
 public sealed record UnaryExpression(UnaryOperator Operator, Expression Operand) : Expression;

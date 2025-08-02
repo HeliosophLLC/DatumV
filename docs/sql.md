@@ -195,6 +195,20 @@ SELECT * FROM logs WHERE line REGEXP '(?i)warning|error'
 
 All three operators support negation via `NOT`: `NOT LIKE`, `NOT ILIKE`, `NOT REGEXP`.
 
+### ESCAPE clause
+
+By default `%` and `_` are wildcards in `LIKE` / `ILIKE` patterns. Use the `ESCAPE` clause to designate a character that causes the next `%` or `_` to be treated as a literal:
+
+```sql
+-- Match strings containing a literal percent sign
+SELECT * FROM data WHERE value LIKE '%100\%' ESCAPE '\'
+
+-- Match strings starting with an underscore (case-insensitive)
+SELECT * FROM users WHERE name ILIKE '\_%' ESCAPE '\'
+```
+
+The escape character must be a single character. It only affects the immediately following `%` or `_`.
+
 ## GROUP BY / Aggregation
 
 Group rows by one or more key expressions and compute aggregate results per group:

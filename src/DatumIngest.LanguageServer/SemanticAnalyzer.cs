@@ -270,6 +270,12 @@ internal sealed class SemanticAnalyzer
                 AnalyzeExpression(binary.Right, aliasToTable, opaqueAliases, diagnostics);
                 break;
 
+            case LikeExpression like:
+                AnalyzeExpression(like.Expression, aliasToTable, opaqueAliases, diagnostics);
+                AnalyzeExpression(like.Pattern, aliasToTable, opaqueAliases, diagnostics);
+                AnalyzeExpression(like.EscapeCharacter, aliasToTable, opaqueAliases, diagnostics);
+                break;
+
             case UnaryExpression unary:
                 AnalyzeExpression(unary.Operand, aliasToTable, opaqueAliases, diagnostics);
                 break;

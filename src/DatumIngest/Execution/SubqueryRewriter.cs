@@ -127,6 +127,28 @@ internal static class SubqueryRewriter
                     : new BinaryExpression(left, binary.Operator, right);
             }
 
+            case LikeExpression like:
+            {
+                Expression expr = await RewriteNodeAsync(
+                    like.Expression, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
+                    subqueryCounter, cancellationToken).ConfigureAwait(false);
+                Expression pattern = await RewriteNodeAsync(
+                    like.Pattern, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
+                    subqueryCounter, cancellationToken).ConfigureAwait(false);
+                Expression escapeChar = await RewriteNodeAsync(
+                    like.EscapeCharacter, outerAliases, planner, context, functionRegistry,
+                    correlatedSubqueries, decorrelatedJoins,
+                    subqueryCounter, cancellationToken).ConfigureAwait(false);
+
+                return ReferenceEquals(expr, like.Expression)
+                    && ReferenceEquals(pattern, like.Pattern)
+                    && ReferenceEquals(escapeChar, like.EscapeCharacter)
+                    ? like
+                    : new LikeExpression(expr, pattern, escapeChar, like.CaseInsensitive);
+            }
+
             case UnaryExpression unary:
             {
                 Expression operand = await RewriteNodeAsync(
@@ -511,6 +533,12 @@ internal static class SubqueryRewriter
             case BinaryExpression binary:
                 CollectAliasesFromExpression(binary.Left, aliases);
                 CollectAliasesFromExpression(binary.Right, aliases);
+                break;
+
+            case LikeExpression like:
+                CollectAliasesFromExpression(like.Expression, aliases);
+                CollectAliasesFromExpression(like.Pattern, aliases);
+                CollectAliasesFromExpression(like.EscapeCharacter, aliases);
                 break;
 
             case UnaryExpression unary:

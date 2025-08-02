@@ -422,4 +422,94 @@ public class StringFunctionTests
         ]);
         Assert.True(result.IsNull);
     }
+
+    // ───────────────── RegexpExtractFunction ─────────────────
+
+    [Fact]
+    public void RegexpExtract_FullMatch()
+    {
+        RegexpExtractFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abc123def"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.Equal("123", result.AsString());
+    }
+
+    [Fact]
+    public void RegexpExtract_CaptureGroup()
+    {
+        RegexpExtractFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("2024-03-26"),
+            DataValue.FromString("(\\d{4})-(\\d{2})-(\\d{2})"),
+            DataValue.FromScalar(2)
+        ]);
+        Assert.Equal("03", result.AsString());
+    }
+
+    [Fact]
+    public void RegexpExtract_GroupZero_ReturnsFullMatch()
+    {
+        RegexpExtractFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello world"),
+            DataValue.FromString("\\w+"),
+            DataValue.FromScalar(0)
+        ]);
+        Assert.Equal("hello", result.AsString());
+    }
+
+    [Fact]
+    public void RegexpExtract_NoMatch_ReturnsNull()
+    {
+        RegexpExtractFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void RegexpExtract_NullInput_ReturnsNull()
+    {
+        RegexpExtractFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void RegexpExtract_NullPattern_ReturnsNull()
+    {
+        RegexpExtractFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.Null(DataKind.String)
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void RegexpExtract_GroupOutOfRange_Throws()
+    {
+        RegexpExtractFunction function = new();
+        Assert.Throws<InvalidOperationException>(() =>
+            function.Execute([
+                DataValue.FromString("abc"),
+                DataValue.FromString("(\\w+)"),
+                DataValue.FromScalar(5)
+            ]));
+    }
+
+    [Fact]
+    public void RegexpExtract_InvalidArgCount_Throws()
+    {
+        RegexpExtractFunction function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.String]));
+    }
 }

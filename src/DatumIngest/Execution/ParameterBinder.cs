@@ -257,6 +257,11 @@ public static class ParameterBinder
                 BindExpression(binary.Left, parameters),
                 binary.Operator,
                 BindExpression(binary.Right, parameters)),
+            LikeExpression like => new LikeExpression(
+                BindExpression(like.Expression, parameters),
+                BindExpression(like.Pattern, parameters),
+                BindExpression(like.EscapeCharacter, parameters),
+                like.CaseInsensitive),
             UnaryExpression unary => new UnaryExpression(
                 unary.Operator,
                 BindExpression(unary.Operand, parameters)),
@@ -441,6 +446,11 @@ public static class ParameterBinder
             case BinaryExpression binary:
                 CollectFromExpression(binary.Left, names);
                 CollectFromExpression(binary.Right, names);
+                break;
+            case LikeExpression like:
+                CollectFromExpression(like.Expression, names);
+                CollectFromExpression(like.Pattern, names);
+                CollectFromExpression(like.EscapeCharacter, names);
                 break;
             case UnaryExpression unary:
                 CollectFromExpression(unary.Operand, names);

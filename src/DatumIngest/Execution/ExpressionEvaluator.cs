@@ -87,6 +87,7 @@ public sealed class ExpressionEvaluator
             IsNullExpression isNull => EvaluateIsNull(isNull, row),
             CastExpression cast => EvaluateCast(cast, row),
             CaseExpression caseExpr => EvaluateCase(caseExpr, row),
+            LikeExpression like => EvaluateLikeEscape(like, row),
             WindowFunctionCallExpression window => throw new InvalidOperationException(
                 $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
                 "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
@@ -734,6 +735,7 @@ public sealed class ExpressionEvaluator
             InExpression => DataKind.Scalar,
             BetweenExpression => DataKind.Scalar,
             IsNullExpression => DataKind.Scalar,
+            LikeExpression => DataKind.Scalar,
             _ => null,
         };
     }
@@ -919,6 +921,82 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
+        return DataValue.FromScalar(matches ? 1f : 0f);
+    }
+
+    /// <summary>
+    /// Evaluates a LIKE or ILIKE expression with an explicit ESCAPE character.
+    /// The escape character causes the following <c>%</c> or <c>_</c> to be
+    /// treated as a literal instead of a wildcard.
+    /// </summary>
+    private DataValue EvaluateLikeEscape(LikeExpression like, Row row)
+    {
+        DataValue input = Evaluate(like.Expression, row);
+        DataValue pattern = Evaluate(like.Pattern, row);
+        DataValue escapeValue = Evaluate(like.EscapeCharacter, row);
+
+        if (input.IsNull || pattern.IsNull || escapeValue.IsNull)
+        {
+            return DataValue.Null(DataKind.Scalar);
+        }
+
+        if (input.Kind != DataKind.String || pattern.Kind != DataKind.String || escapeValue.Kind != DataKind.String)
+        {
+            throw new InvalidOperationException("LIKE ... ESCAPE requires string operands.");
+        }
+
+        string escapeString = escapeValue.AsString();
+        if (escapeString.Length != 1)
+        {
+            throw new InvalidOperationException("ESCAPE character must be a single character.");
+        }
+
+        char escapeChar = escapeString[0];
+        string sqlPattern = pattern.AsString();
+        string cacheKey = $"{sqlPattern}\0{escapeChar}\0{(like.CaseInsensitive ? 'i' : 'c')}";
+
+        if (!_likeRegexCache.TryGetValue(cacheKey, out Regex? regex))
+        {
+            System.Text.StringBuilder regexBuilder = new();
+            regexBuilder.Append('^');
+
+            for (int i = 0; i < sqlPattern.Length; i++)
+            {
+                char current = sqlPattern[i];
+
+                if (current == escapeChar && i + 1 < sqlPattern.Length)
+                {
+                    // Escaped character — treat next char as literal.
+                    regexBuilder.Append(Regex.Escape(sqlPattern[i + 1].ToString()));
+                    i++;
+                }
+                else if (current == '%')
+                {
+                    regexBuilder.Append(".*");
+                }
+                else if (current == '_')
+                {
+                    regexBuilder.Append('.');
+                }
+                else
+                {
+                    regexBuilder.Append(Regex.Escape(current.ToString()));
+                }
+            }
+
+            regexBuilder.Append('$');
+
+            RegexOptions options = RegexOptions.Compiled | RegexOptions.CultureInvariant;
+            if (like.CaseInsensitive)
+            {
+                options |= RegexOptions.IgnoreCase;
+            }
+
+            regex = new Regex(regexBuilder.ToString(), options);
+            _likeRegexCache[cacheKey] = regex;
+        }
+
+        bool matches = regex.IsMatch(input.AsString());
         return DataValue.FromScalar(matches ? 1f : 0f);
     }
 }

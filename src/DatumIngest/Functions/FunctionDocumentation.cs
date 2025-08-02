@@ -126,6 +126,14 @@ public static class FunctionDocumentation
             Description = "Extracts the directory path from a file path.",
             Category = FunctionCategory.String,
         });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_extract",
+            Parameters = [Parameter("input", "String"), Parameter("pattern", "String"), Parameter("group_index", "Scalar", isOptional: true)],
+            ReturnType = "String",
+            Description = "Extracts the first substring matching a regular expression. With group_index (1-based), returns a specific capture group. Returns NULL if no match.",
+            Category = FunctionCategory.String,
+        });
 
         // ── Type Conversion ──
 

@@ -76,6 +76,12 @@ public static class ColumnReferenceCollector
                 Walk(binary.Right, references);
                 break;
 
+            case LikeExpression like:
+                Walk(like.Expression, references);
+                Walk(like.Pattern, references);
+                Walk(like.EscapeCharacter, references);
+                break;
+
             case UnaryExpression unary:
                 Walk(unary.Operand, references);
                 break;
