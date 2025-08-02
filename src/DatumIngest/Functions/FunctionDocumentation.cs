@@ -996,6 +996,78 @@ public static class FunctionDocumentation
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
         });
+        Register(new FunctionSignature
+        {
+            Name = "VARIANCE",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Sample variance (N\u22121 denominator) of non-null values. Alias for VAR_SAMP.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "VAR_SAMP",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Sample variance (N\u22121 denominator) of non-null values. Returns null for fewer than 2 values.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "VAR_POP",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Population variance (N denominator) of non-null values.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "STDDEV",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Sample standard deviation (N\u22121 denominator) of non-null values. Alias for STDDEV_SAMP.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "STDDEV_SAMP",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Sample standard deviation (N\u22121 denominator) of non-null values. Returns null for fewer than 2 values.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "STDDEV_POP",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Population standard deviation (N denominator) of non-null values.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "MEDIAN",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Median (50th percentile) of non-null values. For even counts, returns the average of the two middle values.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "PERCENTILE_CONT",
+            Parameters = [Parameter("expression", "Scalar"), Parameter("fraction", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Continuous percentile using linear interpolation. Fraction must be between 0 and 1.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
 
         RegisterWindowFunctions();
     }

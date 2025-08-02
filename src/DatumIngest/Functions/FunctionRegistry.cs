@@ -431,6 +431,14 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.AvgFunction());
         registry.RegisterAggregate(new Aggregates.MinFunction());
         registry.RegisterAggregate(new Aggregates.MaxFunction());
+        registry.RegisterAggregate(new Aggregates.VarianceFunction(usePopulation: false, "VARIANCE"));
+        registry.RegisterAggregate(new Aggregates.VarianceFunction(usePopulation: false, "VAR_SAMP"));
+        registry.RegisterAggregate(new Aggregates.VarianceFunction(usePopulation: true, "VAR_POP"));
+        registry.RegisterAggregate(new Aggregates.StandardDeviationFunction(usePopulation: false, "STDDEV"));
+        registry.RegisterAggregate(new Aggregates.StandardDeviationFunction(usePopulation: false, "STDDEV_SAMP"));
+        registry.RegisterAggregate(new Aggregates.StandardDeviationFunction(usePopulation: true, "STDDEV_POP"));
+        registry.RegisterAggregate(new Aggregates.MedianFunction());
+        registry.RegisterAggregate(new Aggregates.PercentileContinuousFunction());
 
         // Window
         registry.RegisterWindow(new Window.RowNumberFunction());

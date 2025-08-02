@@ -22,7 +22,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
-| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX). |
+| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, PERCENTILE_CONT). |
 | **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, plus aggregates with OVER). |
 
 > **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
@@ -359,6 +359,14 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `AVG` | `AVG(expr)` | Arithmetic mean of non-null `Scalar` values. Nulls excluded from denominator. | 1 |
 | `MIN` | `MIN(expr)` | Minimum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
 | `MAX` | `MAX(expr)` | Maximum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
+| `VARIANCE` | `VARIANCE(expr)` | Sample variance (N−1 denominator). Alias for `VAR_SAMP`. | 1 |
+| `VAR_SAMP` | `VAR_SAMP(expr)` | Sample variance (N−1). Null for fewer than 2 values. | 1 |
+| `VAR_POP` | `VAR_POP(expr)` | Population variance (N denominator). | 1 |
+| `STDDEV` | `STDDEV(expr)` | Sample standard deviation (N−1). Alias for `STDDEV_SAMP`. | 1 |
+| `STDDEV_SAMP` | `STDDEV_SAMP(expr)` | Sample standard deviation (N−1). Null for fewer than 2 values. | 1 |
+| `STDDEV_POP` | `STDDEV_POP(expr)` | Population standard deviation (N denominator). | 1 |
+| `MEDIAN` | `MEDIAN(expr)` | Median (50th percentile) of non-null `Scalar` values. Averages two middle values for even counts. | 1 |
+| `PERCENTILE_CONT` | `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. | 1 |
 
 All aggregate functions support the `DISTINCT` modifier (e.g. `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`), which deduplicates argument values before accumulation. The DISTINCT deduplication adds no additional Query Units. `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead.
 
@@ -379,7 +387,7 @@ Window functions compute a value for each row based on a window of related rows 
 
 ### Aggregates as Window Functions
 
-All five aggregate functions (COUNT, SUM, AVG, MIN, MAX) can also be used with an OVER clause to produce windowed results instead of grouped results:
+All aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, VAR_SAMP, VAR_POP, STDDEV, STDDEV_SAMP, STDDEV_POP, MEDIAN, PERCENTILE_CONT) can also be used with an OVER clause to produce windowed results instead of grouped results:
 
 ```sql
 -- Running sum

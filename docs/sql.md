@@ -171,8 +171,16 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 | `AVG(DISTINCT expr)` | Mean of distinct non-null values. |
 | `MIN(expr)` | Minimum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
 | `MAX(expr)` | Maximum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
+| `VARIANCE(expr)` | Sample variance (N−1 denominator) of non-null values. Alias for `VAR_SAMP`. |
+| `VAR_SAMP(expr)` | Sample variance (N−1). Returns null for fewer than 2 values. |
+| `VAR_POP(expr)` | Population variance (N denominator) of non-null values. |
+| `STDDEV(expr)` | Sample standard deviation (N−1). Alias for `STDDEV_SAMP`. |
+| `STDDEV_SAMP(expr)` | Sample standard deviation (N−1). Returns null for fewer than 2 values. |
+| `STDDEV_POP(expr)` | Population standard deviation (N denominator) of non-null values. |
+| `MEDIAN(expr)` | Median (50th percentile). Averages two middle values for even counts. |
+| `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. |
 
-The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions: `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`, `AVG(DISTINCT expr)`, `MIN(DISTINCT expr)`, `MAX(DISTINCT expr)`. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
+The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
 
 ### HAVING
 
@@ -239,7 +247,7 @@ SELECT *, LEAD(price, 2, 0) OVER (ORDER BY date) AS price_after_next FROM prices
 
 ### Aggregate Functions over Windows
 
-All aggregate functions (COUNT, SUM, AVG, MIN, MAX) can be used with OVER to compute running or partitioned aggregates:
+All aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates:
 
 ```sql
 -- Running total
