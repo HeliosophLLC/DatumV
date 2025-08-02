@@ -116,6 +116,7 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             DataKind.Boolean => BuildBooleanDataset(column.Name, rowCount),
             DataKind.Time => BuildTimeStringDataset(column.Name, rowCount),
             DataKind.Duration => BuildDurationDoubleDataset(column.Name, rowCount),
+            DataKind.Array => BuildArrayStringDataset(column.Name, rowCount),
             _ => BuildStringDataset(column)
         };
     }
@@ -326,6 +327,22 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = value.IsNull ? double.NaN : value.AsDuration().TotalSeconds;
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Builds a string dataset for <see cref="DataKind.Array"/> columns by serializing
+    /// each array value as a JSON array string.
+    /// </summary>
+    private string[] BuildArrayStringDataset(string columnName, int rowCount)
+    {
+        string[] data = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? "" : value.ToString() ?? "";
         }
 
         return data;

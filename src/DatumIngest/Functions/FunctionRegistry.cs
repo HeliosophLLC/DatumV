@@ -447,6 +447,7 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.ApproximateMedianFunction());
         registry.RegisterAggregate(new Aggregates.ApproximatePercentileFunction());
         registry.RegisterAggregate(new Aggregates.StringAggregateFunction());
+        registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
 
         // Window
         registry.RegisterWindow(new Window.RowNumberFunction());

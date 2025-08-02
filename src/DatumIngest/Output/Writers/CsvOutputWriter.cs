@@ -140,6 +140,7 @@ public sealed class CsvOutputWriter : IOutputWriter
             DataKind.Boolean => value.AsBoolean() ? "true" : "false",
             DataKind.Time => value.AsTime().ToString("HH:mm:ss"),
             DataKind.Duration => value.AsDuration().ToString("c"),
+            DataKind.Array => FormatArray(value),
             _ => value.ToString() ?? ""
         };
     }
@@ -159,6 +160,43 @@ public sealed class CsvOutputWriter : IOutputWriter
             }
 
             builder.Append(vector[index].ToString("G"));
+        }
+
+        builder.Append(']');
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Formats an <see cref="DataKind.Array"/> value as a JSON array string.
+    /// </summary>
+    private static string FormatArray(DataValue value)
+    {
+        DataValue[] elements = value.AsArray();
+        System.Text.StringBuilder builder = new();
+        builder.Append('[');
+        for (int index = 0; index < elements.Length; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            DataValue element = elements[index];
+            if (element.IsNull)
+            {
+                builder.Append("null");
+            }
+            else if (element.Kind is DataKind.String or DataKind.Date or DataKind.DateTime
+                or DataKind.Time or DataKind.Uuid or DataKind.Duration)
+            {
+                builder.Append('"');
+                builder.Append(element.ToString()!.Replace("\"", "\\\""));
+                builder.Append('"');
+            }
+            else
+            {
+                builder.Append(element.ToString());
+            }
         }
 
         builder.Append(']');

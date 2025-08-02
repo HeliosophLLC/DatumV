@@ -35,6 +35,12 @@ public sealed class UnnestFunction : ISchemaAwareTableFunction
             DataKind.UInt8Array => new Schema(
                 [new ColumnInfo("value", DataKind.UInt8, nullable: false)]),
 
+            // Array element kind is unknown at plan time; use String as the
+            // fallback schema, matching the existing JsonValue behaviour.
+            // At execution time the actual element kinds are preserved.
+            DataKind.Array => new Schema(
+                [new ColumnInfo("value", DataKind.String, nullable: true)]),
+
             // JSON arrays may expand to objects with unknown columns;
             // fall back to a single "value" column of String kind.
             _ => new Schema(
@@ -126,6 +132,19 @@ public sealed class UnnestFunction : ISchemaAwareTableFunction
                         // Scalar elements get a single "value" column.
                         yield return new Row(["value"], [ConvertJsonElement(item)]);
                     }
+                }
+                break;
+            }
+
+            case DataKind.Array:
+            {
+                DataValue[] elements = input.AsArray();
+                string[] names = ["value"];
+                Dictionary<string, int> nameIndex = new(1, StringComparer.OrdinalIgnoreCase) { ["value"] = 0 };
+                foreach (DataValue element in elements)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return new Row(names, [element], nameIndex);
                 }
                 break;
             }

@@ -109,7 +109,7 @@ internal sealed class MemoryEstimator
             DataKind kind = row[index].Kind;
             if (kind is DataKind.String or DataKind.Vector or DataKind.Matrix
                 or DataKind.Tensor or DataKind.Image or DataKind.UInt8Array
-                or DataKind.JsonValue)
+                or DataKind.JsonValue or DataKind.Array)
             {
                 return false;
             }
@@ -150,6 +150,7 @@ internal sealed class MemoryEstimator
                 DataKind.Tensor => 4L * value.AsTensor(out _).Length,
                 DataKind.UInt8Array => value.AsUInt8Array().Length,
                 DataKind.Image => value.AsImage().Length,
+                DataKind.Array => EstimateArrayBytes(value),
                 _ => 8,
             };
         }
@@ -157,5 +158,17 @@ internal sealed class MemoryEstimator
         bytes += DictionaryEntryOverheadBytes;
 
         return bytes;
+    }
+
+    private static long EstimateArrayBytes(DataValue value)
+    {
+        DataValue[] elements = value.AsArray();
+        long total = 16; // Array object overhead + length.
+        foreach (DataValue element in elements)
+        {
+            total += DataValueOverheadBytes + 8; // Conservative per-element estimate.
+        }
+
+        return total;
     }
 }

@@ -11,7 +11,7 @@ namespace DatumIngest.Tests.Execution;
 
 /// <summary>
 /// Tests for advanced aggregate functions: PERCENTILE_DISC, MODE, CORR,
-/// COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, and STRING_AGG.
+/// COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG, and ARRAY_AGG.
 /// </summary>
 public class AdvancedAggregateTests
 {
@@ -957,6 +957,220 @@ public class AdvancedAggregateTests
         Assert.Equal("c, b, a", results[0]["result"].AsString());
     }
 
+    // ─────────────── ARRAY_AGG ───────────────
+
+    [Fact]
+    public async Task ArrayAgg_BasicCollection()
+    {
+        MockOperator source = new(
+            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromScalar(3f))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result"),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Single(results);
+        DataValue result = results[0]["result"];
+        Assert.Equal(DataKind.Array, result.Kind);
+        DataValue[] elements = result.AsArray();
+        Assert.Equal(3, elements.Length);
+        Assert.Equal(1f, elements[0].AsScalar());
+        Assert.Equal(2f, elements[1].AsScalar());
+        Assert.Equal(3f, elements[2].AsScalar());
+    }
+
+    [Fact]
+    public async Task ArrayAgg_AllNull_ReturnsNull()
+    {
+        MockOperator source = new(
+            MakeRow(("x", DataValue.Null(DataKind.String))),
+            MakeRow(("x", DataValue.Null(DataKind.String))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result"),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Single(results);
+        Assert.True(results[0]["result"].IsNull);
+    }
+
+    [Fact]
+    public async Task ArrayAgg_SkipsNullValues()
+    {
+        MockOperator source = new(
+            MakeRow(("x", DataValue.FromString("a"))),
+            MakeRow(("x", DataValue.Null(DataKind.String))),
+            MakeRow(("x", DataValue.FromString("c"))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result"),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Single(results);
+        DataValue[] elements = results[0]["result"].AsArray();
+        Assert.Equal(2, elements.Length);
+        Assert.Equal("a", elements[0].AsString());
+        Assert.Equal("c", elements[1].AsString());
+    }
+
+    [Fact]
+    public async Task ArrayAgg_PerGroup()
+    {
+        MockOperator source = new(
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(1f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(10f))),
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(2f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(20f))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [new ColumnReference("cat")],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result"),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Equal(2, results.Count);
+
+        Row groupA = results.First(row => row["cat"].AsString() == "A");
+        Row groupB = results.First(row => row["cat"].AsString() == "B");
+
+        DataValue[] elementsA = groupA["result"].AsArray();
+        Assert.Equal(2, elementsA.Length);
+        Assert.Equal(1f, elementsA[0].AsScalar());
+        Assert.Equal(2f, elementsA[1].AsScalar());
+
+        DataValue[] elementsB = groupB["result"].AsArray();
+        Assert.Equal(2, elementsB.Length);
+        Assert.Equal(10f, elementsB[0].AsScalar());
+        Assert.Equal(20f, elementsB[1].AsScalar());
+    }
+
+    [Fact]
+    public async Task ArrayAgg_WithOrderByAscending()
+    {
+        MockOperator source = new(
+            MakeRow(("x", DataValue.FromScalar(3f))),
+            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromScalar(2f))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result",
+                    OrderBy: [new OrderByItem(new ColumnReference("x"), SortDirection.Ascending)]),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Single(results);
+        DataValue[] elements = results[0]["result"].AsArray();
+        Assert.Equal(1f, elements[0].AsScalar());
+        Assert.Equal(2f, elements[1].AsScalar());
+        Assert.Equal(3f, elements[2].AsScalar());
+    }
+
+    [Fact]
+    public async Task ArrayAgg_WithOrderByDescending()
+    {
+        MockOperator source = new(
+            MakeRow(("x", DataValue.FromScalar(3f))),
+            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromScalar(2f))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result",
+                    OrderBy: [new OrderByItem(new ColumnReference("x"), SortDirection.Descending)]),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Single(results);
+        DataValue[] elements = results[0]["result"].AsArray();
+        Assert.Equal(3f, elements[0].AsScalar());
+        Assert.Equal(2f, elements[1].AsScalar());
+        Assert.Equal(1f, elements[2].AsScalar());
+    }
+
+    [Fact]
+    public async Task ArrayAgg_WithDistinct()
+    {
+        MockOperator source = new(
+            MakeRow(("x", DataValue.FromString("a"))),
+            MakeRow(("x", DataValue.FromString("b"))),
+            MakeRow(("x", DataValue.FromString("a"))),
+            MakeRow(("x", DataValue.FromString("c"))),
+            MakeRow(("x", DataValue.FromString("b"))));
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new ArrayAggregateFunction(),
+                    [new ColumnReference("x")],
+                    "result",
+                    Distinct: true),
+            ]);
+
+        List<Row> results = await CollectAsync(groupBy);
+
+        Assert.Single(results);
+        DataValue[] elements = results[0]["result"].AsArray();
+        Assert.Equal(3, elements.Length);
+
+        // DISTINCT should yield exactly {"a", "b", "c"} in some order
+        string[] values = elements.Select(e => e.AsString()).Order().ToArray();
+        Assert.Equal(["a", "b", "c"], values);
+    }
+
     // ─────────────── REGISTRY ───────────────
 
     [Theory]
@@ -968,6 +1182,7 @@ public class AdvancedAggregateTests
     [InlineData("APPROX_MEDIAN")]
     [InlineData("APPROX_PERCENTILE")]
     [InlineData("STRING_AGG")]
+    [InlineData("ARRAY_AGG")]
     public void Registry_ContainsFunction(string functionName)
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();

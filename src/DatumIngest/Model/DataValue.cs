@@ -152,6 +152,20 @@ public sealed class DataValue : IEquatable<DataValue>
     public static DataValue FromDuration(TimeSpan value) =>
         new(DataKind.Duration, value, shape: null, isNull: false);
 
+    /// <summary>
+    /// Creates a typed array value from an element kind and an array of elements.
+    /// The element kind is stored in the shape metadata so it can be recovered at runtime.
+    /// </summary>
+    /// <param name="elementKind">The <see cref="DataKind"/> shared by all elements.</param>
+    /// <param name="elements">The array of element values.</param>
+    public static DataValue FromArray(DataKind elementKind, DataValue[] elements) =>
+        new(DataKind.Array, elements, shape: [(int)elementKind], isNull: false);
+
+    /// <summary>Creates a typed null array with the given element kind.</summary>
+    /// <param name="elementKind">The element kind of the null array.</param>
+    public static DataValue NullArray(DataKind elementKind) =>
+        new(DataKind.Array, payload: null, shape: [(int)elementKind], isNull: true);
+
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
     {
@@ -323,6 +337,33 @@ public sealed class DataValue : IEquatable<DataValue>
         return (TimeSpan)_payload!;
     }
 
+    /// <summary>Returns the typed array payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public DataValue[] AsArray()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Array);
+        return (DataValue[])_payload!;
+    }
+
+    /// <summary>
+    /// Returns the element <see cref="DataKind"/> for an <see cref="DataKind.Array"/> value.
+    /// Available on both null and non-null array values.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Called on a non-array value.</exception>
+    public DataKind ArrayElementKind
+    {
+        get
+        {
+            if (_kind != DataKind.Array)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot read ArrayElementKind on a {_kind} value.");
+            }
+
+            return (DataKind)_shape![0];
+        }
+    }
+
     // ───────────────────── Zero-copy conversions ──────────────────────
 
     /// <summary>
@@ -419,6 +460,8 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Boolean => (bool)_payload! == (bool)other._payload!,
             DataKind.Time => (TimeOnly)_payload! == (TimeOnly)other._payload!,
             DataKind.Duration => (TimeSpan)_payload! == (TimeSpan)other._payload!,
+            DataKind.Array => _shape!.AsSpan().SequenceEqual(other._shape!)
+                && ((DataValue[])_payload!).AsSpan().SequenceEqual((DataValue[])other._payload!),
             _ => false,
         };
     }
@@ -444,6 +487,7 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Tensor => CombineFloatArrayHash(_kind, (float[])_payload!, _shape),
             DataKind.UInt8Array => CombineByteArrayHash(_kind, (byte[])_payload!),
             DataKind.Image => CombineByteArrayHash(_kind, AsImage()),
+            DataKind.Array => CombineArrayHash(_kind, (DataValue[])_payload!, _shape),
             _ => HashCode.Combine(_kind),
         };
     }
@@ -506,6 +550,27 @@ public sealed class DataValue : IEquatable<DataValue>
         return hash.ToHashCode();
     }
 
+    private static int CombineArrayHash(DataKind kind, DataValue[] elements, int[]? shape)
+    {
+        HashCode hash = new();
+        hash.Add(kind);
+
+        if (shape is not null)
+        {
+            foreach (int dimension in shape)
+            {
+                hash.Add(dimension);
+            }
+        }
+
+        foreach (DataValue element in elements)
+        {
+            hash.Add(element);
+        }
+
+        return hash.ToHashCode();
+    }
+
     // ───────────────────────── Display ─────────────────────────
 
     /// <inheritdoc/>
@@ -530,6 +595,7 @@ public sealed class DataValue : IEquatable<DataValue>
             DataKind.Tensor => $"Tensor[{string.Join("x", _shape!)}]",
             DataKind.UInt8Array => $"UInt8Array[{((byte[])_payload!).Length}]",
             DataKind.Image => $"Image[{AsImage().Length} bytes]",
+            DataKind.Array => $"Array<{(DataKind)_shape![0]}>[{((DataValue[])_payload!).Length}]",
             _ => _kind.ToString(),
         };
     }

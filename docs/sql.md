@@ -187,6 +187,7 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 | `APPROX_MEDIAN(expr)` | Approximate median via reservoir sampling. O(1) memory, ~1–5% error. |
 | `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile via reservoir sampling. O(1) memory, ~1–5% error. |
 | `STRING_AGG(expr, separator [ORDER BY expr [ASC|DESC]])` | Concatenates non-null strings with a separator. Supports intra-aggregate ORDER BY. |
+| `ARRAY_AGG(expr [ORDER BY expr [ASC|DESC]])` | Collects non-null values into a typed Array. Accepts any data kind. Supports intra-aggregate ORDER BY and DISTINCT. Returns null if all inputs are null. |
 
 The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
 
@@ -219,6 +220,11 @@ SELECT region, MODE(payment_method) AS most_common_payment FROM orders GROUP BY 
 
 -- Concatenate labels per group
 SELECT category, STRING_AGG(name, ', ' ORDER BY name ASC) AS items
+FROM products
+GROUP BY category
+
+-- Collect values into arrays per group
+SELECT category, ARRAY_AGG(name ORDER BY name ASC) AS names
 FROM products
 GROUP BY category
 
@@ -325,7 +331,7 @@ Value functions support two optional modifiers between the closing `)` and `OVER
 
 ### Aggregate Functions over Windows
 
-All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP) and STRING_AGG are not supported as window functions.
+All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP), STRING_AGG, and ARRAY_AGG are not supported as window functions.
 
 ```sql
 -- Running total

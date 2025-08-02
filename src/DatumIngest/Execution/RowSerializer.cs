@@ -206,6 +206,16 @@ internal static class RowSerializer
                 writer.Write(duration.Ticks);
                 break;
 
+            case DataKind.Array:
+                DataValue[] arrayElements = value.AsArray();
+                writer.Write((byte)value.ArrayElementKind);
+                writer.Write(arrayElements.Length);
+                foreach (DataValue element in arrayElements)
+                {
+                    WriteDataValue(writer, element);
+                }
+                break;
+
             default:
                 throw new NotSupportedException(
                     $"Cannot serialize DataValue of kind {value.Kind}.");
@@ -246,6 +256,7 @@ internal static class RowSerializer
             DataKind.Boolean => DataValue.FromBoolean(reader.ReadBoolean()),
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(new TimeSpan(reader.ReadInt64())),
+            DataKind.Array => ReadArray(reader),
             _ => throw new InvalidDataException(
                 $"Unknown DataKind {kind} in spill file."),
         };
@@ -304,5 +315,18 @@ internal static class RowSerializer
         int length = reader.ReadInt32();
         byte[] bytes = reader.ReadBytes(length);
         return DataValue.FromImage(bytes);
+    }
+
+    private static DataValue ReadArray(BinaryReader reader)
+    {
+        DataKind elementKind = (DataKind)reader.ReadByte();
+        int length = reader.ReadInt32();
+        DataValue[] elements = new DataValue[length];
+        for (int index = 0; index < length; index++)
+        {
+            elements[index] = ReadDataValue(reader);
+        }
+
+        return DataValue.FromArray(elementKind, elements);
     }
 }

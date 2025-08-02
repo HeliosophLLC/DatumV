@@ -40,9 +40,9 @@ public class DataKindTests
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsFifteen()
+    public void TotalEnumMemberCountIsSixteen()
     {
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(15, allValues.Length);
+        Assert.Equal(16, allValues.Length);
     }
 }

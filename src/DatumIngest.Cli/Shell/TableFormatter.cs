@@ -163,6 +163,7 @@ internal sealed class TableFormatter
             DataKind.Tensor => FormatTensorShape(value),
             DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
             DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
+            DataKind.Array => FormatArrayValue(value),
             _ => value.ToString() ?? ""
         };
     }
@@ -177,5 +178,11 @@ internal sealed class TableFormatter
     {
         float[] data = value.AsTensor(out int[] shape);
         return $"Tensor[{string.Join("x", shape)}]";
+    }
+
+    private static string FormatArrayValue(DataValue value)
+    {
+        DataValue[] elements = value.AsArray();
+        return $"[{string.Join(", ", elements.Select(e => e.IsNull ? "NULL" : e.ToString()))}]";
     }
 }

@@ -125,6 +125,11 @@ internal static class ProtoConverter
             case DataKind.Duration:
                 message.DurationValue = value.AsDuration().TotalSeconds;
                 break;
+
+            case DataKind.Array:
+                // Serialize array elements as a JSON string for wire transport.
+                message.JsonValue = value.ToString() ?? "[]";
+                break;
         }
 
         return message;
@@ -152,6 +157,7 @@ internal static class ProtoConverter
             DataKind.Boolean => DataKindValue.DataKindBoolean,
             DataKind.Time => DataKindValue.DataKindTime,
             DataKind.Duration => DataKindValue.DataKindDuration,
+            DataKind.Array => DataKindValue.DataKindJsonValue,
             _ => DataKindValue.DataKindString,
         };
     }

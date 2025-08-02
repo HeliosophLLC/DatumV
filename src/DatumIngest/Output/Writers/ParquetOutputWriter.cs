@@ -266,6 +266,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
                 DataKind.Boolean => new DataField<bool>(column.Name),
                 DataKind.Time => new DataField<string>(column.Name),
                 DataKind.Duration => new DataField<double>(column.Name),
+                DataKind.Array => new DataField<string>(column.Name),
                 _ => new DataField<string>(column.Name)
             };
         }
@@ -293,6 +294,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
             DataKind.Boolean => BuildBooleanColumn(field, column.Name, rowCount),
             DataKind.Time => BuildTimeColumn(field, column.Name, rowCount),
             DataKind.Duration => BuildDurationColumn(field, column.Name, rowCount),
+            DataKind.Array => BuildFallbackStringColumn(field, column.Name, rowCount),
             _ => BuildFallbackStringColumn(field, column.Name, rowCount)
         };
     }

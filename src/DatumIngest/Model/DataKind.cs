@@ -50,4 +50,10 @@ public enum DataKind
 
     /// <summary>A duration (elapsed time span).</summary>
     Duration = 14,
+
+    /// <summary>
+    /// A typed array of <see cref="DataValue"/> elements sharing a common element kind.
+    /// The element kind is stored in the shape metadata of the owning <see cref="DataValue"/>.
+    /// </summary>
+    Array = 15,
 }
