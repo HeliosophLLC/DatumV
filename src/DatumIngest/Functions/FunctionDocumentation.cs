@@ -1068,6 +1068,78 @@ public static class FunctionDocumentation
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
         });
+        Register(new FunctionSignature
+        {
+            Name = "PERCENTILE_DISC",
+            Parameters = [Parameter("expression", "Scalar"), Parameter("fraction", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Discrete percentile (nearest rank). Returns an actually observed value. Fraction in [0, 1].",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "MODE",
+            Parameters = [Parameter("expression", "Any")],
+            ReturnType = "Any",
+            Description = "Returns the most frequently occurring value. Ties broken by first occurrence.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "CORR",
+            Parameters = [Parameter("y", "Scalar"), Parameter("x", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Pearson correlation coefficient between two numeric columns. Returns value in [−1, 1].",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "COVAR_POP",
+            Parameters = [Parameter("y", "Scalar"), Parameter("x", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Population covariance (N denominator) between two numeric columns.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "COVAR_SAMP",
+            Parameters = [Parameter("y", "Scalar"), Parameter("x", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Sample covariance (N−1 denominator) between two numeric columns. Null for fewer than 2 pairs.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "APPROX_MEDIAN",
+            Parameters = [Parameter("expression", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Approximate median using reservoir sampling. O(1) memory, ~1–5% error for large groups.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "APPROX_PERCENTILE",
+            Parameters = [Parameter("expression", "Scalar"), Parameter("fraction", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error for large groups.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "STRING_AGG",
+            Parameters = [Parameter("expression", "String"), Parameter("separator", "String")],
+            ReturnType = "String",
+            Description = "Concatenates non-null string values with a separator. Supports ORDER BY inside the function call.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
 
         RegisterWindowFunctions();
     }

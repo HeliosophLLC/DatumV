@@ -155,7 +155,10 @@ public sealed class OrderByOperator : IQueryOperator
         return 0;
     }
 
-    private static int CompareDataValues(DataValue left, DataValue right)
+    /// <summary>
+    /// Compares two <see cref="DataValue"/> instances for ordering. Nulls sort last.
+    /// </summary>
+    internal static int CompareDataValues(DataValue left, DataValue right)
     {
         // Nulls sort last.
         if (left.IsNull && right.IsNull) return 0;

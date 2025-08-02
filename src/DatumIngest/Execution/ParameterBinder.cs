@@ -251,7 +251,7 @@ public static class ParameterBinder
             arguments[i] = BindExpression(function.Arguments[i], parameters);
         }
 
-        return new FunctionCallExpression(function.FunctionName, arguments, function.Distinct, function.Span);
+        return new FunctionCallExpression(function.FunctionName, arguments, function.OrderBy, function.Distinct, function.Span);
     }
 
     private static InExpression BindInExpression(

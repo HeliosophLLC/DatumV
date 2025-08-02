@@ -332,9 +332,18 @@ public enum UnaryOperator
 /// <summary>
 /// A function call expression with a name and ordered arguments.
 /// </summary>
+/// <param name="FunctionName">The name of the function being called.</param>
+/// <param name="Arguments">The ordered argument expressions.</param>
+/// <param name="OrderBy">
+/// Optional intra-aggregate ORDER BY items, used by functions like
+/// <c>STRING_AGG(expr, separator ORDER BY expr ASC)</c>.
+/// </param>
+/// <param name="Distinct">Whether the DISTINCT modifier is present.</param>
+/// <param name="Span">The source location span of the function call.</param>
 public sealed record FunctionCallExpression(
     string FunctionName,
     IReadOnlyList<Expression> Arguments,
+    IReadOnlyList<OrderByItem>? OrderBy = null,
     bool Distinct = false,
     SourceSpan? Span = null) : Expression;
 

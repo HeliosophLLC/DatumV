@@ -216,13 +216,15 @@ public static class SqlParser
         .OptionalOrDefault();
 
     /// <summary>
-    /// Function call: identifier ( [DISTINCT] arg1, arg2, ... ) [OVER window_spec]
+    /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] ) [OVER window_spec]
     /// Must be tried before bare column reference because both start with Identifier.
     /// Supports <c>COUNT(*)</c> by treating a bare <c>*</c> inside the argument list
     /// as a sentinel <see cref="LiteralExpression"/> with value <c>"*"</c>.
     /// When followed by an <c>OVER</c> keyword, produces a <see cref="WindowFunctionCallExpression"/>.
     /// The optional <c>DISTINCT</c> keyword before arguments is used by aggregate
     /// functions such as <c>COUNT(DISTINCT col)</c>.
+    /// The optional <c>ORDER BY</c> before the closing paren is used by
+    /// <c>STRING_AGG(expr, separator ORDER BY expr [ASC|DESC])</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> FunctionCall =
         from name in Token.EqualTo(SqlToken.Identifier)
@@ -232,11 +234,12 @@ public static class SqlParser
                 .Select(_ => (Expression)new LiteralExpression("*"))
                 .Or(SP.Ref(() => ExpressionParser!))
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from orderBy in WindowOrderByParser.OptionalOrDefault()
         from close in Token.EqualTo(SqlToken.RightParen)
         from windowSpec in WindowSpecificationParser.OptionalOrDefault()
         select windowSpec is not null
             ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, Span: ToSpan(name))
-            : (Expression)new FunctionCallExpression(GetTokenText(name), args, Distinct: distinct.HasValue, Span: ToSpan(name));
+            : (Expression)new FunctionCallExpression(GetTokenText(name), args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =

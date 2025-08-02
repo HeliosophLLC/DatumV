@@ -179,6 +179,14 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 | `STDDEV_POP(expr)` | Population standard deviation (N denominator) of non-null values. |
 | `MEDIAN(expr)` | Median (50th percentile). Averages two middle values for even counts. |
 | `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. |
+| `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an observed value. Fraction in [0, 1]. |
+| `MODE(expr)` | Most frequently occurring value. Ties broken by first occurrence. |
+| `CORR(y, x)` | Pearson correlation coefficient. Returns value in [−1, 1]. |
+| `COVAR_POP(y, x)` | Population covariance (N denominator). |
+| `COVAR_SAMP(y, x)` | Sample covariance (N−1 denominator). Null for fewer than 2 pairs. |
+| `APPROX_MEDIAN(expr)` | Approximate median via reservoir sampling. O(1) memory, ~1–5% error. |
+| `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile via reservoir sampling. O(1) memory, ~1–5% error. |
+| `STRING_AGG(expr, separator [ORDER BY expr [ASC|DESC]])` | Concatenates non-null strings with a separator. Supports intra-aggregate ORDER BY. |
 
 The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
 

@@ -998,7 +998,7 @@ public sealed class QueryPlanner
                         : func.Arguments;
 
                     aggregateColumns.Add(new AggregateColumn(
-                        aggregateFunction, arguments, outputName, isCountStar, func.Distinct));
+                        aggregateFunction, arguments, outputName, isCountStar, func.Distinct, func.OrderBy));
                 }
 
                 return new ColumnReference(null, outputName);

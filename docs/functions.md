@@ -367,6 +367,14 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `STDDEV_POP` | `STDDEV_POP(expr)` | Population standard deviation (N denominator). | 1 |
 | `MEDIAN` | `MEDIAN(expr)` | Median (50th percentile) of non-null `Scalar` values. Averages two middle values for even counts. | 1 |
 | `PERCENTILE_CONT` | `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. | 1 |
+| `PERCENTILE_DISC` | `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an actually observed value. Fraction in [0, 1]. | 1 |
+| `MODE` | `MODE(expr)` | Most frequently occurring value. Ties broken by first occurrence. Works on any comparable type. | 1 |
+| `CORR` | `CORR(y, x)` | Pearson correlation coefficient between two numeric columns. Returns value in [−1, 1]. | 1 |
+| `COVAR_POP` | `COVAR_POP(y, x)` | Population covariance (N denominator) between two numeric columns. | 1 |
+| `COVAR_SAMP` | `COVAR_SAMP(y, x)` | Sample covariance (N−1 denominator). Null for fewer than 2 pairs. | 1 |
+| `APPROX_MEDIAN` | `APPROX_MEDIAN(expr)` | Approximate median using reservoir sampling. O(1) memory, ~1–5% error for large groups. | 1 |
+| `APPROX_PERCENTILE` | `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error. | 1 |
+| `STRING_AGG` | `STRING_AGG(expr, separator [ORDER BY ...])` | Concatenates non-null string values with a separator. Supports intra-aggregate ORDER BY. | 1 |
 
 All aggregate functions support the `DISTINCT` modifier (e.g. `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`), which deduplicates argument values before accumulation. The DISTINCT deduplication adds no additional Query Units. `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead.
 

@@ -126,7 +126,71 @@ public sealed class GroupByOperator : IQueryOperator
                         arguments[argumentIndex] = evaluator.Evaluate(
                             aggregateColumn.ArgumentExpressions[argumentIndex], row);
                     }
-                    group.Accumulators[aggregateIndex].Accumulate(arguments);
+
+                    if (aggregateColumn.OrderBy is not null)
+                    {
+                        // Buffer arguments and sort keys for deferred sorted accumulation.
+                        DataValue[] sortKeys = new DataValue[aggregateColumn.OrderBy.Count];
+                        for (int sortIndex = 0; sortIndex < aggregateColumn.OrderBy.Count; sortIndex++)
+                        {
+                            sortKeys[sortIndex] = evaluator.Evaluate(
+                                aggregateColumn.OrderBy[sortIndex].Expression, row);
+                        }
+
+                        group.OrderedBuffers![aggregateIndex]!.Add((arguments, sortKeys));
+                    }
+                    else
+                    {
+                        group.Accumulators[aggregateIndex].Accumulate(arguments);
+                    }
+                }
+            }
+        }
+
+        // Flush ordered buffers: sort and accumulate deferred rows.
+        bool hasOrderedAggregates = _aggregateColumns.Any(c => c.OrderBy is not null);
+
+        if (hasOrderedAggregates)
+        {
+            IEnumerable<GroupState> groupsToFlush = isGlobalAggregation
+                ? [globalGroup!]
+                : useSingleKey
+                    ? singleKeyGroups!.Values
+                    : compositeKeyGroups!.Values;
+
+            foreach (GroupState groupState in groupsToFlush)
+            {
+                for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+                {
+                    AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
+                    if (aggregateColumn.OrderBy is null) continue;
+
+                    List<(DataValue[] Arguments, DataValue[] SortKeys)> buffer =
+                        groupState.OrderedBuffers![aggregateIndex]!;
+
+                    IReadOnlyList<OrderByItem> orderByItems = aggregateColumn.OrderBy;
+
+                    buffer.Sort((a, b) =>
+                    {
+                        for (int sortIndex = 0; sortIndex < orderByItems.Count; sortIndex++)
+                        {
+                            int comparison = OrderByOperator.CompareDataValues(
+                                a.SortKeys[sortIndex], b.SortKeys[sortIndex]);
+
+                            if (orderByItems[sortIndex].Direction == SortDirection.Descending)
+                            {
+                                comparison = -comparison;
+                            }
+
+                            if (comparison != 0) return comparison;
+                        }
+                        return 0;
+                    });
+
+                    foreach ((DataValue[] arguments, _) in buffer)
+                    {
+                        groupState.Accumulators[aggregateIndex].Accumulate(arguments);
+                    }
                 }
             }
         }
@@ -187,6 +251,8 @@ public sealed class GroupByOperator : IQueryOperator
     private GroupState CreateGroupState()
     {
         IAggregateAccumulator[] accumulators = new IAggregateAccumulator[_aggregateColumns.Count];
+        List<(DataValue[] Arguments, DataValue[] SortKeys)>?[]? orderedBuffers = null;
+
         for (int index = 0; index < _aggregateColumns.Count; index++)
         {
             AggregateColumn column = _aggregateColumns[index];
@@ -199,8 +265,14 @@ public sealed class GroupByOperator : IQueryOperator
             }
 
             accumulators[index] = accumulator;
+
+            if (column.OrderBy is not null)
+            {
+                orderedBuffers ??= new List<(DataValue[], DataValue[])>?[_aggregateColumns.Count];
+                orderedBuffers[index] = [];
+            }
         }
-        return new GroupState { Accumulators = accumulators };
+        return new GroupState { Accumulators = accumulators, OrderedBuffers = orderedBuffers };
     }
 
     /// <summary>
@@ -213,6 +285,13 @@ public sealed class GroupByOperator : IQueryOperator
 
         /// <summary>One accumulator per aggregate column.</summary>
         public IAggregateAccumulator[] Accumulators = [];
+
+        /// <summary>
+        /// Buffered rows for aggregates with intra-aggregate ORDER BY. Null when
+        /// no aggregates in the query use ORDER BY. Each element is either null
+        /// (aggregate has no ORDER BY) or a list of (arguments, sort-keys) tuples.
+        /// </summary>
+        public List<(DataValue[] Arguments, DataValue[] SortKeys)>?[]? OrderedBuffers;
     }
 }
 
@@ -228,9 +307,15 @@ public sealed class GroupByOperator : IQueryOperator
 /// <param name="OutputName">The output column name (e.g. <c>COUNT(*)</c>, <c>SUM(price)</c>).</param>
 /// <param name="IsCountStar">Whether this is a <c>COUNT(*)</c> invocation with no arguments.</param>
 /// <param name="Distinct">Whether the aggregate uses <c>DISTINCT</c> to deduplicate values before accumulation.</param>
+/// <param name="OrderBy">
+/// Optional intra-aggregate ORDER BY items for functions like
+/// <c>STRING_AGG(expr, separator ORDER BY expr ASC)</c>. When non-null,
+/// accumulated rows are sorted before being fed to the accumulator.
+/// </param>
 public sealed record AggregateColumn(
     IAggregateFunction Function,
     IReadOnlyList<Expression> ArgumentExpressions,
     string OutputName,
     bool IsCountStar = false,
-    bool Distinct = false);
+    bool Distinct = false,
+    IReadOnlyList<OrderByItem>? OrderBy = null);
