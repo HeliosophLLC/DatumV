@@ -212,6 +212,9 @@ public static class CompletionContext
                 case SqlToken.Having:
                     return CompletionZoneKind.AfterHaving;
 
+                case SqlToken.Qualify:
+                    return CompletionZoneKind.AfterQualify;
+
                 case SqlToken.Order:
                     // "ORDER BY" — check for BY token following.
                     if (index + 1 < tokens.Count && tokens[index + 1].Kind == SqlToken.By)
@@ -328,6 +331,9 @@ public enum CompletionZoneKind
 
     /// <summary>After HAVING — offer columns, aggregate functions, operators.</summary>
     AfterHaving,
+
+    /// <summary>After QUALIFY — offer columns, window functions, aggregate functions, operators.</summary>
+    AfterQualify,
 
     /// <summary>After INTO — offer file path (no schema completions).</summary>
     AfterInto,

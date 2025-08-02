@@ -192,6 +192,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("RESPECT"), SqlToken.Respect, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("NULLS"), SqlToken.Nulls, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXISTS"), SqlToken.Exists, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("QUALIFY"), SqlToken.Qualify, requireDelimiters: true)
 
             // CTE keywords
             .Match(Span.EqualToIgnoreCase("WITH"), SqlToken.With, requireDelimiters: true)

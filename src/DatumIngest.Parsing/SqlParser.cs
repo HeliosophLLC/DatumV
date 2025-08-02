@@ -737,6 +737,14 @@ public static class SqlParser
         from condition in ExpressionParser
         select condition;
 
+    // ───────────────────── QUALIFY clause ─────────────────────
+
+    /// <summary>QUALIFY expression (post-window-function filter).</summary>
+    private static readonly TokenListParser<SqlToken, Expression> QualifyClauseParser =
+        from qualifyKw in Token.EqualTo(SqlToken.Qualify)
+        from condition in ExpressionParser
+        select condition;
+
     // ───────────────────── ORDER BY clause ─────────────────────
 
     /// <summary>A single ORDER BY item: expression [ASC|DESC].</summary>
@@ -845,6 +853,7 @@ public static class SqlParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
+        from qualifyClause in QualifyClauseParser.OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
         from orderByClause in OrderByClauseParser.OptionalOrDefault()
         from limitValue in LimitParser.OptionalOrDefault()
@@ -857,6 +866,7 @@ public static class SqlParser
             whereClause,
             groupByClause,
             havingClause,
+            qualifyClause,
             orderByClause,
             limitValue,
             offsetValue,
@@ -879,6 +889,7 @@ public static class SqlParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
+        from qualifyClause in QualifyClauseParser.OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
         select new SelectStatement(
             columns,
@@ -888,6 +899,7 @@ public static class SqlParser
             whereClause,
             groupByClause,
             havingClause,
+            qualifyClause,
             OrderBy: null,
             Limit: null,
             Offset: null,
@@ -997,6 +1009,7 @@ public static class SqlParser
         SqlToken.Where,
         SqlToken.Group,
         SqlToken.Having,
+        SqlToken.Qualify,
         SqlToken.Into,
         SqlToken.Order,
         SqlToken.Limit,
@@ -1224,6 +1237,26 @@ public static class SqlParser
             }
         }
 
+        // ── QUALIFY clause ──
+        Expression? qualifyClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Qualify)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, Expression> qualifyResult =
+                QualifyClauseParser.TryParse(remaining);
+
+            if (!qualifyResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid QUALIFY clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                qualifyClause = qualifyResult.Value;
+                position += CountConsumed(tokenArray, position, qualifyResult.Remainder);
+            }
+        }
+
         // ── INTO clause ──
         IntoClause? intoClause = null;
         if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Into)
@@ -1322,6 +1355,7 @@ public static class SqlParser
                 whereClause,
                 groupByClause,
                 havingClause,
+                qualifyClause,
                 orderByClause,
                 limitValue,
                 offsetValue,

@@ -80,6 +80,9 @@ public enum SqlToken
     /// <summary>The HAVING keyword (post-aggregation filter).</summary>
     Having,
 
+    /// <summary>The QUALIFY keyword (post-window-function filter).</summary>
+    Qualify,
+
     /// <summary>The ORDER keyword (ordering clause).</summary>
     Order,
 

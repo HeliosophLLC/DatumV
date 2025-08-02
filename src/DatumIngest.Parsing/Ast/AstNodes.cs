@@ -21,6 +21,7 @@ public sealed record SelectStatement(
     Expression? Where = null,
     GroupByClause? GroupBy = null,
     Expression? Having = null,
+    Expression? Qualify = null,
     OrderByClause? OrderBy = null,
     int? Limit = null,
     int? Offset = null,

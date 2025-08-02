@@ -74,6 +74,13 @@ public sealed class CompletionProvider
                 AddKeywords(items, ExpressionKeywords);
                 break;
 
+            case CompletionZoneKind.AfterQualify:
+                AddColumns(items, allTables: true);
+                AddAggregateFunctions(items);
+                AddWindowFunctions(items);
+                AddKeywords(items, ExpressionKeywords);
+                break;
+
             case CompletionZoneKind.InFunctionArguments:
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);

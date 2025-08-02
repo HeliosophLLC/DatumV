@@ -379,8 +379,14 @@ public sealed class QueryPlanner
 
         // 3d. Window functions — insert WindowOperator after GROUP BY
         // (which may reference aggregate output columns) but before projection.
+        // QUALIFY may also contain inline window function calls that must be
+        // lifted into the same WindowOperator.
         bool hasWindowFunctions = HasWindowFunction(projectionColumns, _functionRegistry);
-        if (hasWindowFunctions)
+        bool qualifyHasWindowFunctions = statement.Qualify is not null
+            && ExpressionContainsWindowFunction(statement.Qualify);
+        Expression? qualifyExpression = statement.Qualify;
+
+        if (hasWindowFunctions || qualifyHasWindowFunctions)
         {
             List<WindowColumn> windowColumns = new();
             List<SelectColumn> windowRewrittenColumns = new();
@@ -398,8 +404,25 @@ public sealed class QueryPlanner
                 windowRewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
             }
 
+            // Rewrite any inline window function calls inside the QUALIFY expression
+            // so they become column references to the same WindowOperator output.
+            if (qualifyHasWindowFunctions)
+            {
+                qualifyExpression = RewriteWindowExpression(
+                    qualifyExpression!, _functionRegistry, windowColumns);
+            }
+
             source = new WindowOperator(source, windowColumns);
             projectionColumns = windowRewrittenColumns;
+        }
+
+        // 3e. QUALIFY — post-window-function filter, analogous to HAVING for GROUP BY.
+        // QUALIFY runs before projection, so resolve any SELECT aliases
+        // (e.g. QUALIFY rn <= 2 where rn is an alias for a window function).
+        if (qualifyExpression is not null)
+        {
+            qualifyExpression = ResolveSelectAliases(qualifyExpression, projectionColumns);
+            source = new FilterOperator(source, qualifyExpression);
         }
 
         // 4. Apply SELECT projection.
@@ -570,6 +593,7 @@ public sealed class QueryPlanner
             rewrittenWhere,
             statement.GroupBy,
             rewrittenHaving,
+            statement.Qualify,
             statement.OrderBy,
             statement.Limit,
             statement.Offset,
@@ -642,6 +666,11 @@ public sealed class QueryPlanner
         }
 
         if (statement.Having is not null && ContainsSubquery(statement.Having))
+        {
+            return true;
+        }
+
+        if (statement.Qualify is not null && ContainsSubquery(statement.Qualify))
         {
             return true;
         }
@@ -1271,6 +1300,48 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Resolves column references in <paramref name="expression"/> that match
+    /// SELECT-list aliases by substituting them with the underlying (rewritten)
+    /// expression. This allows QUALIFY to reference aliases like <c>rn</c> even
+    /// though projection has not yet been applied at that pipeline stage.
+    /// </summary>
+    private static Expression ResolveSelectAliases(
+        Expression expression, IReadOnlyList<SelectColumn> projectionColumns)
+    {
+        if (expression is ColumnReference column && column.TableName is null)
+        {
+            foreach (SelectColumn selectColumn in projectionColumns)
+            {
+                if (selectColumn.Alias is not null &&
+                    string.Equals(selectColumn.Alias, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return selectColumn.Expression;
+                }
+            }
+        }
+
+        if (expression is BinaryExpression binary)
+        {
+            Expression left = ResolveSelectAliases(binary.Left, projectionColumns);
+            Expression right = ResolveSelectAliases(binary.Right, projectionColumns);
+            if (ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right))
+            {
+                return expression;
+            }
+
+            return new BinaryExpression(left, binary.Operator, right);
+        }
+
+        if (expression is UnaryExpression unary)
+        {
+            Expression operand = ResolveSelectAliases(unary.Operand, projectionColumns);
+            return ReferenceEquals(operand, unary.Operand) ? expression : new UnaryExpression(unary.Operator, operand);
+        }
+
+        return expression;
+    }
+
+    /// <summary>
     /// Rewrites an expression by replacing <see cref="WindowFunctionCallExpression"/>
     /// nodes with <see cref="ColumnReference"/> nodes that reference the output columns
     /// of the <see cref="WindowOperator"/>. Each unique window function call is added
@@ -1759,6 +1830,16 @@ public sealed class QueryPlanner
         {
             foreach ((string? tableName, string columnName) in
                 ColumnReferenceCollector.Collect(statement.Having))
+            {
+                references.Add((tableName, columnName));
+            }
+        }
+
+        // QUALIFY can reference source columns and window function output columns.
+        if (statement.Qualify is not null)
+        {
+            foreach ((string? tableName, string columnName) in
+                ColumnReferenceCollector.Collect(statement.Qualify))
             {
                 references.Add((tableName, columnName));
             }

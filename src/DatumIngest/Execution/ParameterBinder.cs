@@ -138,6 +138,7 @@ public static class ParameterBinder
         IReadOnlyList<SelectColumn> columns = BindSelectColumns(statement.Columns, parameters);
         Expression? where = statement.Where is not null ? BindExpression(statement.Where, parameters) : null;
         Expression? having = statement.Having is not null ? BindExpression(statement.Having, parameters) : null;
+        Expression? qualify = statement.Qualify is not null ? BindExpression(statement.Qualify, parameters) : null;
 
         IReadOnlyList<JoinClause>? joins = null;
         if (statement.Joins is not null)
@@ -193,6 +194,7 @@ public static class ParameterBinder
             where,
             groupBy,
             having,
+            qualify,
             orderBy,
             statement.Limit,
             statement.Offset);
@@ -378,6 +380,11 @@ public static class ParameterBinder
         if (statement.Having is not null)
         {
             CollectFromExpression(statement.Having, names);
+        }
+
+        if (statement.Qualify is not null)
+        {
+            CollectFromExpression(statement.Qualify, names);
         }
 
         if (statement.Joins is not null)

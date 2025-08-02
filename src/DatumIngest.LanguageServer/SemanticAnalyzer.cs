@@ -165,6 +165,11 @@ internal sealed class SemanticAnalyzer
         {
             AnalyzeExpression(statement.Having, aliasToTable, opaqueAliases, diagnostics);
         }
+
+        if (statement.Qualify is not null)
+        {
+            AnalyzeExpression(statement.Qualify, aliasToTable, opaqueAliases, diagnostics);
+        }
     }
 
     /// <summary>
