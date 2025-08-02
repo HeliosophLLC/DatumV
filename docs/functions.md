@@ -22,7 +22,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
-| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, PERCENTILE_CONT). |
+| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, CORR, COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG). |
 | **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, plus aggregates with OVER). |
 
 > **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
@@ -398,7 +398,7 @@ Window functions compute a value for each row based on a window of related rows 
 
 ### Aggregates as Window Functions
 
-All aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, VAR_SAMP, VAR_POP, STDDEV, STDDEV_SAMP, STDDEV_POP, MEDIAN, PERCENTILE_CONT) can also be used with an OVER clause to produce windowed results instead of grouped results:
+All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, VAR_SAMP, VAR_POP, STDDEV, STDDEV_SAMP, STDDEV_POP, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, APPROX_MEDIAN, APPROX_PERCENTILE) can also be used with an OVER clause to produce windowed results instead of grouped results. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP) and STRING_AGG are not supported as window functions.
 
 ```sql
 -- Running sum

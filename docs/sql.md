@@ -190,6 +190,44 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 
 The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
 
+### Statistical and Bivariate Aggregates
+
+```sql
+-- Standard deviation and variance per group
+SELECT category, STDDEV(price) AS price_stddev, VAR_POP(price) AS price_var
+FROM products
+GROUP BY category
+
+-- Median and percentiles
+SELECT department, MEDIAN(salary) AS median_sal,
+       PERCENTILE_CONT(salary, 0.9) AS p90_sal
+FROM employees
+GROUP BY department
+
+-- Correlation and covariance between two columns
+SELECT CORR(height, weight) AS r,
+       COVAR_SAMP(height, weight) AS cov
+FROM measurements
+
+-- Per-group correlation
+SELECT species, CORR(petal_length, sepal_length) AS r
+FROM iris
+GROUP BY species
+
+-- Most frequent value per group
+SELECT region, MODE(payment_method) AS most_common_payment FROM orders GROUP BY region
+
+-- Concatenate labels per group
+SELECT category, STRING_AGG(name, ', ' ORDER BY name ASC) AS items
+FROM products
+GROUP BY category
+
+-- Approximate percentile for large groups (O(1) memory)
+SELECT category, APPROX_PERCENTILE(score, 0.95) AS approx_p95
+FROM reviews
+GROUP BY category
+```
+
 ### HAVING
 
 Filter groups after aggregation. HAVING operates on aggregate results, while WHERE filters individual rows before grouping:
@@ -287,7 +325,7 @@ Value functions support two optional modifiers between the closing `)` and `OVER
 
 ### Aggregate Functions over Windows
 
-All aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates:
+All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP) and STRING_AGG are not supported as window functions.
 
 ```sql
 -- Running total
@@ -339,7 +377,7 @@ SUM(val) OVER (PARTITION BY group_col ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOU
 | `FIRST_VALUE(expr)` | `FIRST_VALUE(expr) [IGNORE NULLS] OVER (...)` | First value in the window frame. |
 | `LAST_VALUE(expr)` | `LAST_VALUE(expr) [IGNORE NULLS] OVER (...)` | Last value in the window frame. |
 | `NTH_VALUE(expr, n)` | `NTH_VALUE(expr, n) [FROM FIRST \| FROM LAST] [IGNORE NULLS] OVER (...)` | Nth value (1-based) in the window frame. |
-| `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` | `agg(...) OVER (...)` | Any aggregate function used with OVER becomes a window aggregate. |
+| `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, and variants | `agg(...) OVER (...)` | Any single-argument aggregate function used with OVER becomes a window aggregate. Includes VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, and APPROX_ variants. |
 
 ### Execution model
 
