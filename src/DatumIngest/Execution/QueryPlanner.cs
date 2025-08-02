@@ -349,8 +349,10 @@ public sealed class QueryPlanner
 
         // 3c. GROUP BY / aggregation.
         bool hasGroupBy = statement.GroupBy is not null;
-        bool hasAggregates = HasAggregateFunction(statement.Columns, _functionRegistry);
+        bool hasAggregates = HasAggregateFunction(statement.Columns, _functionRegistry)
+            || HasLetAggregateFunction(statement.LetBindings, _functionRegistry);
         IReadOnlyList<SelectColumn> projectionColumns = statement.Columns;
+        IReadOnlyList<LetBinding>? letBindings = statement.LetBindings;
 
         if (hasGroupBy || hasAggregates)
         {
@@ -373,6 +375,19 @@ public sealed class QueryPlanner
                 rewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
             }
 
+            // Rewrite aggregate expressions inside LET bindings.
+            if (letBindings is not null)
+            {
+                List<LetBinding> rewrittenLetBindings = new(letBindings.Count);
+                foreach (LetBinding binding in letBindings)
+                {
+                    Expression rewritten = RewriteAggregateExpression(
+                        binding.Expression, _functionRegistry, aggregateColumns);
+                    rewrittenLetBindings.Add(binding with { Expression = rewritten });
+                }
+                letBindings = rewrittenLetBindings;
+            }
+
             source = new GroupByOperator(source, groupByExpressions, aggregateColumns);
 
             // Apply HAVING as a filter on the grouped output.
@@ -390,7 +405,8 @@ public sealed class QueryPlanner
         // (which may reference aggregate output columns) but before projection.
         // QUALIFY may also contain inline window function calls that must be
         // lifted into the same WindowOperator.
-        bool hasWindowFunctions = HasWindowFunction(projectionColumns, _functionRegistry);
+        bool hasWindowFunctions = HasWindowFunction(projectionColumns, _functionRegistry)
+            || HasLetWindowFunction(letBindings);
         bool qualifyHasWindowFunctions = statement.Qualify is not null
             && ExpressionContainsWindowFunction(statement.Qualify);
         Expression? qualifyExpression = statement.Qualify;
@@ -413,6 +429,19 @@ public sealed class QueryPlanner
                 windowRewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
             }
 
+            // Rewrite window function calls inside LET binding expressions.
+            if (letBindings is not null)
+            {
+                List<LetBinding> windowRewrittenLetBindings = new(letBindings.Count);
+                foreach (LetBinding binding in letBindings)
+                {
+                    Expression rewritten = RewriteWindowExpression(
+                        binding.Expression, _functionRegistry, windowColumns);
+                    windowRewrittenLetBindings.Add(binding with { Expression = rewritten });
+                }
+                letBindings = windowRewrittenLetBindings;
+            }
+
             // Rewrite any inline window function calls inside the QUALIFY expression
             // so they become column references to the same WindowOperator output.
             if (qualifyHasWindowFunctions)
@@ -427,18 +456,21 @@ public sealed class QueryPlanner
 
         // 3e. QUALIFY — post-window-function filter, analogous to HAVING for GROUP BY.
         // QUALIFY runs before projection, so resolve any SELECT aliases
-        // (e.g. QUALIFY rn <= 2 where rn is an alias for a window function).
+        // and LET binding names (e.g. QUALIFY rn <= 2 where rn is a window alias).
         if (qualifyExpression is not null)
         {
             qualifyExpression = ResolveSelectAliases(qualifyExpression, projectionColumns);
+            qualifyExpression = ResolveLetBindingReferences(qualifyExpression, letBindings);
             source = new FilterOperator(source, qualifyExpression);
         }
 
-        // 4. Apply SELECT projection.
-        bool hasStarOnly = projectionColumns.Count == 1 && projectionColumns[0] is SelectAllColumns;
+        // 4. Apply SELECT projection (with LET bindings for memoized evaluation).
+        bool hasStarOnly = projectionColumns.Count == 1
+            && projectionColumns[0] is SelectAllColumns
+            && letBindings is null;
         if (!hasStarOnly)
         {
-            source = new ProjectOperator(source, projectionColumns);
+            source = new ProjectOperator(source, projectionColumns, letBindings);
         }
 
         // 5. Apply DISTINCT — streaming deduplication on projected output.
@@ -919,6 +951,19 @@ public sealed class QueryPlanner
             }
         }
 
+        // LET binding expressions.
+        if (statement.LetBindings is not null)
+        {
+            foreach (LetBinding binding in statement.LetBindings)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(binding.Expression))
+                {
+                    references.Add((tableName, columnName));
+                }
+            }
+        }
+
         // WHERE predicate.
         if (statement.Where is not null)
         {
@@ -1348,6 +1393,97 @@ public sealed class QueryPlanner
         }
 
         return expression;
+    }
+
+    /// <summary>
+    /// Resolves column references in <paramref name="expression"/> that match
+    /// LET binding names by substituting them with the binding's expression.
+    /// This allows QUALIFY to reference LET-bound names as expression substitution
+    /// (not memoized, since QUALIFY runs before projection).
+    /// </summary>
+    private static Expression ResolveLetBindingReferences(
+        Expression expression, IReadOnlyList<LetBinding>? letBindings)
+    {
+        if (letBindings is null || letBindings.Count == 0)
+        {
+            return expression;
+        }
+
+        if (expression is ColumnReference column && column.TableName is null)
+        {
+            foreach (LetBinding binding in letBindings)
+            {
+                if (string.Equals(binding.Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return binding.Expression;
+                }
+            }
+        }
+
+        if (expression is BinaryExpression binary)
+        {
+            Expression left = ResolveLetBindingReferences(binary.Left, letBindings);
+            Expression right = ResolveLetBindingReferences(binary.Right, letBindings);
+            if (ReferenceEquals(left, binary.Left) && ReferenceEquals(right, binary.Right))
+            {
+                return expression;
+            }
+
+            return new BinaryExpression(left, binary.Operator, right);
+        }
+
+        if (expression is UnaryExpression unary)
+        {
+            Expression operand = ResolveLetBindingReferences(unary.Operand, letBindings);
+            return ReferenceEquals(operand, unary.Operand) ? expression : new UnaryExpression(unary.Operator, operand);
+        }
+
+        return expression;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> if any LET binding expression contains an
+    /// aggregate function call, requiring the GROUP BY rewriting path.
+    /// </summary>
+    private static bool HasLetAggregateFunction(
+        IReadOnlyList<LetBinding>? letBindings, FunctionRegistry functionRegistry)
+    {
+        if (letBindings is null)
+        {
+            return false;
+        }
+
+        foreach (LetBinding binding in letBindings)
+        {
+            if (ExpressionContainsAggregate(binding.Expression, functionRegistry))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> if any LET binding expression contains a
+    /// window function call, requiring the window function rewriting path.
+    /// </summary>
+    private static bool HasLetWindowFunction(IReadOnlyList<LetBinding>? letBindings)
+    {
+        if (letBindings is null)
+        {
+            return false;
+        }
+
+        foreach (LetBinding binding in letBindings)
+        {
+            if (ExpressionContainsWindowFunction(binding.Expression))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

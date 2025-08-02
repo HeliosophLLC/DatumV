@@ -26,7 +26,23 @@ public sealed record SelectStatement(
     int? Limit = null,
     int? Offset = null,
     bool Distinct = false,
-    IReadOnlyList<CommonTableExpression>? CommonTableExpressions = null);
+    IReadOnlyList<CommonTableExpression>? CommonTableExpressions = null,
+    IReadOnlyList<LetBinding>? LetBindings = null);
+
+/// <summary>
+/// A named, memoized intermediate expression declared via <c>LET</c> in the SELECT list.
+/// Evaluated once per row and cached for all references. Not included in the output
+/// unless <see cref="OutputAlias"/> is non-null (set via <c>AS alias</c>).
+/// </summary>
+/// <param name="Name">The binding name used to reference this expression in subsequent LET bindings and SELECT columns.</param>
+/// <param name="Expression">The expression to evaluate and cache once per row.</param>
+/// <param name="OutputAlias">When non-null, the binding value is emitted as an output column with this name.</param>
+/// <param name="Span">Source location of the binding name for diagnostic reporting.</param>
+public sealed record LetBinding(
+    string Name,
+    Expression Expression,
+    string? OutputAlias = null,
+    SourceSpan? Span = null);
 
 /// <summary>
 /// A single Common Table Expression (CTE) definition within a WITH clause.

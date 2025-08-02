@@ -231,7 +231,8 @@ public sealed class HoverProvider
             SqlToken.Unbounded => "**UNBOUNDED** \u2014 Indicates the frame extends to the beginning (PRECEDING) or end (FOLLOWING) of the partition.",
             SqlToken.Preceding => "**PRECEDING** \u2014 Indicates rows before the current row in a window frame.",
             SqlToken.Following => "**FOLLOWING** \u2014 Indicates rows after the current row in a window frame.",
-            SqlToken.Current => "**CURRENT** \u2014 Used with ROW to indicate the current row in a window frame: `CURRENT ROW`.",            _ => null,
+            SqlToken.Current => "**CURRENT** \u2014 Used with ROW to indicate the current row in a window frame: `CURRENT ROW`.",
+            SqlToken.Let => "**LET** \u2014 Declares a named, memoized intermediate expression in SELECT. Evaluated once per row. Not included in output unless aliased with AS. Syntax: `LET name = expression [AS alias]`.",            _ => null,
         };
     }
 

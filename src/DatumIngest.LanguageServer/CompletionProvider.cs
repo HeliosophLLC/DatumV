@@ -41,7 +41,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, ["FROM", "AS", "CAST", "CASE"]);
+                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET"]);
                 break;
 
             case CompletionZoneKind.AfterFrom:

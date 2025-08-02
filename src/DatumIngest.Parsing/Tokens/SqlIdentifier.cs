@@ -16,7 +16,7 @@ public static partial class SqlIdentifier
         "SELECT", "INTO", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "OUTER",
         "CROSS", "INNER", "ON", "WHERE", "AND", "OR", "NOT", "IN", "BETWEEN",
         "LIKE", "IS", "NULL", "AS", "SHARD", "ORDER", "BY", "ASC", "DESC",
-        "LIMIT", "OFFSET", "CAST", "TRUE", "FALSE",
+        "LIMIT", "OFFSET", "CAST", "TRUE", "FALSE", "LET",
         "CASE", "WHEN", "THEN", "ELSE", "END",
         "OVER", "PARTITION", "ROWS", "UNBOUNDED",
         "PRECEDING", "FOLLOWING", "CURRENT"

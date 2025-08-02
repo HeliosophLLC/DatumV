@@ -609,6 +609,29 @@ public static class SqlParser
             .Or(StarColumn.Try())
             .Or(ExpressionColumn);
 
+    /// <summary>A single LET binding: <c>LET name = expression [AS alias]</c>.</summary>
+    private static readonly TokenListParser<SqlToken, LetBinding> LetBindingParser =
+        from letKw in Token.EqualTo(SqlToken.Let)
+        from name in Token.EqualTo(SqlToken.Identifier)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from expression in ExpressionParser
+        from outputAlias in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from alias in Token.EqualTo(SqlToken.Identifier)
+            select GetTokenText(alias)
+        ).OptionalOrDefault()
+        select new LetBinding(GetTokenText(name), expression, outputAlias, ToSpan(name));
+
+    /// <summary>
+    /// Zero or more comma-separated LET bindings at the start of a SELECT list.
+    /// Each binding is followed by a comma that separates it from the next
+    /// binding or the first output column.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, LetBinding[]> LetBindingsParser =
+        (from binding in LetBindingParser
+         from comma in Token.EqualTo(SqlToken.Comma)
+         select binding).Many();
+
     /// <summary>Comma-delimited list of SELECT columns (at least one required).</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn[]> ColumnList =
         from first in ColumnItem
@@ -883,6 +906,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, SelectStatement> SelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
+        from letBindings in LetBindingsParser
         from columns in ColumnList
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
@@ -906,7 +930,8 @@ public static class SqlParser
             orderByClause,
             limitValue,
             offsetValue,
-            Distinct: distinct.HasValue);
+            Distinct: distinct.HasValue,
+            LetBindings: letBindings.Length > 0 ? letBindings : null);
 
     /// <summary>
     /// Bare SELECT parser: same as <see cref="SelectStatementParser"/> but stops
@@ -919,6 +944,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, SelectStatement> BareSelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
+        from letBindings in LetBindingsParser
         from columns in ColumnList
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
@@ -939,7 +965,8 @@ public static class SqlParser
             OrderBy: null,
             Limit: null,
             Offset: null,
-            Distinct: distinct.HasValue);
+            Distinct: distinct.HasValue,
+            LetBindings: letBindings.Length > 0 ? letBindings : null);
 
     /// <summary>
     /// Top-level statement parser: optional WITH clause followed by SELECT.

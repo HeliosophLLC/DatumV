@@ -13,6 +13,7 @@ public sealed class ProjectOperator : IQueryOperator
 {
     private readonly IQueryOperator _source;
     private readonly IReadOnlyList<SelectColumn> _columns;
+    private readonly IReadOnlyList<LetBinding>? _letBindings;
     private readonly Schema? _sourceSchema;
 
     /// <summary>
@@ -20,14 +21,17 @@ public sealed class ProjectOperator : IQueryOperator
     /// </summary>
     /// <param name="source">The child operator producing rows.</param>
     /// <param name="columns">The SELECT columns to project.</param>
+    /// <param name="letBindings">Optional LET bindings to evaluate before projection.</param>
     /// <param name="sourceSchema">Optional source schema for star expansion.</param>
     public ProjectOperator(
         IQueryOperator source,
         IReadOnlyList<SelectColumn> columns,
+        IReadOnlyList<LetBinding>? letBindings = null,
         Schema? sourceSchema = null)
     {
         _source = source;
         _columns = columns;
+        _letBindings = letBindings;
         _sourceSchema = sourceSchema;
     }
 
@@ -37,6 +41,9 @@ public sealed class ProjectOperator : IQueryOperator
     /// <summary>The projected SELECT columns.</summary>
     public IReadOnlyList<SelectColumn> Columns => _columns;
 
+    /// <summary>The LET bindings evaluated before projection, or null if none.</summary>
+    public IReadOnlyList<LetBinding>? LetBindings => _letBindings;
+
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
@@ -45,7 +52,7 @@ public sealed class ProjectOperator : IQueryOperator
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            schema ??= ProjectionSchema.Build(_columns, row);
+            schema ??= ProjectionSchema.Build(_columns, _letBindings, row);
             yield return schema.Project(row, evaluator);
         }
     }
@@ -54,7 +61,10 @@ public sealed class ProjectOperator : IQueryOperator
     /// Pre-computed projection layout built once from the first source row.
     /// Holds the shared output column names, name-index dictionary, and a plan
     /// describing how to populate each output slot (copy from source ordinal or
-    /// evaluate an expression). Subsequent rows allocate only a <see cref="DataValue"/> array.
+    /// evaluate an expression). When LET bindings are present, the schema also
+    /// holds an augmented column layout that includes source columns and LET
+    /// binding names, enabling memoized evaluation of LET expressions before
+    /// projection. Subsequent rows allocate only a <see cref="DataValue"/> array.
     /// </summary>
     private sealed class ProjectionSchema
     {
@@ -62,28 +72,89 @@ public sealed class ProjectOperator : IQueryOperator
         private readonly Dictionary<string, int> _nameIndex;
         private readonly ProjectionSlot[] _slots;
 
+        // LET binding support: augmented row layout for memoized evaluation.
+        private readonly string[]? _augmentedNames;
+        private readonly Dictionary<string, int>? _augmentedNameIndex;
+        private readonly Expression[]? _letExpressions;
+        private readonly int _sourceFieldCount;
+
         private ProjectionSchema(
             string[] names,
             Dictionary<string, int> nameIndex,
-            ProjectionSlot[] slots)
+            ProjectionSlot[] slots,
+            string[]? augmentedNames = null,
+            Dictionary<string, int>? augmentedNameIndex = null,
+            Expression[]? letExpressions = null,
+            int sourceFieldCount = 0)
         {
             _names = names;
             _nameIndex = nameIndex;
             _slots = slots;
+            _augmentedNames = augmentedNames;
+            _augmentedNameIndex = augmentedNameIndex;
+            _letExpressions = letExpressions;
+            _sourceFieldCount = sourceFieldCount;
         }
 
         /// <summary>
-        /// Builds the projection schema from the column list and the first source row.
-        /// Star and table-star columns are expanded using the source row's schema;
-        /// named expressions record their expression for per-row evaluation.
+        /// Builds the projection schema from the column list, optional LET bindings,
+        /// and the first source row. Star and table-star columns are expanded using
+        /// the source row's schema; named expressions record their expression for
+        /// per-row evaluation. LET bindings produce an augmented row layout so their
+        /// values are memoized and accessible by name during projection.
         /// </summary>
         internal static ProjectionSchema Build(
-            IReadOnlyList<SelectColumn> columns, Row firstRow)
+            IReadOnlyList<SelectColumn> columns,
+            IReadOnlyList<LetBinding>? letBindings,
+            Row firstRow)
         {
+            int letCount = letBindings?.Count ?? 0;
+
+            // Build augmented row layout when LET bindings are present.
+            string[]? augmentedNames = null;
+            Dictionary<string, int>? augmentedNameIndex = null;
+            Expression[]? letExpressions = null;
+
+            if (letCount > 0)
+            {
+                augmentedNames = new string[firstRow.FieldCount + letCount];
+                for (int index = 0; index < firstRow.FieldCount; index++)
+                {
+                    augmentedNames[index] = firstRow.ColumnNames[index];
+                }
+
+                letExpressions = new Expression[letCount];
+                for (int index = 0; index < letCount; index++)
+                {
+                    augmentedNames[firstRow.FieldCount + index] = letBindings![index].Name;
+                    letExpressions[index] = letBindings[index].Expression;
+                }
+
+                augmentedNameIndex =
+                    new Dictionary<string, int>(augmentedNames.Length, StringComparer.OrdinalIgnoreCase);
+                for (int index = 0; index < augmentedNames.Length; index++)
+                {
+                    augmentedNameIndex[augmentedNames[index]] = index;
+                }
+            }
+
+            // Build output column layout.
             List<string> names = new();
             HashSet<int> aliasedPositions = new();
             List<ProjectionSlot> slots = new();
 
+            // Aliased LET bindings appear at the beginning of the output.
+            for (int index = 0; index < letCount; index++)
+            {
+                if (letBindings![index].OutputAlias is not null)
+                {
+                    names.Add(letBindings[index].OutputAlias!);
+                    aliasedPositions.Add(names.Count - 1);
+                    slots.Add(ProjectionSlot.CopyOrdinal(firstRow.FieldCount + index));
+                }
+            }
+
+            // Regular output columns.
             foreach (SelectColumn column in columns)
             {
                 switch (column)
@@ -133,15 +204,24 @@ public sealed class ProjectOperator : IQueryOperator
                 nameIndex[nameArray[index]] = index;
             }
 
-            return new ProjectionSchema(nameArray, nameIndex, slots.ToArray());
+            return new ProjectionSchema(
+                nameArray, nameIndex, slots.ToArray(),
+                augmentedNames, augmentedNameIndex, letExpressions, firstRow.FieldCount);
         }
 
         /// <summary>
-        /// Projects a source row using the pre-computed schema. Only a
-        /// <see cref="DataValue"/> array is allocated per call.
+        /// Projects a source row using the pre-computed schema. When LET bindings
+        /// are present, builds an augmented row with memoized LET values before
+        /// evaluating projection expressions. Only a <see cref="DataValue"/> array
+        /// is allocated per call (plus one augmented array when LET bindings exist).
         /// </summary>
         internal Row Project(Row sourceRow, ExpressionEvaluator evaluator)
         {
+            if (_letExpressions is not null && _letExpressions.Length > 0)
+            {
+                return ProjectWithLetBindings(sourceRow, evaluator);
+            }
+
             DataValue[] values = new DataValue[_slots.Length];
 
             for (int index = 0; index < _slots.Length; index++)
@@ -150,6 +230,47 @@ public sealed class ProjectOperator : IQueryOperator
                 values[index] = slot.SourceOrdinal >= 0
                     ? sourceRow[slot.SourceOrdinal]
                     : evaluator.Evaluate(slot.Expression!, sourceRow);
+            }
+
+            return new Row(_names, values, _nameIndex);
+        }
+
+        /// <summary>
+        /// Projects a source row with LET bindings. Builds a temporary augmented
+        /// row containing source columns plus LET binding values, evaluates each
+        /// LET expression sequentially (so later bindings can reference earlier
+        /// ones), then evaluates projection expressions against the augmented row.
+        /// </summary>
+        private Row ProjectWithLetBindings(Row sourceRow, ExpressionEvaluator evaluator)
+        {
+            // Build augmented values: source columns + LET binding slots.
+            DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
+            for (int index = 0; index < _sourceFieldCount; index++)
+            {
+                augmentedValues[index] = sourceRow[index];
+            }
+
+            // The Row constructor stores the array by reference, so mutations
+            // to augmentedValues are visible through the Row's indexers.
+            Row augmentedRow = new(_augmentedNames!, augmentedValues, _augmentedNameIndex!);
+
+            // Evaluate each LET binding sequentially. Each binding's result
+            // is written into the augmented array before the next binding
+            // is evaluated, enabling left-to-right chaining.
+            for (int index = 0; index < _letExpressions.Length; index++)
+            {
+                augmentedValues[_sourceFieldCount + index] =
+                    evaluator.Evaluate(_letExpressions[index], augmentedRow);
+            }
+
+            // Evaluate output slots against the augmented row.
+            DataValue[] values = new DataValue[_slots.Length];
+            for (int index = 0; index < _slots.Length; index++)
+            {
+                ProjectionSlot slot = _slots[index];
+                values[index] = slot.SourceOrdinal >= 0
+                    ? augmentedRow[slot.SourceOrdinal]
+                    : evaluator.Evaluate(slot.Expression!, augmentedRow);
             }
 
             return new Row(_names, values, _nameIndex);

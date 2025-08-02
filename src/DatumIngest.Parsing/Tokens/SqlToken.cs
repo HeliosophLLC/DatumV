@@ -200,6 +200,9 @@ public enum SqlToken
     /// <summary>The EXCEPT keyword (set operation).</summary>
     Except,
 
+    /// <summary>The LET keyword (named memoized binding in SELECT).</summary>
+    Let,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>

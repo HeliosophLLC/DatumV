@@ -208,6 +208,9 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("EXCEPT"), SqlToken.Except, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ALL"), SqlToken.All, requireDelimiters: true)
 
+            // LET binding keyword
+            .Match(Span.EqualToIgnoreCase("LET"), SqlToken.Let, requireDelimiters: true)
+
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)
