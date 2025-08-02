@@ -22,6 +22,8 @@ public sealed record SelectStatement(
     GroupByClause? GroupBy = null,
     Expression? Having = null,
     Expression? Qualify = null,
+    PivotClause? Pivot = null,
+    UnpivotClause? Unpivot = null,
     OrderByClause? OrderBy = null,
     int? Limit = null,
     int? Offset = null,
@@ -206,6 +208,44 @@ public enum ShardMode
 /// The GROUP BY clause with one or more grouping expressions.
 /// </summary>
 public sealed record GroupByClause(IReadOnlyList<Expression> Expressions);
+
+/// <summary>
+/// The PIVOT clause that rotates distinct values of a column into output columns,
+/// aggregating values for each cell. Grouping keys are inferred implicitly by the
+/// query planner: all source columns not mentioned as the pivot column or as aggregate
+/// arguments become grouping dimensions.
+/// </summary>
+/// <param name="Aggregates">One or more aggregate function calls (e.g. SUM(amount), COUNT(*)).</param>
+/// <param name="PivotColumn">The column whose distinct values become output column names.</param>
+/// <param name="ValueList">
+/// Explicit list of pivot values for deterministic output schema, or <see langword="null"/>
+/// for auto-discovery mode (distinct values determined at runtime, capped at 1000 by default).
+/// </param>
+/// <param name="Alias">Optional alias for the pivoted result.</param>
+public sealed record PivotClause(
+    IReadOnlyList<FunctionCallExpression> Aggregates,
+    ColumnReference PivotColumn,
+    IReadOnlyList<Expression>? ValueList = null,
+    string? Alias = null);
+
+/// <summary>
+/// The UNPIVOT clause that rotates columns into rows, producing a name–value pair
+/// for each source column per input row.
+/// </summary>
+/// <param name="ValueColumnName">The name of the output column that receives the unpivoted values.</param>
+/// <param name="NameColumnName">The name of the output column that receives the source column names.</param>
+/// <param name="SourceColumns">The columns to unpivot (listed in the IN clause).</param>
+/// <param name="IncludeNulls">
+/// When <see langword="true"/>, null values are included in the output.
+/// Defaults to <see langword="false"/> (SQL standard: nulls are excluded).
+/// </param>
+/// <param name="Alias">Optional alias for the unpivoted result.</param>
+public sealed record UnpivotClause(
+    string ValueColumnName,
+    string NameColumnName,
+    IReadOnlyList<ColumnReference> SourceColumns,
+    bool IncludeNulls = false,
+    string? Alias = null);
 
 /// <summary>
 /// The ORDER BY clause with one or more sort items.

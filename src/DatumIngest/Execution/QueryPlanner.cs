@@ -464,7 +464,86 @@ public sealed class QueryPlanner
             source = new FilterOperator(source, qualifyExpression);
         }
 
+        // 3f. PIVOT — reshape wide data by rotating a column's distinct values into columns.
+        // PIVOT replaces the SELECT projection entirely; the projectionColumns are discarded.
+        if (statement.Pivot is not null)
+        {
+            PivotClause pivot = statement.Pivot;
+
+            if (pivot.Aggregates.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "PIVOT requires at least one aggregate function.");
+            }
+
+            // Resolve aggregate functions from the registry.
+            List<AggregateColumn> pivotAggregates = new(pivot.Aggregates.Count);
+
+            foreach (FunctionCallExpression aggregateCall in pivot.Aggregates)
+            {
+                IAggregateFunction? function =
+                    _functionRegistry.TryGetAggregate(aggregateCall.FunctionName)
+                    ?? throw new InvalidOperationException(
+                        $"PIVOT aggregate '{aggregateCall.FunctionName}' is not a known aggregate function.");
+
+                bool isCountStar = IsCountStarCall(aggregateCall);
+                IReadOnlyList<Expression> arguments = isCountStar
+                    ? Array.Empty<Expression>()
+                    : aggregateCall.Arguments;
+
+                pivotAggregates.Add(new AggregateColumn(
+                    function, arguments, QueryExplainer.FormatExpression(aggregateCall), isCountStar));
+            }
+
+            // Pre-evaluate the explicit value list (literals only) into DataValues at plan time.
+            IReadOnlyList<DataValue>? explicitValues = null;
+
+            if (pivot.ValueList is not null)
+            {
+                DataValue[] values = new DataValue[pivot.ValueList.Count];
+
+                for (int valueIndex = 0; valueIndex < pivot.ValueList.Count; valueIndex++)
+                {
+                    values[valueIndex] = EvaluateLiteralForPivot(pivot.ValueList[valueIndex]);
+                }
+
+                explicitValues = values;
+            }
+
+            source = new PivotOperator(source, pivotAggregates, pivot.PivotColumn, explicitValues);
+
+            // Skip the regular SELECT projection — PIVOT defines the output schema.
+            goto afterProjection;
+        }
+
+        // 3g. UNPIVOT — reshape wide rows into narrow rows by rotating columns into (name, value) pairs.
+        // UNPIVOT also replaces the SELECT projection entirely.
+        if (statement.Unpivot is not null)
+        {
+            UnpivotClause unpivot = statement.Unpivot;
+
+            if (unpivot.SourceColumns.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "UNPIVOT requires at least one source column in the IN (...) list.");
+            }
+
+            string[] sourceColumnNames = new string[unpivot.SourceColumns.Count];
+
+            for (int colIndex = 0; colIndex < unpivot.SourceColumns.Count; colIndex++)
+            {
+                sourceColumnNames[colIndex] = unpivot.SourceColumns[colIndex].ColumnName;
+            }
+
+            source = new UnpivotOperator(
+                source, unpivot.ValueColumnName, unpivot.NameColumnName, sourceColumnNames, unpivot.IncludeNulls);
+
+            // Skip the regular SELECT projection — UNPIVOT defines the output schema.
+            goto afterProjection;
+        }
+
         // 4. Apply SELECT projection (with LET bindings for memoized evaluation).
+        {
         bool hasStarOnly = projectionColumns.Count == 1
             && projectionColumns[0] is SelectAllColumns
             && letBindings is null;
@@ -472,6 +551,9 @@ public sealed class QueryPlanner
         {
             source = new ProjectOperator(source, projectionColumns, letBindings);
         }
+        }
+
+        afterProjection:
 
         // 5. Apply DISTINCT — streaming deduplication on projected output.
         if (statement.Distinct)
@@ -635,6 +717,8 @@ public sealed class QueryPlanner
             statement.GroupBy,
             rewrittenHaving,
             statement.Qualify,
+            statement.Pivot,
+            statement.Unpivot,
             statement.OrderBy,
             statement.Limit,
             statement.Offset,
@@ -1639,6 +1723,40 @@ public sealed class QueryPlanner
             && function.Arguments[0] is LiteralExpression literal
             && literal.Value is string value
             && value == "*";
+    }
+
+    /// <summary>
+    /// Evaluates a PIVOT <c>IN</c>-list expression to a <see cref="DataValue"/> at plan time.
+    /// Only literal expressions are supported; non-literal expressions cause
+    /// <see cref="InvalidOperationException"/> because the value list must be a closed
+    /// set of constants known before execution begins.
+    /// </summary>
+    private static DataValue EvaluateLiteralForPivot(Expression expression)
+    {
+        if (expression is not LiteralExpression literal)
+        {
+            throw new InvalidOperationException(
+                "PIVOT IN (…) values must be literal constants (strings or numbers). " +
+                $"Expression '{QueryExplainer.FormatExpression(expression)}' is not a literal.");
+        }
+
+        if (literal.Value is null)
+        {
+            return DataValue.Null(DataKind.Scalar);
+        }
+
+        return literal.Value switch
+        {
+            DataValue dataValue => dataValue,
+            int intValue => DataValue.FromScalar(intValue),
+            long longValue => DataValue.FromScalar(longValue),
+            float floatValue => DataValue.FromScalar(floatValue),
+            double doubleValue => DataValue.FromScalar((float)doubleValue),
+            string stringValue => DataValue.FromString(stringValue),
+            bool boolValue => DataValue.FromBoolean(boolValue),
+            _ => throw new InvalidOperationException(
+                $"Unsupported PIVOT value literal type: {literal.Value.GetType().Name}."),
+        };
     }
 
     private IQueryOperator PlanSource(

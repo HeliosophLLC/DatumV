@@ -170,6 +170,24 @@ internal sealed class SemanticAnalyzer
         {
             AnalyzeExpression(statement.Qualify, aliasToTable, opaqueAliases, diagnostics);
         }
+
+        if (statement.Pivot is not null)
+        {
+            foreach (FunctionCallExpression aggregate in statement.Pivot.Aggregates)
+            {
+                AnalyzeExpression(aggregate, aliasToTable, opaqueAliases, diagnostics);
+            }
+
+            AnalyzeExpression(statement.Pivot.PivotColumn, aliasToTable, opaqueAliases, diagnostics);
+        }
+
+        if (statement.Unpivot is not null)
+        {
+            foreach (ColumnReference sourceColumn in statement.Unpivot.SourceColumns)
+            {
+                AnalyzeExpression(sourceColumn, aliasToTable, opaqueAliases, diagnostics);
+            }
+        }
     }
 
     /// <summary>

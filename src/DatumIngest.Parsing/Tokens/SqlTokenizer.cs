@@ -211,6 +211,12 @@ public static class SqlTokenizer
             // LET binding keyword
             .Match(Span.EqualToIgnoreCase("LET"), SqlToken.Let, requireDelimiters: true)
 
+            // PIVOT / UNPIVOT keywords
+            .Match(Span.EqualToIgnoreCase("PIVOT"), SqlToken.Pivot, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("UNPIVOT"), SqlToken.Unpivot, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("FOR"), SqlToken.For, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("INCLUDE"), SqlToken.Include, requireDelimiters: true)
+
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)

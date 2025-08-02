@@ -263,6 +263,7 @@ Available benchmark suites:
 | `ParsingBenchmarks` | SQL tokenization and parsing at various complexity levels |
 | `ProviderBenchmarks` | Read throughput for CSV and JSON at 1K and 10K rows |
 | `ExecutionBenchmarks` | Full query execution: scan, filter, project, join, order+limit, subqueries, DISTINCT, set operations |
+| `PivotBenchmarks` | PIVOT and UNPIVOT reshaping at 5K and 20K rows, explicit vs auto-discover, multiple aggregates |
 | `StatisticsBenchmarks` | Statistics collection overhead and merge performance |
 | `OutputBenchmarks` | CSV write throughput, with and without sharding |
 
@@ -274,7 +275,7 @@ dotnet run -c Release --project benchmarks/DatumIngest.Benchmarks -- --filter "*
 
 ### Results
 
-**TL;DR** — Parse a query in **42 μs**, read 10K CSV rows in **7 ms**, execute a full scan in **7 ms**, JOIN 10K × 1K rows in **9 ms**, SELECT DISTINCT (low cardinality) in **6 ms**, SELECT DISTINCT (high cardinality) in **17 ms**, COUNT(DISTINCT) per group in **9 ms**, IN subquery in **8 ms**, EXISTS semi-join in **8 ms**, NOT EXISTS in **10 ms**, CTE inlined in **9 ms**, CTE materialized multi-ref in **7 ms**, recursive CTE 1K iterations in **2 ms**, UNION ALL (10K + 10K) in **16 ms**, UNION DISTINCT (10K + 10K) in **42 ms**, INTERSECT in **12 ms**, EXCEPT in **24 ms**, collect all statistics in **53 ms**, and write 10K rows to CSV in **9 ms**. Memory stays under **10 MB** for a 10K-row single-table pipeline.
+**TL;DR** — Parse a query in **42 μs**, read 10K CSV rows in **7 ms**, execute a full scan in **7 ms**, JOIN 10K × 1K rows in **9 ms**, SELECT DISTINCT (low cardinality) in **6 ms**, SELECT DISTINCT (high cardinality) in **17 ms**, COUNT(DISTINCT) per group in **9 ms**, IN subquery in **8 ms**, EXISTS semi-join in **8 ms**, NOT EXISTS in **10 ms**, CTE inlined in **9 ms**, CTE materialized multi-ref in **7 ms**, recursive CTE 1K iterations in **2 ms**, UNION ALL (10K + 10K) in **16 ms**, UNION DISTINCT (10K + 10K) in **42 ms**, INTERSECT in **12 ms**, EXCEPT in **24 ms**, PIVOT 5K rows in **10 ms** (explicit) / **11 ms** (auto-discover), UNPIVOT 1250 wide rows in **2 ms**, collect all statistics in **53 ms**, and write 10K rows to CSV in **9 ms**. Memory stays under **10 MB** for a 10K-row single-table pipeline.
 
 > BenchmarkDotNet v0.14.0, Windows 11 (10.0.26200.8039)
 > Intel Core i9-10900X CPU 3.70GHz, 1 CPU, 20 logical and 10 physical cores
@@ -352,6 +353,21 @@ SELECT DISTINCT uses a streaming hash-dedup operator backed by `HashSet<Composit
 CTEs execute with minimal overhead relative to equivalent inline queries. A single-reference CTE (~9 ms, 8.92 MB) performs on par with a filtered scan, since the planner inlines it directly into the query plan. Multi-reference CTEs (~7 ms, 7.19 MB) benefit from materialization — the CTE result is computed once and served from an in-memory cache on subsequent reads, avoiding redundant scans. Chained multi-CTE queries (~10 ms) scale linearly with the number of definitions. Recursive CTEs demonstrate efficient iteration: 100 iterations complete in ~0.3 ms and 1,000 iterations in ~2 ms, with memory scaling linearly at ~4.6 KB per iteration. The recursive operator uses a queue-based breadth-first expansion with automatic cycle termination.
 
 Set operations use hash-based strategies. **UNION ALL** is a zero-overhead concatenation of both streams (~16 ms for 10K + 10K, allocating 16.53 MB — exactly 2× a single scan). **UNION DISTINCT** concatenates with streaming hash deduplication (~42 ms, 19.32 MB), with spill-to-disk support when the memory budget is exceeded. **INTERSECT DISTINCT** materialises the right branch into a hash set, then probes with the left (~12 ms) — fast because the low-cardinality category column produces only 5 unique rows. **EXCEPT DISTINCT** follows the same materialise-right/probe-left pattern but must also track emitted rows for deduplication (~24 ms, 16.65 MB). Three-way chained UNION ALL (~21 ms) scales linearly — each additional branch adds roughly one scan's worth of time and memory.
+
+#### Pivot
+
+| Method | Mean | Error | StdDev | Allocated |
+|--------|-----:|------:|-------:|----------:|
+| PIVOT explicit IN list, AVG(revenue) (5K rows → 1250 output) | 10.212 ms | 0.2024 ms | 0.2560 ms | 5.98 MB |
+| PIVOT explicit IN list, AVG(revenue) (20K rows → 5000 output) | 58.515 ms | 1.1296 ms | 2.4556 ms | 23.62 MB |
+| PIVOT auto-discover, AVG(revenue) (5K rows → 1250 output) | 10.733 ms | 0.1028 ms | 0.0858 ms | 5.95 MB |
+| PIVOT auto-discover, AVG(revenue) (20K rows → 5000 output) | 48.055 ms | 0.8086 ms | 1.8252 ms | 23.58 MB |
+| PIVOT two aggregates SUM+COUNT (5K rows → 1250 output, 8 value cols) | 12.695 ms | 0.2349 ms | 0.2197 ms | 6.92 MB |
+| UNPIVOT 4 columns (1250 wide rows → 5000 output) | 2.278 ms | 0.0437 ms | 0.0467 ms | 1.86 MB |
+| UNPIVOT 4 columns (5000 wide rows → 20K output) | 6.108 ms | 0.0589 ms | 0.0551 ms | 6.99 MB |
+| UNPIVOT INCLUDE NULLS 4 columns (1250 wide rows) | 2.276 ms | 0.0318 ms | 0.0282 ms | 1.86 MB |
+
+PIVOT is a blocking operator that must buffer all input rows before emitting any output; memory scales linearly at ~1.2 MB per 1K output rows. Auto-discover mode performs comparably to explicit `IN` lists for small datasets and slightly faster at 20K rows, since the value-index dictionary is built lazily from actual data rather than pre-allocated from the literal list. UNPIVOT is a streaming operator and is ~4–5× faster than PIVOT at equivalent input sizes, allocating only what the output rows require. `INCLUDE NULLS` adds no measurable overhead — the flag is a single branch per cell. Multiple aggregates in one PIVOT clause increase memory ~15% (6.92 MB vs 5.98 MB at 5K rows) due to the proportionally wider output schema.
 
 #### Statistics
 

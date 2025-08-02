@@ -804,6 +804,76 @@ public static class SqlParser
         from condition in ExpressionParser
         select condition;
 
+    // ───────────────────── PIVOT clause ─────────────────────
+
+    /// <summary>
+    /// Parses a bare column reference (no table prefix) and returns a
+    /// <see cref="ColumnReference"/> rather than the <see cref="Expression"/> base type.
+    /// Used by both <see cref="PivotClauseParser"/> and <see cref="UnpivotClauseParser"/>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, ColumnReference> BareColumnReferenceParser =
+        from name in Token.EqualTo(SqlToken.Identifier)
+        select new ColumnReference(null, GetTokenText(name), ToSpan(name));
+
+    /// <summary>
+    /// PIVOT ( aggregate [, aggregate ...] FOR pivot_column [IN ( value [, value ...] )] ) [AS alias]
+    /// <para>
+    /// The value list is optional — when omitted the executor auto-discovers all distinct
+    /// values at runtime (subject to the cardinality cap defined on <see cref="PivotClause"/>).
+    /// </para>
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, PivotClause> PivotClauseParser =
+        from pivotKw in Token.EqualTo(SqlToken.Pivot)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from aggregates in FunctionCall
+                .Where(e => e is FunctionCallExpression, "aggregate function call")
+                .Select(e => (FunctionCallExpression)e)
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from forKw in Token.EqualTo(SqlToken.For)
+        from pivotColumn in BareColumnReferenceParser
+        from valueList in (
+            from inKw in Token.EqualTo(SqlToken.In)
+            from openParen in Token.EqualTo(SqlToken.LeftParen)
+            from values in ExpressionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            from closeParen in Token.EqualTo(SqlToken.RightParen)
+            select (IReadOnlyList<Expression>?)values
+        ).Try().OptionalOrDefault()
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from alias in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            select GetTokenText(aliasName)
+        ).Try().OptionalOrDefault()
+        select new PivotClause(aggregates, pivotColumn, valueList, alias);
+
+    // ───────────────────── UNPIVOT clause ─────────────────────
+
+    /// <summary>
+    /// UNPIVOT [INCLUDE NULLS] ( value_column FOR name_column IN ( column [, column ...] ) ) [AS alias]
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, UnpivotClause> UnpivotClauseParser =
+        from unpivotKw in Token.EqualTo(SqlToken.Unpivot)
+        from includeNulls in (
+            from includKw in Token.EqualTo(SqlToken.Include)
+            from nullsKw in Token.EqualTo(SqlToken.Nulls)
+            select true
+        ).Try().OptionalOrDefault()
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from valueColumn in Token.EqualTo(SqlToken.Identifier)
+        from forKw in Token.EqualTo(SqlToken.For)
+        from nameColumn in Token.EqualTo(SqlToken.Identifier)
+        from inKw in Token.EqualTo(SqlToken.In)
+        from openParen in Token.EqualTo(SqlToken.LeftParen)
+        from sourceColumns in BareColumnReferenceParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from closeParen in Token.EqualTo(SqlToken.RightParen)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from alias in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            select GetTokenText(aliasName)
+        ).Try().OptionalOrDefault()
+        select new UnpivotClause(GetTokenText(valueColumn), GetTokenText(nameColumn), sourceColumns, includeNulls, alias);
+
     // ───────────────────── ORDER BY clause ─────────────────────
 
     /// <summary>A single ORDER BY item: expression [ASC|DESC].</summary>
@@ -914,6 +984,8 @@ public static class SqlParser
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
         from qualifyClause in QualifyClauseParser.OptionalOrDefault()
+        from pivotClause in PivotClauseParser.AsNullable().Try().OptionalOrDefault()
+        from unpivotClause in UnpivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
         from orderByClause in OrderByClauseParser.OptionalOrDefault()
         from limitValue in LimitParser.OptionalOrDefault()
@@ -927,6 +999,8 @@ public static class SqlParser
             groupByClause,
             havingClause,
             qualifyClause,
+            pivotClause,
+            unpivotClause,
             orderByClause,
             limitValue,
             offsetValue,
@@ -952,6 +1026,8 @@ public static class SqlParser
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
         from qualifyClause in QualifyClauseParser.OptionalOrDefault()
+        from pivotClause in PivotClauseParser.AsNullable().Try().OptionalOrDefault()
+        from unpivotClause in UnpivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
         select new SelectStatement(
             columns,
@@ -962,6 +1038,8 @@ public static class SqlParser
             groupByClause,
             havingClause,
             qualifyClause,
+            pivotClause,
+            unpivotClause,
             OrderBy: null,
             Limit: null,
             Offset: null,
@@ -1073,6 +1151,8 @@ public static class SqlParser
         SqlToken.Group,
         SqlToken.Having,
         SqlToken.Qualify,
+        SqlToken.Pivot,
+        SqlToken.Unpivot,
         SqlToken.Into,
         SqlToken.Order,
         SqlToken.Limit,
@@ -1320,6 +1400,46 @@ public static class SqlParser
             }
         }
 
+        // ── PIVOT clause ──
+        PivotClause? pivotClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Pivot)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, PivotClause> pivotResult =
+                PivotClauseParser.TryParse(remaining);
+
+            if (!pivotResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid PIVOT clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                pivotClause = pivotResult.Value;
+                position += CountConsumed(tokenArray, position, pivotResult.Remainder);
+            }
+        }
+
+        // ── UNPIVOT clause ──
+        UnpivotClause? unpivotClause = null;
+        if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Unpivot)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, UnpivotClause> unpivotResult =
+                UnpivotClauseParser.TryParse(remaining);
+
+            if (!unpivotResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid UNPIVOT clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+            }
+            else
+            {
+                unpivotClause = unpivotResult.Value;
+                position += CountConsumed(tokenArray, position, unpivotResult.Remainder);
+            }
+        }
+
         // ── INTO clause ──
         IntoClause? intoClause = null;
         if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Into)
@@ -1419,6 +1539,8 @@ public static class SqlParser
                 groupByClause,
                 havingClause,
                 qualifyClause,
+                pivotClause,
+                unpivotClause,
                 orderByClause,
                 limitValue,
                 offsetValue,

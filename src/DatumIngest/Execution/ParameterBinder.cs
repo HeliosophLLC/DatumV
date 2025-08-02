@@ -195,6 +195,8 @@ public static class ParameterBinder
             groupBy,
             having,
             qualify,
+            statement.Pivot,
+            statement.Unpivot,
             orderBy,
             statement.Limit,
             statement.Offset);

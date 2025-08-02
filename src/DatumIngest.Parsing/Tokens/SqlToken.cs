@@ -203,6 +203,18 @@ public enum SqlToken
     /// <summary>The LET keyword (named memoized binding in SELECT).</summary>
     Let,
 
+    /// <summary>The PIVOT keyword (row-to-column reshaping).</summary>
+    Pivot,
+
+    /// <summary>The UNPIVOT keyword (column-to-row reshaping).</summary>
+    Unpivot,
+
+    /// <summary>The FOR keyword (used in PIVOT/UNPIVOT to identify the pivot column).</summary>
+    For,
+
+    /// <summary>The INCLUDE keyword (used with UNPIVOT INCLUDE NULLS).</summary>
+    Include,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>
