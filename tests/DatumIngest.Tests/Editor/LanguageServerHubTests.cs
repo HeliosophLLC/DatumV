@@ -241,6 +241,102 @@ public sealed class LanguageServerHubTests : IAsyncLifetime
         Assert.Throws<HubException>(() => _hub.GetCompletions("SELECT ", 7));
     }
 
+    // ───────────────────── Monarch grammar ─────────────────────
+
+    /// <summary>
+    /// GetMonarchGrammar succeeds without Initialize being called first.
+    /// </summary>
+    [Fact]
+    public void GetMonarchGrammar_DoesNotRequireInitialization()
+    {
+        // Do NOT call Initialize — grammar must work statically.
+        object grammar = _hub.GetMonarchGrammar();
+
+        Assert.NotNull(grammar);
+    }
+
+    /// <summary>
+    /// The grammar contains a non-empty keywords array covering all SQL clause keywords.
+    /// </summary>
+    [Fact]
+    public void GetMonarchGrammar_ContainsExpectedKeywords()
+    {
+        object grammar = _hub.GetMonarchGrammar();
+        string json = System.Text.Json.JsonSerializer.Serialize(grammar);
+        System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(json);
+
+        System.Text.Json.JsonElement keywords = document.RootElement.GetProperty("keywords");
+        Assert.Equal(System.Text.Json.JsonValueKind.Array, keywords.ValueKind);
+        Assert.True(keywords.GetArrayLength() > 0);
+
+        // Spot-check a representative cross-section of the token inventory.
+        List<string> keywordList = [];
+        foreach (System.Text.Json.JsonElement element in keywords.EnumerateArray())
+        {
+            keywordList.Add(element.GetString()!);
+        }
+
+        Assert.Contains("SELECT", keywordList);
+        Assert.Contains("GROUP", keywordList);
+        Assert.Contains("QUALIFY", keywordList);
+        Assert.Contains("OVER", keywordList);
+        Assert.Contains("WITH", keywordList);
+        Assert.Contains("LET", keywordList);
+        Assert.Contains("PIVOT", keywordList);
+        Assert.Contains("UNPIVOT", keywordList);
+    }
+
+    /// <summary>
+    /// TRUE, FALSE, and NULL appear in a separate boolNullKeywords array, not in
+    /// the main keywords array, so themes can color them distinctly.
+    /// </summary>
+    [Fact]
+    public void GetMonarchGrammar_BoolNullKeywords_InSeparateCategory()
+    {
+        object grammar = _hub.GetMonarchGrammar();
+        string json = System.Text.Json.JsonSerializer.Serialize(grammar);
+        System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(json);
+
+        List<string> keywords = [];
+        foreach (System.Text.Json.JsonElement element in document.RootElement.GetProperty("keywords").EnumerateArray())
+        {
+            keywords.Add(element.GetString()!);
+        }
+
+        List<string> boolNullKeywords = [];
+        foreach (System.Text.Json.JsonElement element in document.RootElement.GetProperty("boolNullKeywords").EnumerateArray())
+        {
+            boolNullKeywords.Add(element.GetString()!);
+        }
+
+        // TRUE/FALSE/NULL must be in boolNullKeywords, not in keywords.
+        Assert.DoesNotContain("TRUE", keywords);
+        Assert.DoesNotContain("FALSE", keywords);
+        Assert.DoesNotContain("NULL", keywords);
+        Assert.Contains("TRUE", boolNullKeywords);
+        Assert.Contains("FALSE", boolNullKeywords);
+        Assert.Contains("NULL", boolNullKeywords);
+    }
+
+    /// <summary>
+    /// The grammar serializes to valid JSON with the required Monarch top-level keys.
+    /// </summary>
+    [Fact]
+    public void GetMonarchGrammar_SerializesToValidMonarchShape()
+    {
+        object grammar = _hub.GetMonarchGrammar();
+        string json = System.Text.Json.JsonSerializer.Serialize(grammar);
+        System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(json);
+
+        // All top-level Monarch keys required for Monaco registration.
+        Assert.True(document.RootElement.TryGetProperty("keywords", out _));
+        Assert.True(document.RootElement.TryGetProperty("boolNullKeywords", out _));
+        Assert.True(document.RootElement.TryGetProperty("tokenizer", out System.Text.Json.JsonElement tokenizer));
+        Assert.True(tokenizer.TryGetProperty("root", out _));
+        Assert.True(tokenizer.TryGetProperty("whitespace", out _));
+        Assert.True(tokenizer.TryGetProperty("blockComment", out _));
+    }
+
     // ───────────────────── Reinitialize ─────────────────────
 
     [Fact]

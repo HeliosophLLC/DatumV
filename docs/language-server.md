@@ -145,6 +145,50 @@ Hovering over a token shows contextual documentation:
 - **Tables** — Column list with types and nullability
 - **Columns** — Data kind, nullability, and source table
 
+## Syntax Highlighting
+
+The hub exposes a `GetMonarchGrammar` method that returns a [Monarch grammar](https://microsoft.github.io/monaco-editor/docs.html#interfaces/languages.IMonarchLanguage.html) for the DatumIngest SQL dialect. Monarch is Monaco Editor's built-in client-side tokenizer — syntax highlighting runs entirely in the browser with no server round-trip per keystroke.
+
+Call `GetMonarchGrammar` once after the connection opens, before creating the editor model:
+
+```javascript
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl('/language-server')
+    .build();
+
+await connection.start();
+
+// Fetch the grammar and register it with Monaco.
+const grammar = await connection.invoke('GetMonarchGrammar');
+monaco.languages.register({ id: 'datumingest' });
+monaco.languages.setMonarchTokensProvider('datumingest', grammar);
+
+// Then initialize with the schema manifest and create the editor normally.
+await connection.invoke('Initialize', manifestJson);
+const editor = monaco.editor.create(container, {
+    language: 'datumingest',
+    value: '',
+});
+```
+
+`GetMonarchGrammar` does not require `Initialize` to have been called — it is stateless and returns the same grammar for every connection.
+
+### Token types
+
+The grammar uses standard Monaco token type names that map automatically to editor theme colors:
+
+| Token type | What it covers |
+|---|---|
+| `keyword` | SQL clause and operator keywords (`SELECT`, `FROM`, `LET`, `PIVOT`, …) |
+| `keyword.constant` | `TRUE`, `FALSE`, `NULL` |
+| `string` | Single-quoted string literals (`'hello'`, `''` escape) |
+| `number` | Integer, decimal, and scientific notation literals |
+| `variable` | Named parameter placeholders (`$threshold`) |
+| `comment` | Line comments (`--`) and block comments (`/* */`) |
+| `operator` | Arithmetic and comparison symbols (`+`, `<=`, `<>`, …) |
+| `delimiter` | Commas, parentheses, dots |
+| `identifier` | Unquoted and bracket/double-quoted identifiers (default) |
+
 ## WASM Integration
 
 The `DatumIngest.Wasm` project exposes four `[JSInvokable]` methods via `LanguageServerInterop`:

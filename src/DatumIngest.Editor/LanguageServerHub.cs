@@ -71,6 +71,21 @@ public sealed class LanguageServerHub : Hub
         return service.GetHover(sql, cursorOffset);
     }
 
+    /// <summary>
+    /// Returns the Monarch grammar definition for the DatumIngest SQL dialect.
+    /// Pass the result directly to <c>monaco.languages.setMonarchTokensProvider</c>
+    /// to enable client-side syntax highlighting. Does not require
+    /// <see cref="Initialize"/> to have been called — the grammar is static and
+    /// independent of the schema manifest.
+    /// </summary>
+    /// <returns>
+    /// An object graph that serializes to a valid Monarch grammar JSON document.
+    /// </returns>
+    public object GetMonarchGrammar()
+    {
+        return MonarchGrammarFactory.Build();
+    }
+
     /// <inheritdoc/>
     public override Task OnDisconnectedAsync(Exception? exception)
     {
