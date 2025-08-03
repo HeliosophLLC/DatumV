@@ -91,6 +91,11 @@ Every function belongs to a single **category** that describes its operational d
 | `array_distinct` | `array_distinct(arr)` | Remove duplicates, preserving first-occurrence order. Uses DataValue equality. | 1 |
 | `array_slice` | `array_slice(arr, start, length)` | Sub-array extraction. 1-based start, clamped to bounds. Returns empty array if out of range. | 1 |
 | `array_concat` | `array_concat(arr1, arr2)` | Concatenate two arrays. Both must share the same element kind. | 1 |
+| `array_get` | `array_get(arr, index)` | Element at a 1-based index. Returns null if index is out of bounds or either argument is null. Return type matches the array's element kind. | 1 |
+| `array_min` | `array_min(arr)` | Minimum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind. | 1 |
+| `array_max` | `array_max(arr)` | Maximum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind. | 1 |
+| `array_sum` | `array_sum(arr)` | Sum of numeric (Scalar or UInt8) elements, skipping nulls. Returns null for an empty or all-null array. Always returns Scalar. | 1 |
+| `array_avg` | `array_avg(arr)` | Average (mean) of numeric elements, skipping nulls. Returns null for an empty or all-null array. Always returns Scalar. | 1 |
 
 > **Tip:** `len(arr)` also works as an alias for `array_length(arr)` since `len()` supports Array inputs.
 

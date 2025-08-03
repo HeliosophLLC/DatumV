@@ -10,13 +10,23 @@ namespace DatumIngest.Functions.TableValued;
 /// When unnesting a JsonValue array of objects (e.g. from zip()), each object
 /// property becomes a named column.
 /// </summary>
-public sealed class UnnestFunction : ISchemaAwareTableFunction
+public sealed class UnnestFunction : IElementKindAwareTableFunction
 {
     /// <inheritdoc />
     public string Name => "unnest";
 
     /// <inheritdoc />
-    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds)
+    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds) =>
+        GetOutputSchema(argumentKinds, []);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// When <paramref name="argumentKinds"/>[0] is <see cref="DataKind.Array"/> and
+    /// <paramref name="arrayElementKinds"/>[0] is known, the output column uses the
+    /// element kind directly. Without element kind metadata the fallback is String,
+    /// matching the existing JSON-array behaviour.
+    /// </remarks>
+    public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds, ReadOnlySpan<DataKind?> arrayElementKinds)
     {
         if (argumentKinds.Length != 1)
         {
@@ -24,6 +34,7 @@ public sealed class UnnestFunction : ISchemaAwareTableFunction
         }
 
         DataKind inputKind = argumentKinds[0];
+        DataKind? elementKind = arrayElementKinds.Length > 0 ? arrayElementKinds[0] : null;
 
         return inputKind switch
         {
@@ -35,11 +46,11 @@ public sealed class UnnestFunction : ISchemaAwareTableFunction
             DataKind.UInt8Array => new Schema(
                 [new ColumnInfo("value", DataKind.UInt8, nullable: false)]),
 
-            // Array element kind is unknown at plan time; use String as the
-            // fallback schema, matching the existing JsonValue behaviour.
-            // At execution time the actual element kinds are preserved.
-            DataKind.Array => new Schema(
-                [new ColumnInfo("value", DataKind.String, nullable: true)]),
+            // Use the element kind when it is known at plan time; otherwise fall
+            // back to String, matching the existing JSON-array behaviour.
+            DataKind.Array => elementKind is not null
+                ? new Schema([new ColumnInfo("value", elementKind.Value, nullable: true)])
+                : new Schema([new ColumnInfo("value", DataKind.String, nullable: true)]),
 
             // JSON arrays may expand to objects with unknown columns;
             // fall back to a single "value" column of String kind.

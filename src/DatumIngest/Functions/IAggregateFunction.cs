@@ -26,6 +26,18 @@ public interface IAggregateFunction
     IAggregateAccumulator CreateAccumulator();
 
     /// <summary>
+    /// Returns the element kind of the result array when this aggregate produces a
+    /// <see cref="DataKind.Array"/>, given the argument types at plan time.
+    /// </summary>
+    /// <param name="argumentKinds">The kinds of the arguments being passed.</param>
+    /// <returns>
+    /// The array element kind, or <c>null</c> when this function does not return
+    /// a <see cref="DataKind.Array"/> or when the element kind cannot be
+    /// determined statically.
+    /// </returns>
+    DataKind? GetResultArrayElementKind(ReadOnlySpan<DataKind> argumentKinds) => null;
+
+    /// <summary>
     /// The cost weight of a single invocation of this function, measured in Query Units (QU).
     /// </summary>
     int QueryUnitCost => 1;

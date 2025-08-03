@@ -75,6 +75,62 @@ public static class ExpressionTypeResolver
         return info?.Kind;
     }
 
+    /// <summary>
+    /// Resolves the array element kind for an expression when its resolved kind
+    /// is <see cref="DataKind.Array"/>. Returns <c>null</c> when the element kind
+    /// is not statically known (e.g. a computed expression or unknown column).
+    /// Handles both direct column references (via <see cref="ColumnInfo.ArrayElementKind"/>)
+    /// and aggregate function calls (via <see cref="IAggregateFunction.GetResultArrayElementKind"/>).
+    /// </summary>
+    internal static DataKind? ResolveArrayElementKindFromExpression(Expression expression, Schema sourceSchema, FunctionRegistry functions)
+    {
+        if (expression is ColumnReference column)
+        {
+            ColumnInfo? info = null;
+
+            if (column.TableName is not null)
+            {
+                string qualifiedName = $"{column.TableName}.{column.ColumnName}";
+                info = sourceSchema.FindColumn(qualifiedName);
+            }
+
+            info ??= sourceSchema.FindColumn(column.ColumnName);
+            return info?.ArrayElementKind;
+        }
+
+        // Aggregate function call — determine element kind using
+        // GetResultArrayElementKind if provided by the aggregate.
+        if (expression is FunctionCallExpression func)
+        {
+            IAggregateFunction? aggregateFunction = functions.TryGetAggregate(func.FunctionName);
+            if (aggregateFunction is not null)
+            {
+                DataKind?[] argKindBuffer = new DataKind?[func.Arguments.Count];
+                bool allResolved = true;
+
+                for (int index = 0; index < func.Arguments.Count; index++)
+                {
+                    DataKind? kind = ResolveType(func.Arguments[index], sourceSchema, functions);
+                    if (kind is null) { allResolved = false; break; }
+                    argKindBuffer[index] = kind.Value;
+                }
+
+                if (allResolved)
+                {
+                    DataKind[] argKinds = new DataKind[func.Arguments.Count];
+                    for (int i = 0; i < argKindBuffer.Length; i++)
+                    {
+                        argKinds[i] = argKindBuffer[i]!.Value;
+                    }
+
+                    return aggregateFunction.GetResultArrayElementKind(argKinds);
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static DataKind? ResolveBinary(BinaryExpression binary, Schema sourceSchema, FunctionRegistry functions)
     {
         // Comparison and logical operators always produce Scalar (boolean result).
@@ -118,9 +174,14 @@ public static class ExpressionTypeResolver
     private static DataKind? ResolveFunction(FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
     {
         IScalarFunction? scalarFunction = functions.TryGetScalar(function.FunctionName);
+
+        // If not a scalar function, check whether it is an aggregate. This path is
+        // used by QuerySchemaResolver when resolving SELECT expressions that contain
+        // aggregate calls directly (e.g. SELECT ARRAY_AGG(name) or scalar wrappers
+        // around aggregates like array_get(ARRAY_AGG(name), 1)).
         if (scalarFunction is null)
         {
-            return null;
+            return ResolveAggregate(function, sourceSchema, functions);
         }
 
         // Resolve argument kinds so we can call ValidateArguments.
@@ -144,6 +205,30 @@ public static class ExpressionTypeResolver
             return null;
         }
 
+        // If the function is element-kind-aware, also resolve the array element
+        // kinds and call the richer overload so it can produce a precise return type.
+        if (scalarFunction is IElementKindAwareFunction elementKindAware)
+        {
+            DataKind?[] arrayElementKinds = new DataKind?[function.Arguments.Count];
+            for (int index = 0; index < function.Arguments.Count; index++)
+            {
+                if (argumentKinds[index] == DataKind.Array)
+                {
+                    arrayElementKinds[index] = ResolveArrayElementKindFromExpression(
+                        function.Arguments[index], sourceSchema, functions);
+                }
+            }
+
+            try
+            {
+                return elementKindAware.ValidateArgumentsWithElementKinds(argumentKinds, arrayElementKinds);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+
         try
         {
             return scalarFunction.ValidateArguments(argumentKinds);
@@ -151,6 +236,41 @@ public static class ExpressionTypeResolver
         catch (ArgumentException)
         {
             // If validation fails, the type cannot be determined.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the return type of an aggregate function call. Called as a fallback
+    /// from <see cref="ResolveFunction"/> when no scalar function matches the name.
+    /// </summary>
+    private static DataKind? ResolveAggregate(FunctionCallExpression function, Schema sourceSchema, FunctionRegistry functions)
+    {
+        IAggregateFunction? aggregateFunction = functions.TryGetAggregate(function.FunctionName);
+        if (aggregateFunction is null)
+        {
+            return null;
+        }
+
+        DataKind[] argumentKinds = new DataKind[function.Arguments.Count];
+
+        for (int index = 0; index < function.Arguments.Count; index++)
+        {
+            DataKind? kind = ResolveType(function.Arguments[index], sourceSchema, functions);
+            if (kind is null)
+            {
+                return null;
+            }
+
+            argumentKinds[index] = kind.Value;
+        }
+
+        try
+        {
+            return aggregateFunction.ValidateArguments(argumentKinds);
+        }
+        catch (ArgumentException)
+        {
             return null;
         }
     }
