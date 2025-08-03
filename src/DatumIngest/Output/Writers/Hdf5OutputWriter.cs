@@ -7,6 +7,14 @@ using PureHDF;
 /// Writes query results to HDF5 files. Each column becomes a dataset.
 /// Buffers all rows in memory, then writes a single HDF5 file on finalize.
 /// </summary>
+/// <remarks>
+/// Multi-dimensional kinds are stored as true N-D HDF5 datasets:
+/// <see cref="DataKind.Vector"/> produces rank-2 <c>[rows, dims]</c>,
+/// <see cref="DataKind.Matrix"/> produces rank-3 <c>[rows, matRows, matCols]</c>, and
+/// <see cref="DataKind.Tensor"/> produces rank-(1+N) <c>[rows, shape[0], …, shape[N-1]]</c>.
+/// All multi-dimensional datasets use chunked HDF5 storage (chunk row count: <see cref="ChunkRowSize"/>)
+/// to enable efficient partial reads via hyperslab selection.
+/// </remarks>
 public sealed class Hdf5OutputWriter : IOutputWriter
 {
     private readonly string? _filePath;
@@ -14,6 +22,12 @@ public sealed class Hdf5OutputWriter : IOutputWriter
     private Schema? _schema;
     private readonly List<Row> _rows = new();
     private long _rowsWritten;
+
+    /// <summary>
+    /// Number of rows per HDF5 chunk for multi-dimensional datasets.
+    /// Chunked storage enables efficient hyperslab selection at query time.
+    /// </summary>
+    private const int ChunkRowSize = 1000;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Hdf5OutputWriter"/> class that writes to a file.
@@ -110,6 +124,7 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             DataKind.String or DataKind.JsonValue => BuildStringDataset(column),
             DataKind.Vector => BuildVectorDataset(column.Name, rowCount),
             DataKind.Matrix => BuildMatrixDataset(column.Name, rowCount),
+            DataKind.Tensor => BuildTensorDataset(column.Name, rowCount),
             DataKind.UInt8Array or DataKind.Image => BuildBinaryDataset(column),
             DataKind.Date or DataKind.DateTime => BuildDateStringDataset(column),
             DataKind.Uuid => BuildUuidStringDataset(column.Name, rowCount),
@@ -247,7 +262,8 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             }
         }
 
-        return new H5Dataset(flatData, fileDims: [(ulong)rowCount, (ulong)vectorLength]);
+        uint rowChunk = (uint)Math.Min(ChunkRowSize, rowCount);
+        return new H5Dataset(flatData, chunks: [rowChunk, (uint)vectorLength], fileDims: [(ulong)rowCount, (ulong)vectorLength]);
     }
 
     private H5Dataset BuildMatrixDataset(string columnName, int rowCount)
@@ -281,7 +297,62 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             }
         }
 
-        return new H5Dataset(flatData, fileDims: [(ulong)rowCount, (ulong)matrixRows, (ulong)matrixCols]);
+        uint rowChunk = (uint)Math.Min(ChunkRowSize, rowCount);
+        return new H5Dataset(flatData, chunks: [rowChunk, (uint)matrixRows, (uint)matrixCols], fileDims: [(ulong)rowCount, (ulong)matrixRows, (ulong)matrixCols]);
+    }
+
+    private H5Dataset BuildTensorDataset(string columnName, int rowCount)
+    {
+        // Find the per-element shape from the first non-null row.
+        int[] shape = [];
+        foreach (Row row in _rows)
+        {
+            DataValue value = row[columnName];
+            if (!value.IsNull)
+            {
+                value.AsTensor(out shape);
+                break;
+            }
+        }
+
+        if (shape.Length == 0)
+        {
+            return new H5Dataset(Array.Empty<float>(), fileDims: [0, 0]);
+        }
+
+        int elementCount = 1;
+        foreach (int dim in shape)
+        {
+            elementCount *= dim;
+        }
+
+        float[] flatData = new float[rowCount * elementCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            if (!value.IsNull)
+            {
+                float[] tensorData = value.AsTensor(out _);
+                Array.Copy(tensorData, 0, flatData, i * elementCount, elementCount);
+            }
+        }
+
+        // fileDims: [rowCount, shape[0], shape[1], ...]
+        ulong[] fileDims = new ulong[1 + shape.Length];
+        fileDims[0] = (ulong)rowCount;
+        for (int d = 0; d < shape.Length; d++)
+        {
+            fileDims[d + 1] = (ulong)shape[d];
+        }
+
+        uint[] chunkDims = new uint[1 + shape.Length];
+        chunkDims[0] = (uint)Math.Min(ChunkRowSize, rowCount);
+        for (int d = 0; d < shape.Length; d++)
+        {
+            chunkDims[d + 1] = (uint)shape[d];
+        }
+
+        return new H5Dataset(flatData, chunks: chunkDims, fileDims: fileDims);
     }
 
     private string[] BuildUuidStringDataset(string columnName, int rowCount)

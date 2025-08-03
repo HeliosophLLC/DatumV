@@ -253,4 +253,62 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
         Assert.Equal(fakeImage1, data[0]);
         Assert.Equal(fakeImage2, data[1]);
     }
+
+    [Fact]
+    public async Task FinalizeAsync_TensorColumn_WritesNDimensionalDataset()
+    {
+        string path = Path.Combine(_tempDir, "tensors.h5");
+        Schema schema = new([new ColumnInfo("features", DataKind.Tensor, false)]);
+
+        // Two rows, each a [2, 3] tensor (6 elements each).
+        float[] tensor1 = [1f, 2f, 3f, 4f, 5f, 6f];
+        float[] tensor2 = [7f, 8f, 9f, 10f, 11f, 12f];
+
+        await using Hdf5OutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(("features", DataValue.FromTensor(tensor1, [2, 3]))));
+        await writer.WriteRowAsync(CreateRow(("features", DataValue.FromTensor(tensor2, [2, 3]))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+
+        using NativeFile file = H5File.OpenRead(path);
+        IH5Dataset dataset = file.Dataset("features");
+
+        // Rank must be 3: [rows, shape[0], shape[1]] = [2, 2, 3]
+        Assert.Equal(3, (int)dataset.Space.Rank);
+        Assert.Equal(2UL, dataset.Space.Dimensions[0]);
+        Assert.Equal(2UL, dataset.Space.Dimensions[1]);
+        Assert.Equal(3UL, dataset.Space.Dimensions[2]);
+
+        // Flat data must match the concatenated input values.
+        float[] flatData = dataset.Read<float[]>();
+        Assert.Equal([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f], flatData);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_MatrixColumn_WritesRank3Dataset()
+    {
+        string path = Path.Combine(_tempDir, "matrices.h5");
+        Schema schema = new([new ColumnInfo("m", DataKind.Matrix, false)]);
+
+        // Two rows, each a 2×3 matrix (6 elements each).
+        float[] matrix1 = [1f, 2f, 3f, 4f, 5f, 6f];
+        float[] matrix2 = [7f, 8f, 9f, 10f, 11f, 12f];
+
+        await using Hdf5OutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(("m", DataValue.FromMatrix(matrix1, 2, 3))));
+        await writer.WriteRowAsync(CreateRow(("m", DataValue.FromMatrix(matrix2, 2, 3))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+
+        using NativeFile file = H5File.OpenRead(path);
+        IH5Dataset dataset = file.Dataset("m");
+        Assert.Equal(3, (int)dataset.Space.Rank);
+        Assert.Equal(2UL, dataset.Space.Dimensions[0]);
+        Assert.Equal(2UL, dataset.Space.Dimensions[1]);
+        Assert.Equal(3UL, dataset.Space.Dimensions[2]);
+    }
 }

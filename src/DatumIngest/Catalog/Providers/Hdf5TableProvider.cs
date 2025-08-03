@@ -8,7 +8,9 @@ namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads HDF5 files via PureHDF (pure managed, cross-platform).
-/// Each 1-D dataset becomes a column; 2-D datasets yield one vector per row.
+/// Each 1-D dataset becomes a column. Multi-dimensional datasets are restored to their
+/// original <see cref="DataKind"/>: rank-2 as <see cref="DataKind.Vector"/>, rank-3 as
+/// <see cref="DataKind.Matrix"/>, and rank-4 or higher as <see cref="DataKind.Tensor"/>.
 /// Datasets inside groups use a flattened slash-separated name (e.g. "sensors/temperature").
 /// </summary>
 public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
@@ -265,9 +267,19 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
             return DataKind.String;
         }
 
-        if (rank >= 2)
+        if (rank == 2)
         {
             return DataKind.Vector;
+        }
+
+        if (rank == 3)
+        {
+            return DataKind.Matrix;
+        }
+
+        if (rank >= 4)
+        {
+            return DataKind.Tensor;
         }
 
         if (type.Class == H5DataTypeClass.FixedPoint)
@@ -369,6 +381,64 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
     }
 
     /// <summary>
+    /// Holds pre-read columnar data for a single rank-3 HDF5 dataset, yielding one
+    /// <see cref="DataValue.FromMatrix"/> per row.
+    /// </summary>
+    private sealed class MatrixColumnData : ColumnData
+    {
+        private readonly float[] _flatData;
+        private readonly int _matrixRows;
+        private readonly int _matrixColumns;
+        private readonly int _elementCount;
+
+        public MatrixColumnData(string name, float[] flatData, long rowCount, int matrixRows, int matrixColumns)
+            : base(name, rowCount)
+        {
+            _flatData = flatData;
+            _matrixRows = matrixRows;
+            _matrixColumns = matrixColumns;
+            _elementCount = matrixRows * matrixColumns;
+        }
+
+        public override DataValue GetValue(long rowIndex)
+        {
+            float[] matrix = new float[_elementCount];
+            Array.Copy(_flatData, rowIndex * _elementCount, matrix, 0, _elementCount);
+            return DataValue.FromMatrix(matrix, _matrixRows, _matrixColumns);
+        }
+    }
+
+    /// <summary>
+    /// Holds pre-read columnar data for a single rank-4 or higher HDF5 dataset, yielding
+    /// one <see cref="DataValue.FromTensor"/> per row.
+    /// </summary>
+    private sealed class TensorColumnData : ColumnData
+    {
+        private readonly float[] _flatData;
+        private readonly int[] _shape;
+        private readonly int _elementCount;
+
+        public TensorColumnData(string name, float[] flatData, long rowCount, int[] shape)
+            : base(name, rowCount)
+        {
+            _flatData = flatData;
+            _shape = shape;
+            _elementCount = 1;
+            foreach (int dim in shape)
+            {
+                _elementCount *= dim;
+            }
+        }
+
+        public override DataValue GetValue(long rowIndex)
+        {
+            float[] tensor = new float[_elementCount];
+            Array.Copy(_flatData, rowIndex * _elementCount, tensor, 0, _elementCount);
+            return DataValue.FromTensor(tensor, _shape);
+        }
+    }
+
+    /// <summary>
     /// Reads an entire dataset into the appropriate <see cref="ColumnData"/> subclass.
     /// </summary>
     private static ColumnData ReadDatasetColumn(DatasetEntry entry)
@@ -385,18 +455,29 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
             return new StringColumnData(entry.Path, data);
         }
 
-        // Multi-dimensional numeric datasets yield vectors per row.
+        // Multi-dimensional numeric datasets: restore the original DataKind by rank.
         if (rank >= 2 && (type.Class == H5DataTypeClass.FloatingPoint || type.Class == H5DataTypeClass.FixedPoint))
         {
             long rowCount = (long)dimensions[0];
-            int vectorLength = 1;
-            for (int dimensionIndex = 1; dimensionIndex < dimensions.Length; dimensionIndex++)
+            float[] flatData = ReadAsFloatArray(dataset, type);
+
+            if (rank == 2)
             {
-                vectorLength *= (int)dimensions[dimensionIndex];
+                return new VectorColumnData(entry.Path, flatData, rowCount, (int)dimensions[1]);
             }
 
-            float[] flatData = ReadAsFloatArray(dataset, type);
-            return new VectorColumnData(entry.Path, flatData, rowCount, vectorLength);
+            if (rank == 3)
+            {
+                return new MatrixColumnData(entry.Path, flatData, rowCount, (int)dimensions[1], (int)dimensions[2]);
+            }
+
+            // rank >= 4: Tensor — trailing dimensions form the per-element shape.
+            int[] shape = new int[rank - 1];
+            for (int d = 1; d < rank; d++)
+            {
+                shape[d - 1] = (int)dimensions[d];
+            }
+            return new TensorColumnData(entry.Path, flatData, rowCount, shape);
         }
 
         // 1-D unsigned byte datasets.
@@ -444,14 +525,8 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         if (rank >= 2 && (type.Class == H5DataTypeClass.FloatingPoint || type.Class == H5DataTypeClass.FixedPoint))
         {
             ulong[] dimensions = dataset.Space.Dimensions;
-            int vectorLength = 1;
-            for (int dimensionIndex = 1; dimensionIndex < dimensions.Length; dimensionIndex++)
-            {
-                vectorLength *= (int)dimensions[dimensionIndex];
-            }
 
-            // For multi-dimensional datasets, build an N-D hyperslab selection
-            // that slices only the first dimension (rows).
+            // Build an N-D hyperslab selection that slices only the first dimension (rows).
             ulong[] starts = new ulong[rank];
             ulong[] blocks = new ulong[rank];
             starts[0] = (ulong)startRow;
@@ -464,7 +539,24 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
             HyperslabSelection multiDimensionalSelection = new(rank: rank, starts: starts, blocks: blocks);
             float[] flatData = ReadAsFloatArraySlice(dataset, type, multiDimensionalSelection);
-            return new VectorColumnData(entry.Path, flatData, sliceRowCount, vectorLength);
+
+            if (rank == 2)
+            {
+                return new VectorColumnData(entry.Path, flatData, sliceRowCount, (int)dimensions[1]);
+            }
+
+            if (rank == 3)
+            {
+                return new MatrixColumnData(entry.Path, flatData, sliceRowCount, (int)dimensions[1], (int)dimensions[2]);
+            }
+
+            // rank >= 4: Tensor
+            int[] shape = new int[rank - 1];
+            for (int d = 1; d < rank; d++)
+            {
+                shape[d - 1] = (int)dimensions[d];
+            }
+            return new TensorColumnData(entry.Path, flatData, sliceRowCount, shape);
         }
 
         if (type.Class == H5DataTypeClass.FixedPoint && type.Size == 1 && !type.FixedPoint.IsSigned)

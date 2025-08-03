@@ -1,6 +1,8 @@
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Model;
+using DatumIngest.Output;
+using DatumIngest.Output.Writers;
 using PureHDF;
 
 namespace DatumIngest.Tests.Catalog;
@@ -42,6 +44,18 @@ public sealed class Hdf5TableProviderTests : IDisposable
             rows.Add(row);
         }
         return rows;
+    }
+
+    private static Row CreateProviderRow(params (string Name, DataValue Value)[] columns)
+    {
+        string[] names = new string[columns.Length];
+        DataValue[] values = new DataValue[columns.Length];
+        for (int i = 0; i < columns.Length; i++)
+        {
+            names[i] = columns[i].Name;
+            values[i] = columns[i].Value;
+        }
+        return new Row(names, values);
     }
 
     /// <summary>
@@ -133,6 +147,40 @@ public sealed class Hdf5TableProviderTests : IDisposable
         H5File file = new()
         {
             ["matrix"] = new H5Dataset(data, fileDims: [3, 4]),
+        };
+        file.Write(path);
+        return path;
+    }
+
+    /// <summary>
+    /// Creates an HDF5 file with a rank-3 float32 dataset (stack of matrices).
+    /// Shape: [3, 2, 4] — 3 rows, each a 2×4 matrix.
+    /// </summary>
+    private string Create3DFixture()
+    {
+        string path = FixturePath("matrices3d.h5");
+        // 3 rows × 2 matRows × 4 matCols = 24 elements
+        float[] data = [.. Enumerable.Range(1, 24).Select(x => (float)x)];
+        H5File file = new()
+        {
+            ["m"] = new H5Dataset(data, fileDims: [3, 2, 4]),
+        };
+        file.Write(path);
+        return path;
+    }
+
+    /// <summary>
+    /// Creates an HDF5 file with a rank-4 float32 dataset (tensors).
+    /// Shape: [2, 2, 3, 4] — 2 rows, each a [2, 3, 4] tensor.
+    /// </summary>
+    private string CreateTensorFixture()
+    {
+        string path = FixturePath("tensor4d.h5");
+        // 2 rows × 2×3×4 = 48 elements
+        float[] data = [.. Enumerable.Range(1, 48).Select(x => (float)x)];
+        H5File file = new()
+        {
+            ["t"] = new H5Dataset(data, fileDims: [2, 2, 3, 4]),
         };
         file.Write(path);
         return path;
@@ -521,5 +569,165 @@ public sealed class Hdf5TableProviderTests : IDisposable
         Assert.Equal((byte)20, rows[0]["bytes"].AsUInt8());
         Assert.Equal((byte)30, rows[1]["bytes"].AsUInt8());
         Assert.Equal((byte)40, rows[2]["bytes"].AsUInt8());
+    }
+
+    // ───────────────────── Matrix (rank-3) tests ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_3DDatasetDetectedAsMatrix()
+    {
+        string path = Create3DFixture();
+        Hdf5TableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
+
+        Assert.Single(schema.Columns);
+        Assert.Equal(DataKind.Matrix, schema.Columns[0].Kind);
+    }
+
+    [Fact]
+    public async Task Open_Reads3DDatasetAsMatrixPerRow()
+    {
+        string path = Create3DFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+
+        // First row: elements 1..8 arranged as a [2, 4] matrix.
+        float[] firstMatrix = rows[0]["m"].AsMatrix(out int matRows, out int matCols);
+        Assert.Equal(2, matRows);
+        Assert.Equal(4, matCols);
+        Assert.Equal(1.0f, firstMatrix[0]);
+        Assert.Equal(8.0f, firstMatrix[7]);
+
+        // Last row: elements 17..24.
+        float[] lastMatrix = rows[2]["m"].AsMatrix(out _, out _);
+        Assert.Equal(17.0f, lastMatrix[0]);
+        Assert.Equal(24.0f, lastMatrix[7]);
+    }
+
+    [Fact]
+    public async Task ReadRowRange_3DDataset_SlicesMatrices()
+    {
+        string path = Create3DFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 2, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+
+        // Row 1 elements: 9..16 as a [2, 4] matrix.
+        float[] firstMatrix = rows[0]["m"].AsMatrix(out int matRows, out int matCols);
+        Assert.Equal(2, matRows);
+        Assert.Equal(4, matCols);
+        Assert.Equal(9.0f, firstMatrix[0]);
+        Assert.Equal(16.0f, firstMatrix[7]);
+    }
+
+    // ───────────────────── Tensor (rank-4+) tests ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_4DDatasetDetectedAsTensor()
+    {
+        string path = CreateTensorFixture();
+        Hdf5TableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
+
+        Assert.Single(schema.Columns);
+        Assert.Equal(DataKind.Tensor, schema.Columns[0].Kind);
+    }
+
+    [Fact]
+    public async Task Open_Reads4DDatasetAsTensorPerRow()
+    {
+        string path = CreateTensorFixture();
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+
+        // Shape [2, 2, 3, 4] — each row has a [2, 3, 4] tensor (24 elements).
+        float[] tensorData = rows[0]["t"].AsTensor(out int[] shape);
+        Assert.Equal(3, shape.Length);
+        Assert.Equal(2, shape[0]);
+        Assert.Equal(3, shape[1]);
+        Assert.Equal(4, shape[2]);
+        Assert.Equal(24, tensorData.Length);
+        Assert.Equal(1.0f, tensorData[0]);
+        Assert.Equal(24.0f, tensorData[23]);
+
+        float[] secondTensorData = rows[1]["t"].AsTensor(out _);
+        Assert.Equal(25.0f, secondTensorData[0]);
+        Assert.Equal(48.0f, secondTensorData[23]);
+    }
+
+    // ───────────────────── Writer→Provider round-trip tests ─────────────────────
+
+    [Fact]
+    public async Task RoundTrip_MatrixColumn_PreservesShapeAndValues()
+    {
+        string path = FixturePath("roundtrip_matrix.h5");
+        Schema schema = new([new ColumnInfo("m", DataKind.Matrix, false)]);
+
+        // Write 3 rows of 2×3 matrices.
+        float[] matrix1 = [1f, 2f, 3f, 4f, 5f, 6f];
+        float[] matrix2 = [7f, 8f, 9f, 10f, 11f, 12f];
+        float[] matrix3 = [13f, 14f, 15f, 16f, 17f, 18f];
+
+        await using (Hdf5OutputWriter writer = new(path))
+        {
+            await writer.InitializeAsync(schema);
+            await writer.WriteRowAsync(CreateProviderRow(("m", DataValue.FromMatrix(matrix1, 2, 3))));
+            await writer.WriteRowAsync(CreateProviderRow(("m", DataValue.FromMatrix(matrix2, 2, 3))));
+            await writer.WriteRowAsync(CreateProviderRow(("m", DataValue.FromMatrix(matrix3, 2, 3))));
+            await writer.FinalizeAsync();
+        }
+
+        // Read back and assert shape and kind are restored.
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        float[] readMatrix = rows[1]["m"].AsMatrix(out int matRows, out int matCols);
+        Assert.Equal(2, matRows);
+        Assert.Equal(3, matCols);
+        Assert.Equal(matrix2, readMatrix);
+    }
+
+    [Fact]
+    public async Task RoundTrip_TensorColumn_PreservesShapeAndValues()
+    {
+        string path = FixturePath("roundtrip_tensor.h5");
+        Schema schema = new([new ColumnInfo("t", DataKind.Tensor, false)]);
+
+        // Two rows, each a [2, 3] tensor (6 elements).
+        float[] tensor1 = [1f, 2f, 3f, 4f, 5f, 6f];
+        float[] tensor2 = [7f, 8f, 9f, 10f, 11f, 12f];
+
+        await using (Hdf5OutputWriter writer = new(path))
+        {
+            await writer.InitializeAsync(schema);
+            await writer.WriteRowAsync(CreateProviderRow(("t", DataValue.FromTensor(tensor1, [2, 3]))));
+            await writer.WriteRowAsync(CreateProviderRow(("t", DataValue.FromTensor(tensor2, [2, 3]))));
+            await writer.FinalizeAsync();
+        }
+
+        Hdf5TableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
+
+        Assert.Equal(2, rows.Count);
+
+        float[] readTensor = rows[0]["t"].AsTensor(out int[] shape);
+        Assert.Equal(2, shape.Length);
+        Assert.Equal(2, shape[0]);
+        Assert.Equal(3, shape[1]);
+        Assert.Equal(tensor1, readTensor);
+
+        float[] readTensor2 = rows[1]["t"].AsTensor(out _);
+        Assert.Equal(tensor2, readTensor2);
     }
 }
