@@ -97,7 +97,7 @@ public sealed class WindowOperator : IQueryOperator
         foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
         {
             WindowSpecification spec = _windowColumns[specGroup.Value[0]].WindowSpecification;
-            ComputeForSpecification(spec, specGroup.Value, allRows, evaluator, windowResults);
+            ComputeForSpecification(spec, specGroup.Value, allRows, evaluator, windowResults, context.QueryMeter);
         }
 
         // Step 4: Emit all rows in original order, augmented with window columns.
@@ -149,7 +149,8 @@ public sealed class WindowOperator : IQueryOperator
         List<int> columnIndices,
         List<Row> allRows,
         ExpressionEvaluator evaluator,
-        DataValue[][] windowResults)
+        DataValue[][] windowResults,
+        QueryMeter? meter)
     {
         // Build an index array to track original positions through partitioning.
         int[] originalIndices = new int[allRows.Count];
@@ -205,6 +206,7 @@ public sealed class WindowOperator : IQueryOperator
                     partitionResults,
                     column.NullHandling,
                     column.FromLast);
+                meter?.Add((long)column.Function.QueryUnitCost * count);
 
                 // Write results back to the correct original row positions.
                 for (int i = 0; i < count; i++)

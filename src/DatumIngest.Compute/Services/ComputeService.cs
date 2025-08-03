@@ -159,7 +159,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 {
                     throw new RpcException(new Status(
                         StatusCode.ResourceExhausted,
-                        $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.FunctionQueryUnits})."));
+                        $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
                 }
 
                 QueryRow queryRow = new();
@@ -176,7 +176,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
                 }
 
-                queryRow.QueryUnits = meter.FunctionQueryUnits;
+                queryRow.QueryUnits = meter.QueryUnits;
 
                 await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
 
@@ -219,7 +219,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
         finally
         {
-            session.AddQueryUnits(meter.FunctionQueryUnits);
+            session.AddQueryUnits(meter.QueryUnits);
         }
     }
 

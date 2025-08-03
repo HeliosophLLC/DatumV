@@ -212,7 +212,7 @@ public sealed class ImageCostAwareTests
             new FunctionCallExpression("image_brightness_mean", [new ColumnReference("img")]),
             row);
 
-        Assert.Equal(30, meter.FunctionQueryUnits);
+        Assert.Equal(30, meter.QueryUnits);
     }
 
     /// <summary>
@@ -232,6 +232,6 @@ public sealed class ImageCostAwareTests
             new FunctionCallExpression("image_brightness_mean", [new ColumnReference("img")]),
             row);
 
-        Assert.Equal(10, meter.FunctionQueryUnits);
+        Assert.Equal(10, meter.QueryUnits);
     }
 }

@@ -22,6 +22,10 @@ public sealed class ModeFunction : IAggregateFunction
     public string Name => "MODE";
 
     /// <inheritdoc/>
+    // O(D) frequency map per group where D = distinct values — Tier 2.
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

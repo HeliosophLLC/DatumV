@@ -1,4 +1,5 @@
 using DatumIngest.Functions;
+using DatumIngest.Functions.Aggregates;
 
 namespace DatumIngest.Tests.Functions;
 
@@ -53,6 +54,65 @@ public class QueryUnitCostTests
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
 
         IScalarFunction? function = registry.TryGetScalar(functionName);
+        Assert.NotNull(function);
+        Assert.Equal(expectedCost, function.QueryUnitCost);
+    }
+
+    /// <summary>
+    /// Every aggregate function in the default registry must have a positive Query Unit cost.
+    /// </summary>
+    [Fact]
+    public void AllAggregateFunctions_HavePositiveQueryUnitCost()
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+
+        foreach (string name in registry.AggregateFunctionNames)
+        {
+            IAggregateFunction? function = registry.TryGetAggregate(name);
+            Assert.NotNull(function);
+            Assert.True(function.QueryUnitCost >= 1,
+                $"Aggregate '{name}' has QueryUnitCost {function.QueryUnitCost}, expected >= 1.");
+        }
+    }
+
+    /// <summary>
+    /// Heavy aggregates with O(N) memory or finalization work must report Tier 2 cost.
+    /// </summary>
+    [Theory]
+    [InlineData("MEDIAN", 2)]
+    [InlineData("PERCENTILE_CONT", 2)]
+    [InlineData("PERCENTILE_DISC", 2)]
+    [InlineData("MODE", 2)]
+    [InlineData("APPROX_MEDIAN", 2)]
+    [InlineData("APPROX_PERCENTILE", 2)]
+    [InlineData("STRING_AGG", 2)]
+    public void HeavyAggregate_ReportsExpectedQueryUnitCost(string functionName, int expectedCost)
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+
+        IAggregateFunction? function = registry.TryGetAggregate(functionName);
+        Assert.NotNull(function);
+        Assert.Equal(expectedCost, function.QueryUnitCost);
+    }
+
+    /// <summary>
+    /// Lightweight streaming aggregates must report Tier 1 cost (1 QU per accumulation).
+    /// </summary>
+    [Theory]
+    [InlineData("COUNT", 1)]
+    [InlineData("SUM", 1)]
+    [InlineData("AVG", 1)]
+    [InlineData("MIN", 1)]
+    [InlineData("MAX", 1)]
+    [InlineData("VARIANCE", 1)]
+    [InlineData("STDDEV", 1)]
+    [InlineData("CORR", 1)]
+    [InlineData("COVAR_POP", 1)]
+    public void StreamingAggregate_ReportsTierOneCost(string functionName, int expectedCost)
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+
+        IAggregateFunction? function = registry.TryGetAggregate(functionName);
         Assert.NotNull(function);
         Assert.Equal(expectedCost, function.QueryUnitCost);
     }

@@ -8,7 +8,7 @@ namespace DatumIngest.Execution;
 /// </summary>
 public sealed class QueryMeter
 {
-    private long _functionQueryUnits;
+    private long _queryUnits;
 
     /// <summary>
     /// Creates a new query meter with an optional QU budget.
@@ -27,15 +27,15 @@ public sealed class QueryMeter
     public long? Budget { get; }
 
     /// <summary>
-    /// Total Query Units accumulated from scalar function invocations.
+    /// Total Query Units accumulated from function invocations.
     /// </summary>
-    public long FunctionQueryUnits => Interlocked.Read(ref _functionQueryUnits);
+    public long QueryUnits => Interlocked.Read(ref _queryUnits);
 
     /// <summary>
     /// Returns <see langword="true"/> when a budget is set and the accumulated
     /// Query Units exceed it.
     /// </summary>
-    public bool IsBudgetExceeded => Budget.HasValue && FunctionQueryUnits > Budget.Value;
+    public bool IsBudgetExceeded => Budget.HasValue && QueryUnits > Budget.Value;
 
     /// <summary>
     /// Throws <see cref="QueryBudgetExceededException"/> if a budget is set
@@ -47,7 +47,7 @@ public sealed class QueryMeter
     {
         if (IsBudgetExceeded)
         {
-            throw new QueryBudgetExceededException(Budget!.Value, FunctionQueryUnits);
+            throw new QueryBudgetExceededException(Budget!.Value, QueryUnits);
         }
     }
 
@@ -57,6 +57,6 @@ public sealed class QueryMeter
     /// <param name="cost">The Query Unit cost to add.</param>
     public void Add(long cost)
     {
-        Interlocked.Add(ref _functionQueryUnits, cost);
+        Interlocked.Add(ref _queryUnits, cost);
     }
 }

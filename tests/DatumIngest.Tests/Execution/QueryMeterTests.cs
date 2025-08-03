@@ -12,11 +12,11 @@ public class QueryMeterTests
     /// A newly created meter with no calls should report zero Query Units.
     /// </summary>
     [Fact]
-    public void FunctionQueryUnits_Initially_Zero()
+    public void QueryUnits_Initially_Zero()
     {
         QueryMeter meter = new();
 
-        Assert.Equal(0, meter.FunctionQueryUnits);
+        Assert.Equal(0, meter.QueryUnits);
     }
 
     /// <summary>
@@ -30,7 +30,7 @@ public class QueryMeterTests
         meter.Add(3);
         meter.Add(5);
 
-        Assert.Equal(8, meter.FunctionQueryUnits);
+        Assert.Equal(8, meter.QueryUnits);
     }
 
     /// <summary>
@@ -44,7 +44,7 @@ public class QueryMeterTests
 
         meter.Add(0);
 
-        Assert.Equal(10, meter.FunctionQueryUnits);
+        Assert.Equal(10, meter.QueryUnits);
     }
 
     /// <summary>
@@ -138,7 +138,7 @@ public class QueryMeterTests
 
         await Task.WhenAll(tasks);
 
-        Assert.Equal(threadCount * addsPerThread, meter.FunctionQueryUnits);
+        Assert.Equal(threadCount * addsPerThread, meter.QueryUnits);
     }
 
     // ─────────────── ThrowIfExceeded ───────────────

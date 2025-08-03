@@ -1,7 +1,10 @@
+using DatumIngest.Catalog;
 using DatumIngest.Execution;
+using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
+using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -27,7 +30,7 @@ public class QueryMeteringTests
             new FunctionCallExpression("len", [new ColumnReference("x")]),
             row);
 
-        Assert.Equal(1, meter.FunctionQueryUnits);
+        Assert.Equal(1, meter.QueryUnits);
     }
 
     /// <summary>
@@ -48,7 +51,7 @@ public class QueryMeteringTests
                 row);
         }
 
-        Assert.Equal(3, meter.FunctionQueryUnits);
+        Assert.Equal(3, meter.QueryUnits);
     }
 
     /// <summary>
@@ -89,6 +92,26 @@ public class QueryMeteringTests
     }
 
     /// <summary>
+    /// CAST expressions charge the same QU cost as a direct function call,
+    /// because <see cref="CastFunction"/> is an <see cref="IScalarFunction"/> and
+    /// the evaluator's <c>EvaluateCast</c> path must meter it identically.
+    /// </summary>
+    [Fact]
+    public void EvaluateCast_AccumulatesQueryUnits()
+    {
+        QueryMeter meter = new();
+        ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
+        Row row = new(["x"], [DataValue.FromScalar(3.7f)]);
+
+        // CAST(x AS String) — "cast" is a Tier 1 function (QU 1).
+        evaluator.Evaluate(
+            new CastExpression(new ColumnReference("x"), "String"),
+            row);
+
+        Assert.Equal(1, meter.QueryUnits);
+    }
+
+    /// <summary>
     /// Non-function expressions (literals, column references) do not add QU.
     /// </summary>
     [Fact]
@@ -101,6 +124,128 @@ public class QueryMeteringTests
         evaluator.Evaluate(new LiteralExpression(1), row);
         evaluator.Evaluate(new ColumnReference("x"), row);
 
-        Assert.Equal(0, meter.FunctionQueryUnits);
+        Assert.Equal(0, meter.QueryUnits);
+    }
+
+    /// <summary>
+    /// GroupByOperator accumulates QU for each aggregate Accumulate() call.
+    /// SUM has a cost of 1 QU; 3 rows × 1 aggregate = 3 QU.
+    /// </summary>
+    [Fact]
+    public async Task GroupByOperator_AggregateCalls_AccumulateQueryUnits()
+    {
+        QueryMeter meter = new();
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            meter);
+
+        MockOperator source = new(
+            new Row(["x"], [DataValue.FromScalar(1f)]),
+            new Row(["x"], [DataValue.FromScalar(2f)]),
+            new Row(["x"], [DataValue.FromScalar(3f)]));
+
+        // SELECT SUM(x) — global aggregation (no GROUP BY).
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    FunctionRegistry.CreateDefault().TryGetAggregate("SUM")!,
+                    [new ColumnReference("x")],
+                    OutputName: "sum_x",
+                    IsCountStar: false,
+                    Distinct: false,
+                    OrderBy: null)
+            ]);
+
+        await foreach (Row _ in groupBy.ExecuteAsync(context)) { }
+
+        // 3 rows × SUM (QU 1 each) = 3 QU.
+        Assert.Equal(3, meter.QueryUnits);
+    }
+
+    /// <summary>
+    /// Heavy aggregate MEDIAN (QU 2) accumulates 2 QU per row.
+    /// 4 rows × 2 QU = 8 QU.
+    /// </summary>
+    [Fact]
+    public async Task GroupByOperator_HeavyAggregate_AccumulatesHigherCost()
+    {
+        QueryMeter meter = new();
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            meter);
+
+        MockOperator source = new(
+            new Row(["x"], [DataValue.FromScalar(4f)]),
+            new Row(["x"], [DataValue.FromScalar(1f)]),
+            new Row(["x"], [DataValue.FromScalar(3f)]),
+            new Row(["x"], [DataValue.FromScalar(2f)]));
+
+        // SELECT MEDIAN(x) — QU cost 2 per accumulation.
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    FunctionRegistry.CreateDefault().TryGetAggregate("MEDIAN")!,
+                    [new ColumnReference("x")],
+                    OutputName: "median_x",
+                    IsCountStar: false,
+                    Distinct: false,
+                    OrderBy: null)
+            ]);
+
+        await foreach (Row _ in groupBy.ExecuteAsync(context)) { }
+
+        // 4 rows × MEDIAN (QU 2 each) = 8 QU.
+        Assert.Equal(8, meter.QueryUnits);
+    }
+
+    /// <summary>
+    /// WindowOperator accumulates QU for each window function computation.
+    /// ROW_NUMBER has QU cost 1; 3 rows in the partition = 3 QU.
+    /// </summary>
+    [Fact]
+    public async Task WindowOperator_WindowFunctionCalls_AccumulateQueryUnits()
+    {
+        QueryMeter meter = new();
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            meter);
+
+        MockOperator source = new(
+            new Row(["x"], [DataValue.FromScalar(1f)]),
+            new Row(["x"], [DataValue.FromScalar(2f)]),
+            new Row(["x"], [DataValue.FromScalar(3f)]));
+
+        IWindowFunction rowNumber = FunctionRegistry.CreateDefault().TryGetWindow("ROW_NUMBER")!;
+        WindowOperator window = new(
+            source,
+            [
+                new WindowColumn(
+                    rowNumber,
+                    ArgumentExpressions: [],
+                    WindowSpecification: new WindowSpecification(
+                        PartitionBy: null,
+                        OrderBy: null,
+                        Frame: null),
+                    OutputName: "rn",
+                    NullHandling: NullHandling.RespectNulls,
+                    FromLast: false)
+            ]);
+
+        await foreach (Row _ in window.ExecuteAsync(context)) { }
+
+        // 3 rows in partition × ROW_NUMBER (QU 1 per row) = 3 QU.
+        Assert.Equal(3, meter.QueryUnits);
     }
 }

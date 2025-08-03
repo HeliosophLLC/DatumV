@@ -24,6 +24,10 @@ public sealed class StringAggregateFunction : IAggregateFunction
     public string Name => "STRING_AGG";
 
     /// <inheritdoc/>
+    // O(N) string collection and join at finalization — Tier 2.
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

@@ -117,6 +117,7 @@ public sealed class GroupByOperator : IQueryOperator
                 {
                     // COUNT(*) — no arguments to evaluate.
                     group.Accumulators[aggregateIndex].Accumulate(ReadOnlySpan<DataValue>.Empty);
+                    context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
                 }
                 else
                 {
@@ -142,6 +143,7 @@ public sealed class GroupByOperator : IQueryOperator
                     else
                     {
                         group.Accumulators[aggregateIndex].Accumulate(arguments);
+                        context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
                     }
                 }
             }
@@ -190,6 +192,7 @@ public sealed class GroupByOperator : IQueryOperator
                     foreach ((DataValue[] arguments, _) in buffer)
                     {
                         groupState.Accumulators[aggregateIndex].Accumulate(arguments);
+                        context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
                     }
                 }
             }

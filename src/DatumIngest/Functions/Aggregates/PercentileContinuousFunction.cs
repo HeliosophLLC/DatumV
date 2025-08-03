@@ -21,6 +21,10 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
     public string Name => "PERCENTILE_CONT";
 
     /// <inheritdoc/>
+    // O(N) memory accumulation and O(N log N) sort at finalization — Tier 2.
+    public int QueryUnitCost => 2;
+
+    /// <inheritdoc/>
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

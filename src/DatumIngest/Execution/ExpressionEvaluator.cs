@@ -559,7 +559,9 @@ public sealed class ExpressionEvaluator
         {
             arguments[0] = value;
             arguments[1] = targetTypeValue;
-            return castFunction.Execute(arguments.AsSpan(0, 2));
+            DataValue result = castFunction.Execute(arguments.AsSpan(0, 2));
+            _meter?.Add(castFunction.QueryUnitCost);
+            return result;
         }
         finally
         {

@@ -26,9 +26,9 @@ Every function belongs to a single **category** that describes its operational d
 | **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, CORR, COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG, ARRAY_AGG). |
 | **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, plus aggregates with OVER). |
 
-> **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals; Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10) — full-image pixel scans; Tier 5 (QU 50) — image decode + transform + re-encode. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
+> **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals and memory-intensive aggregates (MEDIAN, PERCENTILE, MODE, STRING_AGG — functions that buffer all rows per group or sort at finalization); Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10 + ⌊px/100K⌋) — full-image pixel scans; Tier 5 (QU 50 + ⌊px/100K⌋) — image decode + transform + re-encode. px = width × height. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
 >
-> **Resolution-aware image costs:** Image analysis (Tier 4) and transform (Tier 5) functions incur a supplemental cost that scales with the input image resolution: `floor(width × height / 100,000)` additional QU per invocation. A 224×224 image adds 0 QU; a 1920×1080 image adds 20 QU; a 4K image adds 82 QU. The QU column in the tables below shows base cost only — actual cost equals base + supplemental.
+> **Resolution-aware image costs:** Image analysis (Tier 4) and transform (Tier 5) functions incur a supplemental cost proportional to input resolution: `⌊width × height / 100,000⌋` additional QU per invocation. A 224×224 image adds 0 QU; a 1920×1080 image adds 20 QU; a 4K image adds 82 QU. The QU column for each affected function shows the full formula — base cost + supplemental.
 
 ## Numeric / Array
 
@@ -395,16 +395,16 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `STDDEV` | `STDDEV(expr)` | Sample standard deviation (N−1). Alias for `STDDEV_SAMP`. | 1 |
 | `STDDEV_SAMP` | `STDDEV_SAMP(expr)` | Sample standard deviation (N−1). Null for fewer than 2 values. | 1 |
 | `STDDEV_POP` | `STDDEV_POP(expr)` | Population standard deviation (N denominator). | 1 |
-| `MEDIAN` | `MEDIAN(expr)` | Median (50th percentile) of non-null `Scalar` values. Averages two middle values for even counts. | 1 |
-| `PERCENTILE_CONT` | `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. | 1 |
-| `PERCENTILE_DISC` | `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an actually observed value. Fraction in [0, 1]. | 1 |
-| `MODE` | `MODE(expr)` | Most frequently occurring value. Ties broken by first occurrence. Works on any comparable type. | 1 |
+| `MEDIAN` | `MEDIAN(expr)` | Median (50th percentile) of non-null `Scalar` values. Averages two middle values for even counts. | 2 |
+| `PERCENTILE_CONT` | `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. | 2 |
+| `PERCENTILE_DISC` | `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an actually observed value. Fraction in [0, 1]. | 2 |
+| `MODE` | `MODE(expr)` | Most frequently occurring value. Ties broken by first occurrence. Works on any comparable type. | 2 |
 | `CORR` | `CORR(y, x)` | Pearson correlation coefficient between two numeric columns. Returns value in [−1, 1]. | 1 |
 | `COVAR_POP` | `COVAR_POP(y, x)` | Population covariance (N denominator) between two numeric columns. | 1 |
 | `COVAR_SAMP` | `COVAR_SAMP(y, x)` | Sample covariance (N−1 denominator). Null for fewer than 2 pairs. | 1 |
-| `APPROX_MEDIAN` | `APPROX_MEDIAN(expr)` | Approximate median using reservoir sampling. O(1) memory, ~1–5% error for large groups. | 1 |
-| `APPROX_PERCENTILE` | `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error. | 1 |
-| `STRING_AGG` | `STRING_AGG(expr, separator [ORDER BY ...])` | Concatenates non-null string values with a separator. Supports intra-aggregate ORDER BY. | 1 |
+| `APPROX_MEDIAN` | `APPROX_MEDIAN(expr)` | Approximate median using reservoir sampling. O(1) memory, ~1–5% error for large groups. | 2 |
+| `APPROX_PERCENTILE` | `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error. | 2 |
+| `STRING_AGG` | `STRING_AGG(expr, separator [ORDER BY ...])` | Concatenates non-null string values with a separator. Supports intra-aggregate ORDER BY. | 2 |
 | `ARRAY_AGG` | `ARRAY_AGG(expr [ORDER BY ...])` | Collects non-null values into a typed `Array`. Accepts any data kind. Supports intra-aggregate ORDER BY and DISTINCT. Returns null if all inputs are null. | 1 |
 
 All aggregate functions support the `DISTINCT` modifier (e.g. `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`), which deduplicates argument values before accumulation. The DISTINCT deduplication adds no additional Query Units. `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead.
@@ -657,51 +657,51 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `image_brightness_mean` | `image_brightness_mean(img)` | Mean brightness (BT.601 luminance) across all pixels → Scalar 0–255. | 10 |
-| `image_brightness_std` | `image_brightness_std(img)` | Standard deviation of brightness across all pixels → Scalar. | 10 |
-| `image_brightness_histogram` | `image_brightness_histogram(img)` | 256-bin brightness histogram → Vector. Each element is the pixel count for that luminance bin. | 10 |
-| `detect_blur` | `detect_blur(img)` | Laplacian variance blur detector → Scalar. Higher values = sharper image. | 10 |
-| `compression_artifact_score` | `compression_artifact_score(img)` | JPEG blockiness score → Scalar 0–1. Measures 8×8 block boundary discontinuities. | 10 |
+| `image_brightness_mean` | `image_brightness_mean(img)` | Mean brightness (BT.601 luminance) across all pixels → Scalar 0–255. | 10 + ⌊px/100K⌋ |
+| `image_brightness_std` | `image_brightness_std(img)` | Standard deviation of brightness across all pixels → Scalar. | 10 + ⌊px/100K⌋ |
+| `image_brightness_histogram` | `image_brightness_histogram(img)` | 256-bin brightness histogram → Vector. Each element is the pixel count for that luminance bin. | 10 + ⌊px/100K⌋ |
+| `detect_blur` | `detect_blur(img)` | Laplacian variance blur detector → Scalar. Higher values = sharper image. | 10 + ⌊px/100K⌋ |
+| `compression_artifact_score` | `compression_artifact_score(img)` | JPEG blockiness score → Scalar 0–1. Measures 8×8 block boundary discontinuities. | 10 + ⌊px/100K⌋ |
 
 ## Image — Pixel Statistics (2)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Scalar. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. | 10 |
-| `image_pixel_std` | `image_pixel_std(img[, channels])` | Standard deviation of pixel values. Same signature as `image_pixel_mean`. | 10 |
+| `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Scalar. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. | 10 + ⌊px/100K⌋ |
+| `image_pixel_std` | `image_pixel_std(img[, channels])` | Standard deviation of pixel values. Same signature as `image_pixel_mean`. | 10 + ⌊px/100K⌋ |
 
 ## Image — Loading & Decode (4)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
 | `load_image` | `load_image(bytes)` | Load encoded bytes (UInt8Array from ZIP/binary column) as an Image for use with transform and analysis functions. No decode — wraps the bytes as an opaque Image value for the fused pipeline. | 1 |
-| `image_to_bytes` | `image_to_bytes(img)` | Extract raw RGBA pixel bytes as UInt8Array (length H×W×4). | 50 |
-| `image_to_tensor_hwc` | `image_to_tensor_hwc(img)` | Decode to [H, W, 3] RGB float tensor (values 0–255). TensorFlow/NumPy layout. | 50 |
-| `image_to_tensor_chw` | `image_to_tensor_chw(img)` | Decode to [3, H, W] RGB float tensor (values 0–255). PyTorch layout. | 50 |
+| `image_to_bytes` | `image_to_bytes(img)` | Extract raw RGBA pixel bytes as UInt8Array (length H×W×4). | 50 + ⌊px/100K⌋ |
+| `image_to_tensor_hwc` | `image_to_tensor_hwc(img)` | Decode to [H, W, 3] RGB float tensor (values 0–255). TensorFlow/NumPy layout. | 50 + ⌊px/100K⌋ |
+| `image_to_tensor_chw` | `image_to_tensor_chw(img)` | Decode to [3, H, W] RGB float tensor (values 0–255). PyTorch layout. | 50 + ⌊px/100K⌋ |
 
 ## Image — Transforms (13)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `resize` | `resize(img, w, h[, fmt])` | Resize image to target width/height. | 50 |
-| `crop` | `crop(img, x, y, w, h[, fmt])` | Crop rectangular region. | 50 |
-| `grayscale` | `grayscale(img[, fmt])` | Convert to grayscale (BT.601 luminance). | 50 |
-| `rotate` | `rotate(img, degrees[, fmt])` | Rotate by arbitrary angle. Canvas expands for non-90° rotations. | 50 |
-| `noise` | `noise(img, type, val[, fmt])` | Add noise. Type: `'gaussian'` (val=stddev) or `'salt_pepper'` (val=ratio). | 50 |
-| `blur` | `blur(img, radius[, fmt])` | Gaussian blur with the given sigma radius. | 50 |
-| `brighten` | `brighten(img, intensity[, fmt])` | Increase brightness by adding intensity to RGB channels. | 50 |
-| `darken` | `darken(img, intensity[, fmt])` | Decrease brightness by subtracting intensity from RGB channels. | 50 |
-| `sobel` | `sobel(img[, fmt])` | Sobel edge detection → grayscale edge magnitude image. | 50 |
-| `resize_and_crop` | `resize_and_crop(img, w, h, gravity[, fmt])` | Resize to fill then crop to exact dimensions. Gravity: `'center'`, `'top'`, `'bottom'`, `'left'`, `'right'`. | 50 |
-| `affine_transform` | `affine_transform(img, angle, sx, sy, shx, shy[, fmt])` | Affine transformation with rotation (degrees), scale, and shear parameters. | 50 |
-| `elastic_deform` | `elastic_deform(img, alpha, sigma[, fmt])` | Elastic deformation (Simard et al.). Alpha = displacement intensity, sigma = smoothing. | 50 |
-| `perspective_warp` | `perspective_warp(img, intensity[, fmt])` or `perspective_warp(img, tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y[, fmt])` | Perspective distortion. Intensity mode: random warp. Explicit mode: normalized corner coordinates. | 50 |
+| `resize` | `resize(img, w, h[, fmt])` | Resize image to target width/height. | 50 + ⌊px/100K⌋ |
+| `crop` | `crop(img, x, y, w, h[, fmt])` | Crop rectangular region. | 50 + ⌊px/100K⌋ |
+| `grayscale` | `grayscale(img[, fmt])` | Convert to grayscale (BT.601 luminance). | 50 + ⌊px/100K⌋ |
+| `rotate` | `rotate(img, degrees[, fmt])` | Rotate by arbitrary angle. Canvas expands for non-90° rotations. | 50 + ⌊px/100K⌋ |
+| `noise` | `noise(img, type, val[, fmt])` | Add noise. Type: `'gaussian'` (val=stddev) or `'salt_pepper'` (val=ratio). | 50 + ⌊px/100K⌋ |
+| `blur` | `blur(img, radius[, fmt])` | Gaussian blur with the given sigma radius. | 50 + ⌊px/100K⌋ |
+| `brighten` | `brighten(img, intensity[, fmt])` | Increase brightness by adding intensity to RGB channels. | 50 + ⌊px/100K⌋ |
+| `darken` | `darken(img, intensity[, fmt])` | Decrease brightness by subtracting intensity from RGB channels. | 50 + ⌊px/100K⌋ |
+| `sobel` | `sobel(img[, fmt])` | Sobel edge detection → grayscale edge magnitude image. | 50 + ⌊px/100K⌋ |
+| `resize_and_crop` | `resize_and_crop(img, w, h, gravity[, fmt])` | Resize to fill then crop to exact dimensions. Gravity: `'center'`, `'top'`, `'bottom'`, `'left'`, `'right'`. | 50 + ⌊px/100K⌋ |
+| `affine_transform` | `affine_transform(img, angle, sx, sy, shx, shy[, fmt])` | Affine transformation with rotation (degrees), scale, and shear parameters. | 50 + ⌊px/100K⌋ |
+| `elastic_deform` | `elastic_deform(img, alpha, sigma[, fmt])` | Elastic deformation (Simard et al.). Alpha = displacement intensity, sigma = smoothing. | 50 + ⌊px/100K⌋ |
+| `perspective_warp` | `perspective_warp(img, intensity[, fmt])` or `perspective_warp(img, tl_x, tl_y, tr_x, tr_y, bl_x, bl_y, br_x, br_y[, fmt])` | Perspective distortion. Intensity mode: random warp. Explicit mode: normalized corner coordinates. | 50 + ⌊px/100K⌋ |
 
 ## Image — Hashing (1)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `perceptual_hash` | `perceptual_hash(img)` | Difference hash (dHash) → 64-element Vector of 0/1 bits. Use with `hamming_distance()` for similarity. | 10 |
+| `perceptual_hash` | `perceptual_hash(img)` | Difference hash (dHash) → 64-element Vector of 0/1 bits. Use with `hamming_distance()` for similarity. | 10 + ⌊px/100K⌋ |
 
 > All transform functions accept an optional trailing `fmt` argument (`'jpeg'`, `'png'`, `'webp'`) to control output encoding. Default preserves the original format.
 
