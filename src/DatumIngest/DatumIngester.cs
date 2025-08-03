@@ -22,6 +22,11 @@ namespace DatumIngest;
 /// offset 0 and ready to upload. Call <see cref="IAsyncDisposable.DisposeAsync"/>
 /// on the result when uploads are complete.
 /// </para>
+/// <para>
+/// Multi-table sources (for example a root-object JSON file with several array properties)
+/// produce one <c>.datum</c> stream and one <c>.datum-index</c> stream per discovered table.
+/// Use <see cref="DatumIngestionResult.Tables"/> to access them.
+/// </para>
 /// </remarks>
 public static class DatumIngester
 {
@@ -41,7 +46,7 @@ public static class DatumIngester
         CancellationToken cancellationToken = default)
     {
         return IngestCoreAsync(
-            tableName: Path.GetFileNameWithoutExtension(filePath),
+            baseTableName: Path.GetFileNameWithoutExtension(filePath),
             filePath: filePath,
             options: options ?? DatumIngesterOptions.Default,
             cancellationToken: cancellationToken);
@@ -80,7 +85,7 @@ public static class DatumIngester
             }
 
             return await IngestCoreAsync(
-                tableName: Path.GetFileNameWithoutExtension(fileName),
+                baseTableName: Path.GetFileNameWithoutExtension(fileName),
                 filePath: tempPath,
                 options: options ?? DatumIngesterOptions.Default,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -97,16 +102,13 @@ public static class DatumIngester
     // ──────────────────── Core implementation ────────────────────
 
     private static async Task<DatumIngestionResult> IngestCoreAsync(
-        string tableName,
+        string baseTableName,
         string filePath,
         DatumIngesterOptions options,
         CancellationToken cancellationToken)
     {
         TableCatalog catalog = new();
-        await catalog.RegisterAsync(filePath, cancellationToken).ConfigureAwait(false);
-
-        TableDescriptor descriptor = catalog.Resolve(catalog.TableNames.First());
-        ITableProvider provider = catalog.CreateProvider(descriptor);
+        await catalog.RegisterAsync(baseTableName, filePath, cancellationToken).ConfigureAwait(false);
 
         SourceFingerprint fingerprint;
         await using (FileStream sourceStream = File.OpenRead(filePath))
@@ -115,36 +117,71 @@ public static class DatumIngester
                 .ConfigureAwait(false);
         }
 
+        Dictionary<string, DatumIngestionTableResult> tables = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, Schema> schemas = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, QueryResultsManifest> manifests = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, SourceIndex> indexes = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string tableName in catalog.TableNames)
+        {
+            TableDescriptor descriptor = catalog.Resolve(tableName);
+            ITableProvider provider = catalog.CreateProvider(descriptor);
+            DatumIngestionTableResult tableResult = await IngestTableAsync(
+                descriptor, provider, fingerprint, options, cancellationToken).ConfigureAwait(false);
+
+            tables[tableName] = tableResult;
+            schemas[tableName] = tableResult.Schema;
+            manifests[tableName] = tableResult.Manifest;
+            indexes[tableName] = tableResult.Index;
+        }
+
+        SourceSchema sourceSchema = new() { Tables = schemas };
+        SourceManifest sourceManifest = new() { Tables = manifests };
+        SourceIndexSet indexSet = new(fingerprint, indexes);
+
+        string schemaJson = SchemaSerializer.Serialize(sourceSchema);
+        string manifestJson = ManifestSerializer.Serialize(sourceManifest);
+
+        return new DatumIngestionResult
+        {
+            Tables = tables,
+            SourceSchema = sourceSchema,
+            SourceManifest = sourceManifest,
+            IndexSet = indexSet,
+            SchemaJson = schemaJson,
+            ManifestJson = manifestJson,
+        };
+    }
+
+    private static async Task<DatumIngestionTableResult> IngestTableAsync(
+        TableDescriptor descriptor,
+        ITableProvider provider,
+        SourceFingerprint fingerprint,
+        DatumIngesterOptions options,
+        CancellationToken cancellationToken)
+    {
+        Schema schema = await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
         IncrementalIndexBuilder indexBuilder = new SourceIndexBuilder(
                 bloomAllColumns: options.BloomAllColumns,
                 indexAllColumns: options.IndexAllColumns,
                 chunkSize: options.ChunkSize)
             .CreateIncrementalBuilder(fingerprint);
-
         StatisticsCollector statisticsCollector = new();
-
         MemoryStream datumStream = new();
         FusedDatumPipelineWriter datumWriter = new(datumStream, indexBuilder, statisticsCollector);
 
-        Dictionary<string, DataKind> columnKinds = new();
-        long rowCount = 0;
+        await datumWriter.InitializeAsync(schema, cancellationToken).ConfigureAwait(false);
 
+        Dictionary<string, DataKind> columnKinds = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            columnKinds[column.Name] = column.Kind;
+        }
+
+        long rowCount = 0;
         await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
-            if (rowCount == 0)
-            {
-                List<ColumnInfo> columns = row.ColumnNames
-                    .Select(name => new ColumnInfo(name, row[name].Kind, nullable: true))
-                    .ToList();
-                Schema schema = new(columns);
-                await datumWriter.InitializeAsync(schema, cancellationToken).ConfigureAwait(false);
-                foreach (ColumnInfo column in columns)
-                {
-                    columnKinds[column.Name] = column.Kind;
-                }
-            }
-
             await datumWriter.WriteRowAsync(row, cancellationToken).ConfigureAwait(false);
             rowCount++;
         }
@@ -152,27 +189,33 @@ public static class DatumIngester
         await datumWriter.FinalizeAsync(cancellationToken).ConfigureAwait(false);
         await datumWriter.DisposeAsync().ConfigureAwait(false);
 
-        QueryResultsManifest tableManifest = ManifestBuilder.Build(
-            datumWriter.Statistics!, columnKinds, rowCount);
-
-        string schemaJson = SchemaSerializer.Serialize(tableName, datumWriter.Schema!);
-        string manifestJson = ManifestSerializer.Serialize(tableName, tableManifest);
+        IReadOnlyDictionary<string, ColumnStatistics> statistics = datumWriter.Statistics
+            ?? throw new InvalidOperationException("The datum writer did not produce statistics.");
+        SourceIndex index = datumWriter.CompletedIndex
+            ?? throw new InvalidOperationException("The datum writer did not produce an index.");
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+        string schemaJson = SchemaSerializer.Serialize(descriptor.Name, schema);
+        string manifestJson = ManifestSerializer.Serialize(descriptor.Name, manifest);
 
         MemoryStream indexStream = new();
-        new IndexWriter().Write(SourceIndexSet.Create(tableName, datumWriter.CompletedIndex!), indexStream);
+        IndexWriter indexWriter = new();
+        indexWriter.Write(SourceIndexSet.Create(descriptor.Name, index), indexStream);
 
         datumStream.Position = 0;
         indexStream.Position = 0;
 
-        return new DatumIngestionResult
+        return new DatumIngestionTableResult
         {
-            TableName = tableName,
+            TableName = descriptor.Name,
+            Schema = schema,
+            Manifest = manifest,
+            Index = index,
             DatumStream = datumStream,
             IndexStream = indexStream,
             SchemaJson = schemaJson,
             ManifestJson = manifestJson,
             RowCount = rowCount,
-            FeatureCount = tableManifest.Features.Count,
+            FeatureCount = manifest.Features.Count,
         };
     }
 }
