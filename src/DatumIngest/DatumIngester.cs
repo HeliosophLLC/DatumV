@@ -131,7 +131,7 @@ public static class DatumIngester
 
             tables[tableName] = tableResult;
             schemas[tableName] = tableResult.Schema;
-            manifests[tableName] = tableResult.Manifest;
+            manifests[tableName] = tableResult.Manifest.Tables[tableName];
             indexes[tableName] = tableResult.Index;
         }
 
@@ -194,9 +194,10 @@ public static class DatumIngester
             ?? throw new InvalidOperationException("The datum writer did not produce statistics.");
         SourceIndex index = datumWriter.CompletedIndex
             ?? throw new InvalidOperationException("The datum writer did not produce an index.");
-        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+        QueryResultsManifest queryManifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+        SourceManifest manifest = SourceManifest.Create(descriptor.Name, queryManifest);
         string schemaJson = SchemaSerializer.Serialize(descriptor.Name, schema);
-        string manifestJson = ManifestSerializer.Serialize(descriptor.Name, manifest);
+        string manifestJson = ManifestSerializer.Serialize(manifest);
 
         MemoryStream indexStream = new();
         IndexWriter indexWriter = new();
@@ -216,7 +217,7 @@ public static class DatumIngester
             SchemaJson = schemaJson,
             ManifestJson = manifestJson,
             RowCount = rowCount,
-            FeatureCount = manifest.Features.Count,
+            FeatureCount = queryManifest.Features.Count,
         };
     }
 }

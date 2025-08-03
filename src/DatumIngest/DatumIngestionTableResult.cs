@@ -16,8 +16,12 @@ public sealed class DatumIngestionTableResult
     /// <summary>The discovered schema for this table.</summary>
     public required Schema Schema { get; init; }
 
-    /// <summary>The collected manifest for this table.</summary>
-    public required QueryResultsManifest Manifest { get; init; }
+    /// <summary>
+    /// The single-table manifest for this table, wrapped in a <see cref="SourceManifest"/>
+    /// whose <see cref="SourceManifest.Tables"/> dictionary contains exactly one entry
+    /// keyed by <see cref="TableName"/>.
+    /// </summary>
+    public required SourceManifest Manifest { get; init; }
 
     /// <summary>The in-memory source index for this table.</summary>
     public required SourceIndex Index { get; init; }

@@ -28,7 +28,9 @@ public sealed class DatumIngesterTests
         Assert.Equal("array", table.TableName);
         Assert.Equal(3, result.RowCount);
         Assert.Equal(3, table.Schema.Columns.Count);
-        Assert.NotEmpty(table.Manifest.Features);
+        Assert.Single(table.Manifest.Tables);
+        Assert.True(table.Manifest.Tables.ContainsKey("array"));
+        Assert.NotEmpty(table.Manifest.Tables["array"].Features);
         Assert.True(table.DatumStream.Length > 0);
         Assert.True(table.IndexStream.Length > 0);
         Assert.Single(result.SourceSchema.Tables);
@@ -56,5 +58,23 @@ public sealed class DatumIngesterTests
         Assert.True(result.Tables["root_object.licenses"].IndexStream.Length > 0);
         Assert.True(result.Tables["root_object.captions"].DatumStream.Length > 0);
         Assert.True(result.Tables["root_object.captions"].IndexStream.Length > 0);
+    }
+
+    /// <summary>
+    /// Verifies that the per-table <see cref="DatumIngestionTableResult.Manifest"/> is always a
+    /// single-entry <see cref="SourceManifest"/> keyed by the table's own
+    /// <see cref="DatumIngestionTableResult.TableName"/>.
+    /// </summary>
+    [Fact]
+    public async Task IngestAsync_MultiTableJson_EachTableManifestIsSingleEntryKeyedByTableName()
+    {
+        await using DatumIngestionResult result = await DatumIngester.IngestAsync(
+            FixturePath("root_object.json"), cancellationToken: CancellationToken.None);
+
+        foreach (DatumIngestionTableResult table in result.Tables.Values)
+        {
+            Assert.Single(table.Manifest.Tables);
+            Assert.True(table.Manifest.Tables.ContainsKey(table.TableName));
+        }
     }
 }
