@@ -18,18 +18,19 @@ public sealed class DatumIngesterTests
     /// <see cref="DatumIngestionResult"/>.
     /// </summary>
     [Fact]
-    public async Task IngestAsync_SingleTableSource_ExposesConvenienceProperties()
+    public async Task IngestAsync_SingleTableSource_ExposesTableResult()
     {
         await using DatumIngestionResult result = await DatumIngester.IngestAsync(
             FixturePath("array.json"), cancellationToken: CancellationToken.None);
 
         Assert.Single(result.Tables);
-        Assert.Equal("array", result.TableName);
+        DatumIngestionTableResult table = result.Tables["array"];
+        Assert.Equal("array", table.TableName);
         Assert.Equal(3, result.RowCount);
-        Assert.Equal(3, result.Schema.Columns.Count);
-        Assert.NotEmpty(result.Manifest.Features);
-        Assert.True(result.DatumStream.Length > 0);
-        Assert.True(result.IndexStream.Length > 0);
+        Assert.Equal(3, table.Schema.Columns.Count);
+        Assert.NotEmpty(table.Manifest.Features);
+        Assert.True(table.DatumStream.Length > 0);
+        Assert.True(table.IndexStream.Length > 0);
         Assert.Single(result.SourceSchema.Tables);
         Assert.Single(result.SourceManifest.Tables);
         Assert.Single(result.IndexSet.Tables);
@@ -55,6 +56,5 @@ public sealed class DatumIngesterTests
         Assert.True(result.Tables["root_object.licenses"].IndexStream.Length > 0);
         Assert.True(result.Tables["root_object.captions"].DatumStream.Length > 0);
         Assert.True(result.Tables["root_object.captions"].IndexStream.Length > 0);
-        Assert.Throws<InvalidOperationException>(() => _ = result.TableName);
     }
 }

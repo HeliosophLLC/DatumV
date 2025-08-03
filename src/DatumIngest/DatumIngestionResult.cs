@@ -1,16 +1,21 @@
+using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
-using DatumIngest.Indexing;
 
 namespace DatumIngest;
 
 /// <summary>
 /// The output of a <see cref="DatumIngester"/> run: streams ready to upload,
-/// in-memory schema and statistics, serialized JSON payloads, and summary counts.
+/// per-table in-memory schema and statistics, serialized JSON payloads, and summary counts.
 /// Dispose when uploads are complete.
 /// </summary>
 public sealed class DatumIngestionResult : IAsyncDisposable
 {
+    /// <summary>
+    /// Gets the source fingerprint shared by all ingested tables.
+    /// </summary>
+    public required SourceFingerprint Fingerprint { get; init; }
+
     /// <summary>
     /// Gets the per-table ingestion results, keyed by logical table name.
     /// Single-table sources have one entry; multi-table sources have one per discovered sub-table.
@@ -31,44 +36,6 @@ public sealed class DatumIngestionResult : IAsyncDisposable
     /// Gets the combined source index set covering all ingested tables.
     /// </summary>
     public required SourceIndexSet IndexSet { get; init; }
-
-    /// <summary>
-    /// The logical table name for single-table sources.
-    /// Throws when the source expands to multiple logical tables.
-    /// </summary>
-    public string TableName => GetSingleTableResult().TableName;
-
-    /// <summary>
-    /// The discovered schema for single-table sources.
-    /// Throws when the source expands to multiple logical tables.
-    /// </summary>
-    public Schema Schema => GetSingleTableResult().Schema;
-
-    /// <summary>
-    /// The collected manifest for single-table sources.
-    /// Throws when the source expands to multiple logical tables.
-    /// </summary>
-    public QueryResultsManifest Manifest => GetSingleTableResult().Manifest;
-
-    /// <summary>
-    /// The in-memory index for single-table sources.
-    /// Throws when the source expands to multiple logical tables.
-    /// </summary>
-    public SourceIndex Index => GetSingleTableResult().Index;
-
-    /// <summary>
-    /// Seekable <see cref="MemoryStream"/> containing the <c>.datum</c> file bytes,
-    /// positioned at offset 0 and ready to upload.
-    /// Throws when the source expands to multiple logical tables.
-    /// </summary>
-    public MemoryStream DatumStream => GetSingleTableResult().DatumStream;
-
-    /// <summary>
-    /// Seekable <see cref="MemoryStream"/> containing the <c>.datum-index</c> file bytes,
-    /// positioned at offset 0 and ready to upload.
-    /// Throws when the source expands to multiple logical tables.
-    /// </summary>
-    public MemoryStream IndexStream => GetSingleTableResult().IndexStream;
 
     /// <summary>Serialized <c>SourceSchema</c> JSON for all ingested tables.</summary>
     public string SchemaJson { get; init; } = string.Empty;
@@ -104,16 +71,5 @@ public sealed class DatumIngestionResult : IAsyncDisposable
         }
 
         return ValueTask.CompletedTask;
-    }
-
-    private DatumIngestionTableResult GetSingleTableResult()
-    {
-        if (Tables.Count != 1)
-        {
-            throw new InvalidOperationException(
-                $"This ingestion produced {Tables.Count} tables. Use the Tables collection for multi-table sources.");
-        }
-
-        return Tables.Values.First();
     }
 }

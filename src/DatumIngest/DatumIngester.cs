@@ -46,7 +46,7 @@ public static class DatumIngester
         CancellationToken cancellationToken = default)
     {
         return IngestCoreAsync(
-            baseTableName: Path.GetFileNameWithoutExtension(filePath),
+            baseTableName: Path.GetFileName(filePath),
             filePath: filePath,
             options: options ?? DatumIngesterOptions.Default,
             cancellationToken: cancellationToken);
@@ -85,7 +85,7 @@ public static class DatumIngester
             }
 
             return await IngestCoreAsync(
-                baseTableName: Path.GetFileNameWithoutExtension(fileName),
+                baseTableName: Path.GetFileName(fileName),
                 filePath: tempPath,
                 options: options ?? DatumIngesterOptions.Default,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -144,6 +144,7 @@ public static class DatumIngester
 
         return new DatumIngestionResult
         {
+            Fingerprint = fingerprint,
             Tables = tables,
             SourceSchema = sourceSchema,
             SourceManifest = sourceManifest,
