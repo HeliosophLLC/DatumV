@@ -36,6 +36,14 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Returns the argument kind directly: <c>ARRAY_AGG(scalar_col)</c> produces
+    /// <c>Array&lt;Scalar&gt;</c>, so the element kind equals the argument kind.
+    /// </remarks>
+    public DataKind? GetResultArrayElementKind(ReadOnlySpan<DataKind> argumentKinds) =>
+        argumentKinds.Length == 1 ? argumentKinds[0] : null;
+
+    /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new ArrayAggregateAccumulator();
 
     /// <summary>

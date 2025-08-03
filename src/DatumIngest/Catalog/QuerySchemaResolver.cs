@@ -210,7 +210,29 @@ public sealed class QuerySchemaResolver
             argumentKinds[index] = kind ?? DataKind.Scalar;
         }
 
-        Schema outputSchema = schemaAware.GetOutputSchema(argumentKinds);
+        // For element-kind-aware functions (e.g. UNNEST), also resolve any array
+        // element kinds so the output schema can use precise types.
+        Schema outputSchema;
+        if (schemaAware is IElementKindAwareTableFunction elementKindAware)
+        {
+            DataKind?[] arrayElementKinds = new DataKind?[functionSource.Arguments.Count];
+            for (int index = 0; index < functionSource.Arguments.Count; index++)
+            {
+                if (argumentKinds[index] == DataKind.Array)
+                {
+                    Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Scalar, nullable: false)]);
+                    arrayElementKinds[index] = ExpressionTypeResolver.ResolveArrayElementKindFromExpression(
+                        functionSource.Arguments[index], emptySchema, _functionRegistry);
+                }
+            }
+
+            outputSchema = elementKindAware.GetOutputSchema(argumentKinds, arrayElementKinds);
+        }
+        else
+        {
+            outputSchema = schemaAware.GetOutputSchema(argumentKinds);
+        }
+
         string sourceIdentifier = functionSource.Alias ?? functionSource.FunctionName;
         return ToResolvedColumns(outputSchema, sourceIdentifier);
     }
@@ -230,7 +252,8 @@ public sealed class QuerySchemaResolver
                 column.Name,
                 column.Kind,
                 column.Nullable,
-                sourceIdentifier);
+                sourceIdentifier,
+                column.ArrayElementKind);
         }
 
         return columns;
@@ -254,14 +277,14 @@ public sealed class QuerySchemaResolver
                 string qualifiedName = $"{resolved.SourceTableOrAlias}.{resolved.ColumnName}";
                 if (seen.Add(qualifiedName))
                 {
-                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable));
+                    columns.Add(new ColumnInfo(qualifiedName, resolved.Kind, resolved.Nullable, resolved.ArrayElementKind));
                 }
             }
 
             // Add unqualified name (first occurrence wins).
             if (seen.Add(resolved.ColumnName))
             {
-                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable));
+                columns.Add(new ColumnInfo(resolved.ColumnName, resolved.Kind, resolved.Nullable, resolved.ArrayElementKind));
             }
         }
 

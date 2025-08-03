@@ -381,6 +381,15 @@ SELECT array_sort(ARRAY_AGG(score)) AS sorted_scores,
 FROM products
 GROUP BY category
 
+-- Array element access and numeric reduction (Tier 3)
+SELECT array_get(ARRAY_AGG(name ORDER BY score DESC), 1) AS top_name,
+       array_min(ARRAY_AGG(score)) AS min_score,
+       array_max(ARRAY_AGG(score)) AS max_score,
+       array_sum(ARRAY_AGG(score)) AS total_score,
+       array_avg(ARRAY_AGG(score)) AS avg_score
+FROM products
+GROUP BY category
+
 -- Approximate percentile for large groups (O(1) memory)
 SELECT category, APPROX_PERCENTILE(score, 0.95) AS approx_p95
 FROM reviews

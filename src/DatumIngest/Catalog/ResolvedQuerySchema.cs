@@ -13,11 +13,17 @@ namespace DatumIngest.Catalog;
 /// The table name or alias this column originates from,
 /// or <c>null</c> for computed columns without a clear source.
 /// </param>
+/// <param name="ArrayElementKind">
+/// For <see cref="DataKind.Array"/> columns, the element kind of the array.
+/// <c>null</c> when the element kind is unknown at plan time or when
+/// <see cref="Kind"/> is not <see cref="DataKind.Array"/>.
+/// </param>
 public sealed record ResolvedColumn(
     string ColumnName,
     DataKind Kind,
     bool Nullable,
-    string? SourceTableOrAlias);
+    string? SourceTableOrAlias,
+    DataKind? ArrayElementKind = null);
 
 /// <summary>
 /// The combined column schema resolved from all table sources in a query's

@@ -10,7 +10,9 @@ namespace DatumIngest.Tests.Functions;
 /// <see cref="ArrayPositionFunction"/>, <see cref="ArrayConstructorFunction"/>,
 /// <see cref="ArraySortFunction"/>, <see cref="ArrayReverseFunction"/>,
 /// <see cref="ArrayDistinctFunction"/>, <see cref="ArraySliceFunction"/>,
-/// and <see cref="ArrayConcatFunction"/>.
+/// <see cref="ArrayConcatFunction"/>, <see cref="ArrayGetFunction"/>,
+/// <see cref="ArrayMinFunction"/>, <see cref="ArrayMaxFunction"/>,
+/// <see cref="ArraySumFunction"/>, and <see cref="ArrayAvgFunction"/>.
 /// Also tests <see cref="LenFunction"/> Array support.
 /// </summary>
 public class ArrayFunctionTests
@@ -819,6 +821,11 @@ public class ArrayFunctionTests
     [InlineData("array_distinct")]
     [InlineData("array_slice")]
     [InlineData("array_concat")]
+    [InlineData("array_get")]
+    [InlineData("array_min")]
+    [InlineData("array_max")]
+    [InlineData("array_sum")]
+    [InlineData("array_avg")]
     public void Registry_ContainsArrayFunction(string functionName)
     {
         FunctionRegistry registry = FunctionRegistry.CreateDefault();
@@ -826,5 +833,340 @@ public class ArrayFunctionTests
 
         Assert.NotNull(function);
         Assert.Equal(functionName, function.Name);
+    }
+
+    // ───────────────── ARRAY_GET ─────────────────
+
+    [Fact]
+    public void ArrayGet_ReturnsElementAtIndex()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(10f, 20f, 30f), DataValue.FromScalar(2f)]);
+        Assert.Equal(20f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ArrayGet_FirstElement()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeStringArray("a", "b", "c"), DataValue.FromScalar(1f)]);
+        Assert.Equal("a", result.AsString());
+    }
+
+    [Fact]
+    public void ArrayGet_LastElement()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeStringArray("x", "y", "z"), DataValue.FromScalar(3f)]);
+        Assert.Equal("z", result.AsString());
+    }
+
+    [Fact]
+    public void ArrayGet_IndexOutOfBounds_ReturnsNull()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromScalar(5f)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void ArrayGet_IndexZero_ReturnsNull()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromScalar(0f)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void ArrayGet_NegativeIndex_ReturnsNull()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromScalar(-1f)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void ArrayGet_NullArray_ReturnsNull()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([DataValue.NullArray(DataKind.Scalar), DataValue.FromScalar(1f)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void ArrayGet_NullIndex_ReturnsNull()
+    {
+        ArrayGetFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.Null(DataKind.Scalar)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void ArrayGet_ValidateWithElementKind_ReturnsElementKind()
+    {
+        ArrayGetFunction function = new();
+        DataKind result = function.ValidateArgumentsWithElementKinds(
+            [DataKind.Array, DataKind.Scalar], [DataKind.String, null]);
+        Assert.Equal(DataKind.String, result);
+    }
+
+    [Fact]
+    public void ArrayGet_ValidateWithUnknownElementKind_FallsBackToScalar()
+    {
+        ArrayGetFunction function = new();
+        DataKind result = function.ValidateArgumentsWithElementKinds(
+            [DataKind.Array, DataKind.Scalar], [null, null]);
+        Assert.Equal(DataKind.Scalar, result);
+    }
+
+    [Fact]
+    public void ArrayGet_ImplementsIElementKindAwareFunction()
+    {
+        Assert.IsAssignableFrom<IElementKindAwareFunction>(new ArrayGetFunction());
+    }
+
+    // ───────────────── ARRAY_MIN ─────────────────
+
+    [Fact]
+    public void ArrayMin_ReturnsMinimumScalar()
+    {
+        ArrayMinFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(3f, 1f, 2f)]);
+        Assert.Equal(1f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ArrayMin_ReturnsMinimumString()
+    {
+        ArrayMinFunction function = new();
+        DataValue result = function.Execute([MakeStringArray("banana", "apple", "cherry")]);
+        Assert.Equal("apple", result.AsString());
+    }
+
+    [Fact]
+    public void ArrayMin_SingleElement()
+    {
+        ArrayMinFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(42f)]);
+        Assert.Equal(42f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ArrayMin_SkipsNullElements()
+    {
+        ArrayMinFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
+            DataValue.Null(DataKind.Scalar),
+            DataValue.FromScalar(5f),
+            DataValue.FromScalar(2f)]);
+        Assert.Equal(2f, function.Execute([arr]).AsScalar());
+    }
+
+    [Fact]
+    public void ArrayMin_AllNulls_ReturnsNull()
+    {
+        ArrayMinFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
+            DataValue.Null(DataKind.Scalar),
+            DataValue.Null(DataKind.Scalar)]);
+        Assert.True(function.Execute([arr]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayMin_EmptyArray_ReturnsNull()
+    {
+        ArrayMinFunction function = new();
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayMin_NullArray_ReturnsNull()
+    {
+        ArrayMinFunction function = new();
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayMin_ValidateWithElementKind_ReturnsElementKind()
+    {
+        ArrayMinFunction function = new();
+        Assert.Equal(DataKind.String,
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.String]));
+    }
+
+    // ───────────────── ARRAY_MAX ─────────────────
+
+    [Fact]
+    public void ArrayMax_ReturnsMaximumScalar()
+    {
+        ArrayMaxFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(3f, 1f, 5f, 2f)]);
+        Assert.Equal(5f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ArrayMax_ReturnsMaximumString()
+    {
+        ArrayMaxFunction function = new();
+        DataValue result = function.Execute([MakeStringArray("banana", "apple", "cherry")]);
+        Assert.Equal("cherry", result.AsString());
+    }
+
+    [Fact]
+    public void ArrayMax_SkipsNullElements()
+    {
+        ArrayMaxFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
+            DataValue.Null(DataKind.Scalar),
+            DataValue.FromScalar(5f),
+            DataValue.FromScalar(2f)]);
+        Assert.Equal(5f, function.Execute([arr]).AsScalar());
+    }
+
+    [Fact]
+    public void ArrayMax_EmptyArray_ReturnsNull()
+    {
+        ArrayMaxFunction function = new();
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayMax_NullArray_ReturnsNull()
+    {
+        ArrayMaxFunction function = new();
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayMax_ValidateWithElementKind_ReturnsElementKind()
+    {
+        ArrayMaxFunction function = new();
+        Assert.Equal(DataKind.Date,
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.Date]));
+    }
+
+    // ───────────────── ARRAY_SUM ─────────────────
+
+    [Fact]
+    public void ArraySum_SumsScalarElements()
+    {
+        ArraySumFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f, 3f, 4f)]);
+        Assert.Equal(10f, result.AsScalar());
+    }
+
+    [Fact]
+    public void ArraySum_SkipsNullElements()
+    {
+        ArraySumFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
+            DataValue.FromScalar(1f),
+            DataValue.Null(DataKind.Scalar),
+            DataValue.FromScalar(3f)]);
+        Assert.Equal(4f, function.Execute([arr]).AsScalar());
+    }
+
+    [Fact]
+    public void ArraySum_EmptyArray_ReturnsNull()
+    {
+        ArraySumFunction function = new();
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+    }
+
+    [Fact]
+    public void ArraySum_AllNulls_ReturnsNull()
+    {
+        ArraySumFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [DataValue.Null(DataKind.Scalar)]);
+        Assert.True(function.Execute([arr]).IsNull);
+    }
+
+    [Fact]
+    public void ArraySum_NullArray_ReturnsNull()
+    {
+        ArraySumFunction function = new();
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+    }
+
+    [Fact]
+    public void ArraySum_AlwaysReturnsScalar()
+    {
+        ArraySumFunction function = new();
+        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Array]));
+        Assert.Equal(DataKind.Scalar,
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.Scalar]));
+    }
+
+    [Fact]
+    public void ArraySum_InvalidElementKind_Throws()
+    {
+        ArraySumFunction function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.String]));
+    }
+
+    // ───────────────── ARRAY_AVG ─────────────────
+
+    [Fact]
+    public void ArrayAvg_AveragesScalarElements()
+    {
+        ArrayAvgFunction function = new();
+        DataValue result = function.Execute([MakeScalarArray(2f, 4f, 6f)]);
+        Assert.Equal(4f, result.AsScalar(), tolerance: 0.001f);
+    }
+
+    [Fact]
+    public void ArrayAvg_SkipsNullElements()
+    {
+        ArrayAvgFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
+            DataValue.FromScalar(10f),
+            DataValue.Null(DataKind.Scalar),
+            DataValue.FromScalar(20f)]);
+        Assert.Equal(15f, function.Execute([arr]).AsScalar(), tolerance: 0.001f);
+    }
+
+    [Fact]
+    public void ArrayAvg_SingleElement()
+    {
+        ArrayAvgFunction function = new();
+        Assert.Equal(7f, function.Execute([MakeScalarArray(7f)]).AsScalar(), tolerance: 0.001f);
+    }
+
+    [Fact]
+    public void ArrayAvg_EmptyArray_ReturnsNull()
+    {
+        ArrayAvgFunction function = new();
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayAvg_AllNulls_ReturnsNull()
+    {
+        ArrayAvgFunction function = new();
+        DataValue arr = DataValue.FromArray(DataKind.Scalar, [DataValue.Null(DataKind.Scalar)]);
+        Assert.True(function.Execute([arr]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayAvg_NullArray_ReturnsNull()
+    {
+        ArrayAvgFunction function = new();
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+    }
+
+    [Fact]
+    public void ArrayAvg_AlwaysReturnsScalar()
+    {
+        ArrayAvgFunction function = new();
+        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Array]));
+    }
+
+    [Fact]
+    public void ArrayAvg_InvalidElementKind_Throws()
+    {
+        ArrayAvgFunction function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.Boolean]));
     }
 }
