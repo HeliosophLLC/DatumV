@@ -359,6 +359,10 @@ public sealed class IndexReader
             DataKind.Matrix => ReadMatrix(reader),
             DataKind.Tensor => ReadTensor(reader),
             DataKind.Image => ReadImage(reader),
+            DataKind.Boolean => DataValue.FromBoolean(reader.ReadBoolean()),
+            DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
+            DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
+            DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
     }

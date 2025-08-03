@@ -185,6 +185,9 @@ public enum OutputFormat
 
     /// <summary>Comma-separated values text format.</summary>
     Csv,
+
+    /// <summary>DatumIngest native columnar format (.datum).</summary>
+    Datum,
 }
 
 /// <summary>

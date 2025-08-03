@@ -1647,6 +1647,11 @@ public static class SqlParser
             return OutputFormat.Csv;
         }
 
+        if (path.EndsWith(".datum", StringComparison.OrdinalIgnoreCase))
+        {
+            return OutputFormat.Datum;
+        }
+
         // .h5, .hdf5, or anything else defaults to HDF5
         return OutputFormat.Hdf5;
     }

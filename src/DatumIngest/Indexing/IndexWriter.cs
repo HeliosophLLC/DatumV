@@ -325,6 +325,22 @@ public sealed class IndexWriter
                 writer.Write(imageBytes);
                 break;
 
+            case DataKind.Boolean:
+                writer.Write(value.AsBoolean());
+                break;
+
+            case DataKind.Time:
+                writer.Write(value.AsTime().Ticks);
+                break;
+
+            case DataKind.Duration:
+                writer.Write(value.AsDuration().Ticks);
+                break;
+
+            case DataKind.Uuid:
+                writer.Write(value.AsUuid().ToByteArray());
+                break;
+
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }

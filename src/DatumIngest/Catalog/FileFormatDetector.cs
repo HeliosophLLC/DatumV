@@ -29,6 +29,7 @@ public static class FileFormatDetector
         [".hdf"] = "hdf5",
         [".zip"] = "zip",
         [".idx"] = "idx",
+        [".datum"] = "datum",
     };
 
     /// <summary>

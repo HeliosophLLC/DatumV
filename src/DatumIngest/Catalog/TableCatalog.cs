@@ -44,6 +44,7 @@ public sealed class TableCatalog
         _providerFactories["hdf5"] = () => new Hdf5TableProvider();
         _providerFactories["zip"] = () => new ZipTableProvider();
         _providerFactories["idx"] = () => new IdxTableProvider();
+        _providerFactories["datum"] = () => new DatumFileTableProvider();
     }
 
     /// <summary>

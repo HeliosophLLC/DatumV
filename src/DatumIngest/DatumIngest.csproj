@@ -30,6 +30,7 @@
     <PackageReference Include="PureHDF" Version="2.1.1" />
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.0" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.7" />
   </ItemGroup>
 
   <ItemGroup>

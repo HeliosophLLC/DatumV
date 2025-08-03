@@ -1024,6 +1024,7 @@ static IOutputWriter CreateBaseWriter(OutputFormat format, string path)
         OutputFormat.Csv => new CsvOutputWriter(path),
         OutputFormat.Hdf5 => new Hdf5OutputWriter(path),
         OutputFormat.Parquet => new ParquetOutputWriter(path),
+        OutputFormat.Datum => new DatumOutputWriter(path),
         _ => throw new ArgumentException($"Unsupported output format: {format}")
     };
 }
