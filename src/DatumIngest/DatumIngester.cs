@@ -209,6 +209,9 @@ public static class DatumIngester
         return new DatumIngestionTableResult
         {
             TableName = descriptor.Name,
+            FileName = $"{descriptor.Name}.datum",
+            IndexFileName = $"{descriptor.Name}.datum-index",
+            ManifestFileName = $"{descriptor.Name}.datum-manifest",
             Schema = schema,
             Manifest = manifest,
             Index = index,

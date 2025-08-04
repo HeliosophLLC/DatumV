@@ -687,6 +687,271 @@ public class QueryPlannerTests
         };
     }
 
+    // ─────────────── Greedy join reordering tests ───────────────
+
+    /// <summary>
+    /// When all joins are INNER and all sources have estimated row counts,
+    /// the planner should place the largest table on the streaming (FROM/left)
+    /// side so that LIMIT can short-circuit the probe without reading the
+    /// entire build side.
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoins_ReordersLargestTableToProbe()
+    {
+        // Arrange: small (100 rows) JOIN large (10_000 rows).
+        // Without reordering, small is probe, large is build.
+        // With reordering, large becomes probe, small becomes build.
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_small", () => new StubRowCountProvider(estimatedRowCount: 100));
+        catalog.RegisterProvider("stub_large", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.Register(new TableDescriptor("stub_small", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_large", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM small_table JOIN large_table ON small_table.id = large_table.id
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("small_table")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("large_table"),
+                new BinaryExpression(
+                    new ColumnReference("small_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("large_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // The outermost join's left (probe) side should be the large table.
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+
+        ScanOperator? probeScan = FindOperator<ScanOperator>(join.Left);
+        Assert.NotNull(probeScan);
+        Assert.Equal("large_table", probeScan!.Descriptor.Name);
+
+        ScanOperator? buildScan = FindOperator<ScanOperator>(join.Right);
+        Assert.NotNull(buildScan);
+        Assert.Equal("small_table", buildScan!.Descriptor.Name);
+    }
+
+    /// <summary>
+    /// Three-table INNER join: the largest table should become the probe,
+    /// and the two smaller tables should be ordered smallest-first on the build
+    /// side, respecting ON-condition connectivity.
+    /// </summary>
+    [Fact]
+    public void Plan_ThreeTableInnerJoin_ReordersCorrectly()
+    {
+        // orders (10_000) JOIN products (500) ON orders.pid = products.id
+        //                  JOIN categories (50) ON products.cid = categories.id
+        // Expected reording: FROM orders (largest, probe)
+        //   JOIN categories (smallest satisfiable) ON ...
+        //   Actually, categories.id only connects to products, not orders,
+        //   so categories can't go first.
+        // Expected: FROM orders JOIN products ON ... JOIN categories ON ...
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_orders", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.RegisterProvider("stub_products", () => new StubRowCountProvider(estimatedRowCount: 500));
+        catalog.RegisterProvider("stub_categories", () => new StubRowCountProvider(estimatedRowCount: 50));
+        catalog.Register(new TableDescriptor("stub_orders", "orders", "o.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_products", "products", "p.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_categories", "categories", "c.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // Original SQL order: FROM products JOIN orders ON ... JOIN categories ON ...
+        // (products is the smallest, orders is largest but written as JOIN)
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("products")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("orders"),
+                    new BinaryExpression(
+                        new ColumnReference("products", "id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("orders", "product_id"))),
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("categories"),
+                    new BinaryExpression(
+                        new ColumnReference("products", "category_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("categories", "id"))),
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // orders (largest) should be the probe.
+        JoinOperator outerJoin = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(outerJoin);
+
+        // The left side of the outer join should be another JoinOperator
+        // (orders JOIN products), and the right side should be categories.
+        JoinOperator innerJoin = Assert.IsType<JoinOperator>(FindDirectJoin(outerJoin.Left));
+        Assert.NotNull(innerJoin);
+
+        // Probe (deepest left) should be orders.
+        ScanOperator? ordersScan = FindOperator<ScanOperator>(innerJoin.Left);
+        Assert.NotNull(ordersScan);
+        Assert.Equal("orders", ordersScan!.Descriptor.Name);
+
+        // First build should be products (connects to orders).
+        ScanOperator? productsScan = FindOperator<ScanOperator>(innerJoin.Right);
+        Assert.NotNull(productsScan);
+        Assert.Equal("products", productsScan!.Descriptor.Name);
+
+        // Second build should be categories (connects to products, now available).
+        ScanOperator? categoriesScan = FindOperator<ScanOperator>(outerJoin.Right);
+        Assert.NotNull(categoriesScan);
+        Assert.Equal("categories", categoriesScan!.Descriptor.Name);
+    }
+
+    /// <summary>
+    /// LEFT OUTER joins should not trigger reordering — only INNER joins
+    /// are eligible because changing the probe side changes semantics.
+    /// </summary>
+    [Fact]
+    public void Plan_LeftJoin_DoesNotReorder()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_small", () => new StubRowCountProvider(estimatedRowCount: 100));
+        catalog.RegisterProvider("stub_large", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.Register(new TableDescriptor("stub_small", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_large", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM small_table LEFT JOIN large_table ON ...
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("small_table")),
+            Joins: [new JoinClause(
+                JoinType.Left,
+                new TableReference("large_table"),
+                new BinaryExpression(
+                    new ColumnReference("small_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("large_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Original order preserved: small_table is probe, large_table is build.
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+
+        ScanOperator? probeScan = FindOperator<ScanOperator>(join.Left);
+        Assert.NotNull(probeScan);
+        Assert.Equal("small_table", probeScan!.Descriptor.Name);
+    }
+
+    /// <summary>
+    /// When a source lacks an estimated row count, reordering is skipped
+    /// since we cannot determine relative sizes.
+    /// </summary>
+    [Fact]
+    public void Plan_MissingRowCount_DoesNotReorder()
+    {
+        // CSV provider returns null for EstimatedRowCount.
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("small_table")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("large_table"),
+                new BinaryExpression(
+                    new ColumnReference("small_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("large_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Original order preserved: small_table is probe.
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+
+        ScanOperator? probeScan = FindOperator<ScanOperator>(join.Left);
+        Assert.NotNull(probeScan);
+        Assert.Equal("small_table", probeScan!.Descriptor.Name);
+    }
+
+    /// <summary>
+    /// When the largest table is already the FROM source, no reordering occurs
+    /// because the left-deep tree already has it as the probe.
+    /// </summary>
+    [Fact]
+    public void Plan_LargestAlreadyProbe_DoesNotReorder()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_small", () => new StubRowCountProvider(estimatedRowCount: 100));
+        catalog.RegisterProvider("stub_large", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.Register(new TableDescriptor("stub_small", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_large", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // FROM large_table JOIN small_table — already optimal.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("large_table")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("small_table"),
+                new BinaryExpression(
+                    new ColumnReference("large_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("small_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Original order preserved: large_table is probe.
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+
+        ScanOperator? probeScan = FindOperator<ScanOperator>(join.Left);
+        Assert.NotNull(probeScan);
+        Assert.Equal("large_table", probeScan!.Descriptor.Name);
+    }
+
+    /// <summary>
+    /// Finds the nearest <see cref="JoinOperator"/> by walking through
+    /// transparent wrappers (alias, filter, project).
+    /// </summary>
+    private static JoinOperator? FindDirectJoin(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case JoinOperator join:
+                    return join;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                case ProjectOperator project:
+                    current = project.Source;
+                    break;
+                default:
+                    return null;
+            }
+        }
+    }
+
     // ─────────────── PlanAsync late materialization tests ───────────────
 
     private static TableCatalog CreateCatalogWithKeyedProvider(
@@ -997,5 +1262,49 @@ internal sealed class StubKeyedProvider : IKeyedTableProvider
     {
         await Task.CompletedTask;
         yield break;
+    }
+}
+
+/// <summary>
+/// A minimal <see cref="ITableProvider"/> that returns a configurable
+/// <see cref="ProviderCapabilities.EstimatedRowCount"/> for greedy join
+/// reordering tests. Produces no rows.
+/// </summary>
+internal sealed class StubRowCountProvider : ITableProvider
+{
+    private readonly long _estimatedRowCount;
+
+    public StubRowCountProvider(long estimatedRowCount)
+    {
+        _estimatedRowCount = estimatedRowCount;
+    }
+
+    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        List<ColumnInfo> columns =
+        [
+            new ColumnInfo("id", DataKind.String, nullable: false),
+        ];
+
+        return Task.FromResult(new Schema(columns));
+    }
+
+    public IAsyncEnumerable<Row> OpenAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        CancellationToken cancellationToken)
+    {
+        return AsyncEnumerable.Empty<Row>();
+    }
+
+    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+        TableDescriptor descriptor,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new ProviderCapabilities(
+            EstimatedRowCount: _estimatedRowCount,
+            EstimatedRowSizeBytes: null,
+            SupportsSeek: false,
+            ColumnCosts: new Dictionary<string, ColumnCost>()));
     }
 }

@@ -1,9 +1,10 @@
 namespace DatumIngest.Catalog;
 
 /// <summary>
-/// Detects the provider name for a data file using file extension,
-/// filename patterns, and magic byte signatures. Returns <c>null</c>
-/// when the format cannot be determined.
+/// Central authority for file format detection and naming conventions. Detects
+/// the provider name for a data file using file extension, filename patterns,
+/// and magic byte signatures. Also derives logical table names and sidecar paths
+/// so that every consumer agrees on the same conventions.
 /// </summary>
 public static class FileFormatDetector
 {
@@ -11,6 +12,16 @@ public static class FileFormatDetector
     /// Maximum number of bytes read from the file header for magic byte detection.
     /// </summary>
     private const int MagicByteBufferLength = 8;
+
+    /// <summary>
+    /// Extensions whose files are container/storage formats wrapping another logical
+    /// data file. The extension is stripped when deriving the logical table name and
+    /// when computing sidecar base paths.
+    /// </summary>
+    private static readonly HashSet<string> ContainerExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".datum",
+    };
 
     /// <summary>
     /// Maps well-known file extensions to provider names.
@@ -31,6 +42,54 @@ public static class FileFormatDetector
         [".idx"] = "idx",
         [".datum"] = "datum",
     };
+
+    /// <summary>
+    /// Glob patterns that match all file types recognised by auto-discovery.
+    /// Generated from <see cref="ExtensionMap"/> plus MNIST IDX filename patterns.
+    /// Use this instead of maintaining separate pattern lists in each consumer.
+    /// </summary>
+    public static IReadOnlyList<string> SupportedFilePatterns { get; } = BuildSupportedPatterns();
+
+    /// <summary>
+    /// Comma-separated list of the distinct provider/format names recognised by the
+    /// detector, suitable for inclusion in user-facing error messages.
+    /// </summary>
+    public static string SupportedFormatList { get; } = BuildFormatList();
+
+    /// <summary>
+    /// Derives the logical table name for a data file. Container formats (e.g.
+    /// <c>.datum</c>) have their storage extension stripped so the name reflects
+    /// the underlying data file (<c>departments.csv.datum</c> → <c>departments.csv</c>).
+    /// All other formats use the full filename including extension.
+    /// </summary>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <returns>The logical table name for use in SQL FROM clauses.</returns>
+    public static string DeriveTableName(string filePath)
+    {
+        string extension = Path.GetExtension(filePath);
+        return ContainerExtensions.Contains(extension)
+            ? Path.GetFileNameWithoutExtension(filePath)
+            : Path.GetFileName(filePath);
+    }
+
+    /// <summary>
+    /// Returns the base path used for resolving sidecar files (<c>.datum-index</c>,
+    /// <c>.datum-manifest</c>, <c>.datum-schema</c>). For container formats the
+    /// storage extension is stripped so sidecars sit alongside the logical data name
+    /// (<c>foo.csv.datum</c> → <c>foo.csv</c>, yielding <c>foo.csv.datum-index</c>).
+    /// </summary>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <returns>The base path to which sidecar suffixes should be appended.</returns>
+    public static string GetSidecarBasePath(string filePath)
+    {
+        string extension = Path.GetExtension(filePath);
+        if (extension.Length > 0 && ContainerExtensions.Contains(extension))
+        {
+            return filePath[..^extension.Length];
+        }
+
+        return filePath;
+    }
 
     /// <summary>
     /// Attempts to detect the provider name for the given file path.
@@ -187,5 +246,44 @@ public static class FileFormatDetector
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Builds the glob pattern list from <see cref="ExtensionMap"/> keys plus
+    /// MNIST IDX filename patterns, ensuring it stays in sync automatically.
+    /// </summary>
+    private static string[] BuildSupportedPatterns()
+    {
+        HashSet<string> patterns = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string extension in ExtensionMap.Keys)
+        {
+            patterns.Add($"*{extension}");
+        }
+
+        // MNIST-style IDX filenames that have no conventional extension.
+        patterns.Add("*idx1-ubyte");
+        patterns.Add("*idx2-ubyte");
+        patterns.Add("*idx3-ubyte");
+        patterns.Add("*idx4-ubyte");
+
+        string[] result = [.. patterns];
+        Array.Sort(result, StringComparer.OrdinalIgnoreCase);
+        return result;
+    }
+
+    /// <summary>
+    /// Builds a comma-separated list of distinct provider names from <see cref="ExtensionMap"/>
+    /// plus "idx" (for MNIST-style files matched by filename pattern).
+    /// </summary>
+    private static string BuildFormatList()
+    {
+        SortedSet<string> providers = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string provider in ExtensionMap.Values)
+        {
+            providers.Add(provider);
+        }
+
+        providers.Add("idx");
+        return string.Join(", ", providers);
     }
 }

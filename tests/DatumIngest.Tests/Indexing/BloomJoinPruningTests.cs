@@ -329,6 +329,149 @@ public sealed class BloomJoinPruningTests
         Assert.Equal(1, scanOperator.PrunedIndexChunks);
     }
 
+    /// <summary>
+    /// Multi-level bloom pruning: when the probe side of an outer join
+    /// itself contains an inner join, bloom keys from the outer build side
+    /// should reach <see cref="ScanOperator"/> instances buried inside the
+    /// inner join.  This verifies the <see cref="JoinOperator.CollectScanOperators"/>
+    /// traversal through nested <see cref="JoinOperator"/> nodes.
+    /// </summary>
+    [Fact]
+    public async Task HashJoin_NestedJoin_BloomPruningReachesBuriedScan()
+    {
+        // Inner-left scan: "orders" table with 2 chunks on column "product_id".
+        // Chunk 0: product_id 1.0, 2.0 | Chunk 1: product_id 3.0, 4.0
+        Row[] orderRows =
+        [
+            MakeRow(("order_id", DataValue.FromScalar(100.0f)), ("product_id", DataValue.FromScalar(1.0f))),
+            MakeRow(("order_id", DataValue.FromScalar(101.0f)), ("product_id", DataValue.FromScalar(2.0f))),
+            MakeRow(("order_id", DataValue.FromScalar(102.0f)), ("product_id", DataValue.FromScalar(3.0f))),
+            MakeRow(("order_id", DataValue.FromScalar(103.0f)), ("product_id", DataValue.FromScalar(4.0f))),
+        ];
+
+        BloomFilter orderChunk0Bloom = new(expectedElements: 10);
+        orderChunk0Bloom.Add(DataValue.FromScalar(1.0f));
+        orderChunk0Bloom.Add(DataValue.FromScalar(2.0f));
+
+        BloomFilter orderChunk1Bloom = new(expectedElements: 10);
+        orderChunk1Bloom.Add(DataValue.FromScalar(3.0f));
+        orderChunk1Bloom.Add(DataValue.FromScalar(4.0f));
+
+        Dictionary<string, BloomFilter[]> orderBloomFilters = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["product_id"] = [orderChunk0Bloom, orderChunk1Bloom]
+        };
+
+        BloomFilterSet orderBloomSet = new(orderBloomFilters, chunkCount: 2);
+
+        Dictionary<string, ChunkColumnStatistics> orderChunk0Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["product_id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+        };
+        Dictionary<string, ChunkColumnStatistics> orderChunk1Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["product_id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+        };
+
+        List<IndexChunk> orderChunks =
+        [
+            new IndexChunk(0, 2, -1, -1, orderChunk0Stats),
+            new IndexChunk(2, 2, -1, -1, orderChunk1Stats),
+        ];
+
+        SourceFingerprint orderFingerprint = new(0, new byte[32]);
+        Schema orderSchema = new([new ColumnInfo("product_id", DataKind.Scalar, nullable: false)]);
+        IndexSchema orderIndexSchema = new(orderSchema, 4);
+        SourceIndex orderSourceIndex = new(orderFingerprint, orderIndexSchema, orderChunks, orderBloomSet);
+
+        TableDescriptor orderDescriptor = new("test", "orders", "orders.test", new Dictionary<string, string>());
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => new InMemoryTableProvider(orderRows));
+        ScanOperator orderScan = new(orderDescriptor, requiredColumns: null);
+        orderScan.SetSourceIndex(orderSourceIndex);
+
+        // Inner right: "customers" table — simple, no bloom needed.
+        MockOperator customerSide = new(
+            MakeRow(("customer_id", DataValue.FromScalar(1.0f)), ("order_id", DataValue.FromScalar(100.0f))));
+
+        // Inner join: orders JOIN customers ON orders.order_id = customers.order_id
+        JoinOperator innerJoin = new(
+            orderScan,
+            customerSide,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("order_id"),
+                BinaryOperator.Equal,
+                new ColumnReference("order_id")));
+
+        // Outer right (build): "products" table has product_id = 3.0.
+        // This should prune the orders scan to chunk 1 only.
+        MockOperator productsSide = new(
+            MakeRow(("product_id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("Widget"))));
+
+        // Outer join: (orders ⋈ customers) JOIN products ON orders.product_id = products.product_id
+        JoinOperator outerJoin = new(
+            innerJoin,
+            productsSide,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("product_id"),
+                BinaryOperator.Equal,
+                new ColumnReference("product_id")));
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        // Act
+        List<Row> results = new();
+        await foreach (Row row in outerJoin.ExecuteAsync(context).ConfigureAwait(false))
+        {
+            results.Add(row);
+        }
+
+        // Assert: the orders scan should show bloom pruning from the outer join's build side.
+        // product_id=3.0 exists only in chunk 1, so chunk 0 should be pruned.
+        Assert.Equal(2, orderScan.TotalIndexChunks);
+        Assert.Equal(1, orderScan.PrunedIndexChunks);
+    }
+
+    /// <summary>
+    /// <see cref="JoinOperator.CollectScanOperators"/> should discover all
+    /// <see cref="ScanOperator"/> instances through nested joins, aliases,
+    /// filters, and projections.
+    /// </summary>
+    [Fact]
+    public void CollectScanOperators_FindsAllScansInNestedJoinTree()
+    {
+        TableDescriptor descriptor1 = new("test", "t1", "t1.test", new Dictionary<string, string>());
+        TableDescriptor descriptor2 = new("test", "t2", "t2.test", new Dictionary<string, string>());
+        TableDescriptor descriptor3 = new("test", "t3", "t3.test", new Dictionary<string, string>());
+
+        ScanOperator scan1 = new(descriptor1, requiredColumns: null);
+        ScanOperator scan2 = new(descriptor2, requiredColumns: null);
+        ScanOperator scan3 = new(descriptor3, requiredColumns: null);
+
+        // Wrap scan2 in AliasOperator.
+        AliasOperator aliased2 = new(scan2, "a2");
+
+        // Inner join: scan1 ⋈ aliased scan2.
+        JoinOperator innerJoin = new(scan1, aliased2, JoinType.Inner, null);
+
+        // Outer join: innerJoin ⋈ scan3.
+        JoinOperator outerJoin = new(innerJoin, scan3, JoinType.Inner, null);
+
+        List<ScanOperator> results = new();
+        JoinOperator.CollectScanOperators(outerJoin, results);
+
+        // Should find all 3 scans.
+        Assert.Equal(3, results.Count);
+        Assert.Contains(scan1, results);
+        Assert.Contains(scan2, results);
+        Assert.Contains(scan3, results);
+    }
+
     // ───────────── Helpers ─────────────
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)

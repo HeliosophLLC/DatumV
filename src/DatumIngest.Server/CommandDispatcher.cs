@@ -560,7 +560,8 @@ public sealed class CommandDispatcher
         }
 
         int nameEqualsIndex = remainder.IndexOf('=');
-        string name = remainder[..nameEqualsIndex];
+        string rawName = remainder[..nameEqualsIndex];
+        string name = FileFormatDetector.DeriveTableName(rawName);
         string pathAndOptions = remainder[(nameEqualsIndex + 1)..];
 
         Dictionary<string, string> options = new();
@@ -586,25 +587,13 @@ public sealed class CommandDispatcher
             filePath = pathAndOptions;
         }
 
-        provider ??= DetectProviderFromPath(filePath);
+        provider ??= FileFormatDetector.DetectProvider(filePath)
+            ?? throw new ArgumentException(
+                $"Cannot detect provider for '{filePath}'. " +
+                $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
+                "Use explicit format: provider:name=path");
 
         return new TableDescriptor(provider, name, filePath, options);
-    }
-
-    private static string DetectProviderFromPath(string filePath)
-    {
-        string extension = Path.GetExtension(filePath).ToLowerInvariant();
-        return extension switch
-        {
-            ".csv" => "csv",
-            ".json" => "json",
-            ".jsonl" => "jsonl",
-            ".parquet" => "parquet",
-            ".hdf5" or ".h5" => "hdf5",
-            ".zip" => "zip",
-            _ => throw new ArgumentException(
-                $"Cannot detect provider for '{filePath}'. Use explicit format: provider:name=path"),
-        };
     }
 
     /// <summary>

@@ -83,14 +83,25 @@ internal sealed class MemoryEstimator
     /// <summary>Estimates total memory consumed by all rows seen so far.</summary>
     internal long EstimateTotalBytes()
     {
-        if (_totalRowCount == 0)
+        return EstimateBytesForRowCount(_totalRowCount);
+    }
+
+    /// <summary>
+    /// Estimates memory consumed by a given number of rows, using the same per-row
+    /// average derived from sampling. This allows callers to estimate memory for a
+    /// subset of rows (e.g. only those held in memory, excluding spilled rows).
+    /// </summary>
+    /// <param name="rowCount">The number of rows to estimate memory for.</param>
+    internal long EstimateBytesForRowCount(long rowCount)
+    {
+        if (rowCount == 0)
         {
             return 0;
         }
 
         if (_fixedWidthDetermined && _isFixedWidth)
         {
-            return _totalRowCount * _fixedRowSize;
+            return rowCount * _fixedRowSize;
         }
 
         if (_sampleCount == 0)
@@ -99,7 +110,7 @@ internal sealed class MemoryEstimator
         }
 
         long averageRowBytes = _totalSampledBytes / _sampleCount;
-        return _totalRowCount * averageRowBytes;
+        return rowCount * averageRowBytes;
     }
 
     private static bool IsFixedWidthRow(Row row)

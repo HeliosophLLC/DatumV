@@ -33,6 +33,33 @@ internal sealed class MockOperator : IQueryOperator
     }
 }
 
+/// <summary>
+/// An in-memory operator that invokes a callback each time a row is yielded.
+/// Used to verify that a consumer does not read more rows than necessary (e.g., with LIMIT).
+/// </summary>
+internal sealed class CountingOperator : IQueryOperator
+{
+    private readonly Row[] _rows;
+    private readonly Action _onRowYielded;
+
+    public CountingOperator(Row[] rows, Action onRowYielded)
+    {
+        _rows = rows;
+        _onRowYielded = onRowYielded;
+    }
+
+    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    {
+        foreach (Row row in _rows)
+        {
+            _onRowYielded();
+            yield return row;
+        }
+
+        await Task.CompletedTask;
+    }
+}
+
 public class OperatorTests
 {
     private static ExecutionContext CreateContext()

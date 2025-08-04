@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Diagnostics;
+using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using static DatumIngest.Execution.Operators.JoinOperator;
@@ -55,6 +57,9 @@ internal sealed class GraceHashJoinExecutor
     private readonly bool _nullSensitiveAntiSemi;
     private readonly string _spillDirectory;
 
+    /// <summary>Human-readable label used in trace output to identify this join's build side.</summary>
+    private readonly string _label;
+
     /// <summary>
     /// Creates a new Grace hash join executor.
     /// </summary>
@@ -66,18 +71,21 @@ internal sealed class GraceHashJoinExecutor
     /// When true and <paramref name="joinType"/> is <see cref="JoinType.LeftAntiSemi"/>,
     /// applies SQL-standard NOT IN null semantics.
     /// </param>
+    /// <param name="label">Human-readable label for the build-side table, used in execution trace output.</param>
     internal GraceHashJoinExecutor(
         JoinType joinType,
         JoinKeyExtractionResult extraction,
         long memoryBudgetBytes,
         ExpressionEvaluator evaluator,
-        bool nullSensitiveAntiSemi = false)
+        bool nullSensitiveAntiSemi = false,
+        string label = "")
     {
         _joinType = joinType;
         _extraction = extraction;
         _memoryBudgetBytes = memoryBudgetBytes;
         _evaluator = evaluator;
         _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
+        _label = label;
         _spillDirectory = Path.Combine(Path.GetTempPath(), $"datum-join-{Guid.NewGuid():N}");
     }
 
@@ -99,15 +107,28 @@ internal sealed class GraceHashJoinExecutor
         int partitionCount = ComputeInitialPartitionCount();
         SpillPartition[] partitions = CreatePartitions(partitionCount);
 
+        ExecutionTracer.Initialize();
+        long ph1aStart = Stopwatch.GetTimestamp();
+        long buildRowCount = 0;
+        long phase1bProbeCount = 0;
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            ExecutionTracer.WriteSeparator();
+            ExecutionTracer.Write($"JOIN Phase1a start  build={_label}  join={_joinType}  budget={ExecutionTracer.FormatBytes(_memoryBudgetBytes)}  partitions={partitionCount}");
+        }
+
         try
         {
             // ── Phase 1: Partition the build side ──
             MemoryEstimator buildEstimator = new();
             Row? firstBuildRow = null;
             bool hasNullKey = false;
+            long inMemoryRowCount = 0;
 
             await foreach (Row buildRow in rightOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
+                buildRowCount++;
                 firstBuildRow ??= buildRow;
 
                 // Track null keys for NOT IN null semantics.
@@ -133,6 +154,12 @@ internal sealed class GraceHashJoinExecutor
                 int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: true);
                 partitions[partitionIndex].AddBuildRow(buildRow);
 
+                // Only count rows that landed in memory (not appended to an already-spilled partition).
+                if (!partitions[partitionIndex].IsBuildSpilled)
+                {
+                    inMemoryRowCount++;
+                }
+
                 // Memory monitoring with sampling.
                 if (buildEstimator.ShouldSample())
                 {
@@ -140,16 +167,25 @@ internal sealed class GraceHashJoinExecutor
                 }
 
                 buildEstimator.IncrementRowCount();
-                long estimatedMemory = buildEstimator.EstimateTotalBytes();
+
+                // Estimate memory for in-memory rows only — spilled rows consume disk, not RAM.
+                long estimatedMemory = buildEstimator.EstimateBytesForRowCount(inMemoryRowCount);
 
                 if (estimatedMemory > _memoryBudgetBytes)
                 {
-                    SpillLargestPartition(partitions);
+                    inMemoryRowCount -= SpillLargestPartition(partitions);
                 }
                 else if (estimatedMemory > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
                 {
                     buildEstimator.EscalateToEveryRow();
                 }
+            }
+
+            if (ExecutionTracer.IsEnabled)
+            {
+                int spilledPartitions = 0;
+                foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
+                ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  estimated_total={ExecutionTracer.FormatBytes(buildEstimator.EstimateTotalBytes())}  estimated_inmem={ExecutionTracer.FormatBytes(buildEstimator.EstimateBytesForRowCount(inMemoryRowCount))}  spilled={spilledPartitions}/{partitionCount}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
             }
 
             // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
@@ -158,39 +194,120 @@ internal sealed class GraceHashJoinExecutor
                 yield break;
             }
 
-            // ── Phase 1b: Partition the probe side ──
-            // Only rows whose corresponding build partition is spilled need to be spilled too.
-            // In-memory partitions' probe rows are collected for later streaming.
+            // Null build template can be computed as soon as Phase 1a completes.
+            // It is needed during hybrid Phase 1b for LEFT JOIN null extension.
+            Row? nullBuildTemplate = firstBuildRow is not null ? CreateNullRow(firstBuildRow) : null;
+
+            // Hybrid streaming probe: for INNER, LEFT, and semi-join types the probe side
+            // can be processed row-by-row against in-memory partitions, yielding results
+            // immediately so a LIMIT above can terminate without fully materialising the
+            // probe stream. RIGHT and FULL OUTER must see all probe rows before emitting
+            // unmatched build rows, so they still use the buffered path.
+            bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
+            bool useHybrid = !needRightUnmatched;
+            bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
+
+            // ── Phase 1b: Probe phase ──
             Row? firstProbeRow = null;
-            await foreach (Row probeRow in leftOperator.ExecuteAsync(context).ConfigureAwait(false))
+            long ph1bStart = Stopwatch.GetTimestamp();
+
+            if (useHybrid)
             {
-                firstProbeRow ??= probeRow;
-                int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: false);
-                SpillPartition partition = partitions[partitionIndex];
+                // Build in-memory hash tables for non-spilled partitions so individual
+                // probe rows can be looked up and yielded immediately without buffering.
+                PartitionBuildTable?[] buildTables = new PartitionBuildTable?[partitionCount];
 
-                if (partition.IsBuildSpilled)
+                for (int tableIndex = 0; tableIndex < partitionCount; tableIndex++)
                 {
-                    // Build side was spilled, so probe side must also be captured.
-                    if (!partition.IsProbeSpilled)
+                    if (!partitions[tableIndex].IsBuildSpilled)
                     {
-                        partition.SpillProbeToDisk();
+                        buildTables[tableIndex] = BuildPartitionTable(
+                            partitions[tableIndex].GetInMemoryBuildRows(),
+                            keyPairs,
+                            useSingleKey);
                     }
-
-                    partition.AddProbeRow(probeRow);
                 }
-                else
+
+                await foreach (Row probeRow in leftOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
-                    partition.AddProbeRow(probeRow);
+                    firstProbeRow ??= probeRow;
+                    phase1bProbeCount++;
+                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: false);
+                    SpillPartition partition = partitions[partitionIndex];
+
+                    if (!partition.IsBuildSpilled)
+                    {
+                        // In-memory partition: join and yield immediately.
+                        // A LIMIT operator above can stop iteration here, preventing the
+                        // remaining probe rows from ever being read from the source.
+                        foreach (Row result in ProbePartitionRow(
+                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate))
+                        {
+                            yield return result;
+                        }
+                    }
+                    else
+                    {
+                        // Spilled partition: buffer probe row to disk for Phase 2.
+                        if (!partition.IsProbeSpilled)
+                        {
+                            partition.SpillProbeToDisk();
+                        }
+
+                        partition.AddProbeRow(probeRow);
+                    }
+                }
+            }
+            else
+            {
+                // Non-hybrid path: buffer all probe rows before joining.
+                // Required for RIGHT and FULL OUTER joins, which must emit unmatched
+                // build rows only after the complete probe set has been consumed.
+                await foreach (Row probeRow in leftOperator.ExecuteAsync(context).ConfigureAwait(false))
+                {
+                    firstProbeRow ??= probeRow;
+                    phase1bProbeCount++;
+                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: false);
+                    SpillPartition partition = partitions[partitionIndex];
+
+                    if (partition.IsBuildSpilled)
+                    {
+                        if (!partition.IsProbeSpilled)
+                        {
+                            partition.SpillProbeToDisk();
+                        }
+
+                        partition.AddProbeRow(probeRow);
+                    }
+                    else
+                    {
+                        partition.AddProbeRow(probeRow);
+                    }
                 }
             }
 
-            // Pre-compute null templates from first-seen rows for outer join support.
-            Row? nullBuildTemplate = firstBuildRow is not null ? CreateNullRow(firstBuildRow) : null;
             Row? nullProbeTemplate = firstProbeRow is not null ? CreateNullRow(firstProbeRow) : null;
 
+            if (ExecutionTracer.IsEnabled)
+            {
+                ExecutionTracer.Write($"JOIN Phase1b done   probe_rows={phase1bProbeCount:N0}  elapsed={Stopwatch.GetElapsedTime(ph1bStart).TotalMilliseconds:F0}ms");
+            }
+
+            long ph2Start = Stopwatch.GetTimestamp();
+            if (ExecutionTracer.IsEnabled)
+            {
+                int spilledPartitions = 0;
+                foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
+                ExecutionTracer.Write($"JOIN Phase2 start   spilled_partitions={spilledPartitions}");
+            }
+
             // ── Phase 2: Join each partition ──
+            // When hybrid mode is active, in-memory partitions were fully processed during
+            // Phase 1b and their probe lists are empty. Pass skipInMemory=true so
+            // JoinAllPartitionsAsync skips them, avoiding redundant work.
             await foreach (Row row in JoinAllPartitionsAsync(
-                partitions, useSingleKey, recursionDepth: 0, nullProbeTemplate, nullBuildTemplate, context)
+                partitions, useSingleKey, recursionDepth: 0, nullProbeTemplate, nullBuildTemplate, context,
+                skipInMemory: useHybrid)
                 .ConfigureAwait(false))
             {
                 yield return row;
@@ -198,6 +315,12 @@ internal sealed class GraceHashJoinExecutor
         }
         finally
         {
+            if (ExecutionTracer.IsEnabled)
+            {
+                ExecutionTracer.Write($"JOIN complete       build={_label}  total_build={buildRowCount:N0}  total_probe={phase1bProbeCount:N0}  total_elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
+                ExecutionTracer.WriteSeparator();
+            }
+
             foreach (SpillPartition partition in partitions)
             {
                 partition.Dispose();
@@ -207,19 +330,200 @@ internal sealed class GraceHashJoinExecutor
         }
     }
 
+    /// <summary>
+    /// Holds the in-memory hash table for a single Grace hash join partition,
+    /// built after Phase 1a to enable the hybrid streaming probe in Phase 1b.
+    /// Caches the <see cref="CombinedRowSchema"/> and null-build template so they are
+    /// allocated at most once per partition across many probe row lookups.
+    /// </summary>
+    private sealed class PartitionBuildTable
+    {
+        internal readonly List<Row> BuildRows;
+        internal readonly Dictionary<DataValue, List<(int Index, Row Row)>>? SingleKeyTable;
+        internal readonly Dictionary<CompositeKey, List<(int Index, Row Row)>>? CompositeKeyTable;
+        internal CombinedRowSchema? JoinSchema;
+        internal Row? CachedNullBuild;
+
+        internal PartitionBuildTable(List<Row> buildRows, bool useSingleKey)
+        {
+            BuildRows = buildRows;
+            SingleKeyTable = useSingleKey ? new() : null;
+            CompositeKeyTable = useSingleKey ? null : new();
+        }
+    }
+
+    /// <summary>
+    /// Builds an in-memory <see cref="PartitionBuildTable"/> from the given build-side rows,
+    /// hashing each row into the appropriate lookup structure for fast probe-phase lookups.
+    /// </summary>
+    private PartitionBuildTable BuildPartitionTable(
+        IReadOnlyList<Row> buildRows,
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
+        bool useSingleKey)
+    {
+        List<Row> buildList = new(buildRows.Count);
+        PartitionBuildTable table = new(buildList, useSingleKey);
+
+        foreach (Row buildRow in buildRows)
+        {
+            int buildIndex = buildList.Count;
+            buildList.Add(buildRow);
+
+            if (useSingleKey)
+            {
+                DataValue key = _evaluator.Evaluate(keyPairs[0].Right, buildRow);
+                if (!key.IsNull)
+                {
+                    if (!table.SingleKeyTable!.TryGetValue(key, out List<(int, Row)>? bucket))
+                    {
+                        bucket = new List<(int, Row)>();
+                        table.SingleKeyTable[key] = bucket;
+                    }
+
+                    bucket.Add((buildIndex, buildRow));
+                }
+            }
+            else
+            {
+                DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: true);
+                if (!HasNull(parts))
+                {
+                    CompositeKey compositeKey = new(parts);
+                    if (!table.CompositeKeyTable!.TryGetValue(compositeKey, out List<(int, Row)>? bucket))
+                    {
+                        bucket = new List<(int, Row)>();
+                        table.CompositeKeyTable[compositeKey] = bucket;
+                    }
+
+                    bucket.Add((buildIndex, buildRow));
+                }
+            }
+        }
+
+        return table;
+    }
+
+    /// <summary>
+    /// Probes a single row against a <see cref="PartitionBuildTable"/>, yielding every
+    /// matching combined row. Handles INNER, LEFT outer, LeftSemi, and LeftAntiSemi join types.
+    /// RIGHT and FULL OUTER joins are not handled here — they use the non-hybrid buffered path.
+    /// </summary>
+    private IEnumerable<Row> ProbePartitionRow(
+        PartitionBuildTable table,
+        Row probeRow,
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
+        bool useSingleKey,
+        bool isSemiJoin,
+        Row? nullBuildTemplate)
+    {
+        List<(int Index, Row Row)>? matches = null;
+
+        if (useSingleKey)
+        {
+            DataValue leftKey = _evaluator.Evaluate(keyPairs[0].Left, probeRow);
+            if (!leftKey.IsNull)
+            {
+                table.SingleKeyTable!.TryGetValue(leftKey, out matches);
+            }
+        }
+        else
+        {
+            DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: false);
+            if (!HasNull(parts))
+            {
+                CompositeKey compositeKey = new(parts);
+                table.CompositeKeyTable!.TryGetValue(compositeKey, out matches);
+            }
+        }
+
+        bool hasMatch = false;
+
+        if (matches is not null)
+        {
+            foreach ((int _, Row buildRow) in matches)
+            {
+                if (_extraction.Residual is not null)
+                {
+                    table.JoinSchema ??= CombinedRowSchema.Build(probeRow, buildRow);
+                    Row combinedRow = table.JoinSchema.Combine(probeRow, buildRow);
+
+                    if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
+                    {
+                        continue;
+                    }
+                }
+
+                hasMatch = true;
+
+                if (isSemiJoin)
+                {
+                    break;
+                }
+
+                if (_extraction.Residual is null)
+                {
+                    table.JoinSchema ??= CombinedRowSchema.Build(probeRow, buildRow);
+                }
+
+                yield return table.JoinSchema!.Combine(probeRow, buildRow);
+            }
+        }
+
+        if (isSemiJoin)
+        {
+            if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+            {
+                yield return probeRow;
+            }
+        }
+        else if (!hasMatch && _joinType == JoinType.Left)
+        {
+            // Left outer: emit a null-extended probe row when no build row matched.
+            Row? nullBuild = table.CachedNullBuild;
+
+            if (nullBuild is null && table.BuildRows.Count > 0)
+            {
+                table.CachedNullBuild = CreateNullRow(table.BuildRows[0]);
+                nullBuild = table.CachedNullBuild;
+            }
+
+            nullBuild ??= nullBuildTemplate;
+
+            if (nullBuild is not null)
+            {
+                table.JoinSchema ??= CombinedRowSchema.Build(probeRow, nullBuild);
+                yield return table.JoinSchema.Combine(probeRow, nullBuild);
+            }
+            else
+            {
+                yield return probeRow;
+            }
+        }
+    }
+
     private async IAsyncEnumerable<Row> JoinAllPartitionsAsync(
         SpillPartition[] partitions,
         bool useSingleKey,
         int recursionDepth,
         Row? nullLeftTemplate,
         Row? nullRightTemplate,
-        ExecutionContext context)
+        ExecutionContext context,
+        bool skipInMemory = false)
     {
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
 
         for (int partitionIndex = 0; partitionIndex < partitions.Length; partitionIndex++)
         {
             SpillPartition partition = partitions[partitionIndex];
+
+            // When skipInMemory is true (hybrid probe mode), in-memory partitions were
+            // already joined and yielded during Phase 1b streaming. Skip them here to
+            // avoid re-processing their build rows against an empty probe list.
+            if (skipInMemory && !partition.IsBuildSpilled)
+            {
+                continue;
+            }
 
             // Get build rows (from memory or disk).
             IEnumerable<Row> buildRows = partition.IsBuildSpilled
@@ -542,7 +846,12 @@ internal sealed class GraceHashJoinExecutor
         return Math.Min(MaxPartitionCount, Math.Max(4, (int)(_memoryBudgetBytes / (1024 * 1024))));
     }
 
-    private static void SpillLargestPartition(SpillPartition[] partitions)
+    /// <summary>
+    /// Spills the largest non-spilled partition to disk and returns the number of
+    /// in-memory build rows that were flushed, so callers can adjust their in-memory
+    /// row count accordingly.
+    /// </summary>
+    private static long SpillLargestPartition(SpillPartition[] partitions)
     {
         int largestIndex = -1;
         int largestCount = 0;
@@ -559,7 +868,10 @@ internal sealed class GraceHashJoinExecutor
         if (largestIndex >= 0)
         {
             partitions[largestIndex].SpillBuildToDisk();
+            return largestCount;
         }
+
+        return 0;
     }
 
     private SpillPartition[] CreatePartitions(int count)

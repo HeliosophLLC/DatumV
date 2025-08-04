@@ -77,7 +77,7 @@ public sealed class TableCatalog
     /// </exception>
     public void Register(string filePath)
     {
-        Register(Path.GetFileName(filePath), filePath);
+        Register(FileFormatDetector.DeriveTableName(filePath), filePath);
     }
 
     /// <summary>
@@ -112,7 +112,7 @@ public sealed class TableCatalog
         string provider = FileFormatDetector.DetectProvider(filePath)
             ?? throw new ArgumentException(
                 $"Cannot detect file format for '{filePath}'. " +
-                "Supported formats: csv, json, jsonl, parquet, hdf5, zip, idx. " +
+                $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
                 "Use Register(TableDescriptor) with an explicit provider.",
                 nameof(filePath));
 
@@ -146,7 +146,7 @@ public sealed class TableCatalog
     /// </exception>
     public Task RegisterAsync(string filePath, CancellationToken cancellationToken)
     {
-        return RegisterAsync(Path.GetFileName(filePath), filePath, cancellationToken);
+        return RegisterAsync(FileFormatDetector.DeriveTableName(filePath), filePath, cancellationToken);
     }
 
     /// <summary>
@@ -366,7 +366,7 @@ public sealed class TableCatalog
         List<string> tableNames,
         HashSet<string> loadedPaths)
     {
-        string sidecarPath = descriptor.FilePath + ".datum-index";
+        string sidecarPath = FileFormatDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-index";
 
         if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
         {
@@ -389,7 +389,7 @@ public sealed class TableCatalog
         List<string> tableNames,
         HashSet<string> loadedPaths)
     {
-        string sidecarPath = descriptor.FilePath + ".datum-manifest";
+        string sidecarPath = FileFormatDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-manifest";
 
         if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
         {
@@ -416,7 +416,7 @@ public sealed class TableCatalog
         List<string> tableNames,
         HashSet<string> loadedPaths)
     {
-        string sidecarPath = descriptor.FilePath + ".datum-schema";
+        string sidecarPath = FileFormatDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-schema";
 
         if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
         {

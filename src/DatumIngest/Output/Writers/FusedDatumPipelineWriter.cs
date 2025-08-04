@@ -1,3 +1,4 @@
+using DatumIngest.Catalog;
 using DatumIngest.DatumFile;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
@@ -154,10 +155,10 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
             return;
         }
 
-        string tableName = Path.GetFileNameWithoutExtension(_filePath);
+        string tableName = FileFormatDetector.DeriveTableName(_filePath);
         SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
 
-        string indexPath = _filePath + ".datum-index";
+        string indexPath = FileFormatDetector.GetSidecarBasePath(_filePath) + ".datum-index";
         using FileStream output = File.Create(indexPath);
         IndexWriter indexWriter = new();
         indexWriter.Write(indexSet, output);

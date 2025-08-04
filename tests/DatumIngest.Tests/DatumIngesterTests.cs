@@ -24,13 +24,13 @@ public sealed class DatumIngesterTests
             FixturePath("array.json"), cancellationToken: CancellationToken.None);
 
         Assert.Single(result.Tables);
-        DatumIngestionTableResult table = result.Tables["array"];
-        Assert.Equal("array", table.TableName);
+        DatumIngestionTableResult table = result.Tables["array.json"];
+        Assert.Equal("array.json", table.TableName);
         Assert.Equal(3, result.RowCount);
         Assert.Equal(3, table.Schema.Columns.Count);
         Assert.Single(table.Manifest.Tables);
-        Assert.True(table.Manifest.Tables.ContainsKey("array"));
-        Assert.NotEmpty(table.Manifest.Tables["array"].Features);
+        Assert.True(table.Manifest.Tables.ContainsKey("array.json"));
+        Assert.NotEmpty(table.Manifest.Tables["array.json"].Features);
         Assert.True(table.DatumStream.Length > 0);
         Assert.True(table.IndexStream.Length > 0);
         Assert.Single(result.SourceSchema.Tables);
@@ -49,15 +49,15 @@ public sealed class DatumIngesterTests
             FixturePath("root_object.json"), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, result.Tables.Count);
-        Assert.Contains("root_object.licenses", result.Tables.Keys);
-        Assert.Contains("root_object.captions", result.Tables.Keys);
+        Assert.Contains("root_object.json.licenses", result.Tables.Keys);
+        Assert.Contains("root_object.json.captions", result.Tables.Keys);
         Assert.Equal(2, result.SourceSchema.Tables.Count);
         Assert.Equal(2, result.SourceManifest.Tables.Count);
         Assert.Equal(2, result.IndexSet.Tables.Count);
-        Assert.True(result.Tables["root_object.licenses"].DatumStream.Length > 0);
-        Assert.True(result.Tables["root_object.licenses"].IndexStream.Length > 0);
-        Assert.True(result.Tables["root_object.captions"].DatumStream.Length > 0);
-        Assert.True(result.Tables["root_object.captions"].IndexStream.Length > 0);
+        Assert.True(result.Tables["root_object.json.licenses"].DatumStream.Length > 0);
+        Assert.True(result.Tables["root_object.json.licenses"].IndexStream.Length > 0);
+        Assert.True(result.Tables["root_object.json.captions"].DatumStream.Length > 0);
+        Assert.True(result.Tables["root_object.json.captions"].IndexStream.Length > 0);
     }
 
     /// <summary>

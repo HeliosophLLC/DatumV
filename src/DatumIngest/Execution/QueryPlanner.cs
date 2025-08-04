@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Catalog;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
@@ -279,29 +281,51 @@ public sealed class QueryPlanner
 
         if (statement.Joins is not null)
         {
+            // Pre-plan all join sources so we can inspect estimated row counts.
+            List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins = new(statement.Joins.Count);
+
             foreach (JoinClause join in statement.Joins)
             {
                 IQueryOperator rightSide = PlanSource(join.Source, allReferencedColumns, deferredColumns, hasJoins, commonTableExpressionOperators);
-
                 HashSet<string> rightAliases = new(StringComparer.OrdinalIgnoreCase);
                 CollectSourceAliases(join.Source, rightAliases);
+                plannedJoins.Add((join, rightSide, rightAliases));
+            }
+
+            // Greedy join reordering: place the largest table on the probe
+            // (streaming) side so LIMIT can short-circuit earlier, and build
+            // the smaller tables into hash tables. Only applied when every
+            // join is a non-lateral INNER join and all sources have estimated
+            // row counts. This is a heuristic — the roadmap CBO will replace it.
+            if (TryReorderJoins(source, leftAliases, plannedJoins,
+                out IQueryOperator? reorderedSource, out HashSet<string>? reorderedFromAliases,
+                out List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins))
+            {
+                source = reorderedSource;
+                leftAliases = reorderedFromAliases;
+                plannedJoins = reorderedJoins;
+            }
+
+            foreach ((JoinClause join, IQueryOperator rightSide, HashSet<string> rightAliases) in plannedJoins)
+            {
+                IQueryOperator currentRight = rightSide;
 
                 if (join.IsLateral)
                 {
                     // Lateral joins re-execute the right side per outer row;
                     // predicate pushdown across the lateral boundary is not safe.
-                    source = new LateralJoinOperator(source, rightSide, join.Type, join.OnCondition);
+                    source = new LateralJoinOperator(source, currentRight, join.Type, join.OnCondition);
                 }
                 else
                 {
                     // Predicate pushdown: push single-table WHERE predicates below the join.
                     if (pendingPredicates is not null && join.Type == JoinType.Inner)
                     {
-                        rightSide = PushPredicatesBelow(rightSide, rightAliases, pendingPredicates);
+                        currentRight = PushPredicatesBelow(currentRight, rightAliases, pendingPredicates);
                         source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
                     }
 
-                    source = new JoinOperator(source, rightSide, join.Type, join.OnCondition);
+                    source = new JoinOperator(source, currentRight, join.Type, join.OnCondition);
                 }
 
                 // After the join, both sides' aliases are available on the left.
@@ -895,6 +919,301 @@ public sealed class QueryPlanner
                     break;
                 default:
                     return; // Not a simple scan chain — cannot push hints.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Attempts greedy join reordering: the source with the largest estimated row
+    /// count becomes the new FROM (probe/streaming side) so that LIMIT can short-circuit
+    /// early, and smaller tables are placed on the build side.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only applied when every join is a non-lateral <see cref="JoinType.Inner"/> join
+    /// and all sources have estimated row counts. Cross joins are excluded because
+    /// they lack an ON condition that can be checked for alias connectivity.
+    /// </para>
+    /// <para>
+    /// This is a heuristic — the roadmap cost-based optimizer will replace it.
+    /// </para>
+    /// </remarks>
+    /// <returns><c>true</c> if a reordering was produced and the out parameters are populated.</returns>
+    private static bool TryReorderJoins(
+        IQueryOperator fromOperator,
+        HashSet<string> fromAliases,
+        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins,
+        [NotNullWhen(true)] out IQueryOperator? reorderedSource,
+        [NotNullWhen(true)] out HashSet<string>? reorderedFromAliases,
+        [NotNullWhen(true)] out List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins)
+    {
+        reorderedSource = null;
+        reorderedFromAliases = null;
+        reorderedJoins = null;
+
+        // Gate: all joins must be non-lateral INNER with an ON condition.
+        foreach ((JoinClause join, _, _) in plannedJoins)
+        {
+            if (join.IsLateral || join.Type != JoinType.Inner || join.OnCondition is null)
+            {
+                ExecutionTracer.Initialize();
+                ExecutionTracer.Write("JOIN REORDER  skipped: non-INNER or lateral join present");
+                return false;
+            }
+        }
+
+        // Collect all sources into a pool with their estimated row counts.
+        // Index 0 is the FROM source (no JoinClause); rest are join sources.
+        int totalSources = 1 + plannedJoins.Count;
+        long?[] rowCounts = new long?[totalSources];
+
+        rowCounts[0] = GetEstimatedRowCount(fromOperator);
+        if (rowCounts[0] is null)
+        {
+            ExecutionTracer.Initialize();
+            ExecutionTracer.Write($"JOIN REORDER  skipped: no row count for FROM={GetOperatorName(fromOperator)}");
+            return false;
+        }
+
+        for (int index = 0; index < plannedJoins.Count; index++)
+        {
+            rowCounts[index + 1] = GetEstimatedRowCount(plannedJoins[index].Operator);
+            if (rowCounts[index + 1] is null)
+            {
+                ExecutionTracer.Initialize();
+                ExecutionTracer.Write($"JOIN REORDER  skipped: no row count for JOIN[{index}]={GetOperatorName(plannedJoins[index].Operator)}");
+                return false;
+            }
+        }
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            ExecutionTracer.WriteSeparator();
+            ExecutionTracer.Write($"JOIN REORDER  evaluating {totalSources} sources");
+            ExecutionTracer.Write($"  [0] FROM  {GetOperatorName(fromOperator)}  rows={rowCounts[0]:N0}");
+            for (int index = 0; index < plannedJoins.Count; index++)
+            {
+                ExecutionTracer.Write($"  [{index + 1}] JOIN  {GetOperatorName(plannedJoins[index].Operator)}  rows={rowCounts[index + 1]:N0}");
+            }
+        }
+
+        // Find the source with the largest estimated row count — it becomes the probe.
+        int largestIndex = 0;
+        long largestCount = rowCounts[0]!.Value;
+
+        for (int index = 1; index < totalSources; index++)
+        {
+            if (rowCounts[index]!.Value > largestCount)
+            {
+                largestCount = rowCounts[index]!.Value;
+                largestIndex = index;
+            }
+        }
+
+        // If the largest source is already the FROM, no reordering needed.
+        if (largestIndex == 0)
+        {
+            ExecutionTracer.Write($"JOIN REORDER  skipped: FROM is already largest ({GetOperatorName(fromOperator)} rows={largestCount:N0})");
+            return false;
+        }
+
+        ExecutionTracer.Write($"JOIN REORDER  new probe (FROM) = {GetOperatorName(largestIndex == 0 ? fromOperator : plannedJoins[largestIndex - 1].Operator)}  rows={largestCount:N0}");
+
+        // Build the pool of remaining sources to schedule.
+        // Each entry: (Operator, Aliases, RowCount, JoinClause or null for the original FROM).
+        List<(IQueryOperator Operator, HashSet<string> Aliases, long RowCount, JoinClause? Join)> remaining = new(totalSources - 1);
+
+        // The original FROM becomes a joinable source — it keeps the ON condition
+        // from the join that previously connected the new probe to the tree.
+        // We'll assign ON conditions during the greedy scheduling below.
+        remaining.Add((fromOperator, fromAliases, rowCounts[0]!.Value, null));
+
+        for (int index = 0; index < plannedJoins.Count; index++)
+        {
+            if (index + 1 == largestIndex)
+            {
+                continue; // Skip the one we chose as the new FROM.
+            }
+
+            remaining.Add((plannedJoins[index].Operator, plannedJoins[index].Aliases,
+                rowCounts[index + 1]!.Value, plannedJoins[index].Join));
+        }
+
+        // Collect all ON conditions from the original join list. These form the
+        // pool of predicates that must be distributed to the reordered joins.
+        // Each ON condition connects two sets of aliases.
+        List<Expression> onConditionPool = new(plannedJoins.Count);
+        foreach ((JoinClause join, _, _) in plannedJoins)
+        {
+            onConditionPool.Add(join.OnCondition!);
+        }
+
+        // Set up the new FROM from the largest source.
+        IQueryOperator newFrom;
+        HashSet<string> joinedAliases;
+
+        if (largestIndex == 0)
+        {
+            newFrom = fromOperator;
+            joinedAliases = new HashSet<string>(fromAliases, StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            int joinIndex = largestIndex - 1;
+            newFrom = plannedJoins[joinIndex].Operator;
+            joinedAliases = new HashSet<string>(plannedJoins[joinIndex].Aliases, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Greedy scheduling: at each step pick the smallest remaining source whose
+        // ON condition is satisfiable (all referenced aliases are in the joined set).
+        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> result = new(remaining.Count);
+
+        while (remaining.Count > 0)
+        {
+            int bestIndex = -1;
+            long bestCount = long.MaxValue;
+
+            for (int index = 0; index < remaining.Count; index++)
+            {
+                // Check that at least one ON condition is satisfiable when we add this source.
+                HashSet<string> candidateAliases = remaining[index].Aliases;
+
+                bool hasSatisfiableCondition = false;
+                foreach (Expression onCondition in onConditionPool)
+                {
+                    HashSet<string> conditionAliases = ColumnReferenceCollector.CollectTableAliases(onCondition);
+
+                    // The condition is satisfiable if every alias it references is
+                    // either in the already-joined set or in this candidate's aliases.
+                    HashSet<string> combined = new(joinedAliases, StringComparer.OrdinalIgnoreCase);
+                    foreach (string alias in candidateAliases)
+                    {
+                        combined.Add(alias);
+                    }
+
+                    if (conditionAliases.IsSubsetOf(combined))
+                    {
+                        hasSatisfiableCondition = true;
+                        break;
+                    }
+                }
+
+                if (!hasSatisfiableCondition)
+                {
+                    continue;
+                }
+
+                if (remaining[index].RowCount < bestCount)
+                {
+                    bestCount = remaining[index].RowCount;
+                    bestIndex = index;
+                }
+            }
+
+            if (bestIndex == -1)
+            {
+                // No remaining source has a satisfiable ON condition — cannot reorder.
+                return false;
+            }
+
+            // Consume the chosen source and assign its applicable ON conditions.
+            (IQueryOperator chosenOperator, HashSet<string> chosenAliases, _, _) = remaining[bestIndex];
+            remaining.RemoveAt(bestIndex);
+
+            // Collect all ON conditions that are now satisfiable with the joined set + chosen source.
+            HashSet<string> newJoined = new(joinedAliases, StringComparer.OrdinalIgnoreCase);
+            foreach (string alias in chosenAliases)
+            {
+                newJoined.Add(alias);
+            }
+
+            List<Expression> applicableConditions = new();
+            for (int index = onConditionPool.Count - 1; index >= 0; index--)
+            {
+                HashSet<string> conditionAliases = ColumnReferenceCollector.CollectTableAliases(onConditionPool[index]);
+
+                if (conditionAliases.IsSubsetOf(newJoined))
+                {
+                    applicableConditions.Add(onConditionPool[index]);
+                    onConditionPool.RemoveAt(index);
+                }
+            }
+
+            // Combine applicable conditions into a single ON expression.
+            Expression onExpression = applicableConditions.Count == 1
+                ? applicableConditions[0]
+                : CombineWithAnd(applicableConditions);
+
+            // The TableSource is not used after planning — supply a placeholder reference.
+            JoinClause reorderedJoinClause = new(JoinType.Inner, new TableReference("_reordered_"), onExpression, false);
+            result.Add((reorderedJoinClause, chosenOperator, chosenAliases));
+
+            // Expand the joined alias set.
+            joinedAliases = newJoined;
+        }
+
+        reorderedSource = newFrom;
+        reorderedFromAliases = new HashSet<string>(
+            largestIndex == 0 ? fromAliases : plannedJoins[largestIndex - 1].Aliases,
+            StringComparer.OrdinalIgnoreCase);
+        reorderedJoins = result;
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            ExecutionTracer.Write("JOIN REORDER  final build order (smallest first):");
+            for (int index = 0; index < result.Count; index++)
+            {
+                ExecutionTracer.Write($"  build[{index}]  {GetOperatorName(result[index].Operator)}");
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Walks through wrapping operators (<see cref="AliasOperator"/>, <see cref="FilterOperator"/>)
+    /// to find the underlying <see cref="ScanOperator"/> and returns its table name,
+    /// used in execution trace output.
+    /// </summary>
+    private static string GetOperatorName(IQueryOperator op)
+    {
+        IQueryOperator current = op;
+        while (true)
+        {
+            if (current is ScanOperator scan)
+                return scan.Descriptor.Name;
+            if (current is AliasOperator alias)
+                current = alias.Source;
+            else if (current is FilterOperator filter)
+                current = filter.Source;
+            else
+                return current.GetType().Name;
+        }
+    }
+
+    /// <summary>
+    /// Walks through wrapping operators (<see cref="AliasOperator"/>, <see cref="FilterOperator"/>)
+    /// to find the underlying <see cref="ScanOperator"/> and returns its estimated row count.
+    /// </summary>
+    /// <returns>The estimated row count, or <c>null</c> if no <see cref="ScanOperator"/> is found
+    /// or it lacks an estimate.</returns>
+    private static long? GetEstimatedRowCount(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case ScanOperator scan:
+                    return scan.EstimatedRowCount;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                default:
+                    return null;
             }
         }
     }

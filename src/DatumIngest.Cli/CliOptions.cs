@@ -56,11 +56,12 @@ internal sealed class CliOptions
     public bool WithInteractions { get; set; }
 
     /// <summary>
-    /// Gets or sets the optional memory budget in bytes for operators that support spill-to-disk.
-    /// When <see langword="null"/>, operators keep all intermediate state in memory.
+    /// Gets or sets the memory budget in bytes for operators that support spill-to-disk.
+    /// Defaults to 2 GB, which is appropriate for single-user CLI workloads. Pass
+    /// <c>--memory-budget 0</c> to remove the budget entirely (fully in-memory joins).
     /// Accepts raw byte counts or human-readable suffixes (e.g. 512MB, 2GB).
     /// </summary>
-    public long? MemoryBudgetBytes { get; set; }
+    public long? MemoryBudgetBytes { get; set; } = 2L * 1024 * 1024 * 1024;
 
     /// <summary>Gets or sets the manifest file paths for the cross-manifest command.</summary>
     public List<string> ManifestPaths { get; set; } = new();
@@ -198,9 +199,13 @@ internal sealed class CliOptions
                 case "--memory-budget":
                     if (i + 1 >= args.Length)
                     {
-                        throw new ArgumentException("--memory-budget requires a size argument (e.g. 512MB, 2GB, or raw bytes)");
+                        throw new ArgumentException("--memory-budget requires a size argument (e.g. 512MB, 2GB, 0 to disable)");
                     }
-                    options.MemoryBudgetBytes = ParseByteSize(args[++i]);
+                    {
+                        long parsed = ParseByteSize(args[++i]);
+                        // Zero or negative means: remove the budget (fully in-memory joins).
+                        options.MemoryBudgetBytes = parsed > 0 ? parsed : null;
+                    }
                     break;
 
                 case "--output":

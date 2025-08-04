@@ -81,7 +81,7 @@ public sealed class JoinOperator : IQueryOperator
             if (context.MemoryBudgetBytes is long memoryBudget)
             {
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
-                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi);
+                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, label: GetOperatorLabel(_right));
 
                 await foreach (Row row in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
@@ -102,6 +102,27 @@ public sealed class JoinOperator : IQueryOperator
             {
                 yield return row;
             }
+        }
+    }
+
+    /// <summary>
+    /// Walks the operator tree to find the underlying <see cref="ScanOperator"/> and returns
+    /// its table name, used as a human-readable label in execution trace output.
+    /// Returns the operator's type name when no scan is found (e.g. a derived join result).
+    /// </summary>
+    private static string GetOperatorLabel(IQueryOperator op)
+    {
+        IQueryOperator current = op;
+        while (true)
+        {
+            if (current is ScanOperator scan)
+                return scan.Descriptor.Name;
+            if (current is AliasOperator alias)
+                current = alias.Source;
+            else if (current is FilterOperator filter)
+                current = filter.Source;
+            else
+                return current.GetType().Name;
         }
     }
 
@@ -625,10 +646,10 @@ public sealed class JoinOperator : IQueryOperator
     }
 
     /// <summary>
-    /// Pushes build-side key values to the probe-side <see cref="ScanOperator"/>
-    /// for bloom-filter-based chunk pruning. Only activates when the probe-side
-    /// key expression is a simple <see cref="ColumnReference"/> pointing to a
-    /// column that has bloom filters in the source index.
+    /// Pushes build-side key values to all reachable probe-side <see cref="ScanOperator"/>
+    /// instances for bloom-filter-based chunk pruning. Traverses through intermediate
+    /// joins, aliases, filters, and projections so that multi-table join trees can
+    /// propagate bloom keys to buried scans.
     /// </summary>
     private void ApplyBloomPruning(
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
@@ -636,13 +657,13 @@ public sealed class JoinOperator : IQueryOperator
         Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable,
         bool useSingleKey)
     {
-        ScanOperator? probeScan = FindScanOperator(_left);
-        if (probeScan?.SourceIndex?.BloomFilters is null)
+        List<ScanOperator> probeScans = new();
+        CollectScanOperators(_left, probeScans);
+
+        if (probeScans.Count == 0)
         {
             return;
         }
-
-        BloomFilterSet bloomFilters = probeScan.SourceIndex.BloomFilters;
 
         for (int keyIndex = 0; keyIndex < keyPairs.Count; keyIndex++)
         {
@@ -652,45 +673,63 @@ public sealed class JoinOperator : IQueryOperator
             }
 
             string columnName = columnReference.ColumnName;
+            HashSet<DataValue>? distinctKeys = null;
 
-            if (!bloomFilters.HasColumn(columnName))
+            foreach (ScanOperator probeScan in probeScans)
             {
-                continue;
-            }
-
-            HashSet<DataValue> distinctKeys = new();
-
-            if (useSingleKey && singleKeyTable is not null)
-            {
-                foreach (DataValue key in singleKeyTable.Keys)
+                if (probeScan.SourceIndex?.BloomFilters is not BloomFilterSet bloomFilters)
                 {
-                    distinctKeys.Add(key);
+                    continue;
                 }
-            }
-            else if (compositeKeyTable is not null)
-            {
-                foreach (CompositeKey compositeKey in compositeKeyTable.Keys)
+
+                if (!bloomFilters.HasColumn(columnName))
                 {
-                    DataValue partValue = compositeKey[keyIndex];
-                    if (!partValue.IsNull)
+                    continue;
+                }
+
+                // Lazily collect distinct keys on first matching scan.
+                if (distinctKeys is null)
+                {
+                    distinctKeys = new HashSet<DataValue>();
+
+                    if (useSingleKey && singleKeyTable is not null)
                     {
-                        distinctKeys.Add(partValue);
+                        foreach (DataValue key in singleKeyTable.Keys)
+                        {
+                            distinctKeys.Add(key);
+                        }
+                    }
+                    else if (compositeKeyTable is not null)
+                    {
+                        foreach (CompositeKey compositeKey in compositeKeyTable.Keys)
+                        {
+                            DataValue partValue = compositeKey[keyIndex];
+                            if (!partValue.IsNull)
+                            {
+                                distinctKeys.Add(partValue);
+                            }
+                        }
+                    }
+
+                    if (distinctKeys.Count == 0)
+                    {
+                        break;
                     }
                 }
-            }
 
-            if (distinctKeys.Count > 0)
-            {
                 probeScan.AddBloomPruningKeys(columnName, distinctKeys);
             }
         }
     }
 
     /// <summary>
-    /// Walks the operator chain to find the underlying <see cref="ScanOperator"/>,
-    /// traversing through <see cref="AliasOperator"/> and <see cref="FilterOperator"/> wrappers.
+    /// Recursively collects all reachable <see cref="ScanOperator"/> instances
+    /// in the operator tree, traversing through <see cref="AliasOperator"/>,
+    /// <see cref="FilterOperator"/>, <see cref="ProjectOperator"/>, and
+    /// <see cref="JoinOperator"/> (both sides). Stops at operators that
+    /// break column identity (e.g. aggregation, DISTINCT).
     /// </summary>
-    private static ScanOperator? FindScanOperator(IQueryOperator operatorNode)
+    internal static void CollectScanOperators(IQueryOperator operatorNode, List<ScanOperator> results)
     {
         IQueryOperator current = operatorNode;
         while (true)
@@ -698,15 +737,23 @@ public sealed class JoinOperator : IQueryOperator
             switch (current)
             {
                 case ScanOperator scan:
-                    return scan;
+                    results.Add(scan);
+                    return;
                 case AliasOperator alias:
                     current = alias.Source;
                     break;
                 case FilterOperator filter:
                     current = filter.Source;
                     break;
+                case ProjectOperator project:
+                    current = project.Source;
+                    break;
+                case JoinOperator join:
+                    CollectScanOperators(join._left, results);
+                    CollectScanOperators(join._right, results);
+                    return;
                 default:
-                    return null;
+                    return;
             }
         }
     }

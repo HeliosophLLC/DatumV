@@ -477,6 +477,17 @@ static TableDescriptor ParseSourceDefinition(string source)
 
     if (equalsIndex < 0)
     {
+        // Bare file path — auto-detect provider and derive name from the file name.
+        if (File.Exists(source))
+        {
+            string detectedProvider = FileFormatDetector.DetectProvider(source)
+                ?? throw new ArgumentException(
+                    $"Cannot determine file format for '{source}'. " +
+                    "Specify explicitly: name=path or provider:name=path");
+            string derivedName = FileFormatDetector.DeriveTableName(source);
+            return new TableDescriptor(detectedProvider, derivedName, source, new Dictionary<string, string>());
+        }
+
         throw new ArgumentException(
             $"Invalid source format: '{source}'. " +
             "Expected format: name=path or provider:name=path[;key=value]");
@@ -499,7 +510,8 @@ static TableDescriptor ParseSourceDefinition(string source)
     }
 
     int nameEqualsIndex = remainder.IndexOf('=');
-    string name = remainder[..nameEqualsIndex];
+    string rawName = remainder[..nameEqualsIndex];
+    string name = FileFormatDetector.DeriveTableName(rawName);
     string pathAndOptions = remainder[(nameEqualsIndex + 1)..];
 
     Dictionary<string, string> options = new();
@@ -530,7 +542,7 @@ static TableDescriptor ParseSourceDefinition(string source)
         provider = FileFormatDetector.DetectProvider(filePath)
             ?? throw new ArgumentException(
                 $"Cannot detect file format for '{filePath}'. " +
-                "Supported formats: csv, json, jsonl, parquet, hdf5, zip, idx. " +
+                $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
                 "Use the explicit format: provider:name=path");
     }
 

@@ -363,6 +363,165 @@ public sealed class GraceHashJoinTests
         Assert.Equal(25, spillMatched);
     }
 
+    /// <summary>
+    /// The hybrid streaming probe must allow a LIMIT to terminate the join early
+    /// without consuming all probe rows. This is the core fix for the 21 GB OOM
+    /// observed when combining a memory budget with a 32 M-row probe table and LIMIT 100.
+    ///
+    /// The test verifies that requesting only 3 rows from a 1 000-row probe × 10-row
+    /// build INNER JOIN reads at most a small multiple of 3 probe rows (not all 1 000).
+    /// </summary>
+    [Fact]
+    public async Task HybridProbe_WithLimit_TerminatesEarlyWithoutReadingAllProbeRows()
+    {
+        // Build side: 10 rows, all with distinct id values 0..9.
+        Row[] buildRows = Enumerable.Range(0, 10)
+            .Select(i => MakeRow(("r.id", DataValue.FromScalar((float)i)), ("r.val", DataValue.FromScalar((float)i * 10))))
+            .ToArray();
+
+        // Probe side: 1 000 rows, each matching a build row so yield is guaranteed early.
+        // Track how many rows were actually consumed from the probe stream.
+        int probeRowsConsumed = 0;
+        Row[] probeRows = Enumerable.Range(0, 1000)
+            .Select(i => MakeRow(("l.id", DataValue.FromScalar((float)(i % 10))), ("l.seq", DataValue.FromScalar((float)i))))
+            .ToArray();
+
+        CountingOperator probeOperator = new(probeRows, () => probeRowsConsumed++);
+
+        // Memory budget large enough that NO partitions spill — all are in-memory,
+        // so the hybrid streaming path fires for every probe row.
+        long generousBudget = 1024 * 1024; // 1 MB
+
+        JoinOperator join = new(
+            probeOperator,
+            new MockOperator(buildRows),
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("l", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "id")));
+
+        // Only take the first 3 results — simulates LIMIT 3.
+        List<Row> results = new();
+        await foreach (Row row in join.ExecuteAsync(CreateContext(generousBudget)))
+        {
+            results.Add(row);
+            if (results.Count >= 3)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(3, results.Count);
+
+        // The hybrid path should have stopped pulling probe rows immediately after
+        // 3 matches were found.  We allow a small slack (one batch's worth) but
+        // the probe count must be far less than 1 000 — not all rows were read.
+        Assert.True(probeRowsConsumed < 100,
+            $"Expected far fewer than 100 probe rows consumed for LIMIT 3, but got {probeRowsConsumed}. " +
+            "This suggests Phase 1b is still buffering all probe rows instead of streaming.");
+    }
+
+    /// <summary>
+    /// When all build partitions are in-memory (no spill), the hybrid probe must
+    /// still produce exactly the same results as the non-budget in-memory hash join.
+    /// </summary>
+    [Fact]
+    public async Task HybridProbe_NoSpill_ProducesSameResultsAsInMemory()
+    {
+        Row[] leftRows = Enumerable.Range(0, 20)
+            .Select(i => MakeRow(("l.id", DataValue.FromScalar((float)i)), ("l.v", DataValue.FromString($"L{i}"))))
+            .ToArray();
+
+        Row[] rightRows = Enumerable.Range(10, 10)
+            .Select(i => MakeRow(("r.id", DataValue.FromScalar((float)i)), ("r.v", DataValue.FromString($"R{i}"))))
+            .ToArray();
+
+        Expression onCondition = new BinaryExpression(
+            new ColumnReference("l", "id"),
+            BinaryOperator.Equal,
+            new ColumnReference("r", "id"));
+
+        JoinOperator inMemoryJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Inner, onCondition);
+        List<Row> inMemoryResults = await CollectAsync(inMemoryJoin);
+
+        JoinOperator hybridJoin = new(new MockOperator(leftRows), new MockOperator(rightRows), JoinType.Inner, onCondition);
+        List<Row> hybridResults = await CollectAsync(hybridJoin, CreateContext(1024 * 1024));
+
+        Assert.Equal(inMemoryResults.Count, hybridResults.Count);
+
+        HashSet<string> inMemoryIds = inMemoryResults
+            .Select(row => $"{row["l.v"].AsString()}/{row["r.v"].AsString()}")
+            .ToHashSet();
+        HashSet<string> hybridIds = hybridResults
+            .Select(row => $"{row["l.v"].AsString()}/{row["r.v"].AsString()}")
+            .ToHashSet();
+        Assert.Equal(inMemoryIds, hybridIds);
+    }
+
+    /// <summary>
+    /// When the build side slightly exceeds the memory budget, only enough partitions
+    /// should spill to bring the in-memory footprint under budget. The remaining
+    /// in-memory partitions must still service hybrid streaming so that LIMIT can
+    /// terminate early. A cascading-spill bug would cause ALL partitions to spill,
+    /// forcing every probe row to disk and defeating LIMIT entirely.
+    /// </summary>
+    [Fact]
+    public async Task BorderlineBudget_DoesNotCascadeSpillAllPartitions()
+    {
+        // Build: 100 rows, 2 scalar columns → ~136 bytes/row → ~13,600 bytes total.
+        Row[] buildRows = Enumerable.Range(0, 100)
+            .Select(index => MakeRow(
+                ("r.id", DataValue.FromScalar((float)index)),
+                ("r.val", DataValue.FromScalar((float)(index * 10)))))
+            .ToArray();
+
+        // Probe: 500 rows, all matching some build row.
+        int probeRowsConsumed = 0;
+        Row[] probeRows = Enumerable.Range(0, 500)
+            .Select(index => MakeRow(
+                ("l.id", DataValue.FromScalar((float)(index % 100))),
+                ("l.seq", DataValue.FromScalar((float)index))))
+            .ToArray();
+
+        CountingOperator probeOperator = new(probeRows, () => probeRowsConsumed++);
+
+        // Budget is ~88% of build size — borderline, not catastrophically small.
+        // With correct in-memory accounting, only ~1 of 4 partitions needs to spill.
+        long borderlineBudget = 12_000;
+
+        JoinOperator join = new(
+            probeOperator,
+            new MockOperator(buildRows),
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("l", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "id")));
+
+        // Take only 3 results — simulates LIMIT 3.
+        List<Row> results = new();
+        await foreach (Row row in join.ExecuteAsync(CreateContext(borderlineBudget)))
+        {
+            results.Add(row);
+            if (results.Count >= 3)
+            {
+                break;
+            }
+        }
+
+        Assert.Equal(3, results.Count);
+
+        // With correct spill accounting, most partitions stay in-memory and the
+        // hybrid path resolves LIMIT 3 after reading very few probe rows.
+        // With the cascading-spill bug, all partitions spill and all 500 probe
+        // rows are buffered to disk before Phase 2 can produce any output.
+        Assert.True(probeRowsConsumed < 100,
+            $"Expected fewer than 100 probe rows consumed for LIMIT 3 on a borderline budget, " +
+            $"but got {probeRowsConsumed}. This indicates a cascading-spill bug where all " +
+            "partitions were spilled despite the build side only slightly exceeding the budget.");
+    }
+
     private static ExecutionContext CreateContext(long memoryBudgetBytes)
     {
         return new ExecutionContext(

@@ -13,6 +13,24 @@ public sealed class DatumIngestionTableResult
     /// <summary>The logical table name.</summary>
     public required string TableName { get; init; }
 
+    /// <summary>
+    /// The destination file name for this table's <c>.datum</c> file, including the extension.
+    /// Must end with <c>.datum</c>.
+    /// </summary>
+    public required string FileName { get; init; }
+
+    /// <summary>
+    /// The destination file name for this table's <c>.datum-index</c> file, including the extension.
+    /// Must end with <c>.datum-index</c>.
+    /// </summary>
+    public required string IndexFileName { get; init; }
+
+    /// <summary>
+    /// The destination file name for this table's <c>.datum-manifest</c> file, including the extension.
+    /// Must end with <c>.datum-manifest</c>.
+    /// </summary>
+    public required string ManifestFileName { get; init; }
+
     /// <summary>The discovered schema for this table.</summary>
     public required Schema Schema { get; init; }
 
