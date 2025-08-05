@@ -19,6 +19,7 @@ public sealed class SourceIndexBuilder
     private readonly bool _bloomAllColumns;
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
+    private readonly int? _maxIndexedColumns;
 
     /// <summary>
     /// Creates a builder with the specified chunk size and optional column-specific indexes.
@@ -49,11 +50,16 @@ public sealed class SourceIndexBuilder
     /// When <c>true</c> and <paramref name="indexAllColumns"/> is <c>false</c>,
     /// automatically selects compact columns for sorted indexing based on their data kind.
     /// </param>
+    /// <param name="maxIndexedColumns">
+    /// Maximum number of columns to include in the sorted index. When not <c>null</c>, only
+    /// the first N eligible columns (in schema order) are indexed. <c>null</c> means no limit.
+    /// </param>
     public SourceIndexBuilder(
         bool bloomAllColumns,
         bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
-        bool autoIndexColumns = false)
+        bool autoIndexColumns = false,
+        int? maxIndexedColumns = null)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
@@ -61,6 +67,7 @@ public sealed class SourceIndexBuilder
         _bloomAllColumns = bloomAllColumns;
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
+        _maxIndexedColumns = maxIndexedColumns;
     }
 
     /// <summary>
@@ -303,7 +310,7 @@ public sealed class SourceIndexBuilder
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
     {
-        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns, _bloomAllColumns, _indexAllColumns, _autoIndexColumns);
+        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns, _bloomAllColumns, _indexAllColumns, _autoIndexColumns, _maxIndexedColumns);
     }
 
     /// <summary>
@@ -335,25 +342,55 @@ public sealed class SourceIndexBuilder
     /// </summary>
     private IReadOnlySet<string>? ResolveEffectiveIndexColumns(Schema schema)
     {
+        IReadOnlySet<string>? result;
+
         // Explicit column list takes highest priority.
         if (_indexColumns is not null && _indexColumns.Count > 0)
         {
-            return _indexColumns;
+            result = _indexColumns;
         }
-
         // Index-all overrides auto-index.
-        if (_indexAllColumns)
+        else if (_indexAllColumns)
         {
-            return ResolveEffectiveColumns(null, true, schema);
+            result = ResolveEffectiveColumns(null, true, schema);
         }
-
         // Auto-index selects compact columns by data kind.
-        if (_autoIndexColumns)
+        else if (_autoIndexColumns)
         {
-            return ResolveAutoIndexColumns(schema);
+            result = ResolveAutoIndexColumns(schema);
+        }
+        else
+        {
+            return null;
         }
 
-        return null;
+        return ApplyMaxIndexedColumns(result);
+    }
+
+    /// <summary>
+    /// Trims a column set to at most <see cref="_maxIndexedColumns"/> entries when set.
+    /// Preserves schema ordering (which matches the insertion order from resolution).
+    /// </summary>
+    private IReadOnlySet<string>? ApplyMaxIndexedColumns(IReadOnlySet<string>? columns)
+    {
+        if (columns is null || _maxIndexedColumns is not int max || columns.Count <= max)
+        {
+            return columns;
+        }
+
+        HashSet<string> trimmed = new(max, StringComparer.OrdinalIgnoreCase);
+
+        foreach (string column in columns)
+        {
+            trimmed.Add(column);
+
+            if (trimmed.Count >= max)
+            {
+                break;
+            }
+        }
+
+        return trimmed;
     }
 
     /// <summary>
@@ -633,6 +670,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private readonly bool _bloomAllColumns;
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
+    private readonly int? _maxIndexedColumns;
     private IReadOnlySet<string>? _effectiveBloomColumns;
     private Schema? _schema;
     private readonly List<IndexChunk> _chunks = new();
@@ -653,7 +691,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
         IReadOnlySet<string>? indexColumns = null,
         bool bloomAllColumns = false,
         bool indexAllColumns = false,
-        bool autoIndexColumns = false)
+        bool autoIndexColumns = false,
+        int? maxIndexedColumns = null)
     {
         _chunkSize = chunkSize;
         _fingerprint = fingerprint;
@@ -661,6 +700,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
         _indexColumns = indexColumns;
         _bloomAllColumns = bloomAllColumns;
         _indexAllColumns = indexAllColumns;
+        _autoIndexColumns = autoIndexColumns;
+        _maxIndexedColumns = maxIndexedColumns;
         _autoIndexColumns = autoIndexColumns;
         bool needsBloom = bloomAllColumns || (bloomColumns is not null && bloomColumns.Count > 0);
         bool needsIndex = indexAllColumns || (indexColumns is not null && indexColumns.Count > 0) || autoIndexColumns;
@@ -733,7 +774,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// Finalizes the index after all rows have been observed.
     /// The spill writer is prepared for reading but not materialized or disposed —
     /// callers that need to serialize sorted indexes should pass <see cref="SpillWriter"/>
-    /// to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?)"/>.
+    /// to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?, bool)"/>.
     /// The spill writer is cleaned up when this builder is disposed.
     /// </summary>
     /// <returns>The completed source index (with <see cref="SourceIndex.SortedIndexes"/>
@@ -830,22 +871,43 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// </summary>
     private IReadOnlySet<string>? ResolveEffectiveIndexColumns(Schema schema)
     {
+        IReadOnlySet<string>? result;
+
         if (_indexColumns is not null && _indexColumns.Count > 0)
         {
-            return _indexColumns;
+            result = _indexColumns;
         }
-
-        if (_indexAllColumns)
+        else if (_indexAllColumns)
         {
-            return SourceIndexBuilder.ResolveEffectiveColumns(null, true, schema);
+            result = SourceIndexBuilder.ResolveEffectiveColumns(null, true, schema);
         }
-
-        if (_autoIndexColumns)
+        else if (_autoIndexColumns)
         {
-            return SourceIndexBuilder.ResolveAutoIndexColumns(schema);
+            result = SourceIndexBuilder.ResolveAutoIndexColumns(schema);
+        }
+        else
+        {
+            return null;
         }
 
-        return null;
+        if (result is not null && _maxIndexedColumns is int max && result.Count > max)
+        {
+            HashSet<string> trimmed = new(max, StringComparer.OrdinalIgnoreCase);
+
+            foreach (string column in result)
+            {
+                trimmed.Add(column);
+
+                if (trimmed.Count >= max)
+                {
+                    break;
+                }
+            }
+
+            return trimmed;
+        }
+
+        return result;
     }
 
     private static Schema BuildSchemaFromRow(Row row)

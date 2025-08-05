@@ -166,7 +166,8 @@ public static class DatumIngester
                 bloomAllColumns: options.BloomAllColumns,
                 indexAllColumns: options.IndexAllColumns,
                 chunkSize: options.ChunkSize,
-                autoIndexColumns: options.AutoIndexColumns)
+                autoIndexColumns: options.AutoIndexColumns,
+                maxIndexedColumns: options.MaxIndexedColumns)
             .CreateIncrementalBuilder(fingerprint);
         StatisticsCollector statisticsCollector = new();
         MemoryStream datumStream = new();
@@ -210,7 +211,8 @@ public static class DatumIngester
         indexWriter.Write(
             SourceIndexSet.Create(descriptor.Name, index),
             indexStream,
-            datumWriter.SortedIndexSpillWriter);
+            datumWriter.SortedIndexSpillWriter,
+            compressIndexes: options.CompressIndexes);
 
         // Dispose the datum writer (and its index builder / spill writer) after streaming.
         await datumWriter.DisposeAsync().ConfigureAwait(false);

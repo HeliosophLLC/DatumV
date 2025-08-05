@@ -10,8 +10,8 @@ public static class IndexConstants
     /// <summary>Magic bytes identifying a datum-index file: ASCII "DTIX".</summary>
     public static ReadOnlySpan<byte> Magic => "DTIX"u8;
 
-    /// <summary>Current format version.</summary>
-    public const ushort FormatVersion = 2;
+    /// <summary>Current format version. Version 3 adds per-column Zstd compression for sorted indexes.</summary>
+    public const ushort FormatVersion = 3;
 
     /// <summary>
     /// Reserved table index value indicating a shared section (e.g. fingerprint, table directory)

@@ -1,15 +1,19 @@
+using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Deserializes a <see cref="SourceIndexSet"/> from a <c>.datum-index</c> binary stream (version 2).
+/// Deserializes a <see cref="SourceIndexSet"/> from a <c>.datum-index</c> binary stream.
+/// Supports format versions 2 (uncompressed) and 3 (per-column Zstd-compressed sorted indexes).
 /// Reads the header, seeks to the table of contents, reads the table directory to map
 /// table indexes to names, then loads each table's sections individually. The shared
 /// fingerprint is applied to all tables.
 /// </summary>
 public sealed class IndexReader
 {
+    private ushort _version;
+
     /// <summary>
     /// Reads a source index set from the given stream.
     /// The stream must be readable and seekable.
@@ -21,7 +25,8 @@ public sealed class IndexReader
     {
         using BinaryReader reader = new(input, System.Text.Encoding.UTF8, leaveOpen: true);
 
-        ReadHeader(reader, out long tableOfContentsOffset);
+        ReadHeader(reader, out long tableOfContentsOffset, out ushort version);
+        _version = version;
 
         input.Position = tableOfContentsOffset;
         List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> tocEntries = ReadTableOfContents(reader);
@@ -82,7 +87,8 @@ public sealed class IndexReader
                 : null;
 
             SortedValueIndexSet? sortedIndexes = sectionMap.ContainsKey(IndexSectionType.SortedIndexes)
-                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.SortedIndexes, ReadSortedIndexes)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.SortedIndexes,
+                    r => _version >= 3 ? ReadCompressedSortedIndexes(r) : ReadSortedIndexes(r))
                 : null;
 
             ZipDirectoryCache? zipDirectory = sectionMap.ContainsKey(IndexSectionType.ZipDirectory)
@@ -95,7 +101,7 @@ public sealed class IndexReader
         return new SourceIndexSet(fingerprint, tables);
     }
 
-    private static void ReadHeader(BinaryReader reader, out long tableOfContentsOffset)
+    private static void ReadHeader(BinaryReader reader, out long tableOfContentsOffset, out ushort version)
     {
         Span<byte> magicBuffer = stackalloc byte[4];
         int bytesRead = reader.Read(magicBuffer);
@@ -105,7 +111,7 @@ public sealed class IndexReader
             throw new InvalidDataException("Not a valid datum-index file: invalid magic bytes.");
         }
 
-        ushort version = reader.ReadUInt16();
+        version = reader.ReadUInt16();
 
         if (version > IndexConstants.FormatVersion)
         {
@@ -302,6 +308,44 @@ public sealed class IndexReader
                 DataValue key = ReadDataValue(reader);
                 int chunkIndex = reader.ReadInt32();
                 long rowOffsetInChunk = reader.ReadInt64();
+                entries[j] = new ValueIndexEntry(key, chunkIndex, rowOffsetInChunk);
+            }
+
+            indexes[columnName] = new SortedValueIndex(entries);
+        }
+
+        return new SortedValueIndexSet(indexes);
+    }
+
+    /// <summary>
+    /// Reads sorted indexes with per-column Zstd decompression (version 3 format).
+    /// </summary>
+    private static SortedValueIndexSet ReadCompressedSortedIndexes(BinaryReader reader)
+    {
+        int columnCount = reader.ReadInt32();
+        Dictionary<string, SortedValueIndex> indexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < columnCount; i++)
+        {
+            string columnName = reader.ReadString();
+            int entryCount = reader.ReadInt32();
+            int uncompressedLength = reader.ReadInt32();
+            int compressedLength = reader.ReadInt32();
+            byte[] compressedData = reader.ReadBytes(compressedLength);
+
+            byte[] decompressed = DatumCompressor.Decompress(
+                compressedData, uncompressedLength, DatumFile.DatumCompression.Zstd);
+
+            using MemoryStream entryStream = new(decompressed);
+            using BinaryReader entryReader = new(entryStream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+            ValueIndexEntry[] entries = new ValueIndexEntry[entryCount];
+
+            for (int j = 0; j < entryCount; j++)
+            {
+                DataValue key = ReadDataValue(entryReader);
+                int chunkIndex = entryReader.ReadInt32();
+                long rowOffsetInChunk = entryReader.ReadInt64();
                 entries[j] = new ValueIndexEntry(key, chunkIndex, rowOffsetInChunk);
             }
 

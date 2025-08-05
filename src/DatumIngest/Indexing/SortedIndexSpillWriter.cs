@@ -318,6 +318,60 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     }
 
     /// <summary>
+    /// Streams the sorted indexes section with per-column Zstd compression (version 3 format).
+    /// Each column's entries are merge-streamed into a memory buffer, compressed, then written
+    /// as an envelope: column name, entry count, uncompressed length, compressed length,
+    /// compressed payload.
+    /// </summary>
+    /// <param name="output">The binary writer to receive the compressed sorted indexes.</param>
+    internal void WriteCompressedSortedIndexesToStream(BinaryWriter output)
+    {
+        PrepareForReading();
+
+        int columnCount = 0;
+
+        foreach (int runCount in _spillRunCounts.Values)
+        {
+            if (runCount > 0)
+            {
+                columnCount++;
+            }
+        }
+
+        output.Write(columnCount);
+
+        foreach (KeyValuePair<string, int> pair in _spillRunCounts)
+        {
+            string columnName = pair.Key;
+            int runCount = pair.Value;
+
+            if (runCount == 0)
+            {
+                continue;
+            }
+
+            long totalEntries = _spillTotalEntries[columnName];
+            output.Write(columnName);
+            output.Write(checked((int)totalEntries));
+
+            // Merge-stream into a memory buffer, then compress.
+            using MemoryStream buffer = new();
+            using (BinaryWriter bufferWriter = new(buffer, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                StreamMergeSortedRuns(bufferWriter, columnName, runCount);
+            }
+
+            byte[] uncompressed = buffer.ToArray();
+            byte[] compressed = DatumFile.Compression.DatumCompressor.Compress(
+                uncompressed, DatumFile.DatumCompression.Zstd);
+
+            output.Write(uncompressed.Length);
+            output.Write(compressed.Length);
+            output.Write(compressed);
+        }
+    }
+
+    /// <summary>
     /// K-way merges pre-sorted runs from a column's spill file and writes each entry
     /// directly to the output writer in sorted order, without allocating the full result array.
     /// </summary>

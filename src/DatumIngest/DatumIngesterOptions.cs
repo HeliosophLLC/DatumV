@@ -44,4 +44,23 @@ public sealed class DatumIngesterOptions
     /// Defaults to <c>true</c>.
     /// </summary>
     public bool AutoIndexColumns { get; init; } = true;
+
+    /// <summary>
+    /// When <c>true</c>, compresses sorted index sections in the <c>.datum-index</c> file
+    /// using Zstd. Sorted indexes are the dominant cost in index size for wide tables
+    /// with many rows; compression typically achieves 5–10× reduction with negligible
+    /// impact on read latency (decompression is sub-millisecond).
+    /// Defaults to <c>true</c>.
+    /// </summary>
+    public bool CompressIndexes { get; init; } = true;
+
+    /// <summary>
+    /// Maximum number of columns to include in the sorted value index.
+    /// When set, auto-index selects the first N eligible
+    /// columns (in schema order). Useful in multi-tenant environments where index size
+    /// must be bounded without disabling indexing entirely.
+    /// <see langword="null"/> means no limit (all eligible columns are indexed).
+    /// Defaults to <see langword="null"/>.
+    /// </summary>
+    public int? MaxIndexedColumns { get; init; }
 }
