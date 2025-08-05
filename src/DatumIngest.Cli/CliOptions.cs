@@ -52,6 +52,13 @@ internal sealed class CliOptions
     /// <summary>Gets or sets whether to build sorted value indexes for all columns during index creation.</summary>
     public bool IndexAllColumns { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether to automatically select compact columns for sorted indexing
+    /// based on their data kind. Has no effect when <see cref="IndexAllColumns"/> is <c>true</c>
+    /// or explicit <see cref="IndexColumns"/> are provided.
+    /// </summary>
+    public bool AutoIndexColumns { get; set; }
+
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
 
@@ -194,6 +201,10 @@ internal sealed class CliOptions
 
                 case "--index-all":
                     options.IndexAllColumns = true;
+                    break;
+
+                case "--auto-index":
+                    options.AutoIndexColumns = true;
                     break;
 
                 case "--memory-budget":

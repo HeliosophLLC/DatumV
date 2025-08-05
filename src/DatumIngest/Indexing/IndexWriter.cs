@@ -19,6 +19,25 @@ public sealed class IndexWriter
     /// <param name="output">Writable, seekable output stream.</param>
     public void Write(SourceIndexSet indexSet, Stream output)
     {
+        Write(indexSet, output, sortedIndexSpillWriter: null);
+    }
+
+    /// <summary>
+    /// Writes the given index set to the output stream, optionally streaming sorted indexes
+    /// directly from a <see cref="SortedIndexSpillWriter"/> instead of materializing them.
+    /// When <paramref name="sortedIndexSpillWriter"/> is provided and has sorted index data,
+    /// the k-way merge is streamed directly to <paramref name="output"/>, avoiding the
+    /// allocation of the full <see cref="ValueIndexEntry"/> arrays.
+    /// </summary>
+    /// <param name="indexSet">The source index set to serialize.</param>
+    /// <param name="output">Writable, seekable output stream.</param>
+    /// <param name="sortedIndexSpillWriter">
+    /// Optional spill writer holding sorted index runs on disk. When non-null and containing
+    /// data, its entries are streamed directly to the output instead of reading from
+    /// <see cref="SourceIndex.SortedIndexes"/>.
+    /// </param>
+    internal void Write(SourceIndexSet indexSet, Stream output, SortedIndexSpillWriter? sortedIndexSpillWriter)
+    {
         using BinaryWriter writer = new(output, System.Text.Encoding.UTF8, leaveOpen: true);
 
         WriteHeader(writer);
@@ -55,7 +74,12 @@ public sealed class IndexWriter
                     WriteBloomFilters(writer, index.BloomFilters));
             }
 
-            if (index.SortedIndexes is not null)
+            if (sortedIndexSpillWriter is not null && sortedIndexSpillWriter.HasSortedIndexes)
+            {
+                RecordSection(sections, IndexSectionType.SortedIndexes, tableIndexByte, writer, () =>
+                    sortedIndexSpillWriter.WriteSortedIndexesToStream(writer));
+            }
+            else if (index.SortedIndexes is not null)
             {
                 RecordSection(sections, IndexSectionType.SortedIndexes, tableIndexByte, writer, () =>
                     WriteSortedIndexes(writer, index.SortedIndexes));

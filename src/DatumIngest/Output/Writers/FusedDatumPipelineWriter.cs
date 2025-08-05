@@ -86,7 +86,19 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
     /// The completed source index, available after <see cref="FinalizeAsync"/> returns.
     /// <c>null</c> when no <see cref="IncrementalIndexBuilder"/> was provided at construction.
     /// </summary>
+    /// <remarks>
+    /// The returned index has <see cref="SourceIndex.SortedIndexes"/> set to <c>null</c>.
+    /// Sorted index data remains on disk in the spill writer (accessible via <see cref="SortedIndexSpillWriter"/>)
+    /// and should be streamed to the output via <see cref="IndexWriter"/>.
+    /// </remarks>
     public SourceIndex? CompletedIndex => _completedIndex;
+
+    /// <summary>
+    /// The spill writer holding sorted index data on disk, available after <see cref="FinalizeAsync"/>.
+    /// Pass to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?)"/> for
+    /// streaming serialization without materializing the full sorted index arrays.
+    /// </summary>
+    internal SortedIndexSpillWriter? SortedIndexSpillWriter => _indexBuilder?.SpillWriter;
 
     /// <summary>
     /// The column statistics, available after <see cref="FinalizeAsync"/> returns.
@@ -143,6 +155,7 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
     public ValueTask DisposeAsync()
     {
         _fileWriter.Dispose();
+        _indexBuilder?.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -161,7 +174,7 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
         string indexPath = FileFormatDetector.GetSidecarBasePath(_filePath) + ".datum-index";
         using FileStream output = File.Create(indexPath);
         IndexWriter indexWriter = new();
-        indexWriter.Write(indexSet, output);
+        indexWriter.Write(indexSet, output, _indexBuilder?.SpillWriter);
 
         filesCreated.Add(indexPath);
     }

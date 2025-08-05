@@ -75,6 +75,14 @@ public sealed class ExecutionContext
     public Row? OuterRow { get; init; }
 
     /// <summary>
+    /// Maximum number of output rows that a downstream <see cref="Operators.LimitOperator"/>
+    /// will consume (LIMIT + OFFSET). Operators such as join can use this hint to choose
+    /// cheaper strategies (e.g. index nested-loop) when only a small number of rows are needed.
+    /// <see langword="null"/> when no LIMIT clause is active.
+    /// </summary>
+    public int? RowLimit { get; init; }
+
+    /// <summary>
     /// Returns a new context with the given outer row set for correlated subquery execution.
     /// All other properties are copied from the current context.
     /// </summary>
@@ -90,6 +98,7 @@ public sealed class ExecutionContext
             MemoryBudgetBytes)
         {
             OuterRow = outerRow,
+            RowLimit = RowLimit,
         };
     }
 }

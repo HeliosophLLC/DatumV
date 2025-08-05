@@ -412,13 +412,19 @@ public sealed class SourceIndexBuilderTests
 
         SourceIndex result = incremental.Finalize();
 
-        Assert.NotNull(result.SortedIndexes);
-        Assert.True(result.SortedIndexes.HasColumn("id"));
-        Assert.True(result.SortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
+        // Finalize no longer materializes sorted indexes (they remain on disk in the spill writer).
+        Assert.Null(result.SortedIndexes);
+
+        // Verify sorted index data via the spill writer.
+        SortedValueIndexSet? sortedIndexes = incremental.SpillWriter?.BuildSortedValueIndexSet();
+        Assert.NotNull(sortedIndexes);
+        Assert.True(sortedIndexes.HasColumn("id"));
+        Assert.True(sortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
         Assert.Equal(3, sortedIndex!.Count);
 
         IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(2.0f));
         Assert.Single(found);
+        incremental.Dispose();
     }
 
     [Fact]
@@ -610,6 +616,200 @@ public sealed class SourceIndexBuilderTests
         Assert.True(result.BloomFilters.HasColumn("id"));
         Assert.True(result.BloomFilters.HasColumn("category"));
         Assert.Equal(2, result.BloomFilters.ChunkCount);
+    }
+
+    // ───────────── Auto-Index Heuristic ─────────────
+
+    [Fact]
+    public async Task BuildAsync_AutoIndex_IndexesCompactColumnsOnly()
+    {
+        Row[] rows =
+        [
+            MakeRow(
+                ("id", DataValue.FromScalar(1.0f)),
+                ("name", DataValue.FromString("alice")),
+                ("data", DataValue.FromVector(new float[] { 1.0f, 2.0f })),
+                ("active", DataValue.FromBoolean(true)),
+                ("created", DataValue.FromDate(new DateOnly(2024, 1, 1)))),
+            MakeRow(
+                ("id", DataValue.FromScalar(2.0f)),
+                ("name", DataValue.FromString("bob")),
+                ("data", DataValue.FromVector(new float[] { 3.0f, 4.0f })),
+                ("active", DataValue.FromBoolean(false)),
+                ("created", DataValue.FromDate(new DateOnly(2024, 2, 1)))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("auto");
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        // Compact types should be indexed.
+        Assert.True(index.SortedIndexes.HasColumn("id"));
+        Assert.True(index.SortedIndexes.HasColumn("name"));
+        Assert.True(index.SortedIndexes.HasColumn("active"));
+        Assert.True(index.SortedIndexes.HasColumn("created"));
+        // Vectors should NOT be indexed.
+        Assert.False(index.SortedIndexes.HasColumn("data"));
+    }
+
+    [Fact]
+    public async Task BuildAsync_AutoIndex_DropsLongStringColumns()
+    {
+        Row[] rows =
+        [
+            MakeRow(
+                ("id", DataValue.FromScalar(1.0f)),
+                ("short_text", DataValue.FromString("ok")),
+                ("long_text", DataValue.FromString("this is way too long for auto-indexing"))),
+            MakeRow(
+                ("id", DataValue.FromScalar(2.0f)),
+                ("short_text", DataValue.FromString("fine")),
+                ("long_text", DataValue.FromString("another long value exceeding the limit"))),
+        ];
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("auto-drop");
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.SortedIndexes.HasColumn("id"));
+        Assert.True(index.SortedIndexes.HasColumn("short_text"));
+        // Long text column should be dropped.
+        Assert.False(index.SortedIndexes.HasColumn("long_text"));
+    }
+
+    [Fact]
+    public async Task BuildAsync_AutoIndex_SpillsAcrossMultipleChunks()
+    {
+        Row[] rows = Enumerable.Range(0, 25).Select(i =>
+            MakeRow(
+                ("id", DataValue.FromScalar((float)i)),
+                ("tag", DataValue.FromString($"t{i % 5}")))).ToArray();
+
+        InMemoryTableProvider provider = new(rows);
+        TableDescriptor descriptor = CreateDescriptor("spill");
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 5, autoIndexColumns: true);
+
+        SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
+
+        Assert.NotNull(index.SortedIndexes);
+        Assert.True(index.SortedIndexes.TryGetIndex("id", out SortedValueIndex? idIndex));
+        Assert.Equal(25, idIndex!.Count);
+
+        // Verify correct chunk assignment after spill+merge.
+        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromScalar(12.0f));
+        Assert.Single(found);
+        Assert.Equal(2, found[0].ChunkIndex); // rows 10-14 are chunk 2
+        Assert.Equal(2, found[0].RowOffsetInChunk);
+    }
+
+    [Fact]
+    public void IncrementalBuilder_AutoIndex_IndexesCompactColumns()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        incremental.AddRow(MakeRow(
+            ("id", DataValue.FromScalar(3.0f)),
+            ("vec", DataValue.FromVector(new float[] { 1.0f }))));
+        incremental.AddRow(MakeRow(
+            ("id", DataValue.FromScalar(1.0f)),
+            ("vec", DataValue.FromVector(new float[] { 2.0f }))));
+
+        SourceIndex result = incremental.Finalize();
+        Assert.Null(result.SortedIndexes);
+
+        SortedValueIndexSet? sortedIndexes = incremental.SpillWriter?.BuildSortedValueIndexSet();
+        Assert.NotNull(sortedIndexes);
+        Assert.True(sortedIndexes.HasColumn("id"));
+        Assert.False(sortedIndexes.HasColumn("vec"));
+        incremental.Dispose();
+    }
+
+    [Fact]
+    public void IncrementalBuilder_AutoIndex_DropsLongStrings()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        incremental.AddRow(MakeRow(
+            ("code", DataValue.FromString("AB")),
+            ("description", DataValue.FromString("A very long description that exceeds the limit"))));
+        incremental.AddRow(MakeRow(
+            ("code", DataValue.FromString("CD")),
+            ("description", DataValue.FromString("Another long one for sure and certain"))));
+
+        SourceIndex result = incremental.Finalize();
+        Assert.Null(result.SortedIndexes);
+
+        SortedValueIndexSet? sortedIndexes = incremental.SpillWriter?.BuildSortedValueIndexSet();
+        Assert.NotNull(sortedIndexes);
+        Assert.True(sortedIndexes.HasColumn("code"));
+        Assert.False(sortedIndexes.HasColumn("description"));
+        incremental.Dispose();
+    }
+
+    [Fact]
+    public void IncrementalBuilder_AutoIndex_SpillsAndMergesCorrectly()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        SourceIndexBuilder builder = new(
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 5, autoIndexColumns: true);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        for (int i = 0; i < 15; i++)
+        {
+            incremental.AddRow(MakeRow(("value", DataValue.FromScalar((float)i))));
+        }
+
+        SourceIndex result = incremental.Finalize();
+        Assert.Null(result.SortedIndexes);
+
+        SortedValueIndexSet? sortedIndexes = incremental.SpillWriter?.BuildSortedValueIndexSet();
+        Assert.NotNull(sortedIndexes);
+        Assert.True(sortedIndexes.TryGetIndex("value", out SortedValueIndex? sortedIndex));
+        Assert.Equal(15, sortedIndex!.Count);
+
+        // Value 7.0 should be in chunk 1, row 2.
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(7.0f));
+        Assert.Single(found);
+        Assert.Equal(1, found[0].ChunkIndex);
+        Assert.Equal(2, found[0].RowOffsetInChunk);
+        incremental.Dispose();
+    }
+
+    [Theory]
+    [InlineData(DataKind.Scalar, true)]
+    [InlineData(DataKind.UInt8, true)]
+    [InlineData(DataKind.Boolean, true)]
+    [InlineData(DataKind.Date, true)]
+    [InlineData(DataKind.DateTime, true)]
+    [InlineData(DataKind.Time, true)]
+    [InlineData(DataKind.Duration, true)]
+    [InlineData(DataKind.Uuid, true)]
+    [InlineData(DataKind.String, true)]
+    [InlineData(DataKind.Vector, false)]
+    [InlineData(DataKind.Matrix, false)]
+    [InlineData(DataKind.Tensor, false)]
+    [InlineData(DataKind.UInt8Array, false)]
+    [InlineData(DataKind.Image, false)]
+    [InlineData(DataKind.JsonValue, false)]
+    [InlineData(DataKind.Array, false)]
+    public void IsAutoIndexableKind_CategorizesCorrectly(DataKind kind, bool expected)
+    {
+        Assert.Equal(expected, SourceIndexBuilder.IsAutoIndexableKind(kind));
     }
 
     // ───────────── Helpers ─────────────

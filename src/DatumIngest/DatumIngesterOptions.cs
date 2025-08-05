@@ -8,7 +8,7 @@ namespace DatumIngest;
 public sealed class DatumIngesterOptions
 {
     /// <summary>
-    /// Default options: all columns sorted-indexed, no bloom filters, default chunk size.
+    /// Default options: auto-indexed compact columns, no bloom filters, default chunk size.
     /// </summary>
     public static readonly DatumIngesterOptions Default = new();
 
@@ -30,7 +30,18 @@ public sealed class DatumIngesterOptions
     /// <summary>
     /// When <c>true</c>, builds a sorted value index for every column,
     /// enabling O(log n) key lookup and range pruning at query time.
+    /// Overrides <see cref="AutoIndexColumns"/> when set.
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool IndexAllColumns { get; init; } = false;
+
+    /// <summary>
+    /// When <c>true</c>, automatically selects columns for sorted value indexes
+    /// based on their <see cref="Model.DataKind"/>. Compact types (numeric, date,
+    /// boolean, UUID, and short strings up to 16 characters) are indexed; wide types
+    /// (vectors, matrices, tensors, images, JSON, arrays) are not.
+    /// Has no effect when <see cref="IndexAllColumns"/> is <c>true</c>.
     /// Defaults to <c>true</c>.
     /// </summary>
-    public bool IndexAllColumns { get; init; } = true;
+    public bool AutoIndexColumns { get; init; } = true;
 }

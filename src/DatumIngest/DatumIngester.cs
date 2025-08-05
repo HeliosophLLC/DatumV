@@ -165,7 +165,8 @@ public static class DatumIngester
         IncrementalIndexBuilder indexBuilder = new SourceIndexBuilder(
                 bloomAllColumns: options.BloomAllColumns,
                 indexAllColumns: options.IndexAllColumns,
-                chunkSize: options.ChunkSize)
+                chunkSize: options.ChunkSize,
+                autoIndexColumns: options.AutoIndexColumns)
             .CreateIncrementalBuilder(fingerprint);
         StatisticsCollector statisticsCollector = new();
         MemoryStream datumStream = new();
@@ -188,7 +189,6 @@ public static class DatumIngester
         }
 
         await datumWriter.FinalizeAsync(cancellationToken).ConfigureAwait(false);
-        await datumWriter.DisposeAsync().ConfigureAwait(false);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = datumWriter.Statistics
             ?? throw new InvalidOperationException("The datum writer did not produce statistics.");
@@ -199,9 +199,21 @@ public static class DatumIngester
         string schemaJson = SchemaSerializer.Serialize(descriptor.Name, schema);
         string manifestJson = ManifestSerializer.Serialize(manifest);
 
-        MemoryStream indexStream = new();
+        // Write the index to a temporary file using streaming sorted indexes from the spill
+        // writer. This avoids materializing the full ValueIndexEntry arrays (~5 GB for 32M rows)
+        // and bypasses the 2 GB MemoryStream capacity limit.
+        string indexTempPath = Path.Combine(Path.GetTempPath(), $"datum-ingest-idx-{Guid.NewGuid():N}.tmp");
+        FileStream indexStream = new(
+            indexTempPath, FileMode.Create, FileAccess.ReadWrite,
+            FileShare.None, bufferSize: 65536, FileOptions.DeleteOnClose);
         IndexWriter indexWriter = new();
-        indexWriter.Write(SourceIndexSet.Create(descriptor.Name, index), indexStream);
+        indexWriter.Write(
+            SourceIndexSet.Create(descriptor.Name, index),
+            indexStream,
+            datumWriter.SortedIndexSpillWriter);
+
+        // Dispose the datum writer (and its index builder / spill writer) after streaming.
+        await datumWriter.DisposeAsync().ConfigureAwait(false);
 
         datumStream.Position = 0;
         indexStream.Position = 0;

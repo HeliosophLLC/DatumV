@@ -51,10 +51,11 @@ public sealed class DatumIngestionTableResult
     public required MemoryStream DatumStream { get; init; }
 
     /// <summary>
-    /// Seekable <see cref="MemoryStream"/> containing the <c>.datum-index</c> file bytes,
-    /// positioned at offset 0 and ready to upload.
+    /// Seekable stream containing the <c>.datum-index</c> file bytes,
+    /// positioned at offset 0 and ready to upload. May be backed by a temporary file
+    /// for datasets whose serialized index exceeds the <see cref="MemoryStream"/> capacity.
     /// </summary>
-    public required MemoryStream IndexStream { get; init; }
+    public required Stream IndexStream { get; init; }
 
     /// <summary>Serialized single-table schema JSON.</summary>
     public required string SchemaJson { get; init; }

@@ -166,15 +166,15 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
 
 static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
 {
-    if (options.BloomAllColumns || options.IndexAllColumns)
+    if (options.BloomAllColumns || options.IndexAllColumns || options.AutoIndexColumns)
     {
         if (options.BloomColumns.Count > 0 || options.IndexColumns.Count > 0)
         {
             throw new ArgumentException(
-                "Cannot combine --bloom-all/--index-all with --bloom-columns/--index-columns. Use one approach or the other.");
+                "Cannot combine --bloom-all/--index-all/--auto-index with --bloom-columns/--index-columns. Use one approach or the other.");
         }
 
-        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize);
+        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns);
     }
 
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;

@@ -1,4 +1,5 @@
 using System.Collections;
+using DatumIngest.Catalog;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -78,7 +79,18 @@ public sealed class JoinOperator : IQueryOperator
 
         if (extraction is not null)
         {
-            if (context.MemoryBudgetBytes is long memoryBudget)
+            // Try index nested loop join when a sorted index exists on the build-side
+            // join column. This is optimal under LIMIT with few probe rows.
+            IndexNestedLoopJoinExecutor? indexNlj = TryCreateIndexNestedLoopExecutor(extraction, context);
+
+            if (indexNlj is not null)
+            {
+                await foreach (Row row in indexNlj.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
+                {
+                    yield return row;
+                }
+            }
+            else if (context.MemoryBudgetBytes is long memoryBudget)
             {
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                 GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, label: GetOperatorLabel(_right));
@@ -124,6 +136,97 @@ public sealed class JoinOperator : IQueryOperator
             else
                 return current.GetType().Name;
         }
+    }
+
+    /// <summary>
+    /// Attempts to create an <see cref="IndexNestedLoopJoinExecutor"/> for the current join.
+    /// Returns <c>null</c> when the preconditions are not met (join type, single key,
+    /// sorted index available, seekable provider, bounded row limit).
+    /// </summary>
+    private IndexNestedLoopJoinExecutor? TryCreateIndexNestedLoopExecutor(
+        JoinKeyExtractionResult extraction, ExecutionContext context)
+    {
+        // Only use index NLJ when a LIMIT is active and small enough that
+        // point-seeks are cheaper than building a full hash table.
+        const int IndexNestedLoopRowLimitThreshold = 1000;
+
+        if (context.RowLimit is not int rowLimit || rowLimit > IndexNestedLoopRowLimitThreshold)
+        {
+            return null;
+        }
+
+        // Index NLJ only supports INNER and LeftSemi.
+        if (_joinType is not (JoinType.Inner or JoinType.LeftSemi))
+        {
+            return null;
+        }
+
+        // Only single-key equi-joins for now.
+        if (extraction.KeyPairs.Count != 1)
+        {
+            return null;
+        }
+
+        // Build-side key must be a simple column reference to match against sorted index names.
+        Expression buildKeyExpression = extraction.KeyPairs[0].Right;
+
+        if (buildKeyExpression is not ColumnReference buildColumnRef)
+        {
+            return null;
+        }
+
+        // Find the build-side ScanOperator.
+        List<ScanOperator> buildScans = new();
+        CollectScanOperators(_right, buildScans);
+
+        if (buildScans.Count != 1)
+        {
+            return null;
+        }
+
+        ScanOperator buildScan = buildScans[0];
+
+        if (buildScan.SourceIndex?.SortedIndexes is null)
+        {
+            return null;
+        }
+
+        // Try both qualified and unqualified column names against the sorted index.
+        string? indexColumnName = buildColumnRef.QualifiedName ?? buildColumnRef.ColumnName;
+        SortedValueIndexSet sortedIndexes = buildScan.SourceIndex.SortedIndexes;
+
+        if (!sortedIndexes.TryGetIndex(indexColumnName, out SortedValueIndex? sortedIndex))
+        {
+            // Try unqualified name if qualified failed.
+            if (buildColumnRef.QualifiedName is not null
+                && !sortedIndexes.TryGetIndex(buildColumnRef.ColumnName, out sortedIndex))
+            {
+                return null;
+            }
+
+            if (sortedIndex is null)
+            {
+                return null;
+            }
+        }
+
+        // Verify the provider supports seeking.
+        ITableProvider provider = context.Catalog.CreateProvider(buildScan.Descriptor);
+
+        if (provider is not ISeekableTableProvider)
+        {
+            return null;
+        }
+
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+
+        return new IndexNestedLoopJoinExecutor(
+            _joinType,
+            extraction,
+            sortedIndex,
+            buildScan.SourceIndex.Chunks,
+            buildScan.Descriptor,
+            evaluator);
     }
 
     private async IAsyncEnumerable<Row> ExecuteHashJoinAsync(

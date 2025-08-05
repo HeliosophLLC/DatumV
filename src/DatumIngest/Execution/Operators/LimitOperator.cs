@@ -38,10 +38,26 @@ public sealed class LimitOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
+        // Propagate the row limit hint so downstream operators (e.g. join) can
+        // choose cheaper strategies when only a small result set is needed.
+        ExecutionContext limitedContext = context.RowLimit is null || _limit + _offset < context.RowLimit
+            ? new ExecutionContext(
+                context.CancellationToken,
+                context.FunctionRegistry,
+                context.Catalog,
+                context.QueryMeter,
+                context.MemoryBudgetBytes)
+              {
+                  OuterRow = context.OuterRow,
+                  MaxRecursionDepth = context.MaxRecursionDepth,
+                  RowLimit = _limit + _offset,
+              }
+            : context;
+
         int skipped = 0;
         int emitted = 0;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (Row row in _source.ExecuteAsync(limitedContext).ConfigureAwait(false))
         {
             if (skipped < _offset)
             {

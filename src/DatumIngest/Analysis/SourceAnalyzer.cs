@@ -32,6 +32,7 @@ public sealed class SourceAnalyzer
     private readonly IReadOnlySet<string>? _indexColumns;
     private readonly bool _bloomAllColumns;
     private readonly bool _indexAllColumns;
+    private readonly bool _autoIndexColumns;
     private readonly bool _withInteractions;
 
     /// <summary>
@@ -52,6 +53,7 @@ public sealed class SourceAnalyzer
         _indexColumns = indexColumns;
         _bloomAllColumns = false;
         _indexAllColumns = false;
+        _autoIndexColumns = false;
         _withInteractions = withInteractions;
     }
 
@@ -62,17 +64,23 @@ public sealed class SourceAnalyzer
     /// <param name="indexAllColumns">When <c>true</c>, builds sorted value indexes for every column discovered in the data.</param>
     /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
     /// <param name="withInteractions">Whether to collect pairwise column interaction statistics.</param>
+    /// <param name="autoIndexColumns">
+    /// When <c>true</c> and <paramref name="indexAllColumns"/> is <c>false</c>,
+    /// automatically selects compact columns for sorted indexing.
+    /// </param>
     public SourceAnalyzer(
         bool bloomAllColumns,
         bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
-        bool withInteractions = false)
+        bool withInteractions = false,
+        bool autoIndexColumns = false)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
         _indexColumns = null;
         _bloomAllColumns = bloomAllColumns;
         _indexAllColumns = indexAllColumns;
+        _autoIndexColumns = autoIndexColumns;
         _withInteractions = withInteractions;
     }
 
@@ -125,8 +133,8 @@ public sealed class SourceAnalyzer
             ? await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken).ConfigureAwait(false)
             : new SourceFingerprint(0, Array.Empty<byte>());
 
-        SourceIndexBuilder indexBuilder = _bloomAllColumns || _indexAllColumns
-            ? new(_bloomAllColumns, _indexAllColumns, _chunkSize)
+        SourceIndexBuilder indexBuilder = _bloomAllColumns || _indexAllColumns || _autoIndexColumns
+            ? new(_bloomAllColumns, _indexAllColumns, _chunkSize, autoIndexColumns: _autoIndexColumns)
             : new SourceIndexBuilder(_chunkSize, _bloomColumns, _indexColumns);
         Dictionary<string, SourceIndex> tableIndexes = new();
         Dictionary<string, QueryResultsManifest> tableManifests = new();
