@@ -12,7 +12,7 @@ A `.datum-index` file uses a TOC-at-end layout (like ZIP), enabling sequential w
 ┌─────────────────────────────────┐
 │  Header (16 bytes)              │
 │    Magic: DTIX (4 bytes ASCII)  │
-│    Version: uint16 (currently 1)│
+│    Version: uint16 (currently 3)│
 │    Flags: uint16 (reserved)     │
 │    TOC offset: int64            │
 ├─────────────────────────────────┤
@@ -22,6 +22,8 @@ A `.datum-index` file uses a TOC-at-end layout (like ZIP), enabling sequential w
 │  Section: BloomFilters     (opt)│
 │  Section: SortedIndexes    (opt)│
 │  Section: ZipDirectory     (opt)│
+│  Section: RowOffsets       (opt)│
+│  Section: TableDirectory   (opt)│
 ├─────────────────────────────────┤
 │  Table of Contents              │
 │    Count: int32                 │
@@ -39,8 +41,18 @@ Each section is identified by an `IndexSectionType`:
 | 3 | BloomFilters | Per-column, per-chunk probabilistic membership filters |
 | 4 | SortedIndexes | Sorted distinct values for binary search lookups |
 | 5 | ZipDirectory | Cached ZIP archive central directory |
+| 6 | RowOffsets | Per-chunk row byte offsets for line-oriented seeking |
+| 7 | TableDirectory | Multi-table index mapping (table name → section ranges) |
 
-Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, SortedIndexes, and ZipDirectory are written only when applicable.
+Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, SortedIndexes, ZipDirectory, RowOffsets, and TableDirectory are written only when applicable.
+
+### Format versions
+
+| Version | Changes |
+|---------|--------|
+| 1 | Initial format |
+| 2 | Added RowOffsets section, multi-table TableDirectory |
+| 3 | Added per-column Zstd compression for SortedIndexes section |
 
 ## Staleness detection
 
@@ -102,6 +114,39 @@ Specify columns at index build time:
 ```bash
 datum-ingest index --source "csv:data=./data.csv" --index-columns "user_id,timestamp"
 ```
+
+### Automatic column selection
+
+When no explicit `--index-columns` are provided, the programmatic `DatumIngester` API (and the compute backend) automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not:
+
+| Eligible (auto-indexed) | Skipped |
+|------------------------|---------|
+| Scalar (numeric) | Vector |
+| Boolean | Matrix |
+| Date, DateTime, Time, Duration | Tensor |
+| UUID | Image |
+| String (≤ 16 characters) | JsonValue |
+| UInt8 | Array |
+
+Auto-indexing is controlled by the `AutoIndexColumns` option (default: `true`). Set `IndexAllColumns = true` to override and index every column regardless of type.
+
+To cap how many columns are indexed (useful in multi-tenant environments where index size must be bounded), set `MaxIndexedColumns` to the desired limit. Only the first N eligible columns in schema order are indexed.
+
+### Sorted index compression
+
+As of format version 3, sorted indexes are compressed per-column using Zstd. This typically achieves 5–10× size reduction with negligible read latency impact (decompression is sub-millisecond).
+
+The compressed envelope format per column is:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| ColumnName | string | Column name (length-prefixed UTF-8) |
+| EntryCount | int32 | Number of index entries |
+| UncompressedLength | int32 | Byte length before compression |
+| CompressedLength | int32 | Byte length after compression |
+| CompressedPayload | byte[] | Zstd-compressed entry data |
+
+Compression is enabled by default in the `DatumIngester` API (`CompressIndexes = true`). The CLI `--with-index` flag writes uncompressed indexes (version 2) for maximum compatibility. The reader accepts both compressed (v3) and uncompressed (v2) indexes transparently.
 
 ## ZIP directory cache
 
@@ -281,6 +326,21 @@ IndexWriter writer = new();
 writer.Write(indexSet, output);
 ```
 
+### Build with auto-indexing
+
+```csharp
+// Auto-select compact columns, compress sorted indexes, cap at 8 columns
+SourceIndexBuilder builder = new(
+    bloomAllColumns: false,
+    indexAllColumns: false,
+    chunkSize: 10_000,
+    autoIndexColumns: true,
+    maxIndexedColumns: 8);
+
+SourceIndex index = await builder.BuildAsync(
+    descriptor, provider, sourceStream, CancellationToken.None);
+```
+
 ### Co-generate during output writing
 
 ```csharp
@@ -298,6 +358,25 @@ await foreach (Row row in plan.ExecuteAsync(context))
 
 SourceIndex index = incremental.Finalize();
 ```
+
+### Using DatumIngester
+
+The `DatumIngester` class provides a high-level API for ingesting source files with automatic index and manifest generation:
+
+```csharp
+DatumIngesterOptions options = new()
+{
+    ChunkSize = 10_000,
+    AutoIndexColumns = true,
+    CompressIndexes = true,
+    MaxIndexedColumns = 8,
+};
+
+DatumIngester ingester = new(options);
+await ingester.IngestTableAsync(descriptor, provider, sourceStream, outputPath, CancellationToken.None);
+```
+
+`DatumIngester` handles index building, compression, and sidecar file writing in a single streaming pass. See [Programmatic API](api.md) for additional `DatumIngester` usage patterns.
 
 ### Read an index
 

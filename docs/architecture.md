@@ -63,6 +63,28 @@ Hash join for INNER, LEFT, RIGHT, and FULL OUTER joins:
 - NULL keys never match (SQL semantics)
 - CROSS JOIN uses nested loop (cartesian product)
 
+### Grace hash join (spill-to-disk)
+
+When `ExecutionContext.MemoryBudgetBytes` is set, equi-joins use a Grace hash join that can spill partitions to temporary files when estimated memory usage exceeds the budget. The operator partitions both build and probe sides into buckets; if a bucket's build side exceeds the memory threshold, it is written to disk and replayed during probing. This allows joining datasets larger than available memory at the cost of additional I/O.
+
+The memory budget is configurable per deployment:
+- **CLI**: 2 GB default (`--memory-budget` flag, `--memory-budget 0` disables)
+- **Compute backend (gRPC)**: 256 MB default per session
+- **Programmatic API**: set via `ExecutionContext` constructor
+
+### Index nested-loop join
+
+For small result sets, the planner can substitute an index nested-loop join (NLJ) instead of a hash join. This strategy is chosen when all of the following conditions are met:
+
+1. A `LIMIT` clause caps output to ≤ 1,000 rows (`RowLimit` hint)
+2. The join is `INNER` or `LEFT SEMI` with a single-key equi-predicate
+3. The build side has a sorted value index on the join key column
+4. The build-side provider supports seeking (`ISeekableTableProvider`)
+
+When eligible, the NLJ streams probe-side rows and performs O(log n) index lookups on the build side for each probe key, avoiding full materialization of the build side. This is substantially faster than a hash join when the probe side is small and most build-side rows are never touched.
+
+The `LimitOperator` propagates the `RowLimit` hint (LIMIT + OFFSET) downstream through the `ExecutionContext`, allowing the `JoinOperator` to see that only a bounded result set is needed and select the NLJ strategy accordingly.
+
 ## Project structure
 
 ```
