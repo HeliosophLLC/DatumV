@@ -127,6 +127,20 @@ idx:images=./train-images-idx3-ubyte
 
 When the provider prefix is omitted, the format is detected automatically (see below). The explicit `provider:name=path` form is always available as an override.
 
+### Directory sources
+
+When `--source` is given a directory path instead of a file, all supported files in that directory are auto-discovered and registered as tables. Table names are derived from filenames using `FileFormatDetector.DeriveTableName` — container extensions like `.datum` are stripped, so `order_products__prior.csv.datum` becomes table `order_products__prior.csv`. Sidecar files (`.datum-index`, `.datum-manifest`, `.datum-schema`) are matched automatically.
+
+This mirrors the behaviour of the gRPC compute backend's `DatasetCatalogFactory`, which performs the same directory scan when a dataset is loaded by ID.
+
+```bash
+# Load every supported file from a directory
+datum-ingest shell --source ./datasets/instacart
+
+# Query against auto-discovered tables
+datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/instacart
+```
+
 ## Format auto-detection
 
 When a `--source` definition omits the provider prefix, or when the programmatic API uses `catalog.Register(name, filePath)`, the file format is detected using a three-tier strategy:
@@ -184,4 +198,4 @@ JSON array of table descriptors:
 ]
 ```
 
-At least one of `--catalog` or `--source` is required. Both can be mixed; `--source` entries override same-named catalog entries.
+At least one of `--catalog` or `--source` is required. Both can be mixed; `--source` entries override same-named catalog entries. Directory sources can be combined with individual file sources and catalog files.

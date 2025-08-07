@@ -159,7 +159,7 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | Flag | Description |
 |------|-------------|
 | `--catalog <path>` | Path to a JSON catalog file defining table sources. |
-| `--source <def>` | Inline source definition. Format: `name=path` (auto-detect) or `provider:name=path[;key=value]` (explicit). Repeatable. |
+| `--source <def>` | Inline source definition. Format: `name=path` (auto-detect), `provider:name=path[;key=value]` (explicit), or a directory path to auto-discover all supported files. Repeatable. |
 | `--limit <n>` | Row limit for explore mode (default: 10). |
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 | `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |
@@ -186,6 +186,13 @@ jsonl:records=./data.jsonl
 zip:images=./train2017.zip
 hdf5:features=./embeddings.h5
 parquet:labels=./labels.parquet
+```
+
+When `--source` is given a directory path, all supported files in that directory are auto-discovered and registered as tables. Table names are derived from filenames (e.g. `order_products__prior.csv.datum` becomes `order_products__prior.csv`). Sidecars (`.datum-index`, `.datum-manifest`, `.datum-schema`) are matched automatically.
+
+```bash
+datum-ingest shell --source ./datasets/my-project
+datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/my-project
 ```
 
 ## Documentation

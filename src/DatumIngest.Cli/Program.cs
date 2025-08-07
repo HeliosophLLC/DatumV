@@ -103,11 +103,19 @@ static TableCatalog BuildCatalog(CliOptions options)
         LoadCatalogFile(catalog, options.CatalogPath);
     }
 
-    // Parse inline --source definitions (override same-named catalog entries)
+    // Parse inline --source definitions (override same-named catalog entries).
+    // If a source is a directory path, auto-discover all supported files within it.
     foreach (string source in options.Sources)
     {
-        TableDescriptor descriptor = ParseSourceDefinition(source);
-        catalog.Register(descriptor);
+        if (Directory.Exists(source))
+        {
+            RegisterDirectory(catalog, source);
+        }
+        else
+        {
+            TableDescriptor descriptor = ParseSourceDefinition(source);
+            catalog.Register(descriptor);
+        }
     }
 
     return catalog;
@@ -187,10 +195,17 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
     SourceIndexBuilder builder = CreateIndexBuilder(options);
 
     // Collect descriptors from inline --source definitions.
+    // Directory sources are handled by BuildCatalog and skipped here so the
+    // fallback "index every table in the catalog" path picks them up.
     List<TableDescriptor> descriptors = new();
 
     foreach (string source in options.Sources)
     {
+        if (Directory.Exists(source))
+        {
+            continue;
+        }
+
         TableDescriptor descriptor = ParseSourceDefinition(source);
 
         if (!catalog.TryResolve(descriptor.Name, out _))
@@ -297,6 +312,11 @@ static async Task<int> RunIndexManifestAsync(TableCatalog catalog, CliOptions op
 
     foreach (string source in options.Sources)
     {
+        if (Directory.Exists(source))
+        {
+            continue;
+        }
+
         TableDescriptor descriptor = ParseSourceDefinition(source);
 
         if (!catalog.TryResolve(descriptor.Name, out _))
@@ -459,6 +479,26 @@ static void LoadCatalogFile(TableCatalog catalog, string catalogPath)
     {
         Dictionary<string, string> entryOptions = entry.Options ?? [];
         catalog.Register(new TableDescriptor(entry.Provider, entry.Name, entry.FilePath, entryOptions));
+    }
+}
+
+// Scans a directory for all supported data files and registers each one in the
+// catalog, mirroring the behaviour of DatasetCatalogFactory in DatumIngest.Compute.
+static void RegisterDirectory(TableCatalog catalog, string directoryPath)
+{
+    foreach (string pattern in FileFormatDetector.SupportedFilePatterns)
+    {
+        foreach (string filePath in Directory.EnumerateFiles(directoryPath, pattern))
+        {
+            string tableName = FileFormatDetector.DeriveTableName(filePath);
+
+            if (catalog.TryResolve(tableName, out _))
+            {
+                continue;
+            }
+
+            catalog.Register(filePath);
+        }
     }
 }
 
