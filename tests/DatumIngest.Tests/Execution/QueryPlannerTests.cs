@@ -124,6 +124,10 @@ public class QueryPlannerTests
 
         IQueryOperator plan = planner.Plan(statement);
 
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap)
+            plan = projectWrap.Source;
+
         Assert.IsType<JoinOperator>(plan);
         JoinOperator join = (JoinOperator)plan;
         Assert.Equal(JoinType.Inner, join.Type);
@@ -431,6 +435,10 @@ public class QueryPlannerTests
 
         IQueryOperator plan = planner.Plan(statement);
 
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap1)
+            plan = projectWrap1.Source;
+
         // The WHERE predicate on "i" should be pushed below the join as a Filter on the right side.
         // Plan: JoinOperator (no top-level filter since it was pushed down)
         Assert.IsType<JoinOperator>(plan);
@@ -469,6 +477,10 @@ public class QueryPlannerTests
                 new ColumnReference("b", "y")));
 
         IQueryOperator plan = planner.Plan(statement);
+
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap2)
+            plan = projectWrap2.Source;
 
         // Multi-table predicate stays above the join.
         Assert.IsType<FilterOperator>(plan);
@@ -511,6 +523,10 @@ public class QueryPlannerTests
 
         IQueryOperator plan = planner.Plan(statement);
 
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap3)
+            plan = projectWrap3.Source;
+
         // Both predicates pushed down — no top-level filter.
         Assert.IsType<JoinOperator>(plan);
         JoinOperator join = (JoinOperator)plan;
@@ -550,6 +566,10 @@ public class QueryPlannerTests
                 new LiteralExpression(10)));
 
         IQueryOperator plan = planner.Plan(statement);
+
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap4)
+            plan = projectWrap4.Source;
 
         // Predicate should stay above the join.
         Assert.IsType<FilterOperator>(plan);
@@ -1165,6 +1185,10 @@ public class QueryPlannerTests
                     new ColumnReference("right_table", "id")))]);
 
         IQueryOperator plan = planner.Plan(statement);
+
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrapper)
+            plan = projectWrapper.Source;
 
         // Plan should be: JoinOperator(AliasOperator(Scan), AliasOperator(Scan))
         Assert.IsType<JoinOperator>(plan);

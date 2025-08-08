@@ -343,10 +343,160 @@ public sealed class CommandDispatcherTests : IDisposable
         session.Dispose();
     }
 
+    /// <summary>
+    /// When greedy join reordering swaps the probe and build sides, the schema
+    /// column order (resolved from SQL text) must still match the row value order.
+    /// Regression test: <c>SELECT *</c> from a join where the right table is larger
+    /// would produce headers in SQL-text order (left first) but values in execution
+    /// order (right first) because the reordering moved the larger table to the probe side.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_SelectStar_JoinReordering_SchemaMatchesRowOrder()
+    {
+        TableCatalog catalog = new();
+
+        // "departments" — small table (2 rows).
+        catalog.RegisterProvider("departments", () => new FixedRowProvider(
+            new Schema([
+                new ColumnInfo("department_id", DataKind.Scalar, false),
+                new ColumnInfo("department", DataKind.String, false),
+            ]),
+            estimatedRowCount: 2,
+            new Row(["department_id", "department"],
+                [DataValue.FromScalar(17f), DataValue.FromString("household")])));
+
+        catalog.Register(new TableDescriptor(
+            "departments", "departments", "departments.csv", new Dictionary<string, string>()));
+
+        // "products" — large table (1000 rows estimated, only 1 actual for test simplicity).
+        catalog.RegisterProvider("products", () => new FixedRowProvider(
+            new Schema([
+                new ColumnInfo("product_id", DataKind.Scalar, false),
+                new ColumnInfo("product_name", DataKind.String, false),
+                new ColumnInfo("department_id", DataKind.Scalar, false),
+            ]),
+            estimatedRowCount: 1000,
+            new Row(["product_id", "product_name", "department_id"],
+                [DataValue.FromScalar(105f), DataValue.FromString("Bakeware"), DataValue.FromScalar(17f)])));
+
+        catalog.Register(new TableDescriptor(
+            "products", "products", "products.csv", new Dictionary<string, string>()));
+
+        SessionManager sessionManager = new(FunctionRegistry.CreateDefault());
+        Session session = sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        CommandDispatcher dispatcher = new(sessionManager);
+
+        CommandResult result = await dispatcher.DispatchAsync(
+            session,
+            "SELECT * FROM departments INNER JOIN products ON departments.department_id = products.department_id",
+            CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.StreamingRows, result.Kind);
+        Assert.NotNull(result.Schema);
+
+        // Schema should list departments columns first (SQL-text order).
+        List<string> schemaNames = result.Schema!.Columns.Select(column => column.Name).ToList();
+
+        List<Row> rows = new();
+        await foreach (Row row in result.Rows!)
+        {
+            rows.Add(row);
+        }
+
+        Assert.Single(rows);
+        Row joined = rows[0];
+
+        // The critical check: for each column position, the schema name and the
+        // row value must correspond. Schema[0] is "department_id" (or deduped variant)
+        // from the departments table — its value must be 17, not 105.
+        for (int index = 0; index < schemaNames.Count; index++)
+        {
+            string name = schemaNames[index];
+            DataValue value = joined[index];
+
+            if (name.Contains("department_id", StringComparison.OrdinalIgnoreCase)
+                && !name.Contains("product", StringComparison.OrdinalIgnoreCase))
+            {
+                // department_id columns should have value 17.
+                Assert.Equal(17f, value.AsScalar());
+            }
+
+            if (name.Equals("product_id", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Equal(105f, value.AsScalar());
+            }
+
+            if (name.Equals("department", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Equal("household", value.AsString());
+            }
+
+            if (name.Equals("product_name", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Equal("Bakeware", value.AsString());
+            }
+        }
+
+        session.Dispose();
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {
         _adminSession.Dispose();
         _userSession.Dispose();
+    }
+}
+
+/// <summary>
+/// Minimal table provider with a fixed schema, estimated row count, and a set of rows.
+/// Used to trigger greedy join reordering by controlling the estimated cardinality.
+/// </summary>
+internal sealed class FixedRowProvider : ITableProvider
+{
+    private readonly Schema _schema;
+    private readonly long _estimatedRowCount;
+    private readonly Row[] _rows;
+
+    /// <summary>
+    /// Creates a fixed-row provider with the specified schema, row count estimate, and rows.
+    /// </summary>
+    public FixedRowProvider(Schema schema, long estimatedRowCount, params Row[] rows)
+    {
+        _schema = schema;
+        _estimatedRowCount = estimatedRowCount;
+        _rows = rows;
+    }
+
+    /// <inheritdoc/>
+    public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(_schema);
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<Row> OpenAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (Row row in _rows)
+        {
+            yield return row;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+        TableDescriptor descriptor,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new ProviderCapabilities(
+            EstimatedRowCount: _estimatedRowCount,
+            EstimatedRowSizeBytes: null,
+            SupportsSeek: false,
+            ColumnCosts: new Dictionary<string, ColumnCost>()));
     }
 }

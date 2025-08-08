@@ -567,6 +567,42 @@ public sealed class QueryPlanner
         }
 
         // 4. Apply SELECT projection (with LET bindings for memoized evaluation).
+        //
+        // When SELECT * is used with JOINs, expand the wildcard into per-table
+        // wildcards (e.g. "a.*", "b.*") in SQL-text order. This ensures the
+        // ProjectOperator emits columns in the original FROM/JOIN declaration
+        // order even when greedy join reordering has swapped the physical probe
+        // and build sides.
+        if (statement.Joins is not null
+            && projectionColumns.Count == 1
+            && projectionColumns[0] is SelectAllColumns)
+        {
+            List<SelectColumn> expanded = new();
+
+            if (statement.From is not null)
+            {
+                string? fromAlias = GetSourceAlias(statement.From.Source);
+                if (fromAlias is not null)
+                {
+                    expanded.Add(new SelectTableColumns(fromAlias));
+                }
+            }
+
+            foreach (JoinClause join in statement.Joins)
+            {
+                string? joinAlias = GetSourceAlias(join.Source);
+                if (joinAlias is not null)
+                {
+                    expanded.Add(new SelectTableColumns(joinAlias));
+                }
+            }
+
+            if (expanded.Count > 0)
+            {
+                projectionColumns = expanded;
+            }
+        }
+
         {
         bool hasStarOnly = projectionColumns.Count == 1
             && projectionColumns[0] is SelectAllColumns
@@ -1488,6 +1524,21 @@ public sealed class QueryPlanner
                 }
                 break;
         }
+    }
+
+    /// <summary>
+    /// Returns the alias (or fallback name) introduced by a table source,
+    /// used when expanding <c>SELECT *</c> into per-table wildcards.
+    /// </summary>
+    private static string? GetSourceAlias(TableSource source)
+    {
+        return source switch
+        {
+            TableReference tableRef => tableRef.Alias ?? tableRef.Name,
+            SubquerySource subquery => subquery.Alias,
+            FunctionSource functionSource => functionSource.Alias,
+            _ => null,
+        };
     }
 
     /// <summary>

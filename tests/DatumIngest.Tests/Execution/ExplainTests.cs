@@ -96,6 +96,10 @@ public class ExplainTests
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
 
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
+
         Assert.Equal("INNER Join", node.OperatorName);
         Assert.Contains("hash", node.Details);
         Assert.Equal(2, node.Children.Count);
@@ -120,6 +124,10 @@ public class ExplainTests
 
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
 
         Assert.Equal("CROSS Join", node.OperatorName);
         Assert.Contains("nested-loop", node.Details);
@@ -882,6 +890,10 @@ public class ExplainTests
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
 
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
+
         Assert.Equal("FULL OUTER Join", node.OperatorName);
         Assert.Contains(node.Warnings, w => w.Contains("materializes both sides"));
     }
@@ -912,6 +924,10 @@ public class ExplainTests
 
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
 
         Assert.Equal("INNER Join", node.OperatorName);
         Assert.Contains("hash", node.Details);
@@ -949,6 +965,10 @@ public class ExplainTests
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
 
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
+
         Assert.Equal("INNER Join", node.OperatorName);
         Assert.Contains("hash+filter", node.Details);
     }
@@ -977,6 +997,10 @@ public class ExplainTests
 
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
 
         Assert.Equal("INNER Join", node.OperatorName);
         Assert.Contains("nested-loop", node.Details);
@@ -1057,6 +1081,10 @@ public class ExplainTests
 
         IQueryOperator plan = planner.Plan(statement);
         ExplainPlanNode node = QueryExplainer.Explain(plan);
+
+        // Unwrap the Project node added for SELECT * column ordering.
+        if (node.OperatorName == "Project")
+            node = node.Children[0];
 
         Assert.Contains("hash", node.Details);
         Assert.DoesNotContain("nested-loop", node.Details);
