@@ -217,6 +217,10 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("FOR"), SqlToken.For, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("INCLUDE"), SqlToken.Include, requireDelimiters: true)
 
+            // TABLESAMPLE keywords
+            .Match(Span.EqualToIgnoreCase("TABLESAMPLE"), SqlToken.Tablesample, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("REPEATABLE"), SqlToken.Repeatable, requireDelimiters: true)
+
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)

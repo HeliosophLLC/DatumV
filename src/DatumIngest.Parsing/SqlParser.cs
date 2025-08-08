@@ -644,16 +644,52 @@ public static class SqlParser
 
     // ───────────────────── FROM clause ─────────────────────
 
-    /// <summary>A table reference with optional alias.</summary>
+    /// <summary>
+    /// Parses BERNOULLI or SYSTEM as a <see cref="TablesampleMethod"/>.
+    /// These are parsed as identifiers (not reserved keywords) to avoid breaking user table names.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, TablesampleMethod> TablesampleMethodParser =
+        Token.EqualTo(SqlToken.Identifier)
+            .Where(token =>
+            {
+                string text = GetTokenText(token);
+                return text.Equals("BERNOULLI", StringComparison.OrdinalIgnoreCase)
+                    || text.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase);
+            }, "BERNOULLI or SYSTEM")
+            .Select(token =>
+                GetTokenText(token).Equals("BERNOULLI", StringComparison.OrdinalIgnoreCase)
+                    ? TablesampleMethod.Bernoulli
+                    : TablesampleMethod.System);
+
+    /// <summary>
+    /// Parses a TABLESAMPLE clause: <c>TABLESAMPLE BERNOULLI|SYSTEM(percentage) [REPEATABLE(seed)]</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, TablesampleClause> TablesampleClauseParser =
+        from tablesampleKeyword in Token.EqualTo(SqlToken.Tablesample)
+        from method in TablesampleMethodParser
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from percentage in SP.Ref(() => ExpressionParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from seed in (
+            from repeatableKeyword in Token.EqualTo(SqlToken.Repeatable)
+            from seedOpen in Token.EqualTo(SqlToken.LeftParen)
+            from seedExpression in SP.Ref(() => ExpressionParser!)
+            from seedClose in Token.EqualTo(SqlToken.RightParen)
+            select seedExpression
+        ).AsNullable().OptionalOrDefault()
+        select new TablesampleClause(method, percentage, seed);
+
+    /// <summary>A table reference with optional TABLESAMPLE clause and alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> TableReferenceParser =
         from name in Token.EqualTo(SqlToken.Identifier)
             .Or(Token.EqualTo(SqlToken.StringLiteral))
+        from tablesample in TablesampleClauseParser.AsNullable().OptionalOrDefault()
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
             from aliasName in Token.EqualTo(SqlToken.Identifier)
             select GetTokenText(aliasName)
         ).OptionalOrDefault()
-        select (TableSource)new TableReference(GetTokenText(name), alias, ToSpan(name));
+        select (TableSource)new TableReference(GetTokenText(name), alias, ToSpan(name), tablesample);
 
     /// <summary>A subquery source: (SELECT ...) AS alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> SubquerySourceParser =

@@ -116,9 +116,38 @@ public sealed record FromClause(TableSource Source);
 public abstract record TableSource;
 
 /// <summary>
-/// A reference to a named table, optionally aliased.
+/// A reference to a named table, optionally aliased, with optional row sampling.
 /// </summary>
-public sealed record TableReference(string Name, string? Alias = null, SourceSpan? Span = null) : TableSource;
+public sealed record TableReference(
+    string Name,
+    string? Alias = null,
+    SourceSpan? Span = null,
+    TablesampleClause? Tablesample = null) : TableSource;
+
+/// <summary>
+/// The sampling method used in a TABLESAMPLE clause.
+/// </summary>
+public enum TablesampleMethod
+{
+    /// <summary>Row-level Bernoulli sampling — each row is included independently with the given probability.</summary>
+    Bernoulli,
+
+    /// <summary>Block-level system sampling — entire chunks/pages are included or excluded.</summary>
+    System,
+}
+
+/// <summary>
+/// A TABLESAMPLE clause that limits the rows returned from a table source
+/// to an approximate percentage of the total, using either Bernoulli (row-level)
+/// or System (chunk-level) sampling.
+/// </summary>
+/// <param name="Method">The sampling strategy (Bernoulli or System).</param>
+/// <param name="Percentage">An expression evaluating to the sampling percentage (0–100).</param>
+/// <param name="Seed">An optional REPEATABLE seed expression for deterministic sampling.</param>
+public sealed record TablesampleClause(
+    TablesampleMethod Method,
+    Expression Percentage,
+    Expression? Seed = null);
 
 /// <summary>
 /// A subquery used as a table source (derived table), always aliased.

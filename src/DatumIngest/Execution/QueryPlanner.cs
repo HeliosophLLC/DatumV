@@ -2340,6 +2340,17 @@ public sealed class QueryPlanner
             ((ScanOperator)scanOperator).SetSourceIndex(sourceIndex!);
         }
 
+        // Apply TABLESAMPLE row/chunk sampling if the table reference includes a sampling clause.
+        if (tableRef.Tablesample is TablesampleClause tablesampleClause)
+        {
+            double percentage = EvaluateConstantDouble(tablesampleClause.Percentage);
+            int? seed = tablesampleClause.Seed is not null
+                ? (int)EvaluateConstantDouble(tablesampleClause.Seed)
+                : null;
+
+            scanOperator = new SampleScanOperator(scanOperator, tablesampleClause.Method, percentage, seed);
+        }
+
         // Wrap column names with the alias prefix. When the query involves JOINs,
         // unaliased tables are implicitly aliased with their table name to prevent
         // column name collisions in the combined row schema.
@@ -2765,6 +2776,23 @@ public sealed class QueryPlanner
                 // Subqueries and functions do not reference outer CTEs.
                 break;
         }
+    }
+
+    /// <summary>
+    /// Evaluates a constant expression to a <see cref="double"/> at plan time.
+    /// Used for TABLESAMPLE percentage and REPEATABLE seed values.
+    /// </summary>
+    private static double EvaluateConstantDouble(Expression expression)
+    {
+        return expression switch
+        {
+            LiteralExpression { Value: int intValue } => intValue,
+            LiteralExpression { Value: long longValue } => longValue,
+            LiteralExpression { Value: float floatValue } => floatValue,
+            LiteralExpression { Value: double doubleValue } => doubleValue,
+            _ => throw new InvalidOperationException(
+                "TABLESAMPLE percentage and REPEATABLE seed must be constant numeric values."),
+        };
     }
 }
 

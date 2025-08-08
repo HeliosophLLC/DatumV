@@ -215,6 +215,12 @@ public enum SqlToken
     /// <summary>The INCLUDE keyword (used with UNPIVOT INCLUDE NULLS).</summary>
     Include,
 
+    /// <summary>The TABLESAMPLE keyword (row sampling).</summary>
+    Tablesample,
+
+    /// <summary>The REPEATABLE keyword (deterministic sampling seed).</summary>
+    Repeatable,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>
