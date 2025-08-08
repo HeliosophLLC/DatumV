@@ -8,10 +8,10 @@ namespace DatumIngest.Catalog.Providers;
 
 /// <summary>
 /// Reads <c>.datum</c> native column-store files via the <see cref="DatumFileReader"/>.
-/// Supports projection pushdown and zone-map-based row group pruning when a filter hint
-/// is provided by the query engine.
+/// Supports projection pushdown, zone-map-based row group pruning when a filter hint
+/// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider
+public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider
 {
     /// <summary>Total number of row groups examined in the most recent read.</summary>
     public int TotalRowGroups { get; private set; }
@@ -50,7 +50,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         return Task.FromResult(new ProviderCapabilities(
             reader.TotalRowCount,
             EstimatedRowSizeBytes: null,
-            SupportsSeek: false,
+            SupportsSeek: true,
             ColumnCosts: new Dictionary<string, ColumnCost>()));
     }
 
@@ -67,11 +67,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         int[] projectedIndices = ResolveProjection(schema, requiredColumns);
         string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
 
-        Dictionary<string, int> nameIndex = new(projectedNames.Length, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < projectedNames.Length; i++)
-        {
-            nameIndex[projectedNames[i]] = i;
-        }
+        Dictionary<string, int> nameIndex = BuildNameIndex(projectedNames);
 
         // Collect the column names referenced in the filter to limit statistics construction.
         HashSet<string>? filterColumnNames = null;
@@ -124,6 +120,72 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         }
     }
 
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        Schema schema = reader.Schema;
+
+        int[] projectedIndices = ResolveProjection(schema, requiredColumns);
+        string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
+        Dictionary<string, int> nameIndex = BuildNameIndex(projectedNames);
+
+        long endRow = startRow + count;
+        long cumulativeRow = 0;
+        int emitted = 0;
+
+        for (int rgIndex = 0; rgIndex < reader.RowGroupCount && emitted < count; rgIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            DatumRowGroupDescriptor rowGroupDescriptor = reader.GetRowGroupDescriptor(rgIndex);
+            long rgRowCount = rowGroupDescriptor.RowCount;
+            long rgEnd = cumulativeRow + rgRowCount;
+
+            // Skip row groups entirely before the requested range.
+            if (rgEnd <= startRow)
+            {
+                cumulativeRow = rgEnd;
+                continue;
+            }
+
+            // Stop once we've passed the requested range.
+            if (cumulativeRow >= endRow)
+            {
+                break;
+            }
+
+            DataValue[][] columns = reader.ReadColumns(rgIndex, projectedIndices);
+
+            // Calculate the slice within this row group.
+            int sliceStart = (int)Math.Max(startRow - cumulativeRow, 0);
+            int sliceEnd = (int)Math.Min(endRow - cumulativeRow, rgRowCount);
+
+            for (int rowIndex = sliceStart; rowIndex < sliceEnd && emitted < count; rowIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                DataValue[] values = new DataValue[projectedIndices.Length];
+                for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
+                {
+                    values[colPos] = columns[colPos][rowIndex];
+                }
+
+                yield return new Row(projectedNames, values, nameIndex);
+                emitted++;
+            }
+
+            cumulativeRow = rgEnd;
+        }
+
+        await Task.CompletedTask;
+    }
+
     private static int[] ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)
     {
         if (requiredColumns is null)
@@ -143,6 +205,17 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         }
 
         return projected.ToArray();
+    }
+
+    private static Dictionary<string, int> BuildNameIndex(string[] projectedNames)
+    {
+        Dictionary<string, int> nameIndex = new(projectedNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < projectedNames.Length; i++)
+        {
+            nameIndex[projectedNames[i]] = i;
+        }
+
+        return nameIndex;
     }
 
     private static Dictionary<string, ColumnStatisticsRange> BuildStatistics(

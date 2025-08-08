@@ -25,6 +25,7 @@ public sealed class ScanOperator : IQueryOperator
     private Expression? _filterHint;
     private SourceIndex? _sourceIndex;
     private Dictionary<string, IReadOnlyCollection<DataValue>>? _bloomPruningKeys;
+    private Dictionary<string, IReadOnlyCollection<DataValue>>? _sortedIndexPruningKeys;
 
     /// <summary>
     /// Creates a scan operator for the given table.
@@ -108,6 +109,19 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <summary>
+    /// Registers join key values for sorted-index-based chunk pruning.
+    /// During execution, chunks whose sorted indexes report that none of the
+    /// provided key values are present are skipped entirely.
+    /// </summary>
+    /// <param name="columnName">The column name to check sorted indexes for.</param>
+    /// <param name="keyValues">The build-side key values from the join partner.</param>
+    public void AddSortedIndexPruningKeys(string columnName, IReadOnlyCollection<DataValue> keyValues)
+    {
+        _sortedIndexPruningKeys ??= new(StringComparer.OrdinalIgnoreCase);
+        _sortedIndexPruningKeys[columnName] = keyValues;
+    }
+
+    /// <summary>
     /// The most recent <see cref="IFilterableTableProvider"/> used during execution,
     /// or <c>null</c> if the provider is not filterable. Used by the explain/instrumentation
     /// layer to retrieve pruning statistics after execution.
@@ -121,9 +135,10 @@ public sealed class ScanOperator : IQueryOperator
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
 
         // When a source index is available and either a filter hint, bloom pruning
-        // keys, or sorted indexes are present, apply chunk-level pruning.
+        // keys, sorted index pruning keys, or sorted indexes are present, apply chunk-level pruning.
         bool hasIndexPruning = _sourceIndex is not null
             && (_filterHint is not null || _bloomPruningKeys is not null
+                || _sortedIndexPruningKeys is not null
                 || _sourceIndex.SortedIndexes is not null);
 
         if (hasIndexPruning)
@@ -211,6 +226,35 @@ public sealed class ScanOperator : IQueryOperator
                         }
 
                         if (!anyMayMatch)
+                        {
+                            pruned = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Sorted-index-based pruning via join keys: if build-side key values
+            // were passed and sorted indexes exist, check whether any build key
+            // is present in this chunk. If none are, skip the chunk.
+            if (!pruned && _sortedIndexPruningKeys is not null && sortedIndexes is not null)
+            {
+                foreach (KeyValuePair<string, IReadOnlyCollection<DataValue>> entry in _sortedIndexPruningKeys)
+                {
+                    if (sortedIndexes.TryGetIndex(entry.Key, out SortedValueIndex? index))
+                    {
+                        bool anyPresent = false;
+                        foreach (DataValue keyValue in entry.Value)
+                        {
+                            IReadOnlySet<int> matchingChunks = index.FindChunksContaining(keyValue);
+                            if (matchingChunks.Contains(chunkIndex))
+                            {
+                                anyPresent = true;
+                                break;
+                            }
+                        }
+
+                        if (!anyPresent)
                         {
                             pruned = true;
                             break;

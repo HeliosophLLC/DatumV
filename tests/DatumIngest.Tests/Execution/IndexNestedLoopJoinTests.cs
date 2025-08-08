@@ -69,7 +69,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, buildOperator, context));
 
@@ -125,7 +125,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
@@ -167,7 +167,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
@@ -215,7 +215,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.LeftSemi, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.LeftSemi, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
@@ -267,7 +267,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
@@ -329,7 +329,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
@@ -375,7 +375,7 @@ public sealed class IndexNestedLoopJoinTests
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
-            JoinType.LeftSemi, extraction, sortedIndex, chunks, descriptor, evaluator);
+            JoinType.LeftSemi, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
 
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
@@ -462,6 +462,84 @@ public sealed class IndexNestedLoopJoinTests
 
         Row charlie = results.First(row => row["name"].AsString() == "Charlie");
         Assert.Equal(87f, charlie["p.score"].AsScalar());
+    }
+
+    /// <summary>
+    /// Verifies that the index NLJ executor qualifies build-side row column names
+    /// with the table alias when the build side is wrapped in an <see cref="AliasOperator"/>.
+    /// Without this, <see cref="ProjectOperator"/> handling <c>SELECT table.*</c>
+    /// cannot match build-side columns by their table prefix.
+    /// </summary>
+    [Fact]
+    public async Task JoinOperator_IndexNlj_QualifiesBuildColumnsWithAlias()
+    {
+        // Build side: raw column names (no alias prefix), simulating seekable reads.
+        Row[] buildRows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))),
+            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob"))),
+        ];
+
+        ValueIndexEntry[] indexEntries =
+        [
+            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromScalar(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+        ];
+
+        SortedValueIndex sortedIndex = new(indexEntries);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["id"] = sortedIndex,
+        });
+
+        IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 2)];
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(new Schema([new ColumnInfo("id", DataKind.Scalar, false), new ColumnInfo("name", DataKind.String, false)]), 2),
+            chunks,
+            sortedIndexes: sortedIndexSet);
+
+        TableDescriptor buildDescriptor = CreateDescriptor("build");
+        ScanOperator buildScan = new(buildDescriptor, requiredColumns: null);
+        buildScan.SetSourceIndex(sourceIndex);
+
+        // Wrap build side in AliasOperator — this is what QueryPlanner does for
+        // JOIN sources. The NLJ executor should apply this alias to fetched rows.
+        AliasOperator aliasedBuild = new(buildScan, "right_table");
+
+        // Probe side with alias-qualified columns (from AliasOperator on probe side).
+        MockOperator probeOperator = new(
+            MakeRow(("left_table.id", DataValue.FromScalar(1f)), ("left_table.score", DataValue.FromScalar(95f))));
+
+        JoinOperator join = new(probeOperator, aliasedBuild, JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("left_table", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("right_table", "id")));
+
+        SeekableInMemoryProvider provider = new(buildRows);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(buildDescriptor);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog)
+        {
+            RowLimit = 10,
+        };
+
+        List<Row> results = await CollectAsync(join, context);
+
+        Assert.Single(results);
+        Row row = results[0];
+
+        // Build-side columns must have the alias prefix from AliasOperator.
+        Assert.True(row.TryGetValue("right_table.id", out _), "Expected qualified column 'right_table.id'");
+        Assert.True(row.TryGetValue("right_table.name", out _), "Expected qualified column 'right_table.name'");
+
+        // Probe-side columns should still be present.
+        Assert.Equal(95f, row["left_table.score"].AsScalar());
+        Assert.Equal("Alice", row["right_table.name"].AsString());
     }
 
     /// <summary>

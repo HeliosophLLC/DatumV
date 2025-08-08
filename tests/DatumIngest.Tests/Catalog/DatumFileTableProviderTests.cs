@@ -228,6 +228,175 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         Assert.Equal(0, provider.PrunedRowGroups);
     }
 
+    // ──────────────────── ReadRowRangeAsync (seeking) ────────────────────
+
+    /// <summary>
+    /// Mid-range seek spanning a single row group returns the correct rows.
+    /// </summary>
+    [Fact]
+    public async Task ReadRowRangeAsync_MiddleRange_ReturnsCorrectRows()
+    {
+        string path = Path.Combine(_tempDirectory, "seek_middle.datum");
+        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+
+        using (DatumFileWriter fileWriter = new(path))
+        {
+            fileWriter.SetRowGroupSize(10);
+            fileWriter.Initialize(DatumFileSchema.FromSchema(schema));
+            for (int i = 0; i < 10; i++)
+            {
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+            }
+
+            fileWriter.Finalize();
+        }
+
+        DatumFileTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+
+        List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 3, count: 4);
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(3f, rows[0]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(4f, rows[1]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(5f, rows[2]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(6f, rows[3]["n"].AsScalar(), 0.0001f);
+    }
+
+    /// <summary>
+    /// Seeks across row group boundaries and returns rows from multiple groups.
+    /// </summary>
+    [Fact]
+    public async Task ReadRowRangeAsync_SpanningMultipleRowGroups_ReturnsCorrectRows()
+    {
+        string path = Path.Combine(_tempDirectory, "seek_span.datum");
+        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+
+        using (DatumFileWriter fileWriter = new(path))
+        {
+            fileWriter.SetRowGroupSize(3);
+            fileWriter.Initialize(DatumFileSchema.FromSchema(schema));
+            // Row group 0: 0, 1, 2 | Row group 1: 3, 4, 5 | Row group 2: 6, 7
+            for (int i = 0; i < 8; i++)
+            {
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+            }
+
+            fileWriter.Finalize();
+        }
+
+        DatumFileTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+
+        // Read rows 2-5 (spans row group 0 and 1).
+        List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 2, count: 4);
+
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(2f, rows[0]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(3f, rows[1]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(4f, rows[2]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(5f, rows[3]["n"].AsScalar(), 0.0001f);
+    }
+
+    /// <summary>
+    /// Seeking with projection returns only the requested columns.
+    /// </summary>
+    [Fact]
+    public async Task ReadRowRangeAsync_WithProjection_ReturnsOnlyRequestedColumns()
+    {
+        string path = await WriteFixture("seek_projection.datum", [
+            MultiRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromString("x")), ("c", DataValue.FromBoolean(true))),
+            MultiRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromString("y")), ("c", DataValue.FromBoolean(false))),
+            MultiRow(("a", DataValue.FromScalar(3f)), ("b", DataValue.FromString("z")), ("c", DataValue.FromBoolean(true))),
+        ]);
+
+        DatumFileTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+        HashSet<string> required = ["a", "c"];
+
+        List<Row> rows = await ReadRange(provider, descriptor, required, startRow: 1, count: 2);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(2f, rows[0]["a"].AsScalar(), 0.0001f);
+        Assert.True(rows[0].TryGetValue("c", out _));
+        Assert.False(rows[0].TryGetValue("b", out _));
+    }
+
+    /// <summary>
+    /// Requesting more rows than available clamps to the file length.
+    /// </summary>
+    [Fact]
+    public async Task ReadRowRangeAsync_BeyondEnd_ClampsToAvailable()
+    {
+        string path = await WriteFixture("seek_clamp.datum", [
+            MultiRow(("n", DataValue.FromScalar(0f))),
+            MultiRow(("n", DataValue.FromScalar(1f))),
+            MultiRow(("n", DataValue.FromScalar(2f))),
+        ]);
+
+        DatumFileTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+
+        List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 1, count: 100);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1f, rows[0]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(2f, rows[1]["n"].AsScalar(), 0.0001f);
+    }
+
+    /// <summary>
+    /// Start row beyond file length returns empty result.
+    /// </summary>
+    [Fact]
+    public async Task ReadRowRangeAsync_StartBeyondEnd_ReturnsEmpty()
+    {
+        string path = await WriteFixture("seek_empty.datum", [
+            MultiRow(("n", DataValue.FromScalar(0f))),
+        ]);
+
+        DatumFileTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+
+        List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 10, count: 5);
+
+        Assert.Empty(rows);
+    }
+
+    /// <summary>
+    /// Reading all rows via <see cref="ISeekableTableProvider.ReadRowRangeAsync"/>
+    /// produces the same result as <see cref="ITableProvider.OpenAsync"/>.
+    /// </summary>
+    [Fact]
+    public async Task ReadRowRangeAsync_AllRows_MatchesOpenAsync()
+    {
+        string path = Path.Combine(_tempDirectory, "seek_all.datum");
+        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+
+        using (DatumFileWriter fileWriter = new(path))
+        {
+            fileWriter.SetRowGroupSize(3);
+            fileWriter.Initialize(DatumFileSchema.FromSchema(schema));
+            for (int i = 0; i < 7; i++)
+            {
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+            }
+
+            fileWriter.Finalize();
+        }
+
+        DatumFileTableProvider provider = new();
+        TableDescriptor descriptor = Descriptor(path);
+
+        List<Row> allRows = await ReadAll(path);
+        List<Row> seekRows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 0, count: 7);
+
+        Assert.Equal(allRows.Count, seekRows.Count);
+        for (int i = 0; i < allRows.Count; i++)
+        {
+            Assert.Equal(allRows[i]["n"].AsScalar(), seekRows[i]["n"].AsScalar(), 0.0001f);
+        }
+    }
+
     // ──────────────────── Helpers ────────────────────
 
     private async Task<string> WriteFixture(string fileName, IEnumerable<Row> rows)
@@ -278,6 +447,23 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             : provider.OpenAsync(descriptor, requiredColumns, CancellationToken.None);
 
         await foreach (Row row in source)
+        {
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    private static async Task<List<Row>> ReadRange(
+        DatumFileTableProvider provider,
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count)
+    {
+        List<Row> rows = new();
+        await foreach (Row row in provider.ReadRowRangeAsync(
+            descriptor, requiredColumns, startRow, count, CancellationToken.None))
         {
             rows.Add(row);
         }

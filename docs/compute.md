@@ -102,7 +102,7 @@ builder.Services.AddDatumCompute(options => options.ApiKey = "key");
 | `MaxOutputRows` | `long?` | `null` | Server-wide default maximum rows per query. `null` = no limit. |
 | `ThrottleDelayMilliseconds` | `int?` | `null` | Server-wide default throttle delay in ms. `null` = no throttle. |
 | `MaxQueryUnits` | `long?` | `null` | Server-wide default QU budget per query. `null` = no limit. |
-| `MemoryBudgetBytes` | `long?` | `null` | Server-wide default memory budget for spill-to-disk operators (joins, SELECT DISTINCT) in bytes. `null` = keep everything in memory. |
+| `MemoryBudgetBytes` | `long?` | `null` | Server-wide default memory budget for spill-to-disk operators (joins, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT, materialised CTEs) in bytes. `null` = keep everything in memory. |
 
 ## Calling with grpcurl
 
@@ -172,7 +172,7 @@ Creates a new session on the compute backend.
 | `max_output_rows` | `int64` | Per-session row budget override. `0` = server default, positive = override, negative = disable. |
 | `throttle_delay_ms` | `int32` | Per-session throttle delay override. `0` = server default, positive = override, negative = disable. |
 | `max_query_units` | `int64` | Per-session QU budget override. `0` = server default, positive = override, negative = disable. |
-| `memory_budget_bytes` | `int64` | Per-session memory budget for spill-to-disk operators (joins, SELECT DISTINCT). `0` = server default, positive = override (bytes), negative = disable (all in-memory). |
+| `memory_budget_bytes` | `int64` | Per-session memory budget for spill-to-disk operators (joins, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT, materialised CTEs). `0` = server default, positive = override (bytes), negative = disable (all in-memory). |
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
@@ -636,7 +636,17 @@ Each governance field in `CreateSessionRequest` follows three-state semantics:
 
 **Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from function invocations (scalar, aggregate, and window). Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-row cost via the `query_units` field on `QueryRow`, and query cumulative session cost via `GetUsage`.
 
-**Memory budget (`memory_budget_bytes`):** The maximum memory (in bytes) that memory-intensive operators (joins, SELECT DISTINCT) may use before spilling to temporary files on disk. When set, joins use a Grace hash join strategy: both sides are partitioned by hash key, memory usage is sampled, and the largest in-memory partition spills to disk when usage exceeds 75% of the budget. Spilled partitions are joined in a second pass by reading rows back from disk. The DISTINCT operator uses the same mechanism: when the in-memory hash set exceeds the budget, unseen rows are hash-partitioned to 64 spill files and deduplicated in a drain phase. When the budget is `null` (or explicitly disabled with a negative override), all data is held in memory. Typical values are `512MB`–`2GB` depending on available server RAM.
+**Memory budget (`memory_budget_bytes`):** The maximum memory (in bytes) that memory-intensive operators may use before spilling to temporary files on disk. Covered operators:
+
+- **Hash join** — Grace hash join: both sides are partitioned by hash key, memory usage is sampled, and the largest in-memory partition spills to disk when usage exceeds 75% of the budget. Spilled partitions are joined in a second pass by reading rows back from disk.
+- **ORDER BY** — external sort: in-memory rows are sorted in runs; when the budget is exceeded, each run is flushed to a temporary file. A k-way merge produces the final sorted output.
+- **GROUP BY** — partitioned re-aggregation: rows are accumulated in memory; when the budget is exceeded, incoming rows for new groups are hash-partitioned to 64 spill files. Spilled partitions are re-aggregated in a drain phase.
+- **DISTINCT** — streaming hash deduplication with 64-partition spill, identical to UNION DISTINCT.
+- **PIVOT** — row buffering with single-file spill: rows are buffered in memory for the two-pass pivot algorithm; overflow rows spill to a temporary file and are replayed during aggregation.
+- **INTERSECT / EXCEPT** (all four variants) — grace-hash-partitioned spill: the right branch is materialised with memory tracking; when the budget is exceeded, remaining right rows and matching left rows are hash-partitioned to spill files and processed partition-by-partition in a drain phase.
+- **Materialised CTEs** — CTE results spill to temporary files when the buffer exceeds the budget.
+
+When the budget is `null` (or explicitly disabled with a negative override), all data is held in memory. Typical values are `512MB`–`2GB` depending on available server RAM.
 
 ### Configuration Example
 

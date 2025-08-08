@@ -19,9 +19,11 @@ public sealed class ExecutionContext
     /// <param name="catalog">Registry of named tables and provider factories.</param>
     /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
     /// <param name="memoryBudgetBytes">
-    /// Optional memory budget in bytes for operators that support spill-to-disk (e.g. hash join).
-    /// When <see langword="null"/>, operators keep all intermediate state in memory (current default behavior).
-    /// When set, operators may spill partitions to temporary files when estimated memory usage exceeds this budget.
+    /// Optional memory budget in bytes for operators that support spill-to-disk.
+    /// When <see langword="null"/>, operators keep all intermediate state in memory.
+    /// When set, operators spill to temporary files when estimated memory exceeds this budget.
+    /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
+    /// and materialised CTEs.
     /// </param>
     public ExecutionContext(
         CancellationToken cancellationToken,
@@ -55,8 +57,10 @@ public sealed class ExecutionContext
     /// <summary>
     /// Optional memory budget in bytes for operators that support spill-to-disk.
     /// When <see langword="null"/>, operators keep all intermediate state in memory.
-    /// When set, operators such as the hash join may spill partitions to temporary
-    /// files when estimated memory usage exceeds this budget.
+    /// When set, operators spill intermediate state to temporary files when estimated
+    /// memory usage exceeds this budget. Covered operators: hash join, ORDER BY
+    /// (external sort), GROUP BY (partitioned re-aggregation), DISTINCT, PIVOT,
+    /// UNION/INTERSECT/EXCEPT (hash-partitioned), and materialised CTEs.
     /// </summary>
     public long? MemoryBudgetBytes { get; }
 
@@ -99,6 +103,7 @@ public sealed class ExecutionContext
         {
             OuterRow = outerRow,
             RowLimit = RowLimit,
+            MaxRecursionDepth = MaxRecursionDepth,
         };
     }
 }

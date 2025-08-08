@@ -32,6 +32,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     private readonly SortedValueIndex _buildIndex;
     private readonly IReadOnlyList<IndexChunk> _buildChunks;
     private readonly TableDescriptor _buildDescriptor;
+    private readonly string? _buildAlias;
     private readonly ExpressionEvaluator _evaluator;
 
     /// <summary>
@@ -42,6 +43,13 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// <param name="buildIndex">The sorted value index on the build-side join column.</param>
     /// <param name="buildChunks">The chunk directory for translating chunk-relative offsets to absolute row positions.</param>
     /// <param name="buildDescriptor">The table descriptor for the build-side source (used for seeks).</param>
+    /// <param name="buildAlias">
+    /// The table alias that the query planner assigned to the build side via
+    /// <see cref="Operators.AliasOperator"/>. When non-null, fetched build-side rows
+    /// are re-qualified with this prefix so that downstream operators (e.g.
+    /// <see cref="Operators.ProjectOperator"/> handling <c>SELECT table.*</c>) can
+    /// match columns by table name.
+    /// </param>
     /// <param name="evaluator">Expression evaluator for key extraction and residual filter evaluation.</param>
     internal IndexNestedLoopJoinExecutor(
         JoinType joinType,
@@ -49,6 +57,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         SortedValueIndex buildIndex,
         IReadOnlyList<IndexChunk> buildChunks,
         TableDescriptor buildDescriptor,
+        string? buildAlias,
         ExpressionEvaluator evaluator)
     {
         _joinType = joinType;
@@ -56,6 +65,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         _buildIndex = buildIndex;
         _buildChunks = buildChunks;
         _buildDescriptor = buildDescriptor;
+        _buildAlias = buildAlias;
         _evaluator = evaluator;
     }
 
@@ -91,6 +101,10 @@ internal sealed class IndexNestedLoopJoinExecutor
         Expression? residual = _extraction.Residual;
 
         JoinOperator.CombinedRowSchema? combinedSchema = null;
+
+        // Pre-computed alias schema for re-qualifying build-side rows that the
+        // seekable provider returns with raw (unqualified) column names.
+        BuildAliasSchema? buildAliasSchema = null;
 
         await foreach (Row probeRow in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
@@ -136,6 +150,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                         continue;
                     }
 
+                    buildRow = ApplyBuildAlias(buildRow, ref buildAliasSchema);
                     combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
                     Row combined = combinedSchema.Combine(probeRow, buildRow);
 
@@ -165,6 +180,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     continue;
                 }
 
+                buildRow = ApplyBuildAlias(buildRow, ref buildAliasSchema);
                 combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
                 Row combined = combinedSchema.Combine(probeRow, buildRow);
 
@@ -197,6 +213,83 @@ internal sealed class IndexNestedLoopJoinExecutor
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Applies the build-side alias prefix to a raw row returned by the seekable
+    /// provider, producing a row with qualified column names (e.g. <c>table.column</c>).
+    /// The schema is built once from the first row and reused for all subsequent rows.
+    /// </summary>
+    private Row ApplyBuildAlias(Row row, ref BuildAliasSchema? schema)
+    {
+        if (_buildAlias is null)
+        {
+            return row;
+        }
+
+        schema ??= BuildAliasSchema.Create(_buildAlias, row);
+        return schema.Apply(row);
+    }
+
+    /// <summary>
+    /// Pre-computed schema for re-qualifying build-side rows with the table alias.
+    /// Built once from the first fetched row and reused for all subsequent rows,
+    /// allocating only a <see cref="DataValue"/> array per row.
+    /// </summary>
+    private sealed class BuildAliasSchema
+    {
+        private readonly string[] _names;
+        private readonly Dictionary<string, int> _nameIndex;
+        private readonly int _fieldCount;
+
+        private BuildAliasSchema(
+            string[] names,
+            Dictionary<string, int> nameIndex,
+            int fieldCount)
+        {
+            _names = names;
+            _nameIndex = nameIndex;
+            _fieldCount = fieldCount;
+        }
+
+        /// <summary>
+        /// Builds the alias schema from the alias prefix and the first build-side row.
+        /// </summary>
+        internal static BuildAliasSchema Create(string alias, Row firstRow)
+        {
+            int fieldCount = firstRow.FieldCount;
+            string[] names = new string[fieldCount];
+
+            for (int index = 0; index < fieldCount; index++)
+            {
+                names[index] = $"{alias}.{firstRow.ColumnNames[index]}";
+            }
+
+            Dictionary<string, int> nameIndex =
+                new(fieldCount * 2, StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < fieldCount; index++)
+            {
+                nameIndex[names[index]] = index;
+                nameIndex[firstRow.ColumnNames[index]] = index;
+            }
+
+            return new BuildAliasSchema(names, nameIndex, fieldCount);
+        }
+
+        /// <summary>
+        /// Applies the alias schema to a raw build-side row.
+        /// </summary>
+        internal Row Apply(Row sourceRow)
+        {
+            DataValue[] values = new DataValue[_fieldCount];
+
+            for (int index = 0; index < _fieldCount; index++)
+            {
+                values[index] = sourceRow[index];
+            }
+
+            return new Row(_names, values, _nameIndex);
+        }
     }
 
     /// <summary>

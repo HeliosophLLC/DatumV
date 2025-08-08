@@ -474,6 +474,198 @@ public sealed class BloomJoinPruningTests
 
     // ───────────── Helpers ─────────────
 
+    // ────────────────── Sorted index join pruning tests ──────────────────
+
+    /// <summary>
+    /// When a probe-side source index has sorted value indexes but no bloom filters,
+    /// the <see cref="JoinOperator"/> should push build-side key values for sorted
+    /// index pruning, and chunks whose sorted index contains no matching key should
+    /// be skipped.
+    /// </summary>
+    [Fact]
+    public async Task HashJoin_WithSortedIndexes_PrunesChunksWithNoMatchingKeys()
+    {
+        // Probe side: 3 chunks of 2 rows each on column "id".
+        // Chunk 0: ids 1, 2 | Chunk 1: ids 3, 4 | Chunk 2: ids 5, 6
+        Row[] leftRows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1.0f)), ("value", DataValue.FromString("a"))),
+            MakeRow(("id", DataValue.FromScalar(2.0f)), ("value", DataValue.FromString("b"))),
+            MakeRow(("id", DataValue.FromScalar(3.0f)), ("value", DataValue.FromString("c"))),
+            MakeRow(("id", DataValue.FromScalar(4.0f)), ("value", DataValue.FromString("d"))),
+            MakeRow(("id", DataValue.FromScalar(5.0f)), ("value", DataValue.FromString("e"))),
+            MakeRow(("id", DataValue.FromScalar(6.0f)), ("value", DataValue.FromString("f"))),
+        ];
+
+        // Build a sorted value index for the "id" column.
+        ValueIndexEntry[] entries =
+        [
+            new(DataValue.FromScalar(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromScalar(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromScalar(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
+            new(DataValue.FromScalar(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
+            new(DataValue.FromScalar(5.0f), ChunkIndex: 2, RowOffsetInChunk: 0),
+            new(DataValue.FromScalar(6.0f), ChunkIndex: 2, RowOffsetInChunk: 1),
+        ];
+
+        SortedValueIndex sortedIndex = new(entries);
+        SortedValueIndexSet sortedIndexSet = new(
+            new Dictionary<string, SortedValueIndex>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = sortedIndex
+            });
+
+        Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+        };
+        Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+        };
+        Dictionary<string, ChunkColumnStatistics> chunk2Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new(DataValue.FromScalar(5.0f), DataValue.FromScalar(6.0f), 0, 2, 2)
+        };
+
+        List<IndexChunk> chunks =
+        [
+            new IndexChunk(0, 2, -1, -1, chunk0Stats),
+            new IndexChunk(2, 2, -1, -1, chunk1Stats),
+            new IndexChunk(4, 2, -1, -1, chunk2Stats),
+        ];
+
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 6);
+        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks,
+            bloomFilters: null, sortedIndexes: sortedIndexSet);
+
+        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
+        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        scanOperator.SetSourceIndex(sourceIndex);
+
+        // Build side: only key 4.0 — should match chunk 1 only.
+        MockOperator rightSide = new(
+            MakeRow(("rid", DataValue.FromScalar(4.0f)), ("data", DataValue.FromString("match"))));
+
+        JoinOperator join = new(
+            scanOperator,
+            rightSide,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("id"),
+                BinaryOperator.Equal,
+                new ColumnReference("rid")));
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> results = new();
+        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        {
+            results.Add(row);
+        }
+
+        // Only row with id=4 should match.
+        Assert.Single(results);
+        Assert.Equal(4.0f, results[0]["id"].AsScalar());
+
+        // Chunks 0 and 2 should have been pruned via sorted index.
+        Assert.Equal(3, scanOperator.TotalIndexChunks);
+        Assert.Equal(2, scanOperator.PrunedIndexChunks);
+    }
+
+    /// <summary>
+    /// When all chunks contain matching sorted index keys, nothing is pruned.
+    /// </summary>
+    [Fact]
+    public async Task HashJoin_WithSortedIndexes_NoPruningWhenAllChunksMatch()
+    {
+        Row[] leftRows =
+        [
+            MakeRow(("id", DataValue.FromScalar(1.0f))),
+            MakeRow(("id", DataValue.FromScalar(2.0f))),
+            MakeRow(("id", DataValue.FromScalar(3.0f))),
+            MakeRow(("id", DataValue.FromScalar(4.0f))),
+        ];
+
+        ValueIndexEntry[] entries =
+        [
+            new(DataValue.FromScalar(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromScalar(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromScalar(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
+            new(DataValue.FromScalar(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
+        ];
+
+        SortedValueIndex sortedIndex = new(entries);
+        SortedValueIndexSet sortedIndexSet = new(
+            new Dictionary<string, SortedValueIndex>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = sortedIndex
+            });
+
+        Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+        };
+        Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+        };
+
+        List<IndexChunk> chunks =
+        [
+            new IndexChunk(0, 2, -1, -1, chunk0Stats),
+            new IndexChunk(2, 2, -1, -1, chunk1Stats),
+        ];
+
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        IndexSchema indexSchema = new(schema, 4);
+        SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks,
+            bloomFilters: null, sortedIndexes: sortedIndexSet);
+
+        TableDescriptor descriptor = new("test", "left", "left.test", new Dictionary<string, string>());
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => new InMemoryTableProvider(leftRows));
+        ScanOperator scanOperator = new(descriptor, requiredColumns: null);
+        scanOperator.SetSourceIndex(sourceIndex);
+
+        // Build side has keys from both chunks.
+        MockOperator rightSide = new(
+            MakeRow(("rid", DataValue.FromScalar(1.0f))),
+            MakeRow(("rid", DataValue.FromScalar(3.0f))));
+
+        JoinOperator join = new(
+            scanOperator,
+            rightSide,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("id"),
+                BinaryOperator.Equal,
+                new ColumnReference("rid")));
+
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            catalog);
+
+        List<Row> results = new();
+        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        {
+            results.Add(row);
+        }
+
+        Assert.Equal(2, results.Count);
+        Assert.Equal(2, scanOperator.TotalIndexChunks);
+        Assert.Equal(0, scanOperator.PrunedIndexChunks);
+    }
+
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
     {
         string[] names = columns.Select(c => c.Name).ToArray();

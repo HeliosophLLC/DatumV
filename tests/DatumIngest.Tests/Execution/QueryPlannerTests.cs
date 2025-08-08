@@ -577,6 +577,167 @@ public class QueryPlannerTests
         Assert.IsType<JoinOperator>(filter.Source);
     }
 
+    // ─────────────── Transitive predicate inference tests ───────────────
+
+    /// <summary>
+    /// When <c>WHERE a.x = 10</c> and <c>JOIN ON a.x = b.x</c>, the planner
+    /// should derive <c>b.x = 10</c> and push it as a filter on <c>b</c>'s scan.
+    /// Both sides of the join should have filters.
+    /// </summary>
+    [Fact]
+    public void Plan_TransitivePredicateInference_DerivesPushdownForJoinPartner()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "products", "p.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "order_products", "op.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM products AS p
+        // JOIN order_products AS op ON p.product_id = op.product_id
+        // WHERE p.product_id = 10
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("products", "p")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("order_products", "op"),
+                new BinaryExpression(
+                    new ColumnReference("p", "product_id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("op", "product_id")))],
+            Where: new BinaryExpression(
+                new ColumnReference("p", "product_id"),
+                BinaryOperator.Equal,
+                new LiteralExpression(10)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap)
+            plan = projectWrap.Source;
+
+        // Both predicates should be pushed down — no top-level filter.
+        Assert.IsType<JoinOperator>(plan);
+        JoinOperator join = (JoinOperator)plan;
+
+        // Left side (products): should have a filter for p.product_id = 10.
+        Assert.IsType<FilterOperator>(join.Left);
+
+        // Right side (order_products): should have a derived filter for op.product_id = 10.
+        Assert.IsType<FilterOperator>(join.Right);
+    }
+
+    /// <summary>
+    /// Transitive inference should not apply across LEFT JOINs because
+    /// the right side can produce NULL rows.
+    /// </summary>
+    [Fact]
+    public void Plan_TransitivePredicateInference_LeftJoin_NoDerivation()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "products", "p.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "order_products", "op.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM products AS p
+        // LEFT JOIN order_products AS op ON p.product_id = op.product_id
+        // WHERE p.product_id = 10
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("products", "p")),
+            Joins: [new JoinClause(
+                JoinType.Left,
+                new TableReference("order_products", "op"),
+                new BinaryExpression(
+                    new ColumnReference("p", "product_id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("op", "product_id")))],
+            Where: new BinaryExpression(
+                new ColumnReference("p", "product_id"),
+                BinaryOperator.Equal,
+                new LiteralExpression(10)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap)
+            plan = projectWrap.Source;
+
+        // LEFT JOIN prevents both inference AND pushdown. The original
+        // predicate stays above the join.
+        Assert.IsType<FilterOperator>(plan);
+        FilterOperator topFilter = (FilterOperator)plan;
+        Assert.IsType<JoinOperator>(topFilter.Source);
+
+        JoinOperator join = (JoinOperator)topFilter.Source;
+
+        // Right side should NOT have a derived filter.
+        Assert.IsNotType<FilterOperator>(join.Right);
+    }
+
+    /// <summary>
+    /// With multiple equi-join columns, transitive inference derives predicates
+    /// for each matching column.
+    /// </summary>
+    [Fact]
+    public void Plan_TransitivePredicateInference_MultipleColumns_DerivesAll()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "src", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "tgt", "t.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM src AS s
+        // JOIN tgt AS t ON s.a = t.a AND s.b = t.b
+        // WHERE s.a = 1 AND s.b = 2
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("src", "s")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("tgt", "t"),
+                new BinaryExpression(
+                    new BinaryExpression(
+                        new ColumnReference("s", "a"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("t", "a")),
+                    BinaryOperator.And,
+                    new BinaryExpression(
+                        new ColumnReference("s", "b"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("t", "b"))))],
+            Where: new BinaryExpression(
+                new BinaryExpression(
+                    new ColumnReference("s", "a"),
+                    BinaryOperator.Equal,
+                    new LiteralExpression(1)),
+                BinaryOperator.And,
+                new BinaryExpression(
+                    new ColumnReference("s", "b"),
+                    BinaryOperator.Equal,
+                    new LiteralExpression(2))));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Unwrap the ProjectOperator added for SELECT * column ordering.
+        if (plan is ProjectOperator projectWrap)
+            plan = projectWrap.Source;
+
+        // All predicates pushed down — no top-level filter.
+        Assert.IsType<JoinOperator>(plan);
+        JoinOperator join = (JoinOperator)plan;
+
+        // Both sides should have filters (original + derived).
+        Assert.IsType<FilterOperator>(join.Left);
+        Assert.IsType<FilterOperator>(join.Right);
+    }
+
     // ─────────────── Projection pushdown tests ───────────────
 
     [Fact]

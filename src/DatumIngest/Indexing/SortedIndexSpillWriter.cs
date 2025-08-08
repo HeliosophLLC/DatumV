@@ -1,5 +1,6 @@
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using ZstdSharp;
 
 namespace DatumIngest.Indexing;
 
@@ -354,18 +355,29 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             output.Write(columnName);
             output.Write(checked((int)totalEntries));
 
-            // Merge-stream into a memory buffer, then compress.
-            using MemoryStream buffer = new();
-            using (BinaryWriter bufferWriter = new(buffer, System.Text.Encoding.UTF8, leaveOpen: true))
+            // Stream the k-way merge through Zstd compression so only the
+            // compressed output (typically 5-20% of original) is held in memory.
+            // The previous approach materialized the entire uncompressed buffer
+            // (~500 MB+ for large columns), causing a ~1.5 GB peak allocation.
+            using MemoryStream compressedBuffer = new();
+            int uncompressedLength;
+
+            using (CompressionStream zstdStream = new(
+                compressedBuffer,
+                DatumFile.DatumFileConstants.DefaultZstdCompressionLevel,
+                leaveOpen: true))
             {
-                StreamMergeSortedRuns(bufferWriter, columnName, runCount);
+                ByteCountingStream counting = new(zstdStream);
+                using (BinaryWriter zstdWriter = new(counting, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    StreamMergeSortedRuns(zstdWriter, columnName, runCount);
+                }
+
+                uncompressedLength = checked((int)counting.BytesWritten);
             }
 
-            byte[] uncompressed = buffer.ToArray();
-            byte[] compressed = DatumFile.Compression.DatumCompressor.Compress(
-                uncompressed, DatumFile.DatumCompression.Zstd);
-
-            output.Write(uncompressed.Length);
+            byte[] compressed = compressedBuffer.ToArray();
+            output.Write(uncompressedLength);
             output.Write(compressed.Length);
             output.Write(compressed);
         }
@@ -625,5 +637,48 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             DataPosition = dataPosition;
             RemainingCount = entryCount;
         }
+    }
+
+    /// <summary>
+    /// Write-only stream wrapper that counts bytes written while forwarding all
+    /// data to an inner stream. Used to measure uncompressed size while streaming
+    /// through a compression pipeline without materializing all data in memory.
+    /// </summary>
+    private sealed class ByteCountingStream : Stream
+    {
+        private readonly Stream _inner;
+
+        /// <summary>Total number of bytes written through this stream.</summary>
+        public long BytesWritten { get; private set; }
+
+        public ByteCountingStream(Stream inner) => _inner = inner;
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => BytesWritten;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            _inner.Write(buffer, offset, count);
+            BytesWritten += count;
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            _inner.Write(buffer);
+            BytesWritten += buffer.Length;
+        }
+
+        public override void Flush() => _inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 }

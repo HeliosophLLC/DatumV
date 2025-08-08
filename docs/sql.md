@@ -417,7 +417,7 @@ HAVING AVG(price) > 100
 
 ### Execution model
 
-GROUP BY uses hash-based aggregation: all groups are accumulated in memory using a hash table keyed by the GROUP BY expressions. This is a blocking operator — all input rows must be consumed before any output rows are emitted.
+GROUP BY uses hash-based aggregation: all groups are accumulated in memory using a hash table keyed by the GROUP BY expressions. This is a blocking operator — all input rows must be consumed before any output rows are emitted. When a memory budget is configured and the in-memory accumulators exceed the budget, incoming rows for new groups are hash-partitioned to 64 temporary spill files. Known in-memory groups continue to accumulate normally. In a drain phase, spilled partitions are re-aggregated one at a time, ensuring arbitrarily large group-by operations complete without out-of-memory failures.
 
 ## Window Functions
 
@@ -702,7 +702,7 @@ Use an explicit `IN (…)` list to select a known subset of values and avoid the
 
 ### Execution model
 
-PIVOT is a **blocking** operator — it must buffer all input rows before emitting any output, since it must discover all distinct pivot values (in auto-discover mode) before building the output schema. Memory usage is proportional to the number of input rows.
+PIVOT is a **blocking** operator — it must buffer all input rows before emitting any output, since it must discover all distinct pivot values (in auto-discover mode) before building the output schema. When a memory budget is configured and the in-memory row buffer exceeds the budget, overflow rows are spilled to a temporary file on disk and replayed during the aggregation phase. This bounds peak memory regardless of input size.
 
 ---
 
@@ -830,6 +830,8 @@ SELECT * FROM data ORDER BY score DESC LIMIT 10
 ```
 
 When ORDER BY + LIMIT are combined, a bounded priority queue (top-N sort) avoids materializing the full result set.
+
+When a memory budget is configured, ORDER BY uses an external sort strategy: in-memory rows are sorted in runs, and when the budget is exceeded each run is flushed to a temporary file on disk. The final output is produced by a k-way merge of all sorted runs, ensuring arbitrarily large sorts complete without out-of-memory failures.
 
 ## CASE Expressions
 
@@ -1172,14 +1174,14 @@ SELECT name, score FROM test ORDER BY score DESC LIMIT 50
 |-----------|----------|
 | UNION ALL | Zero-overhead stream concatenation |
 | UNION (distinct) | Streaming hash deduplication with spill-to-disk |
-| INTERSECT | Materialise right branch into hash set, probe with left |
-| INTERSECT ALL | Materialise right branch into counted multiset, emit up to count |
-| EXCEPT | Materialise right branch into hash set, exclude from left |
-| EXCEPT ALL | Materialise right branch into counted multiset, subtract counts |
+| INTERSECT | Materialise right branch into hash set, probe with left; spill-to-disk via grace hash partitioning |
+| INTERSECT ALL | Materialise right branch into counted multiset, emit up to count; spill-to-disk via grace hash partitioning |
+| EXCEPT | Materialise right branch into hash set, exclude from left; spill-to-disk via grace hash partitioning |
+| EXCEPT ALL | Materialise right branch into counted multiset, subtract counts; spill-to-disk via grace hash partitioning |
 
 For single-column results, `HashSet<DataValue>` is used directly. For multi-column results, a `CompositeKey` wrapper provides structural equality and hashing.
 
-UNION DISTINCT supports **spill-to-disk** when a memory budget is configured: when the in-memory hash set exceeds the budget (tracked by `MemoryEstimator`), unseen rows are spilled to 64 hash-partitioned temporary files and deduplicated in a drain phase. This ensures arbitrarily large unions complete without out-of-memory failures.
+UNION DISTINCT supports **spill-to-disk** when a memory budget is configured: when the in-memory hash set exceeds the budget (tracked by `MemoryEstimator`), unseen rows are spilled to 64 hash-partitioned temporary files and deduplicated in a drain phase. INTERSECT and EXCEPT (all four variants) also support **spill-to-disk**: when the right-branch materialisation exceeds the memory budget, remaining right rows are hash-partitioned to spill files; left rows whose partitions were spilled are buffered to corresponding left-side spill files and processed partition-by-partition in a drain phase. This ensures arbitrarily large set operations complete without out-of-memory failures.
 
 Set operations add no Query Units (0 QU).
 

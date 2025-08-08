@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
 using DatumIngest.Functions.Aggregates;
 using DatumIngest.Model;
@@ -19,8 +21,13 @@ namespace DatumIngest.Execution.Operators;
 /// distinct values is capped by <see cref="CardinalityCap"/>. Exceeding the cap
 /// raises <see cref="InvalidOperationException"/>.
 /// </para>
+/// <para>
+/// When <see cref="ExecutionContext.MemoryBudgetBytes"/> is set, buffered input rows
+/// spill to a temporary file once estimated memory usage exceeds the budget. Spilled
+/// rows are read back sequentially during the aggregation pass.
+/// </para>
 /// </summary>
-public sealed class PivotOperator : IQueryOperator
+public sealed class PivotOperator : IQueryOperator, IDisposable
 {
     /// <summary>
     /// Maximum number of distinct pivot values allowed when auto-discovering values.
@@ -33,6 +40,7 @@ public sealed class PivotOperator : IQueryOperator
     private readonly IReadOnlyList<AggregateColumn> _aggregateColumns;
     private readonly Expression _pivotColumnExpression;
     private readonly IReadOnlyList<DataValue>? _explicitValues;
+    private string? _spillDirectory;
 
     /// <summary>Creates a PIVOT operator.</summary>
     /// <param name="source">The child operator producing pre-filtered rows.</param>
@@ -82,165 +90,258 @@ public sealed class PivotOperator : IQueryOperator
         List<DataValue>? discoveredValues = _explicitValues is null ? new() : null;
         HashSet<DataValue>? discoveredValueSet = _explicitValues is null ? new() : null;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        // Spill state for row buffering.
+        long? memoryBudget = context.MemoryBudgetBytes;
+        MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
+        BinaryWriter? spillWriter = null;
+        string? spillPath = null;
+        bool schemaWritten = false;
+        bool spilling = false;
+
+        try
         {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
-
-            bufferedRows.Add(row);
-
-            if (discoveredValueSet is not null)
+            await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                DataValue pivotValue = evaluator.Evaluate(_pivotColumnExpression, row);
+                context.CancellationToken.ThrowIfCancellationRequested();
+                context.QueryMeter?.ThrowIfExceeded();
 
-                if (discoveredValueSet.Add(pivotValue))
+                if (discoveredValueSet is not null)
                 {
-                    if (discoveredValueSet.Count > CardinalityCap)
+                    DataValue pivotValue = evaluator.Evaluate(_pivotColumnExpression, row);
+
+                    if (discoveredValueSet.Add(pivotValue))
                     {
-                        throw new InvalidOperationException(
-                            $"PIVOT auto-discover exceeded the cardinality cap of {CardinalityCap} distinct values. " +
-                            "Use an explicit IN (value1, value2, …) list to select the values to pivot.");
+                        if (discoveredValueSet.Count > CardinalityCap)
+                        {
+                            throw new InvalidOperationException(
+                                $"PIVOT auto-discover exceeded the cardinality cap of {CardinalityCap} distinct values. " +
+                                "Use an explicit IN (value1, value2, …) list to select the values to pivot.");
+                        }
+
+                        discoveredValues!.Add(pivotValue);
+                    }
+                }
+
+                if (spilling)
+                {
+                    if (!schemaWritten)
+                    {
+                        RowSerializer.WriteSchema(spillWriter!, row);
+                        schemaWritten = true;
                     }
 
-                    discoveredValues!.Add(pivotValue);
-                }
-            }
-        }
-
-        // Determine the ordered list of pivot values for output column layout.
-        IReadOnlyList<DataValue> pivotValues = _explicitValues
-            ?? (IReadOnlyList<DataValue>)discoveredValues!;
-
-        if (pivotValues.Count == 0)
-        {
-            yield break;
-        }
-
-        // Build a stable index from pivot value to ordinal position.
-        Dictionary<DataValue, int> pivotValueIndex = new(_explicitValues is not null
-            ? _explicitValues.Count
-            : discoveredValues!.Count);
-
-        for (int index = 0; index < pivotValues.Count; index++)
-        {
-            // Explicit lists may contain duplicate values; keep only the first occurrence.
-            pivotValueIndex.TryAdd(pivotValues[index], index);
-        }
-
-        // Determine the key columns: all columns from the first row that are not the pivot column.
-        // The pivot column is excluded from both key columns and aggregate arguments.
-        if (bufferedRows.Count == 0)
-        {
-            yield break;
-        }
-
-        Row firstRow = bufferedRows[0];
-        string pivotColumnName = GetPivotColumnName();
-        List<string> keyColumnNames = new(firstRow.FieldCount);
-
-        for (int fieldIndex = 0; fieldIndex < firstRow.FieldCount; fieldIndex++)
-        {
-            string name = firstRow.ColumnNames[fieldIndex];
-            if (!string.Equals(name, pivotColumnName, StringComparison.OrdinalIgnoreCase))
-            {
-                keyColumnNames.Add(name);
-            }
-        }
-
-        // Build the output column name schema.
-        // Convention: single aggregate → column name is the pivot value as string;
-        // multiple aggregates → "<pivotValue>_<aggregateName>".
-        bool singleAggregate = _aggregateColumns.Count == 1;
-        string[] outputNames = BuildOutputNames(pivotValues, singleAggregate, keyColumnNames);
-        Dictionary<string, int> outputNameIndex = new(outputNames.Length, StringComparer.OrdinalIgnoreCase);
-
-        for (int index = 0; index < outputNames.Length; index++)
-        {
-            outputNameIndex[outputNames[index]] = index;
-        }
-
-        int keyCount = keyColumnNames.Count;
-        int pivotCellCount = pivotValues.Count * _aggregateColumns.Count;
-        int totalOutputFields = keyCount + pivotCellCount;
-
-        // Pass 2: group by key columns, accumulate aggregates per (pivot value, aggregate) cell.
-        Dictionary<DataValue, PivotGroupState> singleKeyGroups = new();
-        Dictionary<CompositeKey, PivotGroupState> compositeKeyGroups = new();
-        // For zero key columns (global pivot): one group.
-        PivotGroupState? globalGroup = keyColumnNames.Count == 0
-            ? CreateGroupState(pivotValues.Count)
-            : null;
-
-        foreach (Row row in bufferedRows)
-        {
-            DataValue pivotValue = evaluator.Evaluate(_pivotColumnExpression, row);
-
-            // Only process rows whose pivot value is in the output set.
-            if (!pivotValueIndex.TryGetValue(pivotValue, out int pivotOrdinal))
-            {
-                continue;
-            }
-
-            PivotGroupState group = ResolveGroup(
-                row, keyColumnNames, evaluator, singleKeyGroups, compositeKeyGroups, globalGroup,
-                pivotValues.Count, out DataValue[]? keyValues);
-
-            // Accumulate this row's contribution to each aggregate for this pivot value.
-            for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
-            {
-                AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
-                int cellIndex = (pivotOrdinal * _aggregateColumns.Count) + aggregateIndex;
-
-                if (aggregateColumn.IsCountStar)
-                {
-                    group.CellAccumulators[cellIndex].Accumulate(ReadOnlySpan<DataValue>.Empty);
+                    RowSerializer.WriteRow(spillWriter!, row);
                 }
                 else
                 {
-                    DataValue[] arguments = new DataValue[aggregateColumn.ArgumentExpressions.Count];
-                    for (int argIndex = 0; argIndex < aggregateColumn.ArgumentExpressions.Count; argIndex++)
-                    {
-                        arguments[argIndex] = evaluator.Evaluate(aggregateColumn.ArgumentExpressions[argIndex], row);
-                    }
+                    bufferedRows.Add(row);
 
-                    group.CellAccumulators[cellIndex].Accumulate(arguments);
+                    if (estimator is not null)
+                    {
+                        if (estimator.ShouldSample())
+                        {
+                            estimator.RecordSample(row);
+                        }
+
+                        estimator.IncrementRowCount();
+                        long estimatedMemory = estimator.EstimateBytesForRowCount(bufferedRows.Count);
+
+                        if (estimatedMemory > memoryBudget!.Value)
+                        {
+                            spilling = true;
+                            _spillDirectory = Path.Combine(
+                                Path.GetTempPath(), $"datum-pivot-{Guid.NewGuid():N}");
+                            Directory.CreateDirectory(_spillDirectory);
+                            spillPath = Path.Combine(_spillDirectory, "pivot_buffer.spill");
+                            FileStream fileStream = new(spillPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
+                            spillWriter = new BinaryWriter(fileStream);
+
+                            if (ExecutionTracer.IsEnabled)
+                            {
+                                ExecutionTracer.Write(
+                                    $"PIVOT spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  rows={bufferedRows.Count}");
+                            }
+                        }
+                        else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                        {
+                            estimator.EscalateToEveryRow();
+                        }
+                    }
                 }
             }
 
-            // Store the key values the first time this group is encountered.
-            if (group.KeyValues is null && keyValues is not null)
+            // Close the spill writer before reading.
+            spillWriter?.Flush();
+            spillWriter?.Dispose();
+            spillWriter = null;
+
+            // Determine the ordered list of pivot values for output column layout.
+            IReadOnlyList<DataValue> pivotValues = _explicitValues
+                ?? (IReadOnlyList<DataValue>)discoveredValues!;
+
+            if (pivotValues.Count == 0)
             {
-                group.KeyValues = keyValues;
+                yield break;
+            }
+
+            // Build a stable index from pivot value to ordinal position.
+            Dictionary<DataValue, int> pivotValueIndex = new(_explicitValues is not null
+                ? _explicitValues.Count
+                : discoveredValues!.Count);
+
+            for (int index = 0; index < pivotValues.Count; index++)
+            {
+                pivotValueIndex.TryAdd(pivotValues[index], index);
+            }
+
+            // Determine the key columns from the first buffered row.
+            if (bufferedRows.Count == 0 && spillPath is null)
+            {
+                yield break;
+            }
+
+            Row firstRow = bufferedRows[0];
+            string pivotColumnName = GetPivotColumnName();
+            List<string> keyColumnNames = new(firstRow.FieldCount);
+
+            for (int fieldIndex = 0; fieldIndex < firstRow.FieldCount; fieldIndex++)
+            {
+                string name = firstRow.ColumnNames[fieldIndex];
+                if (!string.Equals(name, pivotColumnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    keyColumnNames.Add(name);
+                }
+            }
+
+            // Build the output column name schema.
+            bool singleAggregate = _aggregateColumns.Count == 1;
+            string[] outputNames = BuildOutputNames(pivotValues, singleAggregate, keyColumnNames);
+            Dictionary<string, int> outputNameIndex = new(outputNames.Length, StringComparer.OrdinalIgnoreCase);
+
+            for (int index = 0; index < outputNames.Length; index++)
+            {
+                outputNameIndex[outputNames[index]] = index;
+            }
+
+            int keyCount = keyColumnNames.Count;
+            int pivotCellCount = pivotValues.Count * _aggregateColumns.Count;
+            int totalOutputFields = keyCount + pivotCellCount;
+
+            // Pass 2: group by key columns, accumulate aggregates per (pivot value, aggregate) cell.
+            Dictionary<DataValue, PivotGroupState> singleKeyGroups = new();
+            Dictionary<CompositeKey, PivotGroupState> compositeKeyGroups = new();
+            PivotGroupState? globalGroup = keyColumnNames.Count == 0
+                ? CreateGroupState(pivotValues.Count)
+                : null;
+
+            // Process in-memory rows.
+            foreach (Row row in bufferedRows)
+            {
+                AccumulatePivotRow(row, evaluator, pivotValueIndex, keyColumnNames,
+                    singleKeyGroups, compositeKeyGroups, globalGroup, pivotValues.Count);
+            }
+
+            // Process spilled rows.
+            if (spillPath is not null)
+            {
+                using FileStream readStream = new(spillPath, FileMode.Open, FileAccess.Read, FileShare.None, 65536);
+                using BinaryReader reader = new(readStream);
+
+                RowSerializer.ReadSchema(reader, out string[] schemaNames, out Dictionary<string, int> schemaNameIndex);
+
+                while (readStream.Position < readStream.Length)
+                {
+                    context.CancellationToken.ThrowIfCancellationRequested();
+
+                    Row row = RowSerializer.ReadRow(reader, schemaNames, schemaNameIndex);
+
+                    AccumulatePivotRow(row, evaluator, pivotValueIndex, keyColumnNames,
+                        singleKeyGroups, compositeKeyGroups, globalGroup, pivotValues.Count);
+                }
+            }
+
+            // Pass 3: emit one row per group.
+            IEnumerable<PivotGroupState> allGroups = keyColumnNames.Count == 0
+                ? globalGroup is null ? [] : [globalGroup]
+                : keyColumnNames.Count == 1
+                    ? singleKeyGroups.Values
+                    : compositeKeyGroups.Values;
+
+            foreach (PivotGroupState group in allGroups)
+            {
+                DataValue[] values = new DataValue[totalOutputFields];
+
+                if (group.KeyValues is not null)
+                {
+                    for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
+                    {
+                        values[keyIndex] = group.KeyValues[keyIndex];
+                    }
+                }
+
+                for (int cellIndex = 0; cellIndex < pivotCellCount; cellIndex++)
+                {
+                    values[keyCount + cellIndex] = group.CellAccumulators[cellIndex].Result;
+                }
+
+                yield return new Row(outputNames, values, outputNameIndex);
+            }
+        }
+        finally
+        {
+            spillWriter?.Dispose();
+            CleanupSpillDirectory();
+        }
+    }
+
+    /// <summary>
+    /// Accumulates a single row's contribution to the pivot groups.
+    /// </summary>
+    private void AccumulatePivotRow(
+        Row row,
+        ExpressionEvaluator evaluator,
+        Dictionary<DataValue, int> pivotValueIndex,
+        List<string> keyColumnNames,
+        Dictionary<DataValue, PivotGroupState> singleKeyGroups,
+        Dictionary<CompositeKey, PivotGroupState> compositeKeyGroups,
+        PivotGroupState? globalGroup,
+        int pivotValueCount)
+    {
+        DataValue pivotValue = evaluator.Evaluate(_pivotColumnExpression, row);
+
+        if (!pivotValueIndex.TryGetValue(pivotValue, out int pivotOrdinal))
+        {
+            return;
+        }
+
+        PivotGroupState group = ResolveGroup(
+            row, keyColumnNames, evaluator, singleKeyGroups, compositeKeyGroups, globalGroup,
+            pivotValueCount, out DataValue[]? keyValues);
+
+        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+        {
+            AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
+            int cellIndex = (pivotOrdinal * _aggregateColumns.Count) + aggregateIndex;
+
+            if (aggregateColumn.IsCountStar)
+            {
+                group.CellAccumulators[cellIndex].Accumulate(ReadOnlySpan<DataValue>.Empty);
+            }
+            else
+            {
+                DataValue[] arguments = new DataValue[aggregateColumn.ArgumentExpressions.Count];
+                for (int argIndex = 0; argIndex < aggregateColumn.ArgumentExpressions.Count; argIndex++)
+                {
+                    arguments[argIndex] = evaluator.Evaluate(aggregateColumn.ArgumentExpressions[argIndex], row);
+                }
+
+                group.CellAccumulators[cellIndex].Accumulate(arguments);
             }
         }
 
-        // Pass 3: emit one row per group.
-        IEnumerable<PivotGroupState> allGroups = keyColumnNames.Count == 0
-            ? globalGroup is null ? [] : [globalGroup]
-            : keyColumnNames.Count == 1
-                ? singleKeyGroups.Values
-                : compositeKeyGroups.Values;
-
-        foreach (PivotGroupState group in allGroups)
+        if (group.KeyValues is null && keyValues is not null)
         {
-            DataValue[] values = new DataValue[totalOutputFields];
-
-            // Key column values.
-            if (group.KeyValues is not null)
-            {
-                for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
-                {
-                    values[keyIndex] = group.KeyValues[keyIndex];
-                }
-            }
-
-            // Pivot cell aggregate results.
-            for (int cellIndex = 0; cellIndex < pivotCellCount; cellIndex++)
-            {
-                values[keyCount + cellIndex] = group.CellAccumulators[cellIndex].Result;
-            }
-
-            yield return new Row(outputNames, values, outputNameIndex);
+            group.KeyValues = keyValues;
         }
     }
 
@@ -356,6 +457,29 @@ public sealed class PivotOperator : IQueryOperator
         }
 
         return new PivotGroupState { CellAccumulators = accumulators };
+    }
+
+    private void CleanupSpillDirectory()
+    {
+        if (_spillDirectory is not null && Directory.Exists(_spillDirectory))
+        {
+            try
+            {
+                Directory.Delete(_spillDirectory, recursive: true);
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+
+            _spillDirectory = null;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        CleanupSpillDirectory();
     }
 
     /// <summary>

@@ -218,6 +218,10 @@ public sealed class JoinOperator : IQueryOperator
             return null;
         }
 
+        // Extract the build-side alias so the executor can re-qualify rows
+        // fetched directly from the seekable provider (which bypasses AliasOperator).
+        string? buildAlias = FindBuildAlias(_right);
+
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
         return new IndexNestedLoopJoinExecutor(
@@ -226,6 +230,7 @@ public sealed class JoinOperator : IQueryOperator
             sortedIndex,
             buildScan.SourceIndex.Chunks,
             buildScan.Descriptor,
+            buildAlias,
             evaluator);
     }
 
@@ -750,9 +755,9 @@ public sealed class JoinOperator : IQueryOperator
 
     /// <summary>
     /// Pushes build-side key values to all reachable probe-side <see cref="ScanOperator"/>
-    /// instances for bloom-filter-based chunk pruning. Traverses through intermediate
-    /// joins, aliases, filters, and projections so that multi-table join trees can
-    /// propagate bloom keys to buried scans.
+    /// instances for bloom-filter-based and sorted-index-based chunk pruning. Traverses
+    /// through intermediate joins, aliases, filters, and projections so that multi-table
+    /// join trees can propagate keys to buried scans.
     /// </summary>
     private void ApplyBloomPruning(
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
@@ -780,12 +785,12 @@ public sealed class JoinOperator : IQueryOperator
 
             foreach (ScanOperator probeScan in probeScans)
             {
-                if (probeScan.SourceIndex?.BloomFilters is not BloomFilterSet bloomFilters)
-                {
-                    continue;
-                }
+                bool hasBloom = probeScan.SourceIndex?.BloomFilters is BloomFilterSet bloomFilters
+                    && bloomFilters.HasColumn(columnName);
+                bool hasSortedIndex = probeScan.SourceIndex?.SortedIndexes is SortedValueIndexSet sortedIndexes
+                    && sortedIndexes.TryGetIndex(columnName, out _);
 
-                if (!bloomFilters.HasColumn(columnName))
+                if (!hasBloom && !hasSortedIndex)
                 {
                     continue;
                 }
@@ -820,7 +825,39 @@ public sealed class JoinOperator : IQueryOperator
                     }
                 }
 
-                probeScan.AddBloomPruningKeys(columnName, distinctKeys);
+                if (hasBloom)
+                {
+                    probeScan.AddBloomPruningKeys(columnName, distinctKeys);
+                }
+
+                if (hasSortedIndex)
+                {
+                    probeScan.AddSortedIndexPruningKeys(columnName, distinctKeys);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Walks the build-side operator chain to find the <see cref="AliasOperator"/> that
+    /// qualifies column names with the table alias. Returns the alias string, or
+    /// <c>null</c> if no alias wrapper exists. Traverses through
+    /// <see cref="FilterOperator"/> which may be inserted by predicate pushdown.
+    /// </summary>
+    private static string? FindBuildAlias(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case AliasOperator alias:
+                    return alias.Alias;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                default:
+                    return null;
             }
         }
     }

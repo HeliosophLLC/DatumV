@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 
@@ -638,5 +639,56 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.NotNull(restored.ZipDirectory);
         Assert.Equal(1, restored.ZipDirectory.Count);
         Assert.True(restored.SortedIndexes.HasColumn("id"));
+    }
+
+    [Fact]
+    public void RoundTrip_CompressedSpillWriter_PreservesSortedIndexEntries()
+    {
+        SourceFingerprint fingerprint = new(0, new byte[32]);
+        HashSet<string> indexColumns = ["id"];
+        SourceIndexBuilder builder = new(chunkSize: 3, indexColumns: indexColumns);
+        IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
+
+        // Add 9 rows across 3 chunks (chunkSize=3) to exercise multi-run merge.
+        float[] values = [9.0f, 2.0f, 7.0f, 4.0f, 1.0f, 8.0f, 3.0f, 6.0f, 5.0f];
+        foreach (float value in values)
+        {
+            string[] names = ["id"];
+            DataValue[] dataValues = [DataValue.FromScalar(value)];
+            incremental.AddRow(new Row(names, dataValues));
+        }
+
+        SourceIndex index = incremental.Finalize();
+
+        // Serialize through the compressed spill writer path.
+        using MemoryStream stream = new();
+        IndexWriter writer = new();
+        SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
+        writer.Write(indexSet, stream, incremental.SpillWriter, compressIndexes: true);
+
+        // Read back and verify.
+        stream.Position = 0;
+        IndexReader reader = new();
+        SourceIndexSet restoredSet = reader.Read(stream);
+        SourceIndex restored = restoredSet.Tables["test"];
+
+        Assert.NotNull(restored.SortedIndexes);
+        Assert.True(restored.SortedIndexes.HasColumn("id"));
+        Assert.True(restored.SortedIndexes.TryGetIndex("id", out SortedValueIndex? idIndex));
+        Assert.Equal(9, idIndex!.Count);
+
+        // Verify all values survived and lookup works on the round-tripped index.
+        foreach (float value in values)
+        {
+            IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromScalar(value));
+            Assert.Single(found);
+        }
+
+        // Verify sorted order: first entry should be 1.0, last should be 9.0.
+        IReadOnlyList<ValueIndexEntry> first = idIndex.FindExact(DataValue.FromScalar(1.0f));
+        Assert.Equal(1, first[0].ChunkIndex); // rows 3-5 → chunk 1, value 1.0 is the 2nd row in chunk 1
+        Assert.Equal(1, first[0].RowOffsetInChunk);
+
+        incremental.Dispose();
     }
 }
