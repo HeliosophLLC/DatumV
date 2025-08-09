@@ -203,6 +203,7 @@ datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/m
 | [docs/functions.md](docs/functions.md) | All 200+ functions: math, string, JSON, temporal, image, vector, UUID, hashing, window |
 | [docs/providers.md](docs/providers.md) | Data provider details, options, catalog file format |
 | [docs/statistics.md](docs/statistics.md) | Statistics accumulators, manifest schema, column interactions |
+| [docs/datum-format.md](docs/datum-format.md) | `.datum` binary columnar format: physical layout, encoding strategies, zone maps, compression |
 | [docs/indexes.md](docs/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, CLI usage |
 | [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
 | [docs/language-server.md](docs/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
