@@ -70,20 +70,20 @@ public sealed class CrossManifestThresholds
     // ── Evidence Weights ──
     // Weights for the composite confidence calculation. Must sum to ~1.0.
 
-    /// <summary>Weight for name similarity in composite confidence. Default: 0.30.</summary>
-    public double WeightNameSimilarity { get; init; } = 0.30;
+    /// <summary>Weight for name similarity in composite confidence. Default: 0.35.</summary>
+    public double WeightNameSimilarity { get; init; } = 0.35;
 
-    /// <summary>Weight for type compatibility in composite confidence. Default: 0.15.</summary>
-    public double WeightTypeCompatibility { get; init; } = 0.15;
+    /// <summary>Weight for type compatibility in composite confidence. Default: 0.10.</summary>
+    public double WeightTypeCompatibility { get; init; } = 0.10;
 
-    /// <summary>Weight for TopK Jaccard similarity in composite confidence. Default: 0.20.</summary>
-    public double WeightTopKJaccard { get; init; } = 0.20;
+    /// <summary>Weight for TopK Jaccard similarity in composite confidence. Default: 0.10.</summary>
+    public double WeightTopKJaccard { get; init; } = 0.10;
 
-    /// <summary>Weight for cardinality ratio in composite confidence. Default: 0.15.</summary>
-    public double WeightCardinalityRatio { get; init; } = 0.15;
+    /// <summary>Weight for cardinality ratio in composite confidence. Default: 0.20.</summary>
+    public double WeightCardinalityRatio { get; init; } = 0.20;
 
-    /// <summary>Weight for numeric range overlap in composite confidence. Default: 0.10.</summary>
-    public double WeightRangeOverlap { get; init; } = 0.10;
+    /// <summary>Weight for numeric range overlap in composite confidence. Default: 0.15.</summary>
+    public double WeightRangeOverlap { get; init; } = 0.15;
 
     /// <summary>Weight for unique key score in composite confidence. Default: 0.10.</summary>
     public double WeightUniqueKeyScore { get; init; } = 0.10;

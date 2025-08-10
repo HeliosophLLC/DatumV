@@ -234,6 +234,110 @@ public sealed class JoinEvidenceScorerTests
         Assert.Equal(0.0, evidence.RangeOverlap.Value);
     }
 
+    // ── Multiplicative Penalties ──
+
+    [Fact]
+    public void ScoreEvidence_IncompatibleTypes_PenalisesConfidence()
+    {
+        // String vs Scalar — typeCompatibility = 0.0.
+        StringFeatureManifest left = MakeStringFeatureWithTopK("aisle",
+            [new FrequencyEntry("Active", 100)]);
+        NumericFeatureManifest right = MakeIntegerFeature("aisle_id",
+            estimatedDistinctCount: 100,
+            topK: [new FrequencyEntry("1", 100)]);
+
+        ColumnMatchCandidate match = new("aisle", "aisle_id", 0.625, 0.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 1000, right, 1000, match, CrossManifestThresholds.Default);
+
+        // Type incompatibility penalty (0.7×) should visibly reduce confidence.
+        Assert.True(evidence.CompositeConfidence < 0.50,
+            $"Expected < 0.50 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
+    public void ScoreEvidence_LargeCardinalityMismatch_PenalisesConfidence()
+    {
+        // 21 distinct vs 3.4M distinct — cardinality ratio ≈ 0.000006.
+        NumericFeatureManifest left = MakeIntegerFeature("department_id",
+            estimatedDistinctCount: 21, min: 1, max: 21,
+            topK: [new FrequencyEntry("1", 10), new FrequencyEntry("2", 10)]);
+        NumericFeatureManifest right = MakeIntegerFeature("order_id",
+            estimatedDistinctCount: 3400000, min: 1, max: 3500000,
+            topK: [new FrequencyEntry("100", 1), new FrequencyEntry("200", 1)]);
+
+        ColumnMatchCandidate match = new("department_id", "order_id", 0.535, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 21, right, 3421083, match, CrossManifestThresholds.Default);
+
+        // Extreme cardinality mismatch should drop confidence well below graph threshold.
+        Assert.True(evidence.CompositeConfidence < 0.30,
+            $"Expected < 0.30 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
+    public void ScoreEvidence_ZeroOverlapWeakName_PenalisesConfidence()
+    {
+        // No TopK overlap, weak name similarity — coincidental numeric match.
+        NumericFeatureManifest left = MakeIntegerFeature("order_hour_of_day",
+            estimatedDistinctCount: 24, min: 0, max: 23,
+            topK: [new FrequencyEntry("10", 200), new FrequencyEntry("11", 190)]);
+        NumericFeatureManifest right = MakeIntegerFeature("department_id",
+            estimatedDistinctCount: 21, min: 1, max: 21,
+            topK: [new FrequencyEntry("4", 300), new FrequencyEntry("7", 200)]);
+
+        ColumnMatchCandidate match = new("order_hour_of_day", "department_id", 0.176, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 3421083, right, 49688, match, CrossManifestThresholds.Default);
+
+        // Weak name + zero overlap + name mismatch penalties should all apply.
+        Assert.True(evidence.CompositeConfidence < 0.40,
+            $"Expected < 0.40 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
+    public void ScoreEvidence_PerfectPrimaryKeyJoin_RetainsHighConfidence()
+    {
+        // aisle_id → aisle_id: exact name, same type, same cardinality, same range.
+        NumericFeatureManifest left = MakeIntegerFeature("aisle_id",
+            estimatedDistinctCount: 134, min: 1, max: 134,
+            topK: [new FrequencyEntry("1", 1), new FrequencyEntry("2", 1)]);
+        NumericFeatureManifest right = MakeIntegerFeature("aisle_id",
+            estimatedDistinctCount: 134, min: 1, max: 134,
+            topK: [new FrequencyEntry("1", 300), new FrequencyEntry("2", 280)]);
+
+        ColumnMatchCandidate match = new("aisle_id", "aisle_id", 1.0, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 134, right, 49688, match, CrossManifestThresholds.Default);
+
+        // Perfect join — no penalties should fire, confidence should be very high.
+        Assert.True(evidence.CompositeConfidence > 0.85,
+            $"Expected > 0.85 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
+    public void ScoreEvidence_UnrelatedStringColumns_StaysLow()
+    {
+        // aisle (135 values) vs eval_set (3 values) — completely unrelated strings.
+        StringFeatureManifest left = MakeStringFeatureWithTopK("aisle",
+            [new FrequencyEntry("frozen", 50), new FrequencyEntry("dairy", 40)], estimatedDistinctCount: 135);
+        StringFeatureManifest right = MakeStringFeatureWithTopK("eval_set",
+            [new FrequencyEntry("prior", 500), new FrequencyEntry("train", 300)], estimatedDistinctCount: 3);
+
+        ColumnMatchCandidate match = new("aisle", "eval_set", 0.25, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 134, right, 3421083, match, CrossManifestThresholds.Default);
+
+        // Low name similarity + zero overlap + cardinality mismatch → should be well below 0.3.
+        Assert.True(evidence.CompositeConfidence < 0.25,
+            $"Expected < 0.25 but was {evidence.CompositeConfidence:F4}");
+    }
+
     // ── Helpers ──
 
     private static NumericFeatureManifest MakeIntegerFeature(
@@ -303,7 +407,8 @@ public sealed class JoinEvidenceScorerTests
 
     private static StringFeatureManifest MakeStringFeatureWithTopK(
         string name,
-        IReadOnlyList<FrequencyEntry> topK)
+        IReadOnlyList<FrequencyEntry> topK,
+        long estimatedDistinctCount = 100)
     {
         return new StringFeatureManifest
         {
@@ -313,7 +418,7 @@ public sealed class JoinEvidenceScorerTests
             NullCount = 0,
             ValidCount = 1000,
             NullRatio = 0.0,
-            EstimatedDistinctCount = 100,
+            EstimatedDistinctCount = estimatedDistinctCount,
             TopKValues = topK,
             MinLength = 1,
             MaxLength = 50,

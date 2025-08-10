@@ -13,6 +13,35 @@ internal static class JoinEvidenceScorer
     private const double UniqueKeyThreshold = 0.95;
 
     /// <summary>
+    /// Confidence multiplier when <see cref="JoinEvidence.TypeCompatibility"/> is zero
+    /// (incompatible types require a cast).
+    /// </summary>
+    private const double TypeIncompatibilityPenalty = 0.7;
+
+    /// <summary>
+    /// Cardinality ratio below which a scaling penalty is applied. A ratio below 0.1
+    /// means one side has at least 10× more distinct values, suggesting different domains.
+    /// </summary>
+    private const double CardinalityPenaltyThreshold = 0.1;
+
+    /// <summary>
+    /// Name similarity at or above which the name-only evidence is considered strong
+    /// enough to not penalise zero value overlap.
+    /// </summary>
+    private const double StrongNameThreshold = 0.8;
+
+    /// <summary>
+    /// Confidence multiplier when TopK Jaccard is zero and name similarity is weak.
+    /// </summary>
+    private const double ZeroOverlapWeakNamePenalty = 0.85;
+
+    /// <summary>
+    /// Name similarity below which a scaling penalty is applied. Names too dissimilar
+    /// suggest the columns were not designed as a join pair.
+    /// </summary>
+    private const double WeakNameThreshold = 0.4;
+
+    /// <summary>
     /// Computes the full join evidence for a candidate column pair.
     /// </summary>
     /// <param name="left">Feature manifest for the left column.</param>
@@ -256,7 +285,9 @@ internal static class JoinEvidenceScorer
     /// <summary>
     /// Computes the weighted composite confidence from all evidence signals.
     /// When range overlap is null (non-numeric), its weight is redistributed
-    /// proportionally across other signals.
+    /// proportionally across other signals. After the weighted average, multiplicative
+    /// penalties are applied for type incompatibility, cardinality mismatch,
+    /// zero value overlap, and weak name similarity.
     /// </summary>
     private static double ComputeCompositeConfidence(
         double nameSimilarity,
@@ -302,6 +333,55 @@ internal static class JoinEvidenceScorer
                 + (uniqueKeyScore * thresholds.WeightUniqueKeyScore);
         }
 
-        return totalWeight > 0.0 ? weightedSum / totalWeight : 0.0;
+        double confidence = totalWeight > 0.0 ? weightedSum / totalWeight : 0.0;
+
+        confidence = ApplyMultiplicativePenalties(
+            confidence, nameSimilarity, typeCompatibility, topKJaccard, cardinalityRatio);
+
+        return confidence;
+    }
+
+    /// <summary>
+    /// Applies multiplicative penalty factors that gate confidence for structurally
+    /// implausible joins. These catch cases where a few coincidentally high signals
+    /// (e.g. same type + one unique side) inflate the weighted average above the
+    /// candidate threshold.
+    /// </summary>
+    private static double ApplyMultiplicativePenalties(
+        double confidence,
+        double nameSimilarity,
+        double typeCompatibility,
+        double topKJaccard,
+        double cardinalityRatio)
+    {
+        // Incompatible types require a cast — penalise regardless of name match.
+        if (typeCompatibility == 0.0)
+        {
+            confidence *= TypeIncompatibilityPenalty;
+        }
+
+        // Large cardinality mismatch (< 10:1 NDV ratio) suggests different domains.
+        // Scales from 0.5× at ratio=0 to 1.0× at ratio=0.1.
+        if (cardinalityRatio < CardinalityPenaltyThreshold)
+        {
+            double scale = 0.5 + (cardinalityRatio / CardinalityPenaltyThreshold * 0.5);
+            confidence *= scale;
+        }
+
+        // No overlapping values AND weak name evidence — likely coincidental match.
+        if (topKJaccard == 0.0 && nameSimilarity < StrongNameThreshold)
+        {
+            confidence *= ZeroOverlapWeakNamePenalty;
+        }
+
+        // Very different column names — names are the strongest structural signal.
+        // Scales from 0.5× at name=0 to 1.0× at name=0.4.
+        if (nameSimilarity < WeakNameThreshold)
+        {
+            double scale = (WeakNameThreshold + nameSimilarity) / (2.0 * WeakNameThreshold);
+            confidence *= scale;
+        }
+
+        return confidence;
     }
 }
