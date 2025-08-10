@@ -377,6 +377,13 @@ DatumIndexerOptions options = new()
 };
 
 await using DatumIndexResult index = await DatumIngester.BuildIndexAsync("data.csv.datum", options);
+
+// Optional: receive progress updates during indexing
+Progress<IndexingProgress> progress = new(snapshot =>
+    Console.WriteLine($"{snapshot.TableName}: {snapshot.PercentComplete}% ({snapshot.RowsProcessed}/{snapshot.TotalRows})"));
+
+await using DatumIndexResult indexWithProgress = await DatumIngester.BuildIndexAsync(
+    "data.csv.datum", options, progress);
 ```
 
 `DatumIngester.IngestAsync` handles format conversion and statistics collection. `DatumIngester.BuildIndexAsync` handles index building, compression, and sidecar file writing. See [Programmatic API](api.md) for additional usage patterns.

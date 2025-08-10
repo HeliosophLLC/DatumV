@@ -3,7 +3,7 @@ using DatumIngest.Indexing;
 namespace DatumIngest;
 
 /// <summary>
-/// The output of a <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/>
+/// The output of a <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
 /// call: per-table index streams and a combined <see cref="SourceIndexSet"/>.
 /// Dispose when uploads are complete.
 /// </summary>

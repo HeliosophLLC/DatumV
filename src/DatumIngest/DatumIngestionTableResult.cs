@@ -9,7 +9,7 @@ namespace DatumIngest;
 /// </summary>
 /// <remarks>
 /// This result does not contain indexes. Use
-/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/>
+/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
 /// on the produced <c>.datum</c> file to build indexes separately.
 /// </remarks>
 public sealed class DatumIngestionTableResult

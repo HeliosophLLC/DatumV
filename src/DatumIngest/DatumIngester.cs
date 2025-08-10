@@ -20,7 +20,7 @@ namespace DatumIngest;
 /// containing per-column statistics. It does <em>not</em> build indexes.
 /// </para>
 /// <para>
-/// <see cref="BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/> reads
+/// <see cref="BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/> reads
 /// an existing <c>.datum</c> file and builds a <c>.datum-index</c> containing bloom filters
 /// and sorted value indexes. This is a separate pass so that ingestion and indexing can be
 /// performed independently.
@@ -103,6 +103,10 @@ public static class DatumIngester
     /// </summary>
     /// <param name="datumFilePath">Absolute path to the <c>.datum</c> file.</param>
     /// <param name="options">Optional indexing options. Defaults are used when <c>null</c>.</param>
+    /// <param name="progress">
+    /// Optional progress reporter. When provided, receives <see cref="IndexingProgress"/>
+    /// snapshots at every 5% completion boundary and at 100% when the table finishes.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A <see cref="DatumIndexResult"/> containing the <c>.datum-index</c> stream
@@ -111,12 +115,14 @@ public static class DatumIngester
     public static Task<DatumIndexResult> BuildIndexAsync(
         string datumFilePath,
         DatumIndexerOptions? options = null,
+        IProgress<IndexingProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         return BuildIndexCoreAsync(
             baseTableName: FileFormatDetector.DeriveTableName(datumFilePath),
             filePath: datumFilePath,
             options: options ?? DatumIndexerOptions.Default,
+            progress: progress,
             cancellationToken: cancellationToken);
     }
 
@@ -130,11 +136,16 @@ public static class DatumIngester
     /// </param>
     /// <param name="datumSource">Readable stream containing the <c>.datum</c> file bytes.</param>
     /// <param name="options">Optional indexing options. Defaults are used when <c>null</c>.</param>
+    /// <param name="progress">
+    /// Optional progress reporter. When provided, receives <see cref="IndexingProgress"/>
+    /// snapshots at every 5% completion boundary and at 100% when the table finishes.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<DatumIndexResult> BuildIndexAsync(
         string fileName,
         Stream datumSource,
         DatumIndexerOptions? options = null,
+        IProgress<IndexingProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         string tempPath = Path.Combine(
@@ -152,6 +163,7 @@ public static class DatumIngester
                 baseTableName: FileFormatDetector.DeriveTableName(fileName),
                 filePath: tempPath,
                 options: options ?? DatumIndexerOptions.Default,
+                progress: progress,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -273,6 +285,7 @@ public static class DatumIngester
         string baseTableName,
         string filePath,
         DatumIndexerOptions options,
+        IProgress<IndexingProgress>? progress,
         CancellationToken cancellationToken)
     {
         TableCatalog catalog = new();
@@ -293,7 +306,7 @@ public static class DatumIngester
             TableDescriptor descriptor = catalog.Resolve(tableName);
             ITableProvider provider = catalog.CreateProvider(descriptor);
             DatumIndexTableResult tableResult = await BuildIndexForTableAsync(
-                descriptor, provider, fingerprint, options, cancellationToken).ConfigureAwait(false);
+                descriptor, provider, fingerprint, options, progress, cancellationToken).ConfigureAwait(false);
 
             tables[tableName] = tableResult;
             indexes[tableName] = tableResult.Index;
@@ -314,6 +327,7 @@ public static class DatumIngester
         ITableProvider provider,
         SourceFingerprint fingerprint,
         DatumIndexerOptions options,
+        IProgress<IndexingProgress>? progress,
         CancellationToken cancellationToken)
     {
         Schema schema = await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
@@ -325,10 +339,40 @@ public static class DatumIngester
                 maxIndexedColumns: options.MaxIndexedColumns)
             .CreateIncrementalBuilder(fingerprint);
 
+        long? totalRows = null;
+        int lastReportedPercent = -1;
+
+        if (progress is not null)
+        {
+            ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(descriptor, cancellationToken)
+                .ConfigureAwait(false);
+            totalRows = capabilities.EstimatedRowCount;
+        }
+
+        long rowsProcessed = 0;
+
         await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
             indexBuilder.AddRow(row);
+            rowsProcessed++;
+
+            if (progress is not null && totalRows is > 0)
+            {
+                int currentPercent = (int)(rowsProcessed * 100 / totalRows.Value);
+                if (currentPercent >= lastReportedPercent + 5)
+                {
+                    lastReportedPercent = currentPercent;
+                    progress.Report(new IndexingProgress(
+                        descriptor.Name, rowsProcessed, totalRows.Value, currentPercent));
+                }
+            }
+        }
+
+        if (progress is not null && totalRows is > 0 && lastReportedPercent < 100)
+        {
+            progress.Report(new IndexingProgress(
+                descriptor.Name, rowsProcessed, totalRows.Value, 100));
         }
 
         SourceIndex index = indexBuilder.Finalize();

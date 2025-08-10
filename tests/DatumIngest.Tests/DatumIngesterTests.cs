@@ -152,4 +152,120 @@ public sealed class DatumIngesterTests
             }
         }
     }
+
+    // ──────────────── Progress reporting ────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
+    /// reports progress through the <see cref="IProgress{IndexingProgress}"/> callback,
+    /// ending at 100%.
+    /// </summary>
+    [Fact]
+    public async Task BuildIndexAsync_WithProgress_ReportsProgressEndingAt100()
+    {
+        await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
+            FixturePath("array.json"), cancellationToken: CancellationToken.None);
+
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
+
+        string tempDatumPath = Path.Combine(Path.GetTempPath(), $"test_prog_{Guid.NewGuid():N}.datum");
+        try
+        {
+            await using (FileStream output = File.Create(tempDatumPath))
+            {
+                await table.DatumStream.CopyToAsync(output, CancellationToken.None);
+            }
+
+            List<IndexingProgress> reports = [];
+            Progress<IndexingProgress> progress = new(reports.Add);
+
+            await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
+                tempDatumPath, progress: progress, cancellationToken: CancellationToken.None);
+
+            Assert.NotEmpty(reports);
+            Assert.All(reports, report =>
+            {
+                Assert.NotEmpty(report.TableName);
+                Assert.Equal(3, report.TotalRows);
+                Assert.True(report.PercentComplete >= 0 && report.PercentComplete <= 100);
+                Assert.True(report.RowsProcessed > 0 && report.RowsProcessed <= 3);
+            });
+            Assert.Equal(100, reports[^1].PercentComplete);
+
+            // Percentages must be monotonically non-decreasing
+            for (int i = 1; i < reports.Count; i++)
+            {
+                Assert.True(reports[i].PercentComplete >= reports[i - 1].PercentComplete);
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempDatumPath))
+            {
+                File.Delete(tempDatumPath);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that the <see cref="Stream"/>-based <c>BuildIndexAsync</c> overload
+    /// also reports progress correctly.
+    /// </summary>
+    [Fact]
+    public async Task BuildIndexAsync_StreamOverload_ReportsProgressEndingAt100()
+    {
+        await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
+            FixturePath("array.json"), cancellationToken: CancellationToken.None);
+
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
+
+        List<IndexingProgress> reports = [];
+        Progress<IndexingProgress> progress = new(reports.Add);
+
+        await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
+            "array_json.datum", table.DatumStream, progress: progress, cancellationToken: CancellationToken.None);
+
+        Assert.NotEmpty(reports);
+        Assert.Equal(100, reports[^1].PercentComplete);
+        Assert.All(reports, report =>
+        {
+            Assert.True(report.TotalRows > 0);
+            Assert.True(report.PercentComplete >= 0 && report.PercentComplete <= 100);
+        });
+    }
+
+    /// <summary>
+    /// Verifies that passing <c>null</c> for progress does not cause errors
+    /// and produces a valid index.
+    /// </summary>
+    [Fact]
+    public async Task BuildIndexAsync_NullProgress_ProducesValidIndex()
+    {
+        await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
+            FixturePath("array.json"), cancellationToken: CancellationToken.None);
+
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
+
+        string tempDatumPath = Path.Combine(Path.GetTempPath(), $"test_np_{Guid.NewGuid():N}.datum");
+        try
+        {
+            await using (FileStream output = File.Create(tempDatumPath))
+            {
+                await table.DatumStream.CopyToAsync(output, CancellationToken.None);
+            }
+
+            await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
+                tempDatumPath, progress: null, cancellationToken: CancellationToken.None);
+
+            Assert.Single(indexResult.Tables);
+            Assert.True(indexResult.Tables.Values.First().IndexStream.Length > 0);
+        }
+        finally
+        {
+            if (File.Exists(tempDatumPath))
+            {
+                File.Delete(tempDatumPath);
+            }
+        }
+    }
 }

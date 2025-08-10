@@ -3,7 +3,7 @@ using DatumIngest.Indexing;
 namespace DatumIngest;
 
 /// <summary>
-/// Configuration options for <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/>.
+/// Configuration options for <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>.
 /// </summary>
 public sealed class DatumIndexerOptions
 {
