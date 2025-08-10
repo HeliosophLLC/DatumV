@@ -117,7 +117,7 @@ datum-ingest index --source "csv:data=./data.csv" --index-columns "user_id,times
 
 ### Automatic column selection
 
-When no explicit `--index-columns` are provided, the programmatic `DatumIngester` API (and the compute backend) automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not:
+When no explicit `--index-columns` are provided, the programmatic `DatumIngester.BuildIndexAsync` API (and the compute backend) automatically selects columns for sorted indexing based on their data kind. Compact types are indexed; wide types are not:
 
 | Eligible (auto-indexed) | Skipped |
 |------------------------|---------|
@@ -146,7 +146,7 @@ The compressed envelope format per column is:
 | CompressedLength | int32 | Byte length after compression |
 | CompressedPayload | byte[] | Zstd-compressed entry data |
 
-Compression is enabled by default in the `DatumIngester` API (`CompressIndexes = true`). The CLI `--with-index` flag writes uncompressed indexes (version 2) for maximum compatibility. The reader accepts both compressed (v3) and uncompressed (v2) indexes transparently.
+Compression is enabled by default in the `DatumIndexerOptions` (`CompressIndexes = true`). The CLI `--with-index` flag writes uncompressed indexes (version 2) for maximum compatibility. The reader accepts both compressed (v3) and uncompressed (v2) indexes transparently.
 
 ## ZIP directory cache
 
@@ -361,10 +361,14 @@ SourceIndex index = incremental.Finalize();
 
 ### Using DatumIngester
 
-The `DatumIngester` class provides a high-level API for ingesting source files with automatic index and manifest generation:
+The `DatumIngester` class provides a two-step API: ingest source files into `.datum` format with statistics, then build indexes separately:
 
 ```csharp
-DatumIngesterOptions options = new()
+// Step 1: Ingest source file → .datum + manifest (no index)
+await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
+
+// Step 2: Build index from the .datum file
+DatumIndexerOptions options = new()
 {
     ChunkSize = 10_000,
     AutoIndexColumns = true,
@@ -372,11 +376,10 @@ DatumIngesterOptions options = new()
     MaxIndexedColumns = 8,
 };
 
-DatumIngester ingester = new(options);
-await ingester.IngestTableAsync(descriptor, provider, sourceStream, outputPath, CancellationToken.None);
+await using DatumIndexResult index = await DatumIngester.BuildIndexAsync("data.csv.datum", options);
 ```
 
-`DatumIngester` handles index building, compression, and sidecar file writing in a single streaming pass. See [Programmatic API](api.md) for additional `DatumIngester` usage patterns.
+`DatumIngester.IngestAsync` handles format conversion and statistics collection. `DatumIngester.BuildIndexAsync` handles index building, compression, and sidecar file writing. See [Programmatic API](api.md) for additional usage patterns.
 
 ### Read an index
 

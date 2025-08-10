@@ -5,10 +5,15 @@ using DatumIngest.Model;
 namespace DatumIngest;
 
 /// <summary>
-/// The output of a <see cref="DatumIngester"/> run: streams ready to upload,
-/// per-table in-memory schema and statistics, serialized JSON payloads, and summary counts.
+/// The output of a <see cref="DatumIngester.IngestAsync(string, CancellationToken)"/> call: <c>.datum</c> streams,
+/// per-table schemas and statistics, serialized JSON payloads, and summary counts.
 /// Dispose when uploads are complete.
 /// </summary>
+/// <remarks>
+/// This result does not contain indexes. Call
+/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/>
+/// on the produced <c>.datum</c> file to build indexes separately.
+/// </remarks>
 public sealed class DatumIngestionResult : IAsyncDisposable
 {
     /// <summary>
@@ -32,11 +37,6 @@ public sealed class DatumIngestionResult : IAsyncDisposable
     /// </summary>
     public required SourceManifest SourceManifest { get; init; }
 
-    /// <summary>
-    /// Gets the combined source index set covering all ingested tables.
-    /// </summary>
-    public required SourceIndexSet IndexSet { get; init; }
-
     /// <summary>Serialized <c>SourceSchema</c> JSON for all ingested tables.</summary>
     public string SchemaJson { get; init; } = string.Empty;
 
@@ -52,9 +52,6 @@ public sealed class DatumIngestionResult : IAsyncDisposable
     /// <summary>Total byte length of all <c>.datum</c> streams.</summary>
     public long DatumByteCount => Tables.Values.Sum(table => table.DatumByteCount);
 
-    /// <summary>Total byte length of all <c>.datum-index</c> streams.</summary>
-    public long IndexByteCount => Tables.Values.Sum(table => table.IndexByteCount);
-
     /// <summary>Byte count of <see cref="SchemaJson"/> when UTF-8 encoded.</summary>
     public int SchemaByteCount => System.Text.Encoding.UTF8.GetByteCount(SchemaJson);
 
@@ -67,7 +64,6 @@ public sealed class DatumIngestionResult : IAsyncDisposable
         foreach (DatumIngestionTableResult table in Tables.Values)
         {
             table.DatumStream.Dispose();
-            table.IndexStream.Dispose();
         }
 
         return ValueTask.CompletedTask;

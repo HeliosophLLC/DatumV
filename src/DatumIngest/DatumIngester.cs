@@ -8,47 +8,50 @@ using DatumIngest.Statistics;
 namespace DatumIngest;
 
 /// <summary>
-/// High-level entry point for converting a source data file into the <c>.datum</c>
-/// columnar format, building a source index, and collecting column statistics — all
-/// in a single streaming pass.
+/// High-level entry point for converting source data files into the <c>.datum</c>
+/// columnar format with column statistics, and for building indexes from existing
+/// <c>.datum</c> files.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Accepts any format that <see cref="TableCatalog"/> recognises: CSV, TSV, JSON,
-/// JSON Lines, Parquet, HDF5, ZIP, IDX, or <c>.datum</c>.
+/// <see cref="IngestAsync(string, CancellationToken)"/> converts any format that
+/// <see cref="TableCatalog"/> recognises (CSV, TSV, JSON, JSON Lines, Parquet, HDF5,
+/// ZIP, IDX, or <c>.datum</c>) into <c>.datum</c> streams with a <see cref="SourceManifest"/>
+/// containing per-column statistics. It does <em>not</em> build indexes.
 /// </para>
 /// <para>
-/// Returns a <see cref="DatumIngestionResult"/> whose streams are positioned at
-/// offset 0 and ready to upload. Call <see cref="IAsyncDisposable.DisposeAsync"/>
-/// on the result when uploads are complete.
+/// <see cref="BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/> reads
+/// an existing <c>.datum</c> file and builds a <c>.datum-index</c> containing bloom filters
+/// and sorted value indexes. This is a separate pass so that ingestion and indexing can be
+/// performed independently.
 /// </para>
 /// <para>
 /// Multi-table sources (for example a root-object JSON file with several array properties)
-/// produce one <c>.datum</c> stream and one <c>.datum-index</c> stream per discovered table.
+/// produce one <c>.datum</c> stream per discovered table.
 /// Use <see cref="DatumIngestionResult.Tables"/> to access them.
 /// </para>
 /// </remarks>
 public static class DatumIngester
 {
+    // ──────────────────── Ingestion ────────────────────
+
     /// <summary>
-    /// Ingests a source file from disk in a single streaming pass.
+    /// Ingests a source file from disk in a single streaming pass, producing a
+    /// <c>.datum</c> stream, schema, and manifest with column statistics.
     /// </summary>
     /// <param name="filePath">Absolute path to the source file.</param>
-    /// <param name="options">Optional ingestion options. Defaults are used when <c>null</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A <see cref="DatumIngestionResult"/> containing the <c>.datum</c> stream,
-    /// index stream, schema JSON, and manifest JSON.
+    /// schema JSON, and manifest JSON. Does not include indexes.
     /// </returns>
     public static Task<DatumIngestionResult> IngestAsync(
         string filePath,
-        DatumIngesterOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         return IngestCoreAsync(
             baseTableName: Path.GetFileName(filePath),
             filePath: filePath,
-            options: options ?? DatumIngesterOptions.Default,
             cancellationToken: cancellationToken);
     }
 
@@ -62,17 +65,12 @@ public static class DatumIngester
     /// logical table name. For example: <c>"survey.csv"</c>, <c>"embeddings.parquet"</c>.
     /// </param>
     /// <param name="source">Readable stream containing the source file bytes.</param>
-    /// <param name="options">Optional ingestion options. Defaults are used when <c>null</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<DatumIngestionResult> IngestAsync(
         string fileName,
         Stream source,
-        DatumIngesterOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        // The TableCatalog requires a real file path for format detection and
-        // provider construction. Write to a temp file with the original extension
-        // so extension-based detection works correctly, then clean up.
         string tempPath = Path.Combine(
             Path.GetTempPath(),
             $"datum_ingest_{Guid.NewGuid():N}{Path.GetExtension(fileName)}");
@@ -87,7 +85,6 @@ public static class DatumIngester
             return await IngestCoreAsync(
                 baseTableName: Path.GetFileName(fileName),
                 filePath: tempPath,
-                options: options ?? DatumIngesterOptions.Default,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -99,12 +96,78 @@ public static class DatumIngester
         }
     }
 
-    // ──────────────────── Core implementation ────────────────────
+    // ──────────────────── Indexing ────────────────────
+
+    /// <summary>
+    /// Builds a source index from an existing <c>.datum</c> file on disk.
+    /// </summary>
+    /// <param name="datumFilePath">Absolute path to the <c>.datum</c> file.</param>
+    /// <param name="options">Optional indexing options. Defaults are used when <c>null</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// A <see cref="DatumIndexResult"/> containing the <c>.datum-index</c> stream
+    /// and in-memory <see cref="SourceIndexSet"/>.
+    /// </returns>
+    public static Task<DatumIndexResult> BuildIndexAsync(
+        string datumFilePath,
+        DatumIndexerOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        return BuildIndexCoreAsync(
+            baseTableName: Path.GetFileName(datumFilePath),
+            filePath: datumFilePath,
+            options: options ?? DatumIndexerOptions.Default,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds a source index from an in-memory <c>.datum</c> stream.
+    /// The stream is written to a temporary file for provider access, then deleted
+    /// on completion.
+    /// </summary>
+    /// <param name="fileName">
+    /// The logical file name (with <c>.datum</c> extension) used for table registration.
+    /// </param>
+    /// <param name="datumSource">Readable stream containing the <c>.datum</c> file bytes.</param>
+    /// <param name="options">Optional indexing options. Defaults are used when <c>null</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task<DatumIndexResult> BuildIndexAsync(
+        string fileName,
+        Stream datumSource,
+        DatumIndexerOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(),
+            $"datum_index_{Guid.NewGuid():N}{Path.GetExtension(fileName)}");
+
+        try
+        {
+            await using (FileStream tempFile = File.Create(tempPath))
+            {
+                await datumSource.CopyToAsync(tempFile, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await BuildIndexCoreAsync(
+                baseTableName: Path.GetFileName(fileName),
+                filePath: tempPath,
+                options: options ?? DatumIndexerOptions.Default,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    // ──────────────────── Ingestion core ────────────────────
 
     private static async Task<DatumIngestionResult> IngestCoreAsync(
         string baseTableName,
         string filePath,
-        DatumIngesterOptions options,
         CancellationToken cancellationToken)
     {
         TableCatalog catalog = new();
@@ -120,24 +183,21 @@ public static class DatumIngester
         Dictionary<string, DatumIngestionTableResult> tables = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, Schema> schemas = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, QueryResultsManifest> manifests = new(StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, SourceIndex> indexes = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (string tableName in catalog.TableNames)
         {
             TableDescriptor descriptor = catalog.Resolve(tableName);
             ITableProvider provider = catalog.CreateProvider(descriptor);
             DatumIngestionTableResult tableResult = await IngestTableAsync(
-                descriptor, provider, fingerprint, options, cancellationToken).ConfigureAwait(false);
+                descriptor, provider, cancellationToken).ConfigureAwait(false);
 
             tables[tableName] = tableResult;
             schemas[tableName] = tableResult.Schema;
             manifests[tableName] = tableResult.Manifest.Tables[tableName];
-            indexes[tableName] = tableResult.Index;
         }
 
         SourceSchema sourceSchema = new() { Tables = schemas };
         SourceManifest sourceManifest = new() { Tables = manifests };
-        SourceIndexSet indexSet = new(fingerprint, indexes);
 
         string schemaJson = SchemaSerializer.Serialize(sourceSchema);
         string manifestJson = ManifestSerializer.Serialize(sourceManifest);
@@ -148,7 +208,6 @@ public static class DatumIngester
             Tables = tables,
             SourceSchema = sourceSchema,
             SourceManifest = sourceManifest,
-            IndexSet = indexSet,
             SchemaJson = schemaJson,
             ManifestJson = manifestJson,
         };
@@ -157,21 +216,12 @@ public static class DatumIngester
     private static async Task<DatumIngestionTableResult> IngestTableAsync(
         TableDescriptor descriptor,
         ITableProvider provider,
-        SourceFingerprint fingerprint,
-        DatumIngesterOptions options,
         CancellationToken cancellationToken)
     {
         Schema schema = await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
-        IncrementalIndexBuilder indexBuilder = new SourceIndexBuilder(
-                bloomAllColumns: options.BloomAllColumns,
-                indexAllColumns: options.IndexAllColumns,
-                chunkSize: options.ChunkSize,
-                autoIndexColumns: options.AutoIndexColumns,
-                maxIndexedColumns: options.MaxIndexedColumns)
-            .CreateIncrementalBuilder(fingerprint);
         StatisticsCollector statisticsCollector = new();
         MemoryStream datumStream = new();
-        FusedDatumPipelineWriter datumWriter = new(datumStream, indexBuilder, statisticsCollector);
+        FusedDatumPipelineWriter datumWriter = new(datumStream, indexBuilder: null, statisticsCollector);
 
         await datumWriter.InitializeAsync(schema, cancellationToken).ConfigureAwait(false);
 
@@ -193,12 +243,95 @@ public static class DatumIngester
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = datumWriter.Statistics
             ?? throw new InvalidOperationException("The datum writer did not produce statistics.");
-        SourceIndex index = datumWriter.CompletedIndex
-            ?? throw new InvalidOperationException("The datum writer did not produce an index.");
         QueryResultsManifest queryManifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
         SourceManifest manifest = SourceManifest.Create(descriptor.Name, queryManifest);
         string schemaJson = SchemaSerializer.Serialize(descriptor.Name, schema);
         string manifestJson = ManifestSerializer.Serialize(manifest);
+
+        await datumWriter.DisposeAsync().ConfigureAwait(false);
+
+        datumStream.Position = 0;
+
+        return new DatumIngestionTableResult
+        {
+            TableName = descriptor.Name,
+            FileName = $"{descriptor.Name}.datum",
+            ManifestFileName = $"{descriptor.Name}.datum-manifest",
+            Schema = schema,
+            Manifest = manifest,
+            DatumStream = datumStream,
+            SchemaJson = schemaJson,
+            ManifestJson = manifestJson,
+            RowCount = rowCount,
+            FeatureCount = queryManifest.Features.Count,
+        };
+    }
+
+    // ──────────────────── Indexing core ────────────────────
+
+    private static async Task<DatumIndexResult> BuildIndexCoreAsync(
+        string baseTableName,
+        string filePath,
+        DatumIndexerOptions options,
+        CancellationToken cancellationToken)
+    {
+        TableCatalog catalog = new();
+        await catalog.RegisterAsync(baseTableName, filePath, cancellationToken).ConfigureAwait(false);
+
+        SourceFingerprint fingerprint;
+        await using (FileStream sourceStream = File.OpenRead(filePath))
+        {
+            fingerprint = await SourceFingerprint.ComputeAsync(sourceStream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        Dictionary<string, DatumIndexTableResult> tables = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, SourceIndex> indexes = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string tableName in catalog.TableNames)
+        {
+            TableDescriptor descriptor = catalog.Resolve(tableName);
+            ITableProvider provider = catalog.CreateProvider(descriptor);
+            DatumIndexTableResult tableResult = await BuildIndexForTableAsync(
+                descriptor, provider, fingerprint, options, cancellationToken).ConfigureAwait(false);
+
+            tables[tableName] = tableResult;
+            indexes[tableName] = tableResult.Index;
+        }
+
+        SourceIndexSet indexSet = new(fingerprint, indexes);
+
+        return new DatumIndexResult
+        {
+            Fingerprint = fingerprint,
+            Tables = tables,
+            IndexSet = indexSet,
+        };
+    }
+
+    private static async Task<DatumIndexTableResult> BuildIndexForTableAsync(
+        TableDescriptor descriptor,
+        ITableProvider provider,
+        SourceFingerprint fingerprint,
+        DatumIndexerOptions options,
+        CancellationToken cancellationToken)
+    {
+        Schema schema = await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
+        IncrementalIndexBuilder indexBuilder = new SourceIndexBuilder(
+                bloomAllColumns: options.BloomAllColumns,
+                indexAllColumns: options.IndexAllColumns,
+                chunkSize: options.ChunkSize,
+                autoIndexColumns: options.AutoIndexColumns,
+                maxIndexedColumns: options.MaxIndexedColumns)
+            .CreateIncrementalBuilder(fingerprint);
+
+        await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            indexBuilder.AddRow(row);
+        }
+
+        SourceIndex index = indexBuilder.Finalize();
 
         // Write the index to a temporary file using streaming sorted indexes from the spill
         // writer. This avoids materializing the full ValueIndexEntry arrays (~5 GB for 32M rows)
@@ -211,30 +344,19 @@ public static class DatumIngester
         indexWriter.Write(
             SourceIndexSet.Create(descriptor.Name, index),
             indexStream,
-            datumWriter.SortedIndexSpillWriter,
+            indexBuilder.SpillWriter,
             compressIndexes: options.CompressIndexes);
 
-        // Dispose the datum writer (and its index builder / spill writer) after streaming.
-        await datumWriter.DisposeAsync().ConfigureAwait(false);
+        indexBuilder.Dispose();
 
-        datumStream.Position = 0;
         indexStream.Position = 0;
 
-        return new DatumIngestionTableResult
+        return new DatumIndexTableResult
         {
             TableName = descriptor.Name,
-            FileName = $"{descriptor.Name}.datum",
             IndexFileName = $"{descriptor.Name}.datum-index",
-            ManifestFileName = $"{descriptor.Name}.datum-manifest",
-            Schema = schema,
-            Manifest = manifest,
             Index = index,
-            DatumStream = datumStream,
             IndexStream = indexStream,
-            SchemaJson = schemaJson,
-            ManifestJson = manifestJson,
-            RowCount = rowCount,
-            FeatureCount = queryManifest.Features.Count,
         };
     }
 }

@@ -1,13 +1,17 @@
-using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest;
 
 /// <summary>
-/// Per-table output of a <see cref="DatumIngester"/> run.
-/// Contains the in-memory schema, manifest, index, and binary streams for a single logical table.
+/// Per-table output of a <see cref="DatumIngester.IngestAsync(string, CancellationToken)"/> call.
+/// Contains the in-memory schema, manifest, and <c>.datum</c> binary stream for a single logical table.
 /// </summary>
+/// <remarks>
+/// This result does not contain indexes. Use
+/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/>
+/// on the produced <c>.datum</c> file to build indexes separately.
+/// </remarks>
 public sealed class DatumIngestionTableResult
 {
     /// <summary>The logical table name.</summary>
@@ -18,12 +22,6 @@ public sealed class DatumIngestionTableResult
     /// Must end with <c>.datum</c>.
     /// </summary>
     public required string FileName { get; init; }
-
-    /// <summary>
-    /// The destination file name for this table's <c>.datum-index</c> file, including the extension.
-    /// Must end with <c>.datum-index</c>.
-    /// </summary>
-    public required string IndexFileName { get; init; }
 
     /// <summary>
     /// The destination file name for this table's <c>.datum-manifest</c> file, including the extension.
@@ -41,21 +39,11 @@ public sealed class DatumIngestionTableResult
     /// </summary>
     public required SourceManifest Manifest { get; init; }
 
-    /// <summary>The in-memory source index for this table.</summary>
-    public required SourceIndex Index { get; init; }
-
     /// <summary>
     /// Seekable <see cref="MemoryStream"/> containing the <c>.datum</c> file bytes,
     /// positioned at offset 0 and ready to upload.
     /// </summary>
     public required MemoryStream DatumStream { get; init; }
-
-    /// <summary>
-    /// Seekable stream containing the <c>.datum-index</c> file bytes,
-    /// positioned at offset 0 and ready to upload. May be backed by a temporary file
-    /// for datasets whose serialized index exceeds the <see cref="MemoryStream"/> capacity.
-    /// </summary>
-    public required Stream IndexStream { get; init; }
 
     /// <summary>Serialized single-table schema JSON.</summary>
     public required string SchemaJson { get; init; }
@@ -71,9 +59,6 @@ public sealed class DatumIngestionTableResult
 
     /// <summary>Byte length of the <c>.datum</c> stream.</summary>
     public long DatumByteCount => DatumStream.Length;
-
-    /// <summary>Byte length of the <c>.datum-index</c> stream.</summary>
-    public long IndexByteCount => IndexStream.Length;
 
     /// <summary>Byte count of <see cref="SchemaJson"/> when UTF-8 encoded.</summary>
     public int SchemaByteCount => System.Text.Encoding.UTF8.GetByteCount(SchemaJson);

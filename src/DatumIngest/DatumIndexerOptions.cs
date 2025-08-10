@@ -3,14 +3,14 @@ using DatumIngest.Indexing;
 namespace DatumIngest;
 
 /// <summary>
-/// Configuration options for <see cref="DatumIngester"/>.
+/// Configuration options for <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, CancellationToken)"/>.
 /// </summary>
-public sealed class DatumIngesterOptions
+public sealed class DatumIndexerOptions
 {
     /// <summary>
     /// Default options: auto-indexed compact columns, no bloom filters, default chunk size.
     /// </summary>
-    public static readonly DatumIngesterOptions Default = new();
+    public static readonly DatumIndexerOptions Default = new();
 
     /// <summary>
     /// Number of rows per index chunk.
