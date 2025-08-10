@@ -178,6 +178,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.LpadFunction());
         registry.RegisterScalar(new Scalar.RpadFunction());
         registry.RegisterScalar(new Scalar.RegexpExtractFunction());
+        registry.RegisterScalar(new Scalar.WordCountFunction());
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());
