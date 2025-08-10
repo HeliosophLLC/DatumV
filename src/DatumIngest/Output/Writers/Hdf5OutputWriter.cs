@@ -352,8 +352,22 @@ public sealed class Hdf5OutputWriter : IOutputWriter
             chunkDims[d + 1] = (uint)shape[d];
         }
 
-        return new H5Dataset(flatData, chunks: chunkDims, fileDims: fileDims);
+        return new H5Dataset(flatData, chunks: chunkDims, fileDims: fileDims)
+        {
+            Attributes = new() { [TensorKindAttributeName] = TensorKindAttributeValue }
+        };
     }
+
+    /// <summary>
+    /// HDF5 attribute name written on tensor datasets to disambiguate from matrices,
+    /// which share the same rank-3 layout when the tensor shape is two-dimensional.
+    /// </summary>
+    internal const string TensorKindAttributeName = "datumingest_kind";
+
+    /// <summary>
+    /// The attribute value that marks a dataset as a tensor.
+    /// </summary>
+    internal const string TensorKindAttributeValue = "tensor";
 
     private string[] BuildUuidStringDataset(string columnName, int rowCount)
     {

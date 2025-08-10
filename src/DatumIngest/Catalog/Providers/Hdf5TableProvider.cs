@@ -10,7 +10,9 @@ namespace DatumIngest.Catalog.Providers;
 /// Reads HDF5 files via PureHDF (pure managed, cross-platform).
 /// Each 1-D dataset becomes a column. Multi-dimensional datasets are restored to their
 /// original <see cref="DataKind"/>: rank-2 as <see cref="DataKind.Vector"/>, rank-3 as
-/// <see cref="DataKind.Matrix"/>, and rank-4 or higher as <see cref="DataKind.Tensor"/>.
+/// <see cref="DataKind.Matrix"/> (or <see cref="DataKind.Tensor"/> when the dataset carries
+/// a <c>datumingest_kind=tensor</c> attribute), and rank-4 or higher as
+/// <see cref="DataKind.Tensor"/>.
 /// Datasets inside groups use a flattened slash-separated name (e.g. "sensors/temperature").
 /// </summary>
 public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
@@ -274,7 +276,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
         if (rank == 3)
         {
-            return DataKind.Matrix;
+            return HasTensorKindAttribute(dataset) ? DataKind.Tensor : DataKind.Matrix;
         }
 
         if (rank >= 4)
@@ -297,6 +299,23 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         }
 
         return DataKind.String;
+    }
+
+    /// <summary>
+    /// Checks whether the dataset carries the <c>datumingest_kind</c> attribute with value
+    /// <c>"tensor"</c>, written by <see cref="Output.Writers.Hdf5OutputWriter"/> to
+    /// disambiguate rank-3 tensors from matrices.
+    /// </summary>
+    private static bool HasTensorKindAttribute(IH5Dataset dataset)
+    {
+        if (!dataset.AttributeExists(Output.Writers.Hdf5OutputWriter.TensorKindAttributeName))
+        {
+            return false;
+        }
+
+        IH5Attribute attribute = dataset.Attribute(Output.Writers.Hdf5OutputWriter.TensorKindAttributeName);
+        string value = attribute.Read<string>();
+        return string.Equals(value, Output.Writers.Hdf5OutputWriter.TensorKindAttributeValue, StringComparison.Ordinal);
     }
 
     // ───────────────────── Data reading ─────────────────────
@@ -466,12 +485,12 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
                 return new VectorColumnData(entry.Path, flatData, rowCount, (int)dimensions[1]);
             }
 
-            if (rank == 3)
+            if (rank == 3 && !HasTensorKindAttribute(dataset))
             {
                 return new MatrixColumnData(entry.Path, flatData, rowCount, (int)dimensions[1], (int)dimensions[2]);
             }
 
-            // rank >= 4: Tensor — trailing dimensions form the per-element shape.
+            // rank >= 3 tensor or rank >= 4: trailing dimensions form the per-element shape.
             int[] shape = new int[rank - 1];
             for (int d = 1; d < rank; d++)
             {
@@ -545,12 +564,12 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
                 return new VectorColumnData(entry.Path, flatData, sliceRowCount, (int)dimensions[1]);
             }
 
-            if (rank == 3)
+            if (rank == 3 && !HasTensorKindAttribute(dataset))
             {
                 return new MatrixColumnData(entry.Path, flatData, sliceRowCount, (int)dimensions[1], (int)dimensions[2]);
             }
 
-            // rank >= 4: Tensor
+            // rank >= 3 tensor or rank >= 4: trailing dimensions form the per-element shape.
             int[] shape = new int[rank - 1];
             for (int d = 1; d < rank; d++)
             {
