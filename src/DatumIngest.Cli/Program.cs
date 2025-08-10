@@ -182,12 +182,12 @@ static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
                 "Cannot combine --bloom-all/--index-all/--auto-index with --bloom-columns/--index-columns. Use one approach or the other.");
         }
 
-        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns);
+        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns, indexStrategy: options.IndexStrategy);
     }
 
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
     HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
-    return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns);
+    return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns, indexStrategy: options.IndexStrategy);
 }
 
 static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)

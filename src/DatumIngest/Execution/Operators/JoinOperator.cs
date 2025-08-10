@@ -186,25 +186,24 @@ public sealed class JoinOperator : IQueryOperator
 
         ScanOperator buildScan = buildScans[0];
 
-        if (buildScan.SourceIndex?.SortedIndexes is null)
+        if (buildScan.SourceIndex is null)
         {
             return null;
         }
 
-        // Try both qualified and unqualified column names against the sorted index.
+        // Try both qualified and unqualified column names against the column index.
         string? indexColumnName = buildColumnRef.QualifiedName ?? buildColumnRef.ColumnName;
-        SortedValueIndexSet sortedIndexes = buildScan.SourceIndex.SortedIndexes;
 
-        if (!sortedIndexes.TryGetIndex(indexColumnName, out SortedValueIndex? sortedIndex))
+        if (!buildScan.SourceIndex.TryGetColumnIndex(indexColumnName, out IColumnIndex? columnIndex))
         {
             // Try unqualified name if qualified failed.
             if (buildColumnRef.QualifiedName is not null
-                && !sortedIndexes.TryGetIndex(buildColumnRef.ColumnName, out sortedIndex))
+                && !buildScan.SourceIndex.TryGetColumnIndex(buildColumnRef.ColumnName, out columnIndex))
             {
                 return null;
             }
 
-            if (sortedIndex is null)
+            if (columnIndex is null)
             {
                 return null;
             }
@@ -227,7 +226,7 @@ public sealed class JoinOperator : IQueryOperator
         return new IndexNestedLoopJoinExecutor(
             _joinType,
             extraction,
-            sortedIndex,
+            columnIndex,
             buildScan.SourceIndex.Chunks,
             buildScan.Descriptor,
             buildAlias,
@@ -787,8 +786,8 @@ public sealed class JoinOperator : IQueryOperator
             {
                 bool hasBloom = probeScan.SourceIndex?.BloomFilters is BloomFilterSet bloomFilters
                     && bloomFilters.HasColumn(columnName);
-                bool hasSortedIndex = probeScan.SourceIndex?.SortedIndexes is SortedValueIndexSet sortedIndexes
-                    && sortedIndexes.TryGetIndex(columnName, out _);
+                bool hasSortedIndex = probeScan.SourceIndex is not null
+                    && probeScan.SourceIndex.TryGetColumnIndex(columnName, out _);
 
                 if (!hasBloom && !hasSortedIndex)
                 {

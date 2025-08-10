@@ -377,7 +377,8 @@ public static class DatumIngester
                 indexAllColumns: options.IndexAllColumns,
                 chunkSize: options.ChunkSize,
                 autoIndexColumns: options.AutoIndexColumns,
-                maxIndexedColumns: options.MaxIndexedColumns)
+                maxIndexedColumns: options.MaxIndexedColumns,
+                indexStrategy: options.IndexStrategy)
             .CreateIncrementalBuilder(fingerprint);
 
         long? totalRows = null;

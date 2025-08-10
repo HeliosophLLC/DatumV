@@ -1402,13 +1402,13 @@ public sealed class QueryPlanner
             return false;
         }
 
-        // The scan must have a source index with a sorted index for the sort column.
-        if (scan.SourceIndex?.SortedIndexes is null)
+        // The scan must have a source index with a column index for the sort column.
+        if (scan.SourceIndex is null)
         {
             return false;
         }
 
-        if (!scan.SourceIndex.SortedIndexes.TryGetIndex(sortColumn, out SortedValueIndex? sortedIndex))
+        if (!scan.SourceIndex.TryGetColumnIndex(sortColumn, out IColumnIndex? columnIndex))
         {
             return false;
         }
@@ -1418,7 +1418,7 @@ public sealed class QueryPlanner
         IndexScanOperator indexScan = new(
             scan.Descriptor,
             scan.RequiredColumns,
-            sortedIndex,
+            columnIndex,
             scan.SourceIndex.Chunks,
             descending);
 

@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace DatumIngest.Indexing;
 
 /// <summary>
@@ -58,5 +60,26 @@ public sealed class SourceIndex
         BloomFilters = bloomFilters;
         SortedIndexes = sortedIndexes;
         ZipDirectory = zipDirectory;
+    }
+
+    /// <summary>
+    /// Retrieves the best available column index for the specified column,
+    /// returning whichever implementation (sorted array or B+Tree) is present.
+    /// This is the single entry point for operators and the query planner —
+    /// callers never need to know which concrete index type backs the column.
+    /// </summary>
+    /// <param name="columnName">Column name (case-insensitive lookup).</param>
+    /// <param name="index">The column index, or <c>null</c> if no index exists for this column.</param>
+    /// <returns><c>true</c> if an index exists for the specified column.</returns>
+    public bool TryGetColumnIndex(string columnName, [NotNullWhen(true)] out IColumnIndex? index)
+    {
+        if (SortedIndexes is not null && SortedIndexes.TryGetIndex(columnName, out SortedValueIndex? sortedIndex))
+        {
+            index = sortedIndex;
+            return true;
+        }
+
+        index = null;
+        return false;
     }
 }

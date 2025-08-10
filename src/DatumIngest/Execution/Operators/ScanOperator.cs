@@ -177,7 +177,6 @@ public sealed class ScanOperator : IQueryOperator
     {
         IReadOnlyList<IndexChunk> chunks = _sourceIndex!.Chunks;
         BloomFilterSet? bloomFilters = _sourceIndex.BloomFilters;
-        SortedValueIndexSet? sortedIndexes = _sourceIndex.SortedIndexes;
         TotalIndexChunks = chunks.Count;
         PrunedIndexChunks = 0;
         ExactSeekRowsFetched = null;
@@ -237,11 +236,11 @@ public sealed class ScanOperator : IQueryOperator
             // Sorted-index-based pruning via join keys: if build-side key values
             // were passed and sorted indexes exist, check whether any build key
             // is present in this chunk. If none are, skip the chunk.
-            if (!pruned && _sortedIndexPruningKeys is not null && sortedIndexes is not null)
+            if (!pruned && _sortedIndexPruningKeys is not null)
             {
                 foreach (KeyValuePair<string, IReadOnlyCollection<DataValue>> entry in _sortedIndexPruningKeys)
                 {
-                    if (sortedIndexes.TryGetIndex(entry.Key, out SortedValueIndex? index))
+                    if (_sourceIndex.TryGetColumnIndex(entry.Key, out IColumnIndex? index))
                     {
                         bool anyPresent = false;
                         foreach (DataValue keyValue in entry.Value)
@@ -264,10 +263,10 @@ public sealed class ScanOperator : IQueryOperator
             }
 
             // Sorted-index-based pruning: if equality predicates are present and
-            // sorted indexes exist, check whether the chunk contains the key.
-            if (!pruned && _filterHint is not null && sortedIndexes is not null)
+            // a column index exists, check whether the chunk contains the key.
+            if (!pruned && _filterHint is not null)
             {
-                pruned = ShouldPruneWithSortedIndexes(_filterHint, sortedIndexes, chunkIndex);
+                pruned = ShouldPruneWithColumnIndexes(_filterHint, _sourceIndex, chunkIndex);
             }
 
             if (pruned)
@@ -281,13 +280,13 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
-        // When the provider supports seeking and equality predicates have sorted
+        // When the provider supports seeking and equality predicates have
         // index hits, seek directly to matching rows rather than reading entire chunks.
         if (provider is ISeekableTableProvider seekable
-            && _filterHint is not null && sortedIndexes is not null)
+            && _filterHint is not null)
         {
             List<long>? exactPositions = CollectExactSeekPositions(
-                _filterHint, sortedIndexes, chunks, activeChunkIndexes);
+                _filterHint, _sourceIndex, chunks, activeChunkIndexes);
 
             if (exactPositions is not null)
             {
@@ -383,55 +382,55 @@ public sealed class ScanOperator : IQueryOperator
     /// Extracts equality predicates (column = literal) from the filter expression
     /// and checks the sorted index to see if the chunk contains any matching key.
     /// </summary>
-    private static bool ShouldPruneWithSortedIndexes(
-        Expression filterHint, SortedValueIndexSet sortedIndexes, int chunkIndex)
+    private static bool ShouldPruneWithColumnIndexes(
+        Expression filterHint, SourceIndex sourceIndex, int chunkIndex)
     {
         // Walk the expression tree looking for equality comparisons of the form
         // column = literal. Each such predicate can rule out chunks that do not
         // contain the literal in their sorted index.
-        return CheckExpressionForPruning(filterHint, sortedIndexes, chunkIndex);
+        return CheckExpressionForPruning(filterHint, sourceIndex, chunkIndex);
     }
 
     private static bool CheckExpressionForPruning(
-        Expression expression, SortedValueIndexSet sortedIndexes, int chunkIndex)
+        Expression expression, SourceIndex sourceIndex, int chunkIndex)
     {
         if (expression is BinaryExpression binary)
         {
             if (binary.Operator == BinaryOperator.And)
             {
                 // AND: prune if either side says we can prune.
-                return CheckExpressionForPruning(binary.Left, sortedIndexes, chunkIndex)
-                    || CheckExpressionForPruning(binary.Right, sortedIndexes, chunkIndex);
+                return CheckExpressionForPruning(binary.Left, sourceIndex, chunkIndex)
+                    || CheckExpressionForPruning(binary.Right, sourceIndex, chunkIndex);
             }
 
             if (binary.Operator == BinaryOperator.Equal)
             {
-                return CheckEqualityForPruning(binary.Left, binary.Right, sortedIndexes, chunkIndex);
+                return CheckEqualityForPruning(binary.Left, binary.Right, sourceIndex, chunkIndex);
             }
 
             if (binary.Operator is BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual
                 or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual)
             {
                 return CheckComparisonForPruning(
-                    binary.Left, binary.Right, binary.Operator, sortedIndexes, chunkIndex);
+                    binary.Left, binary.Right, binary.Operator, sourceIndex, chunkIndex);
             }
         }
 
         if (expression is BetweenExpression between && !between.Negated)
         {
-            return CheckBetweenForPruning(between, sortedIndexes, chunkIndex);
+            return CheckBetweenForPruning(between, sourceIndex, chunkIndex);
         }
 
         if (expression is InExpression inExpression && !inExpression.Negated)
         {
-            return CheckInForPruning(inExpression, sortedIndexes, chunkIndex);
+            return CheckInForPruning(inExpression, sourceIndex, chunkIndex);
         }
 
         return false;
     }
 
     private static bool CheckEqualityForPruning(
-        Expression left, Expression right, SortedValueIndexSet sortedIndexes, int chunkIndex)
+        Expression left, Expression right, SourceIndex sourceIndex, int chunkIndex)
     {
         // Match: column = literal  or  literal = column
         string? columnName = null;
@@ -453,7 +452,7 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        if (!sortedIndexes.TryGetIndex(columnName, out SortedValueIndex? index))
+        if (!sourceIndex.TryGetColumnIndex(columnName, out IColumnIndex? index))
         {
             return false;
         }
@@ -470,7 +469,7 @@ public sealed class ScanOperator : IQueryOperator
     /// </summary>
     private static bool CheckComparisonForPruning(
         Expression left, Expression right, BinaryOperator op,
-        SortedValueIndexSet sortedIndexes, int chunkIndex)
+        SourceIndex sourceIndex, int chunkIndex)
     {
         string? columnName = null;
         object? rawLiteral = null;
@@ -493,7 +492,7 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        if (!sortedIndexes.TryGetIndex(columnName, out SortedValueIndex? index))
+        if (!sourceIndex.TryGetColumnIndex(columnName, out IColumnIndex? index))
         {
             return false;
         }
@@ -533,7 +532,7 @@ public sealed class ScanOperator : IQueryOperator
     /// by looking up the inclusive range in a sorted index.
     /// </summary>
     private static bool CheckBetweenForPruning(
-        BetweenExpression between, SortedValueIndexSet sortedIndexes, int chunkIndex)
+        BetweenExpression between, SourceIndex sourceIndex, int chunkIndex)
     {
         if (between.Expression is not ColumnReference columnRef)
         {
@@ -546,7 +545,7 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        if (!sortedIndexes.TryGetIndex(columnRef.ColumnName, out SortedValueIndex? index))
+        if (!sourceIndex.TryGetColumnIndex(columnRef.ColumnName, out IColumnIndex? index))
         {
             return false;
         }
@@ -562,14 +561,14 @@ public sealed class ScanOperator : IQueryOperator
     /// by looking up each value in a sorted index.
     /// </summary>
     private static bool CheckInForPruning(
-        InExpression inExpression, SortedValueIndexSet sortedIndexes, int chunkIndex)
+        InExpression inExpression, SourceIndex sourceIndex, int chunkIndex)
     {
         if (inExpression.Expression is not ColumnReference columnRef)
         {
             return false;
         }
 
-        if (!sortedIndexes.TryGetIndex(columnRef.ColumnName, out SortedValueIndex? index))
+        if (!sourceIndex.TryGetColumnIndex(columnRef.ColumnName, out IColumnIndex? index))
         {
             return false;
         }
@@ -620,7 +619,7 @@ public sealed class ScanOperator : IQueryOperator
     /// <returns>Sorted list of absolute row positions, or <c>null</c> if no seek is possible.</returns>
     private static List<long>? CollectExactSeekPositions(
         Expression filterHint,
-        SortedValueIndexSet sortedIndexes,
+        SourceIndex sourceIndex,
         IReadOnlyList<IndexChunk> chunks,
         HashSet<int> activeChunkIndexes)
     {
@@ -632,7 +631,7 @@ public sealed class ScanOperator : IQueryOperator
 
         foreach ((string column, DataValue value) in equalities)
         {
-            if (!sortedIndexes.TryGetIndex(column, out SortedValueIndex? index))
+            if (!sourceIndex.TryGetColumnIndex(column, out IColumnIndex? index))
             {
                 continue;
             }
@@ -652,7 +651,7 @@ public sealed class ScanOperator : IQueryOperator
 
         foreach ((string column, DataValue low, DataValue high) in betweens)
         {
-            if (!sortedIndexes.TryGetIndex(column, out SortedValueIndex? index))
+            if (!sourceIndex.TryGetColumnIndex(column, out IColumnIndex? index))
             {
                 continue;
             }
@@ -672,7 +671,7 @@ public sealed class ScanOperator : IQueryOperator
 
         foreach ((string column, List<DataValue> values) in inPredicates)
         {
-            if (!sortedIndexes.TryGetIndex(column, out SortedValueIndex? index))
+            if (!sourceIndex.TryGetColumnIndex(column, out IColumnIndex? index))
             {
                 continue;
             }

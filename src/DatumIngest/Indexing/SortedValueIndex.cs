@@ -23,12 +23,15 @@ public readonly record struct ValueIndexEntry(DataValue Key, int ChunkIndex, lon
 /// pruning: first eliminate chunks via min/max stats, then locate exact rows via
 /// the sorted index within surviving chunks.
 /// </remarks>
-public sealed class SortedValueIndex
+public sealed class SortedValueIndex : IColumnIndex
 {
     private readonly ValueIndexEntry[] _entries;
 
     /// <summary>Number of entries in this index.</summary>
     public int Count => _entries.Length;
+
+    /// <inheritdoc/>
+    public long EntryCount => _entries.Length;
 
     /// <summary>The sorted entries (for serialization and testing).</summary>
     internal ReadOnlySpan<ValueIndexEntry> Entries => _entries;
@@ -287,6 +290,24 @@ public sealed class SortedValueIndex
     {
         Array.Sort(entries, (a, b) => CompareKeys(a.Key, b.Key));
         return new SortedValueIndex(entries);
+    }
+
+    /// <inheritdoc/>
+    public IEnumerable<ValueIndexEntry> TraverseForward()
+    {
+        for (int index = 0; index < _entries.Length; index++)
+        {
+            yield return _entries[index];
+        }
+    }
+
+    /// <inheritdoc/>
+    public IEnumerable<ValueIndexEntry> TraverseBackward()
+    {
+        for (int index = _entries.Length - 1; index >= 0; index--)
+        {
+            yield return _entries[index];
+        }
     }
 
     private static int CompareKeys(DataValue left, DataValue right)

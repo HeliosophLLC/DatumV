@@ -12,8 +12,13 @@ namespace DatumIngest;
 /// Completion percentage (0–100). Reported at every 5% boundary and always
 /// at 100% when the table finishes.
 /// </param>
+/// <param name="Phase">
+/// The current phase of index building. Defaults to <see cref="IndexingPhase.Scanning"/>
+/// for backward compatibility with existing consumers.
+/// </param>
 public sealed record IndexingProgress(
     string TableName,
     long RowsProcessed,
     long TotalRows,
-    int PercentComplete);
+    int PercentComplete,
+    IndexingPhase Phase = IndexingPhase.Scanning);

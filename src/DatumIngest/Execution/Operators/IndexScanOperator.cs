@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
@@ -6,7 +7,7 @@ namespace DatumIngest.Execution.Operators;
 
 /// <summary>
 /// Scans rows from a <see cref="ISeekableTableProvider"/> in the order defined
-/// by a <see cref="SortedValueIndex"/>. Entries in the sorted index are walked
+/// by an <see cref="IColumnIndex"/>. Entries in the index are walked
 /// sequentially, and each row is fetched via random access — producing sorted
 /// output without materializing and sorting the entire dataset.
 /// </summary>
@@ -16,16 +17,12 @@ namespace DatumIngest.Execution.Operators;
 /// <see cref="ScanOperator"/> + <see cref="OrderByOperator"/> combination when
 /// a sorted index exists for the ORDER BY column and the provider supports seeking.
 /// </para>
-/// <para>
-/// Consecutive entries that fall within the same chunk are batched into a single
-/// <see cref="ISeekableTableProvider.ReadRowRangeAsync"/> call to reduce I/O overhead.
-/// </para>
 /// </remarks>
 public sealed class IndexScanOperator : IQueryOperator
 {
     private readonly TableDescriptor _descriptor;
     private readonly IReadOnlySet<string>? _requiredColumns;
-    private readonly SortedValueIndex _sortedIndex;
+    private readonly IColumnIndex _columnIndex;
     private readonly IReadOnlyList<IndexChunk> _chunks;
     private readonly bool _descending;
 
@@ -34,19 +31,19 @@ public sealed class IndexScanOperator : IQueryOperator
     /// </summary>
     /// <param name="descriptor">Table descriptor identifying the data source.</param>
     /// <param name="requiredColumns">Columns needed downstream; null means all columns.</param>
-    /// <param name="sortedIndex">The sorted value index defining scan order.</param>
+    /// <param name="columnIndex">The column index defining scan order.</param>
     /// <param name="chunks">The chunk directory for translating chunk-relative offsets to absolute row positions.</param>
     /// <param name="descending">Whether to walk the index in reverse (descending) order.</param>
     public IndexScanOperator(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
-        SortedValueIndex sortedIndex,
+        IColumnIndex columnIndex,
         IReadOnlyList<IndexChunk> chunks,
         bool descending)
     {
         _descriptor = descriptor;
         _requiredColumns = requiredColumns;
-        _sortedIndex = sortedIndex;
+        _columnIndex = columnIndex;
         _chunks = chunks;
         _descending = descending;
     }
@@ -73,94 +70,100 @@ public sealed class IndexScanOperator : IQueryOperator
                 $"uses '{provider.GetType().Name}' which does not implement ISeekableTableProvider.");
         }
 
-        // Copy entries to an array since ReadOnlySpan cannot live across await/yield.
-        ValueIndexEntry[] entries = _sortedIndex.Entries.ToArray();
-        int entryCount = entries.Length;
-
-        if (entryCount == 0)
-        {
-            yield break;
-        }
-
-        // Walk entries in sorted order (ascending or descending).
+        // Traverse the index in sorted order (ascending or descending).
         // Batch consecutive entries from the same chunk into a single read.
-        int current = _descending ? entryCount - 1 : 0;
-        int step = _descending ? -1 : 1;
+        IEnumerable<ValueIndexEntry> traversal = _descending
+            ? _columnIndex.TraverseBackward()
+            : _columnIndex.TraverseForward();
 
-        while (current >= 0 && current < entryCount)
+        List<ValueIndexEntry> batch = new();
+        int batchChunkIndex = -1;
+
+        foreach (ValueIndexEntry entry in traversal)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            int chunkIndex = entries[current].ChunkIndex;
-            long absoluteRow = _chunks[chunkIndex].RowOffset
-                + entries[current].RowOffsetInChunk;
-
-            // Look ahead for consecutive entries in the same chunk to batch.
-            int batchStart = current;
-            int batchEnd = current;
-            long minRow = absoluteRow;
-            long maxRow = absoluteRow;
-
-            while (true)
+            if (batch.Count > 0 && entry.ChunkIndex != batchChunkIndex)
             {
-                int next = batchEnd + step;
-                if (next < 0 || next >= entryCount)
-                {
-                    break;
-                }
-
-                if (entries[next].ChunkIndex != chunkIndex)
-                {
-                    break;
-                }
-
-                long nextAbsoluteRow = _chunks[entries[next].ChunkIndex].RowOffset
-                    + entries[next].RowOffsetInChunk;
-                minRow = Math.Min(minRow, nextAbsoluteRow);
-                maxRow = Math.Max(maxRow, nextAbsoluteRow);
-                batchEnd = next;
-            }
-
-            int batchSize = Math.Abs(batchEnd - batchStart) + 1;
-
-            if (batchSize == 1)
-            {
-                // Single entry: fetch exactly one row.
-                await foreach (Row row in seekable.ReadRowRangeAsync(
-                    _descriptor, _requiredColumns, absoluteRow, 1,
-                    cancellationToken).ConfigureAwait(false))
+                // Chunk boundary: flush the accumulated batch.
+                await foreach (Row row in FlushBatchAsync(
+                    seekable, batch, cancellationToken).ConfigureAwait(false))
                 {
                     yield return row;
                 }
+
+                batch.Clear();
             }
-            else
+
+            batch.Add(entry);
+            batchChunkIndex = entry.ChunkIndex;
+        }
+
+        // Flush any remaining entries.
+        if (batch.Count > 0)
+        {
+            await foreach (Row row in FlushBatchAsync(
+                seekable, batch, cancellationToken).ConfigureAwait(false))
             {
-                // Batch: fetch the row range covering all entries and yield in index order.
-                int rangeCount = (int)(maxRow - minRow + 1);
-                Dictionary<long, Row> rowsByOffset = new(batchSize);
+                yield return row;
+            }
+        }
+    }
 
-                await foreach (Row row in seekable.ReadRowRangeAsync(
-                    _descriptor, _requiredColumns, minRow, rangeCount,
-                    cancellationToken).ConfigureAwait(false))
-                {
-                    long fetchedRow = minRow + rowsByOffset.Count;
-                    rowsByOffset[fetchedRow] = row;
-                }
+    /// <summary>
+    /// Reads the rows identified by a batch of index entries that share the same chunk.
+    /// Single-entry batches fetch exactly one row; larger batches read the covering
+    /// range and yield rows in the order they appear in the batch.
+    /// </summary>
+    private async IAsyncEnumerable<Row> FlushBatchAsync(
+        ISeekableTableProvider seekable,
+        List<ValueIndexEntry> batch,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (batch.Count == 1)
+        {
+            ValueIndexEntry entry = batch[0];
+            long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-                // Yield rows in index order (ascending or descending).
-                for (int i = batchStart; i != batchEnd + step; i += step)
-                {
-                    long batchAbsoluteRow = _chunks[entries[i].ChunkIndex].RowOffset
-                        + entries[i].RowOffsetInChunk;
-
-                    if (rowsByOffset.TryGetValue(batchAbsoluteRow, out Row? batchRow))
-                    {
-                        yield return batchRow;
-                    }
-                }
+            await foreach (Row row in seekable.ReadRowRangeAsync(
+                _descriptor, _requiredColumns, absoluteRow, 1,
+                cancellationToken).ConfigureAwait(false))
+            {
+                yield return row;
             }
 
-            current = batchEnd + step;
+            yield break;
+        }
+
+        // Compute the covering range across all entries in the batch.
+        long minRow = long.MaxValue;
+        long maxRow = long.MinValue;
+
+        foreach (ValueIndexEntry entry in batch)
+        {
+            long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
+            minRow = Math.Min(minRow, absoluteRow);
+            maxRow = Math.Max(maxRow, absoluteRow);
+        }
+
+        int rangeCount = (int)(maxRow - minRow + 1);
+        Dictionary<long, Row> rowsByOffset = new(batch.Count);
+
+        await foreach (Row row in seekable.ReadRowRangeAsync(
+            _descriptor, _requiredColumns, minRow, rangeCount,
+            cancellationToken).ConfigureAwait(false))
+        {
+            long fetchedRow = minRow + rowsByOffset.Count;
+            rowsByOffset[fetchedRow] = row;
+        }
+
+        // Yield rows in index order (the batch order from the traversal).
+        foreach (ValueIndexEntry entry in batch)
+        {
+            long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
+
+            if (rowsByOffset.TryGetValue(absoluteRow, out Row? batchRow))
+            {
+                yield return batchRow;
+            }
         }
     }
 }

@@ -8,20 +8,20 @@ using DatumIngest.Parsing.Ast;
 namespace DatumIngest.Execution;
 
 /// <summary>
-/// Executes an equi-join by probing a sorted value index on the build side for each
-/// probe-side row. Each probe-side key triggers an O(log n) binary search in the
-/// sorted index, followed by a point-seek to the matching build-side row(s) via
+/// Executes an equi-join by probing a column index on the build side for each
+/// probe-side row. Each probe-side key triggers an O(log n) lookup in the
+/// index, followed by a point-seek to the matching build-side row(s) via
 /// <see cref="ISeekableTableProvider.ReadRowRangeAsync"/>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// This strategy is optimal under LIMIT when the probe side produces few rows and the
-/// build side has a sorted index on the join column — the total cost is
+/// build side has a column index on the join column — the total cost is
 /// <c>O(probeRows × log(buildRows))</c> with no materialization of the build side.
 /// </para>
 /// <para>
 /// Only supports <see cref="JoinType.Inner"/> and <see cref="JoinType.LeftSemi"/>.
-/// The query planner selects this executor when a sorted index is available on the
+/// The query planner selects this executor when a column index is available on the
 /// build-side join column and the query has a LIMIT clause.
 /// </para>
 /// </remarks>
@@ -29,7 +29,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 {
     private readonly JoinType _joinType;
     private readonly JoinKeyExtractionResult _extraction;
-    private readonly SortedValueIndex _buildIndex;
+    private readonly IColumnIndex _buildIndex;
     private readonly IReadOnlyList<IndexChunk> _buildChunks;
     private readonly TableDescriptor _buildDescriptor;
     private readonly string? _buildAlias;
@@ -40,7 +40,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// </summary>
     /// <param name="joinType">The join type (must be Inner or LeftSemi).</param>
     /// <param name="extraction">The extracted equi-join key pairs and optional residual filter.</param>
-    /// <param name="buildIndex">The sorted value index on the build-side join column.</param>
+    /// <param name="buildIndex">The column index on the build-side join column.</param>
     /// <param name="buildChunks">The chunk directory for translating chunk-relative offsets to absolute row positions.</param>
     /// <param name="buildDescriptor">The table descriptor for the build-side source (used for seeks).</param>
     /// <param name="buildAlias">
@@ -54,7 +54,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     internal IndexNestedLoopJoinExecutor(
         JoinType joinType,
         JoinKeyExtractionResult extraction,
-        SortedValueIndex buildIndex,
+        IColumnIndex buildIndex,
         IReadOnlyList<IndexChunk> buildChunks,
         TableDescriptor buildDescriptor,
         string? buildAlias,
