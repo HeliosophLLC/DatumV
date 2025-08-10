@@ -900,16 +900,6 @@ public class SqlParserTests
     // ───────────────────── Quoted table names ─────────────────────
 
     [Fact]
-    public void SelectFromBracketQuotedTableName()
-    {
-        SelectStatement result = Parse("SELECT * FROM [adult.data]");
-
-        Assert.NotNull(result.From);
-        TableReference table = Assert.IsType<TableReference>(result.From.Source);
-        Assert.Equal("adult.data", table.Name);
-    }
-
-    [Fact]
     public void SelectFromDoubleQuotedTableName()
     {
         SelectStatement result = Parse("SELECT * FROM \"adult.data\"");
@@ -927,17 +917,6 @@ public class SqlParserTests
         Assert.NotNull(result.From);
         TableReference table = Assert.IsType<TableReference>(result.From.Source);
         Assert.Equal("adult.data", table.Name);
-    }
-
-    [Fact]
-    public void SelectFromBracketQuotedTableNameWithAlias()
-    {
-        SelectStatement result = Parse("SELECT a.x FROM [adult.data] AS a");
-
-        Assert.NotNull(result.From);
-        TableReference table = Assert.IsType<TableReference>(result.From.Source);
-        Assert.Equal("adult.data", table.Name);
-        Assert.Equal("a", table.Alias);
     }
 
     // ───────────────────── GROUP BY ─────────────────────

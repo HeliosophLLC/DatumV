@@ -583,7 +583,7 @@ public sealed class TableCatalog
         // Register each discovered sub-table with a qualified name.
         foreach (DiscoveredTable subTable in discovered)
         {
-            string qualifiedName = $"{tableName}.{subTable.Name}";
+            string qualifiedName = $"{tableName}_{subTable.Name}";
 
             // Merge sub-table options with the table-key marker.
             Dictionary<string, string> mergedOptions = new(subTable.Options)

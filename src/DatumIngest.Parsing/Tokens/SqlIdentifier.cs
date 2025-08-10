@@ -43,24 +43,25 @@ public static partial class SqlIdentifier
     }
 
     /// <summary>
-    /// Returns the name wrapped in square brackets if it requires quoting,
-    /// or the original name if it is a valid bare identifier.
+    /// Returns the name wrapped in double quotes (PostgreSQL convention) if it
+    /// requires quoting, or the original name if it is a valid bare identifier.
+    /// Embedded double-quote characters are escaped by doubling.
     /// </summary>
     public static string QuoteIfNeeded(string name)
     {
-        return NeedsQuoting(name) ? $"[{name}]" : name;
+        return NeedsQuoting(name)
+            ? $"\"{name.Replace("\"", "\"\"")}\""
+            : name;
     }
 
     /// <summary>
-    /// Strips surrounding bracket, double-quote, or single-quote delimiters
-    /// from a name if present. Returns the bare name otherwise.
+    /// Strips surrounding double-quote or single-quote delimiters from a name
+    /// if present, un-escaping doubled characters. Returns the bare name otherwise.
     /// </summary>
     public static string Unquote(string name)
     {
         if (name.Length >= 2)
         {
-            if (name[0] == '[' && name[^1] == ']')
-                return name[1..^1];
             if (name[0] == '"' && name[^1] == '"')
                 return name[1..^1].Replace("\"\"", "\"");
             if (name[0] == '\'' && name[^1] == '\'')

@@ -79,8 +79,8 @@ public sealed class TableCatalogRegistrationTests
 
         // The original "data" registration should be replaced by sub-tables.
         Assert.False(catalog.TryResolve("data", out _));
-        Assert.True(catalog.TryResolve("data.licenses", out _));
-        Assert.True(catalog.TryResolve("data.captions", out _));
+        Assert.True(catalog.TryResolve("data_licenses", out _));
+        Assert.True(catalog.TryResolve("data_captions", out _));
     }
 
     /// <summary>
@@ -95,8 +95,8 @@ public sealed class TableCatalogRegistrationTests
         await catalog.RegisterAsync(descriptor, CancellationToken.None);
 
         Assert.False(catalog.TryResolve("data", out _));
-        Assert.True(catalog.TryResolve("data.licenses", out _));
-        Assert.True(catalog.TryResolve("data.captions", out _));
+        Assert.True(catalog.TryResolve("data_licenses", out _));
+        Assert.True(catalog.TryResolve("data_captions", out _));
     }
 
     /// <summary>
@@ -121,8 +121,8 @@ public sealed class TableCatalogRegistrationTests
         TableCatalog catalog = new();
         await catalog.RegisterAsync("data", FixturePath("root_object.json"), CancellationToken.None);
 
-        Schema licensesSchema = await catalog.GetSchemaAsync("data.licenses", CancellationToken.None);
-        Schema captionsSchema = await catalog.GetSchemaAsync("data.captions", CancellationToken.None);
+        Schema licensesSchema = await catalog.GetSchemaAsync("data_licenses", CancellationToken.None);
+        Schema captionsSchema = await catalog.GetSchemaAsync("data_captions", CancellationToken.None);
 
         Assert.True(licensesSchema.Columns.Count > 0);
         Assert.True(captionsSchema.Columns.Count > 0);

@@ -24,7 +24,7 @@ internal static class MonarchGrammarFactory
     ///   <item><c>comment</c> — line comments (--) and block comments (/* */)</item>
     ///   <item><c>operator</c> — arithmetic and comparison symbols</item>
     ///   <item><c>delimiter</c> — commas, parentheses, dots</item>
-    ///   <item><c>identifier</c> — unquoted and bracket/double-quoted identifiers (default)</item>
+    ///   <item><c>identifier</c> — unquoted and double-quoted identifiers (default)</item>
     /// </list>
     /// Token rules are intentionally ordered: multi-character operators before
     /// single-character ones, literals before identifiers, identifiers last so
@@ -53,9 +53,6 @@ internal static class MonarchGrammarFactory
 
                 // Named parameter placeholders: $identifier
                 new[] { @"\$[a-zA-Z_]\w*", "variable" },
-
-                // Bracket-quoted identifiers: [column name with spaces]
-                new[] { @"\[.*?\]", "identifier" },
 
                 // Double-quoted identifiers: "column name". "" is the escape sequence.
                 new[] { @"""([^""\\]|"""")*""", "identifier" },

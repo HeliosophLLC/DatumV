@@ -50,7 +50,7 @@ public static class DatumIngester
         CancellationToken cancellationToken = default)
     {
         return IngestCoreAsync(
-            baseTableName: Path.GetFileName(filePath),
+            baseTableName: FileFormatDetector.DeriveTableName(filePath),
             filePath: filePath,
             cancellationToken: cancellationToken);
     }
@@ -83,7 +83,7 @@ public static class DatumIngester
             }
 
             return await IngestCoreAsync(
-                baseTableName: Path.GetFileName(fileName),
+                baseTableName: FileFormatDetector.DeriveTableName(fileName),
                 filePath: tempPath,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
@@ -114,7 +114,7 @@ public static class DatumIngester
         CancellationToken cancellationToken = default)
     {
         return BuildIndexCoreAsync(
-            baseTableName: Path.GetFileName(datumFilePath),
+            baseTableName: FileFormatDetector.DeriveTableName(datumFilePath),
             filePath: datumFilePath,
             options: options ?? DatumIndexerOptions.Default,
             cancellationToken: cancellationToken);
@@ -149,7 +149,7 @@ public static class DatumIngester
             }
 
             return await BuildIndexCoreAsync(
-                baseTableName: Path.GetFileName(fileName),
+                baseTableName: FileFormatDetector.DeriveTableName(fileName),
                 filePath: tempPath,
                 options: options ?? DatumIndexerOptions.Default,
                 cancellationToken: cancellationToken).ConfigureAwait(false);

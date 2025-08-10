@@ -98,7 +98,7 @@ The completion engine classifies the cursor position using tokenizer-only analys
 |------|---------|-------------|
 | `StatementStart` | Empty input | `SELECT` |
 | `AfterSelect` | After `SELECT` | Columns, scalar functions, `FROM`, `AS`, `CAST` |
-| `AfterFrom` / `AfterJoin` | After `FROM` or `JOIN` | Tables, table-valued functions. Table names that require quoting (contain dots, spaces, hyphens, or collide with keywords) are automatically bracket-quoted in the inserted text. |
+| `AfterFrom` / `AfterJoin` | After `FROM` or `JOIN` | Tables, table-valued functions. Table names that require quoting (contain spaces, hyphens, or collide with keywords) are automatically double-quoted in the inserted text. |
 | `AfterWhere` / `AfterOn` | After `WHERE` or `ON` | Columns, functions, `AND`, `OR`, `NOT`, etc. |
 | `AfterOrderBy` | After `ORDER BY` | Columns, `ASC`, `DESC` |
 | `AfterDot` | After `alias.` | Columns from the qualified table |
@@ -187,7 +187,7 @@ The grammar uses standard Monaco token type names that map automatically to edit
 | `comment` | Line comments (`--`) and block comments (`/* */`) |
 | `operator` | Arithmetic and comparison symbols (`+`, `<=`, `<>`, …) |
 | `delimiter` | Commas, parentheses, dots |
-| `identifier` | Unquoted and bracket/double-quoted identifiers (default) |
+| `identifier` | Unquoted and double-quoted identifiers (default) |
 
 ## WASM Integration
 

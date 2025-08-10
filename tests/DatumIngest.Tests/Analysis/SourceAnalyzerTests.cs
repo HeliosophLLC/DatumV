@@ -225,10 +225,10 @@ public sealed class SourceAnalyzerTests
 
         SourceAnalysisResult result = await analyzer.AnalyzeAsync(catalog, CancellationToken.None);
 
-        Assert.True(result.IndexSet.Tables.ContainsKey("data.licenses"));
-        Assert.True(result.IndexSet.Tables.ContainsKey("data.captions"));
-        Assert.True(result.Manifest.Tables.ContainsKey("data.licenses"));
-        Assert.True(result.Manifest.Tables.ContainsKey("data.captions"));
+        Assert.True(result.IndexSet.Tables.ContainsKey("data_licenses"));
+        Assert.True(result.IndexSet.Tables.ContainsKey("data_captions"));
+        Assert.True(result.Manifest.Tables.ContainsKey("data_licenses"));
+        Assert.True(result.Manifest.Tables.ContainsKey("data_captions"));
     }
 
     // ───────────── Helpers ─────────────

@@ -24,15 +24,6 @@ public static class SqlTokenizer
         select Unit.Value;
 
     /// <summary>
-    /// Recognizes a bracket-quoted identifier such as <c>[My Column]</c>.
-    /// </summary>
-    private static readonly TextParser<Unit> BracketQuotedIdentifierToken =
-        from open in Character.EqualTo('[')
-        from content in Character.Except(']').AtLeastOnce()
-        from close in Character.EqualTo(']')
-        select Unit.Value;
-
-    /// <summary>
     /// Recognizes a double-quoted identifier such as <c>"My Column"</c>,
     /// with <c>""</c> as the escape sequence for an embedded double-quote.
     /// </summary>
@@ -129,9 +120,6 @@ public static class SqlTokenizer
 
             // String literals (before keywords and identifiers)
             .Match(StringLiteralToken, SqlToken.StringLiteral)
-
-            // Bracket-quoted identifiers (before keywords)
-            .Match(BracketQuotedIdentifierToken, SqlToken.Identifier)
 
             // Double-quoted identifiers (before keywords)
             .Match(DoubleQuotedIdentifierToken, SqlToken.Identifier)

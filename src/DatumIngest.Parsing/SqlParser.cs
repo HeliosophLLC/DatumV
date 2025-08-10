@@ -20,18 +20,16 @@ public static class SqlParser
 
     /// <summary>
     /// Extracts the text content from a token span, stripping surrounding
-    /// delimiters from bracket-quoted, double-quoted, and single-quoted tokens.
+    /// delimiters from double-quoted and single-quoted tokens.
     /// </summary>
     private static string GetTokenText(Token<SqlToken> token)
     {
         string text = token.ToStringValue();
 
-        if (token.Kind == SqlToken.Identifier && text.Length >= 2)
+        if (token.Kind == SqlToken.Identifier && text.Length >= 2
+            && text[0] == '"' && text[^1] == '"')
         {
-            if (text[0] == '[' && text[^1] == ']')
-                return text[1..^1];
-            if (text[0] == '"' && text[^1] == '"')
-                return text[1..^1].Replace("\"\"", "\"");
+            return text[1..^1].Replace("\"\"", "\"");
         }
 
         if (token.Kind == SqlToken.StringLiteral && text.Length >= 2

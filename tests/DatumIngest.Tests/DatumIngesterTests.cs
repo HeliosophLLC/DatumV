@@ -24,13 +24,13 @@ public sealed class DatumIngesterTests
             FixturePath("array.json"), cancellationToken: CancellationToken.None);
 
         Assert.Single(result.Tables);
-        DatumIngestionTableResult table = result.Tables["array.json"];
-        Assert.Equal("array.json", table.TableName);
+        DatumIngestionTableResult table = result.Tables["array_json"];
+        Assert.Equal("array_json", table.TableName);
         Assert.Equal(3, result.RowCount);
         Assert.Equal(3, table.Schema.Columns.Count);
         Assert.Single(table.Manifest.Tables);
-        Assert.True(table.Manifest.Tables.ContainsKey("array.json"));
-        Assert.NotEmpty(table.Manifest.Tables["array.json"].Features);
+        Assert.True(table.Manifest.Tables.ContainsKey("array_json"));
+        Assert.NotEmpty(table.Manifest.Tables["array_json"].Features);
         Assert.True(table.DatumStream.Length > 0);
         Assert.Single(result.SourceSchema.Tables);
         Assert.Single(result.SourceManifest.Tables);
@@ -47,12 +47,12 @@ public sealed class DatumIngesterTests
             FixturePath("root_object.json"), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, result.Tables.Count);
-        Assert.Contains("root_object.json.licenses", result.Tables.Keys);
-        Assert.Contains("root_object.json.captions", result.Tables.Keys);
+        Assert.Contains("root_object_json_licenses", result.Tables.Keys);
+        Assert.Contains("root_object_json_captions", result.Tables.Keys);
         Assert.Equal(2, result.SourceSchema.Tables.Count);
         Assert.Equal(2, result.SourceManifest.Tables.Count);
-        Assert.True(result.Tables["root_object.json.licenses"].DatumStream.Length > 0);
-        Assert.True(result.Tables["root_object.json.captions"].DatumStream.Length > 0);
+        Assert.True(result.Tables["root_object_json_licenses"].DatumStream.Length > 0);
+        Assert.True(result.Tables["root_object_json_captions"].DatumStream.Length > 0);
     }
 
     /// <summary>
@@ -85,7 +85,7 @@ public sealed class DatumIngesterTests
         await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
             FixturePath("array.json"), cancellationToken: CancellationToken.None);
 
-        DatumIngestionTableResult table = ingestion.Tables["array.json"];
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
 
         string tempDatumPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid():N}.datum");
         try
@@ -122,7 +122,7 @@ public sealed class DatumIngesterTests
         await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
             FixturePath("array.json"), cancellationToken: CancellationToken.None);
 
-        DatumIngestionTableResult table = ingestion.Tables["array.json"];
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
 
         string tempDatumPath = Path.Combine(Path.GetTempPath(), $"test_rt_{Guid.NewGuid():N}.datum");
         try

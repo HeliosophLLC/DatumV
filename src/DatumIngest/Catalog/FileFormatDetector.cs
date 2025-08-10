@@ -57,19 +57,26 @@ public static class FileFormatDetector
     public static string SupportedFormatList { get; } = BuildFormatList();
 
     /// <summary>
-    /// Derives the logical table name for a data file. Container formats (e.g.
-    /// <c>.datum</c>) have their storage extension stripped so the name reflects
-    /// the underlying data file (<c>departments.csv.datum</c> → <c>departments.csv</c>).
-    /// All other formats use the full filename including extension.
+    /// Derives the logical table name for a data file. The file extension is
+    /// replaced with an underscore so the name is a valid bare SQL identifier
+    /// (e.g. <c>orders.csv</c> → <c>orders_csv</c>). Container formats have
+    /// their storage extension stripped first (<c>orders.csv.datum</c> →
+    /// <c>orders_csv</c>). Dots in the stem are also replaced with underscores.
     /// </summary>
     /// <param name="filePath">Absolute or relative path to the data file.</param>
     /// <returns>The logical table name for use in SQL FROM clauses.</returns>
     public static string DeriveTableName(string filePath)
     {
-        string extension = Path.GetExtension(filePath);
-        return ContainerExtensions.Contains(extension)
-            ? Path.GetFileNameWithoutExtension(filePath)
-            : Path.GetFileName(filePath);
+        string fileName = Path.GetFileName(filePath);
+
+        // Strip container extensions (e.g. .datum) to reveal the logical name.
+        string extension = Path.GetExtension(fileName);
+        if (extension.Length > 0 && ContainerExtensions.Contains(extension))
+        {
+            fileName = Path.GetFileNameWithoutExtension(fileName);
+        }
+
+        return fileName.Replace('.', '_');
     }
 
     /// <summary>

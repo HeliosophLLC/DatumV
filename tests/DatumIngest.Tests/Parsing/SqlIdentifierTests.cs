@@ -55,26 +55,24 @@ public class SqlIdentifierTests
     }
 
     [Fact]
-    public void QuoteIfNeededBracketQuotesDottedName()
+    public void QuoteIfNeededDoubleQuotesDottedName()
     {
-        Assert.Equal("[adult.data]", SqlIdentifier.QuoteIfNeeded("adult.data"));
+        Assert.Equal("\"adult.data\"", SqlIdentifier.QuoteIfNeeded("adult.data"));
     }
 
     [Fact]
-    public void QuoteIfNeededBracketQuotesKeyword()
+    public void QuoteIfNeededDoubleQuotesKeyword()
     {
-        Assert.Equal("[order]", SqlIdentifier.QuoteIfNeeded("order"));
+        Assert.Equal("\"order\"", SqlIdentifier.QuoteIfNeeded("order"));
+    }
+
+    [Fact]
+    public void QuoteIfNeededEscapesEmbeddedDoubleQuotes()
+    {
+        Assert.Equal("\"col\"\"name\"", SqlIdentifier.QuoteIfNeeded("col\"name"));
     }
 
     // ───────────────────── Unquote ─────────────────────
-
-    [Theory]
-    [InlineData("[adult.data]", "adult.data")]
-    [InlineData("[My Column]", "My Column")]
-    public void UnquoteStripsBrackets(string quoted, string expected)
-    {
-        Assert.Equal(expected, SqlIdentifier.Unquote(quoted));
-    }
 
     [Theory]
     [InlineData("\"adult.data\"", "adult.data")]

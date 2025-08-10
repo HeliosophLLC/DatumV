@@ -332,11 +332,11 @@ public sealed class CommandDispatcherTests : IDisposable
         Assert.False(catalog.TryResolve("data", out _));
 
         // Sub-tables should be registered with qualified names.
-        Assert.True(catalog.TryResolve("data.licenses", out _));
-        Assert.True(catalog.TryResolve("data.captions", out _));
+        Assert.True(catalog.TryResolve("data_licenses", out _));
+        Assert.True(catalog.TryResolve("data_captions", out _));
 
         // Each sub-table should be queryable without errors.
-        Schema licensesSchema = await catalog.GetSchemaAsync("data.licenses", CancellationToken.None);
+        Schema licensesSchema = await catalog.GetSchemaAsync("data_licenses", CancellationToken.None);
         Assert.NotNull(licensesSchema.FindColumn("id"));
         Assert.NotNull(licensesSchema.FindColumn("name"));
 

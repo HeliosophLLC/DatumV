@@ -272,7 +272,7 @@ public sealed class CompletionProviderTests
 
         CompletionItem? tableItem = Array.Find(items, item => item.Label == "adult.data");
         Assert.NotNull(tableItem);
-        Assert.Equal("[adult.data]", tableItem.InsertText);
+        Assert.Equal("\"adult.data\"", tableItem.InsertText);
     }
 
     [Fact]

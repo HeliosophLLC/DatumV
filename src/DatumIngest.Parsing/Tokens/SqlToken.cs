@@ -223,7 +223,7 @@ public enum SqlToken
 
     // ───────────────────── Identifiers & Literals ─────────────────────
 
-    /// <summary>An unquoted or bracket-quoted identifier (table or column name).</summary>
+    /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>
     Identifier,
 
     /// <summary>A single-quoted string literal.</summary>

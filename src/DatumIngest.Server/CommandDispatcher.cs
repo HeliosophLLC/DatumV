@@ -359,7 +359,7 @@ public sealed class CommandDispatcher
         if (!session.Catalog.TryResolve(descriptor.Name, out _))
         {
             List<string> expandedNames = session.Catalog.TableNames
-                .Where(name => name.StartsWith(descriptor.Name + ".", StringComparison.OrdinalIgnoreCase))
+                .Where(name => name.StartsWith(descriptor.Name + "_", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 

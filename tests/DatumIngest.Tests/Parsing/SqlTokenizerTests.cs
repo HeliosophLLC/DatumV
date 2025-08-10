@@ -90,12 +90,6 @@ public class SqlTokenizerTests
     }
 
     [Fact]
-    public void BracketQuotedIdentifierIsRecognized()
-    {
-        AssertSingleToken("[My Column]", SqlToken.Identifier);
-    }
-
-    [Fact]
     public void IdentifierStartingWithUnderscoreIsRecognized()
     {
         AssertSingleToken("_private", SqlToken.Identifier);
@@ -324,12 +318,6 @@ public class SqlTokenizerTests
     public void DoubleQuotedIdentifierIsRecognized()
     {
         AssertSingleToken("\"adult.data\"", SqlToken.Identifier);
-    }
-
-    [Fact]
-    public void BracketQuotedIdentifierWithDotIsRecognized()
-    {
-        AssertSingleToken("[adult.data]", SqlToken.Identifier);
     }
 
     [Fact]

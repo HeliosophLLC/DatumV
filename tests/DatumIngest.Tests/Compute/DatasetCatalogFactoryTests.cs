@@ -48,7 +48,7 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
 
         TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
-        Assert.Contains("sales.csv", catalog.TableNames);
+        Assert.Contains("sales_csv", catalog.TableNames);
     }
 
     /// <summary>
@@ -63,9 +63,9 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
 
         TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
-        Assert.Contains("data.csv", catalog.TableNames);
-        Assert.Contains("config.json", catalog.TableNames);
-        Assert.Contains("events.jsonl", catalog.TableNames);
+        Assert.Contains("data_csv", catalog.TableNames);
+        Assert.Contains("config_json", catalog.TableNames);
+        Assert.Contains("events_jsonl", catalog.TableNames);
     }
 
     /// <summary>
@@ -79,8 +79,8 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
 
         TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
-        Assert.Contains("data.csv", catalog.TableNames);
-        Assert.Contains("data.json", catalog.TableNames);
+        Assert.Contains("data_csv", catalog.TableNames);
+        Assert.Contains("data_json", catalog.TableNames);
     }
 
     /// <summary>
@@ -94,8 +94,8 @@ public sealed class DatasetCatalogFactoryTests : IDisposable
 
         TableCatalog catalog = await DatasetCatalogFactory.CreateAsync(_tempDirectory);
 
-        Assert.DoesNotContain("readme.txt", catalog.TableNames);
-        Assert.Contains("data.csv", catalog.TableNames);
+        Assert.DoesNotContain("readme_txt", catalog.TableNames);
+        Assert.Contains("data_csv", catalog.TableNames);
     }
 
     /// <inheritdoc/>
