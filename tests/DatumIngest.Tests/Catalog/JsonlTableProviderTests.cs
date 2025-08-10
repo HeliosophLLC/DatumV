@@ -231,7 +231,8 @@ public sealed class JsonlTableProviderTests
         ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(
             Descriptor("simple.jsonl"), CancellationToken.None);
 
-        Assert.Null(capabilities.EstimatedRowCount);
+        Assert.NotNull(capabilities.EstimatedRowCount);
+        Assert.True(capabilities.EstimatedRowCount > 0);
         Assert.True(capabilities.SupportsSeek);
     }
 

@@ -280,15 +280,87 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     }
 
     /// <inheritdoc />
-    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+    public async Task<ProviderCapabilities> GetCapabilitiesAsync(
         TableDescriptor descriptor,
         CancellationToken cancellationToken)
     {
-        return Task.FromResult(new ProviderCapabilities(
-            EstimatedRowCount: null,
-            EstimatedRowSizeBytes: null,
+        long? estimatedRowCount = null;
+        long? estimatedRowSizeBytes = null;
+
+        if (!File.Exists(descriptor.FilePath))
+        {
+            return new ProviderCapabilities(
+                EstimatedRowCount: null,
+                EstimatedRowSizeBytes: null,
+                SupportsSeek: true,
+                ColumnCosts: new Dictionary<string, ColumnCost>());
+        }
+
+        FileInfo fileInfo = new(descriptor.FilePath);
+        long fileSize = fileInfo.Length;
+
+        if (fileSize > 0)
+        {
+            Schema schema = await GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
+            bool hasHeader = HasHeaderRow(descriptor, schema);
+
+            using FileStream stream = new(
+                descriptor.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: MeasurementBufferSize, useAsync: true);
+
+            byte[] buffer = new byte[MeasurementBufferSize];
+            int bytesRead = await stream.ReadAsync(
+                buffer.AsMemory(0, MeasurementBufferSize), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (bytesRead > 0)
+            {
+                int lineCount = 0;
+                bool inQuote = false;
+
+                for (int i = 0; i < bytesRead; i++)
+                {
+                    byte b = buffer[i];
+                    if (b == (byte)'"')
+                    {
+                        inQuote = !inQuote;
+                    }
+                    else if (b == (byte)'\n' && !inQuote)
+                    {
+                        lineCount++;
+                    }
+                }
+
+                // Account for a final line not terminated by a newline.
+                if (bytesRead < fileSize || buffer[bytesRead - 1] != (byte)'\n')
+                {
+                    lineCount++;
+                }
+
+                if (lineCount > 0)
+                {
+                    // Extrapolate total physical lines using the sample's bytes-per-line ratio,
+                    // then subtract the header row if present.
+                    long totalLines = fileSize * lineCount / bytesRead;
+                    if (hasHeader && totalLines > 0)
+                    {
+                        totalLines--;
+                    }
+
+                    if (totalLines > 0)
+                    {
+                        estimatedRowCount = totalLines;
+                        estimatedRowSizeBytes = fileSize / totalLines;
+                    }
+                }
+            }
+        }
+
+        return new ProviderCapabilities(
+            EstimatedRowCount: estimatedRowCount,
+            EstimatedRowSizeBytes: estimatedRowSizeBytes,
             SupportsSeek: true,
-            ColumnCosts: new Dictionary<string, ColumnCost>()));
+            ColumnCosts: new Dictionary<string, ColumnCost>());
     }
 
     /// <inheritdoc />

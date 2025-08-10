@@ -14,13 +14,13 @@ namespace DatumIngest;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="IngestAsync(string, CancellationToken)"/> converts any format that
+/// <see cref="IngestAsync(string, Action{IngestionProgress}?, CancellationToken)"/> converts any format that
 /// <see cref="TableCatalog"/> recognises (CSV, TSV, JSON, JSON Lines, Parquet, HDF5,
 /// ZIP, IDX, or <c>.datum</c>) into <c>.datum</c> streams with a <see cref="SourceManifest"/>
 /// containing per-column statistics. It does <em>not</em> build indexes.
 /// </para>
 /// <para>
-/// <see cref="BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/> reads
+/// <see cref="BuildIndexAsync(string, DatumIndexerOptions?, Action{IndexingProgress}?, CancellationToken)"/> reads
 /// an existing <c>.datum</c> file and builds a <c>.datum-index</c> containing bloom filters
 /// and sorted value indexes. This is a separate pass so that ingestion and indexing can be
 /// performed independently.
@@ -40,6 +40,10 @@ public static class DatumIngester
     /// <c>.datum</c> stream, schema, and manifest with column statistics.
     /// </summary>
     /// <param name="filePath">Absolute path to the source file.</param>
+    /// <param name="progress">
+    /// Optional progress callback. When provided, receives <see cref="IngestionProgress"/>
+    /// snapshots synchronously at every 5% completion boundary and at 100% when the table finishes.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A <see cref="DatumIngestionResult"/> containing the <c>.datum</c> stream,
@@ -47,11 +51,13 @@ public static class DatumIngester
     /// </returns>
     public static Task<DatumIngestionResult> IngestAsync(
         string filePath,
+        Action<IngestionProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         return IngestCoreAsync(
             baseTableName: FileFormatDetector.DeriveTableName(filePath),
             filePath: filePath,
+            progress: progress,
             cancellationToken: cancellationToken);
     }
 
@@ -65,10 +71,15 @@ public static class DatumIngester
     /// logical table name. For example: <c>"survey.csv"</c>, <c>"embeddings.parquet"</c>.
     /// </param>
     /// <param name="source">Readable stream containing the source file bytes.</param>
+    /// <param name="progress">
+    /// Optional progress callback. When provided, receives <see cref="IngestionProgress"/>
+    /// snapshots synchronously at every 5% completion boundary and at 100% when the table finishes.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<DatumIngestionResult> IngestAsync(
         string fileName,
         Stream source,
+        Action<IngestionProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         string tempPath = Path.Combine(
@@ -85,6 +96,7 @@ public static class DatumIngester
             return await IngestCoreAsync(
                 baseTableName: FileFormatDetector.DeriveTableName(fileName),
                 filePath: tempPath,
+                progress: progress,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -104,8 +116,8 @@ public static class DatumIngester
     /// <param name="datumFilePath">Absolute path to the <c>.datum</c> file.</param>
     /// <param name="options">Optional indexing options. Defaults are used when <c>null</c>.</param>
     /// <param name="progress">
-    /// Optional progress reporter. When provided, receives <see cref="IndexingProgress"/>
-    /// snapshots at every 5% completion boundary and at 100% when the table finishes.
+    /// Optional progress callback. When provided, receives <see cref="IndexingProgress"/>
+    /// snapshots synchronously at every 5% completion boundary and at 100% when the table finishes.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
@@ -115,7 +127,7 @@ public static class DatumIngester
     public static Task<DatumIndexResult> BuildIndexAsync(
         string datumFilePath,
         DatumIndexerOptions? options = null,
-        IProgress<IndexingProgress>? progress = null,
+        Action<IndexingProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         return BuildIndexCoreAsync(
@@ -137,15 +149,15 @@ public static class DatumIngester
     /// <param name="datumSource">Readable stream containing the <c>.datum</c> file bytes.</param>
     /// <param name="options">Optional indexing options. Defaults are used when <c>null</c>.</param>
     /// <param name="progress">
-    /// Optional progress reporter. When provided, receives <see cref="IndexingProgress"/>
-    /// snapshots at every 5% completion boundary and at 100% when the table finishes.
+    /// Optional progress callback. When provided, receives <see cref="IndexingProgress"/>
+    /// snapshots synchronously at every 5% completion boundary and at 100% when the table finishes.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<DatumIndexResult> BuildIndexAsync(
         string fileName,
         Stream datumSource,
         DatumIndexerOptions? options = null,
-        IProgress<IndexingProgress>? progress = null,
+        Action<IndexingProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         string tempPath = Path.Combine(
@@ -180,6 +192,7 @@ public static class DatumIngester
     private static async Task<DatumIngestionResult> IngestCoreAsync(
         string baseTableName,
         string filePath,
+        Action<IngestionProgress>? progress,
         CancellationToken cancellationToken)
     {
         TableCatalog catalog = new();
@@ -201,7 +214,7 @@ public static class DatumIngester
             TableDescriptor descriptor = catalog.Resolve(tableName);
             ITableProvider provider = catalog.CreateProvider(descriptor);
             DatumIngestionTableResult tableResult = await IngestTableAsync(
-                descriptor, provider, cancellationToken).ConfigureAwait(false);
+                descriptor, provider, progress, cancellationToken).ConfigureAwait(false);
 
             tables[tableName] = tableResult;
             schemas[tableName] = tableResult.Schema;
@@ -228,6 +241,7 @@ public static class DatumIngester
     private static async Task<DatumIngestionTableResult> IngestTableAsync(
         TableDescriptor descriptor,
         ITableProvider provider,
+        Action<IngestionProgress>? progress,
         CancellationToken cancellationToken)
     {
         Schema schema = await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
@@ -243,12 +257,39 @@ public static class DatumIngester
             columnKinds[column.Name] = column.Kind;
         }
 
+        long? totalRows = null;
+        int lastReportedPercent = -1;
+
+        if (progress is not null)
+        {
+            ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(descriptor, cancellationToken)
+                .ConfigureAwait(false);
+            totalRows = capabilities.EstimatedRowCount;
+        }
+
         long rowCount = 0;
         await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
             await datumWriter.WriteRowAsync(row, cancellationToken).ConfigureAwait(false);
             rowCount++;
+
+            if (progress is not null && totalRows is > 0)
+            {
+                int currentPercent = (int)Math.Min(100, rowCount * 100 / totalRows.Value);
+                if (currentPercent >= lastReportedPercent + 5)
+                {
+                    lastReportedPercent = currentPercent;
+                    progress(new IngestionProgress(
+                        descriptor.Name, rowCount, totalRows, currentPercent));
+                }
+            }
+        }
+
+        if (progress is not null && lastReportedPercent < 100)
+        {
+            progress(new IngestionProgress(
+                descriptor.Name, rowCount, totalRows, 100));
         }
 
         await datumWriter.FinalizeAsync(cancellationToken).ConfigureAwait(false);
@@ -285,7 +326,7 @@ public static class DatumIngester
         string baseTableName,
         string filePath,
         DatumIndexerOptions options,
-        IProgress<IndexingProgress>? progress,
+        Action<IndexingProgress>? progress,
         CancellationToken cancellationToken)
     {
         TableCatalog catalog = new();
@@ -327,7 +368,7 @@ public static class DatumIngester
         ITableProvider provider,
         SourceFingerprint fingerprint,
         DatumIndexerOptions options,
-        IProgress<IndexingProgress>? progress,
+        Action<IndexingProgress>? progress,
         CancellationToken cancellationToken)
     {
         Schema schema = await provider.GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
@@ -359,11 +400,11 @@ public static class DatumIngester
 
             if (progress is not null && totalRows is > 0)
             {
-                int currentPercent = (int)(rowsProcessed * 100 / totalRows.Value);
+                int currentPercent = (int)Math.Min(100, rowsProcessed * 100 / totalRows.Value);
                 if (currentPercent >= lastReportedPercent + 5)
                 {
                     lastReportedPercent = currentPercent;
-                    progress.Report(new IndexingProgress(
+                    progress(new IndexingProgress(
                         descriptor.Name, rowsProcessed, totalRows.Value, currentPercent));
                 }
             }
@@ -371,7 +412,7 @@ public static class DatumIngester
 
         if (progress is not null && totalRows is > 0 && lastReportedPercent < 100)
         {
-            progress.Report(new IndexingProgress(
+            progress(new IndexingProgress(
                 descriptor.Name, rowsProcessed, totalRows.Value, 100));
         }
 

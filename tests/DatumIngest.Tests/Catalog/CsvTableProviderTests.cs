@@ -202,7 +202,8 @@ public sealed class CsvTableProviderTests
         ProviderCapabilities capabilities = await provider.GetCapabilitiesAsync(
             Descriptor("simple.csv"), CancellationToken.None);
 
-        Assert.Null(capabilities.EstimatedRowCount);
+        Assert.NotNull(capabilities.EstimatedRowCount);
+        Assert.True(capabilities.EstimatedRowCount > 0);
         Assert.True(capabilities.SupportsSeek);
     }
 

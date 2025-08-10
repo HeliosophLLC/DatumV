@@ -2,7 +2,7 @@ namespace DatumIngest;
 
 /// <summary>
 /// A snapshot of progress during index building, reported by
-/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
+/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, Action{IndexingProgress}?, CancellationToken)"/>
 /// at regular percentage intervals.
 /// </summary>
 /// <param name="TableName">The logical name of the table being indexed.</param>

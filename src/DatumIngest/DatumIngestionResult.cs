@@ -5,13 +5,13 @@ using DatumIngest.Model;
 namespace DatumIngest;
 
 /// <summary>
-/// The output of a <see cref="DatumIngester.IngestAsync(string, CancellationToken)"/> call: <c>.datum</c> streams,
+/// The output of a <see cref="DatumIngester.IngestAsync(string, Action{IngestionProgress}?, CancellationToken)"/> call: <c>.datum</c> streams,
 /// per-table schemas and statistics, serialized JSON payloads, and summary counts.
 /// Dispose when uploads are complete.
 /// </summary>
 /// <remarks>
 /// This result does not contain indexes. Call
-/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
+/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, Action{IndexingProgress}?, CancellationToken)"/>
 /// on the produced <c>.datum</c> file to build indexes separately.
 /// </remarks>
 public sealed class DatumIngestionResult : IAsyncDisposable

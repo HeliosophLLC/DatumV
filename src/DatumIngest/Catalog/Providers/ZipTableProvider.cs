@@ -132,8 +132,37 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
         TableDescriptor descriptor,
         CancellationToken cancellationToken)
     {
+        if (!File.Exists(descriptor.FilePath))
+        {
+            return Task.FromResult(new ProviderCapabilities(
+                EstimatedRowCount: null,
+                EstimatedRowSizeBytes: null,
+                SupportsSeek: false,
+                ColumnCosts: new Dictionary<string, ColumnCost>
+                {
+                    ["file_bytes"] = ColumnCost.Expensive
+                },
+                KeyColumn: "file_name"));
+        }
+
+        long? estimatedRowCount = null;
+
+        using (ZipArchive archive = ZipFile.OpenRead(descriptor.FilePath))
+        {
+            int entryCount = 0;
+            foreach (ZipArchiveEntry entry in archive.Entries)
+            {
+                if (!string.IsNullOrEmpty(entry.Name))
+                {
+                    entryCount++;
+                }
+            }
+
+            estimatedRowCount = entryCount;
+        }
+
         return Task.FromResult(new ProviderCapabilities(
-            EstimatedRowCount: null,
+            EstimatedRowCount: estimatedRowCount,
             EstimatedRowSizeBytes: null,
             SupportsSeek: false,
             ColumnCosts: new Dictionary<string, ColumnCost>

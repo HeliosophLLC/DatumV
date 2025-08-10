@@ -163,15 +163,87 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
     }
 
     /// <inheritdoc />
-    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+    public async Task<ProviderCapabilities> GetCapabilitiesAsync(
         TableDescriptor descriptor,
         CancellationToken cancellationToken)
     {
-        return Task.FromResult(new ProviderCapabilities(
-            EstimatedRowCount: null,
-            EstimatedRowSizeBytes: null,
+        long? estimatedRowCount = null;
+        long? estimatedRowSizeBytes = null;
+
+        if (!File.Exists(descriptor.FilePath))
+        {
+            return new ProviderCapabilities(
+                EstimatedRowCount: null,
+                EstimatedRowSizeBytes: null,
+                SupportsSeek: true,
+                ColumnCosts: new Dictionary<string, ColumnCost>());
+        }
+
+        FileInfo fileInfo = new(descriptor.FilePath);
+        long fileSize = fileInfo.Length;
+
+        if (fileSize > 0)
+        {
+            using FileStream stream = new(
+                descriptor.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: MeasurementBufferSize, useAsync: true);
+
+            byte[] buffer = new byte[MeasurementBufferSize];
+            int bytesRead = await stream.ReadAsync(
+                buffer.AsMemory(0, MeasurementBufferSize), cancellationToken)
+                .ConfigureAwait(false);
+
+            if (bytesRead > 0)
+            {
+                int lineCount = 0;
+                int lineStart = 0;
+                bool lineHasNonWhitespace = false;
+                bool lineStartsWithBrace = false;
+
+                for (int i = 0; i < bytesRead; i++)
+                {
+                    byte b = buffer[i];
+
+                    if (b == (byte)'\n')
+                    {
+                        if (lineHasNonWhitespace && lineStartsWithBrace)
+                        {
+                            lineCount++;
+                        }
+
+                        lineStart = i + 1;
+                        lineHasNonWhitespace = false;
+                        lineStartsWithBrace = false;
+                    }
+                    else if (b != (byte)'\r' && b != (byte)' ' && b != (byte)'\t')
+                    {
+                        if (!lineHasNonWhitespace)
+                        {
+                            lineHasNonWhitespace = true;
+                            lineStartsWithBrace = b == (byte)'{';
+                        }
+                    }
+                }
+
+                // Account for a final line not terminated by a newline.
+                if (lineHasNonWhitespace && lineStartsWithBrace)
+                {
+                    lineCount++;
+                }
+
+                if (lineCount > 0)
+                {
+                    estimatedRowCount = fileSize * lineCount / bytesRead;
+                    estimatedRowSizeBytes = fileSize / estimatedRowCount.Value;
+                }
+            }
+        }
+
+        return new ProviderCapabilities(
+            EstimatedRowCount: estimatedRowCount,
+            EstimatedRowSizeBytes: estimatedRowSizeBytes,
             SupportsSeek: true,
-            ColumnCosts: new Dictionary<string, ColumnCost>()));
+            ColumnCosts: new Dictionary<string, ColumnCost>());
     }
 
     /// <inheritdoc />

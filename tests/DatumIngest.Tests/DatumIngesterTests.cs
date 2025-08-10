@@ -156,8 +156,8 @@ public sealed class DatumIngesterTests
     // ──────────────── Progress reporting ────────────────
 
     /// <summary>
-    /// Verifies that <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
-    /// reports progress through the <see cref="IProgress{IndexingProgress}"/> callback,
+    /// Verifies that <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, Action{IndexingProgress}?, CancellationToken)"/>
+    /// reports progress through the <see cref="Action{IndexingProgress}"/> callback,
     /// ending at 100%.
     /// </summary>
     [Fact]
@@ -177,10 +177,9 @@ public sealed class DatumIngesterTests
             }
 
             List<IndexingProgress> reports = [];
-            Progress<IndexingProgress> progress = new(reports.Add);
 
             await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
-                tempDatumPath, progress: progress, cancellationToken: CancellationToken.None);
+                tempDatumPath, progress: reports.Add, cancellationToken: CancellationToken.None);
 
             Assert.NotEmpty(reports);
             Assert.All(reports, report =>
@@ -220,10 +219,10 @@ public sealed class DatumIngesterTests
         DatumIngestionTableResult table = ingestion.Tables["array_json"];
 
         List<IndexingProgress> reports = [];
-        Progress<IndexingProgress> progress = new(reports.Add);
+
 
         await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
-            "array_json.datum", table.DatumStream, progress: progress, cancellationToken: CancellationToken.None);
+            "array_json.datum", table.DatumStream, progress: reports.Add, cancellationToken: CancellationToken.None);
 
         Assert.NotEmpty(reports);
         Assert.Equal(100, reports[^1].PercentComplete);
@@ -267,5 +266,89 @@ public sealed class DatumIngesterTests
                 File.Delete(tempDatumPath);
             }
         }
+    }
+
+    // ──────────────────── Ingestion progress ────────────────────
+
+    /// <summary>
+    /// Verifies that ingesting a CSV file reports progress ending at 100%.
+    /// CSV supports sampling-based row estimation so intermediate reports are expected.
+    /// </summary>
+    [Fact]
+    public async Task IngestAsync_CsvFile_ReportsProgressEndingAt100()
+    {
+        List<IngestionProgress> reports = [];
+
+        await using DatumIngestionResult result = await DatumIngester.IngestAsync(
+            FixturePath("simple.csv"), progress: reports.Add, cancellationToken: CancellationToken.None);
+
+        Assert.NotEmpty(reports);
+        Assert.Equal(100, reports[^1].PercentComplete);
+        Assert.All(reports, report =>
+        {
+            Assert.NotEmpty(report.TableName);
+            Assert.True(report.PercentComplete >= 0 && report.PercentComplete <= 100);
+            Assert.True(report.RowsProcessed >= 0);
+        });
+
+        // Percentages must be monotonically non-decreasing.
+        for (int i = 1; i < reports.Count; i++)
+        {
+            Assert.True(reports[i].PercentComplete >= reports[i - 1].PercentComplete);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that ingesting a JSON file reports exactly 100% completion.
+    /// JSON providers do not estimate row counts, so only the final report is issued.
+    /// </summary>
+    [Fact]
+    public async Task IngestAsync_JsonFile_ReportsProgressAt100()
+    {
+        List<IngestionProgress> reports = [];
+
+
+        await using DatumIngestionResult result = await DatumIngester.IngestAsync(
+            FixturePath("array.json"), progress: reports.Add, cancellationToken: CancellationToken.None);
+
+        Assert.NotEmpty(reports);
+        Assert.Equal(100, reports[^1].PercentComplete);
+        Assert.All(reports, report =>
+        {
+            Assert.NotEmpty(report.TableName);
+            Assert.True(report.RowsProcessed > 0);
+        });
+    }
+
+    /// <summary>
+    /// Verifies that passing <c>null</c> for progress does not cause errors
+    /// and produces a valid ingestion result.
+    /// </summary>
+    [Fact]
+    public async Task IngestAsync_NullProgress_ProducesValidResult()
+    {
+        await using DatumIngestionResult result = await DatumIngester.IngestAsync(
+            FixturePath("simple.csv"), progress: null, cancellationToken: CancellationToken.None);
+
+        Assert.NotEmpty(result.Tables);
+        Assert.True(result.RowCount > 0);
+    }
+
+    /// <summary>
+    /// Verifies that the <see cref="Stream"/>-based <c>IngestAsync</c> overload
+    /// also reports progress correctly.
+    /// </summary>
+    [Fact]
+    public async Task IngestAsync_StreamOverload_ReportsProgress()
+    {
+        List<IngestionProgress> reports = [];
+
+
+        await using FileStream source = File.OpenRead(FixturePath("simple.csv"));
+        await using DatumIngestionResult result = await DatumIngester.IngestAsync(
+            "simple.csv", source, progress: reports.Add, cancellationToken: CancellationToken.None);
+
+        Assert.NotEmpty(reports);
+        Assert.Equal(100, reports[^1].PercentComplete);
     }
 }

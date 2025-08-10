@@ -3,7 +3,7 @@ using DatumIngest.Indexing;
 namespace DatumIngest;
 
 /// <summary>
-/// Per-table output of a <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
+/// Per-table output of a <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, Action{IndexingProgress}?, CancellationToken)"/>
 /// call. Contains the in-memory index and the serialized <c>.datum-index</c> stream for a single logical table.
 /// </summary>
 public sealed class DatumIndexTableResult

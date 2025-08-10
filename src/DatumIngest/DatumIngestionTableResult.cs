@@ -4,12 +4,12 @@ using DatumIngest.Model;
 namespace DatumIngest;
 
 /// <summary>
-/// Per-table output of a <see cref="DatumIngester.IngestAsync(string, CancellationToken)"/> call.
+/// Per-table output of a <see cref="DatumIngester.IngestAsync(string, Action{IngestionProgress}?, CancellationToken)"/> call.
 /// Contains the in-memory schema, manifest, and <c>.datum</c> binary stream for a single logical table.
 /// </summary>
 /// <remarks>
 /// This result does not contain indexes. Use
-/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, IProgress{IndexingProgress}?, CancellationToken)"/>
+/// <see cref="DatumIngester.BuildIndexAsync(string, DatumIndexerOptions?, Action{IndexingProgress}?, CancellationToken)"/>
 /// on the produced <c>.datum</c> file to build indexes separately.
 /// </remarks>
 public sealed class DatumIngestionTableResult
