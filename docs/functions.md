@@ -648,6 +648,53 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `iif` | `iif(cond, then, else)` | Returns then when cond is truthy (non-null, non-zero), else otherwise. For multi-branch conditionals, see [CASE expressions](sql.md#case-expressions). | 1 |
 | `random` | `random()` | Random float in [0, 1). | 1 |
 
+## Random & Sampling (15)
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `hash_split` | `hash_split(key, seed)` | Deterministic float in [0, 1) from key and seed (XxHash64). Same (key, seed) pair always produces the same value. Enables reproducible train/val/test splits via `WHERE hash_split(id, 42) < 0.8`. | 1 |
+| `random_int` | `random_int(min, max)` | Random integer in [min, max] (both inclusive). | 1 |
+| `random_range` | `random_range(min, max)` | Random float in [min, max). | 1 |
+| `random_normal` | `random_normal(mean, stddev)` | Sample from normal distribution N(mean, stddev) via Box-Muller. | 1 |
+| `random_boolean` | `random_boolean(probability)` | Bernoulli trial — returns true with probability p ∈ [0, 1]. | 1 |
+| `random_truncated_normal` | `random_truncated_normal(mean, stddev, min, max)` | Sample from truncated normal, rejection-sampled to [min, max]. | 1 |
+| `random_log_normal` | `random_log_normal(mean, stddev)` | Sample from log-normal: exp(N(mean, stddev)). | 1 |
+| `random_exponential` | `random_exponential(rate)` | Sample from exponential distribution with given rate. | 1 |
+| `random_beta` | `random_beta(alpha, beta)` | Sample from Beta(α, β) distribution. | 1 |
+| `random_poisson` | `random_poisson(lambda)` | Sample from Poisson(λ) distribution (integer count). | 1 |
+| `random_categorical` | `random_categorical(weights)` | Draw a 0-based category index from weighted probabilities (Vector). | 2 |
+| `random_vector` | `random_vector(length)` | Vector of uniform random floats in [0, 1). | 2 |
+| `random_normal_vector` | `random_normal_vector(length, mean, stddev)` | Vector of Gaussian random floats N(mean, stddev). | 2 |
+| `random_permutation` | `random_permutation(length)` | Random permutation of [0, length) via Fisher-Yates. | 2 |
+| `random_choice` | `random_choice(array, count)` | Sample count elements from array without replacement. | 2 |
+
+### Random & sampling examples
+
+```sql
+-- Reproducible 80/10/10 train/val/test split
+SELECT *,
+  CASE
+    WHEN hash_split(id, 42) < 0.8 THEN 'train'
+    WHEN hash_split(id, 42) < 0.9 THEN 'val'
+    ELSE 'test'
+  END AS split
+FROM dataset
+
+-- Add Gaussian noise to embeddings
+SELECT embedding + random_normal_vector(768, 0, 0.01) AS augmented
+FROM features
+
+-- Random dropout mask
+SELECT iif(random_boolean(0.1), 0, value) AS dropped
+FROM activations
+
+-- Synthetic count data
+SELECT random_poisson(5) AS event_count FROM generate_series(1, 1000)
+
+-- Random sample of 3 tags from each row
+SELECT random_choice(tags, 3) AS sampled_tags FROM articles
+```
+
 ## Image — Metadata (5)
 
 | Function | Signature | Description | QU |

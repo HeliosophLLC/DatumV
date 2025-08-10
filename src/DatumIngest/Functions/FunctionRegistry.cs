@@ -391,6 +391,27 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.IifFunction());
         registry.RegisterScalar(new Math.RandomFunction());
 
+        // Random — Core
+        registry.RegisterScalar(new Math.HashSplitFunction());
+        registry.RegisterScalar(new Math.RandomIntFunction());
+        registry.RegisterScalar(new Math.RandomRangeFunction());
+        registry.RegisterScalar(new Math.RandomNormalFunction());
+        registry.RegisterScalar(new Math.RandomBooleanFunction());
+
+        // Random — Distributions
+        registry.RegisterScalar(new Math.RandomTruncatedNormalFunction());
+        registry.RegisterScalar(new Math.RandomLogNormalFunction());
+        registry.RegisterScalar(new Math.RandomExponentialFunction());
+        registry.RegisterScalar(new Math.RandomBetaFunction());
+        registry.RegisterScalar(new Math.RandomPoissonFunction());
+        registry.RegisterScalar(new Math.RandomCategoricalFunction());
+
+        // Random — Vector
+        registry.RegisterScalar(new Math.RandomVectorFunction());
+        registry.RegisterScalar(new Math.RandomNormalVectorFunction());
+        registry.RegisterScalar(new Math.RandomPermutationFunction());
+        registry.RegisterScalar(new Math.RandomChoiceFunction());
+
         // Categorical Encoding
         registry.RegisterScalar(new Scalar.OneHotFunction());
         registry.RegisterScalar(new Scalar.OneHotUnknownFunction());

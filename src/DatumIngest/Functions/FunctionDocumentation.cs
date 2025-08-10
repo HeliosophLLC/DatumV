@@ -654,6 +654,134 @@ public static class FunctionDocumentation
             Category = FunctionCategory.Utility,
         });
 
+        // ── Random ──
+
+        Register(new FunctionSignature
+        {
+            Name = "hash_split",
+            Parameters = [Parameter("key", "Any"), Parameter("seed", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Deterministic float in [0, 1) from key and seed. Enables reproducible train/val/test splits via WHERE hash_split(id, 42) < 0.8.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_int",
+            Parameters = [Parameter("min", "Scalar"), Parameter("max", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Returns a random integer in [min, max] (both inclusive).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_range",
+            Parameters = [Parameter("min", "Scalar"), Parameter("max", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Returns a random float in [min, max).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_normal",
+            Parameters = [Parameter("mean", "Scalar"), Parameter("stddev", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Samples from a normal (Gaussian) distribution N(mean, stddev).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_boolean",
+            Parameters = [Parameter("probability", "Scalar")],
+            ReturnType = "Boolean",
+            Description = "Bernoulli trial — returns true with the given probability (0 to 1).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_truncated_normal",
+            Parameters = [Parameter("mean", "Scalar"), Parameter("stddev", "Scalar"), Parameter("min", "Scalar"), Parameter("max", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Samples from a truncated normal distribution, clamped to [min, max].",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_log_normal",
+            Parameters = [Parameter("mean", "Scalar"), Parameter("stddev", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Samples from a log-normal distribution: exp(N(mean, stddev)).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_exponential",
+            Parameters = [Parameter("rate", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Samples from an exponential distribution with the given rate.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_beta",
+            Parameters = [Parameter("alpha", "Scalar"), Parameter("beta", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Samples from a Beta(alpha, beta) distribution.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_poisson",
+            Parameters = [Parameter("lambda", "Scalar")],
+            ReturnType = "Scalar",
+            Description = "Samples from a Poisson distribution with the given rate.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_categorical",
+            Parameters = [Parameter("weights", "Vector")],
+            ReturnType = "Scalar",
+            Description = "Draws a 0-based category index from weighted probabilities.",
+            Category = FunctionCategory.Utility,
+            QueryUnitCost = 2,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_vector",
+            Parameters = [Parameter("length", "Scalar")],
+            ReturnType = "Vector",
+            Description = "Generates a vector of uniform random floats in [0, 1).",
+            Category = FunctionCategory.Utility,
+            QueryUnitCost = 2,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_normal_vector",
+            Parameters = [Parameter("length", "Scalar"), Parameter("mean", "Scalar"), Parameter("stddev", "Scalar")],
+            ReturnType = "Vector",
+            Description = "Generates a vector of Gaussian random floats N(mean, stddev).",
+            Category = FunctionCategory.Utility,
+            QueryUnitCost = 2,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_permutation",
+            Parameters = [Parameter("length", "Scalar")],
+            ReturnType = "Vector",
+            Description = "Generates a random permutation of [0, length).",
+            Category = FunctionCategory.Utility,
+            QueryUnitCost = 2,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "random_choice",
+            Parameters = [Parameter("array", "Array"), Parameter("count", "Scalar")],
+            ReturnType = "Array",
+            Description = "Samples count elements from an array without replacement.",
+            Category = FunctionCategory.Utility,
+            QueryUnitCost = 2,
+        });
+
         // ── Image — Metadata ──
 
         RegisterImageUnary("width", "Scalar", "Returns the width (in pixels) of an image.");
