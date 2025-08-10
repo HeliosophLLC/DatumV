@@ -431,7 +431,8 @@ public static class DatumIngester
             SourceIndexSet.Create(descriptor.Name, index),
             indexStream,
             indexBuilder.SpillWriter,
-            compressIndexes: options.CompressIndexes);
+            compressIndexes: options.CompressIndexes,
+            indexStrategy: options.IndexStrategy);
 
         indexBuilder.Dispose();
 

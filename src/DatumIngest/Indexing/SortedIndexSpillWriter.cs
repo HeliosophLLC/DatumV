@@ -1,4 +1,5 @@
 using DatumIngest.Execution;
+using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 using ZstdSharp;
 
@@ -253,6 +254,179 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     }
 
     /// <summary>
+    /// Returns the total number of entries accumulated for the specified column across all
+    /// flushed chunks. Unflushed entries in the current chunk are not included.
+    /// </summary>
+    /// <param name="columnName">The column to query.</param>
+    /// <returns>The total entry count, or 0 if the column is not tracked.</returns>
+    internal long GetTotalEntryCount(string columnName)
+    {
+        return _spillTotalEntries.TryGetValue(columnName, out long count) ? count : 0;
+    }
+
+    /// <summary>
+    /// Returns the names of all indexed columns that have at least one spilled entry.
+    /// </summary>
+    internal IEnumerable<string> IndexedColumnNames
+    {
+        get
+        {
+            foreach (KeyValuePair<string, long> pair in _spillTotalEntries)
+            {
+                if (pair.Value > 0 && _spillRunCounts.TryGetValue(pair.Key, out int runCount) && runCount > 0)
+                {
+                    yield return pair.Key;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Streams B+Tree index sections to the output writer by performing a k-way merge
+    /// of spilled sorted runs per column and feeding them to <see cref="BPlusTreeBulkLoader"/>.
+    /// Each column produces one B+Tree with section header + compressed pages.
+    /// </summary>
+    /// <param name="output">The seekable binary writer to receive B+Tree pages.</param>
+    /// <param name="schema">The table schema, used to resolve <see cref="DataKind"/> per column.</param>
+    /// <param name="columnFilter">
+    /// When not <c>null</c>, only columns in this set are written.
+    /// When <c>null</c>, all indexed columns with entries are written.
+    /// </param>
+    internal void WriteBPlusTreeIndexesToStream(
+        BinaryWriter output,
+        Schema schema,
+        IReadOnlySet<string>? columnFilter = null)
+    {
+        PrepareForReading();
+
+        // Count how many columns will be written.
+        int columnCount = 0;
+
+        foreach (KeyValuePair<string, int> pair in _spillRunCounts)
+        {
+            if (pair.Value > 0
+                && (columnFilter is null || columnFilter.Contains(pair.Key)))
+            {
+                columnCount++;
+            }
+        }
+
+        output.Write(columnCount);
+
+        foreach (KeyValuePair<string, int> pair in _spillRunCounts)
+        {
+            string columnName = pair.Key;
+            int runCount = pair.Value;
+
+            if (runCount == 0)
+            {
+                continue;
+            }
+
+            if (columnFilter is not null && !columnFilter.Contains(columnName))
+            {
+                continue;
+            }
+
+            DataKind keyKind = ResolveDataKind(columnName, schema);
+
+            BPlusTreeBulkLoader.Build(
+                EnumerateMergedEntries(columnName, runCount),
+                columnName,
+                keyKind,
+                output);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the <see cref="DataKind"/> for the specified column from the schema.
+    /// Falls back to <see cref="DataKind.String"/> if the column is not found.
+    /// </summary>
+    private static DataKind ResolveDataKind(string columnName, Schema schema)
+    {
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return column.Kind;
+            }
+        }
+
+        return DataKind.String;
+    }
+
+    /// <summary>
+    /// Performs a k-way merge of spilled sorted runs for a column and yields entries
+    /// in sorted order without materializing the full array.
+    /// </summary>
+    private IEnumerable<ValueIndexEntry> EnumerateMergedEntries(string columnName, int runCount)
+    {
+        string spillPath = GetSpillPath(columnName);
+        using FileStream fileStream = File.OpenRead(spillPath);
+        using BinaryReader reader = new(fileStream);
+
+        if (runCount == 1)
+        {
+            int count = reader.ReadInt32();
+
+            for (int index = 0; index < count; index++)
+            {
+                yield return ReadEntry(reader);
+            }
+
+            yield break;
+        }
+
+        RunState[] runs = new RunState[runCount];
+
+        for (int runIndex = 0; runIndex < runCount; runIndex++)
+        {
+            long runStart = fileStream.Position;
+            int entryCount = reader.ReadInt32();
+            long dataStart = fileStream.Position;
+
+            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+            {
+                SkipEntry(reader);
+            }
+
+            runs[runIndex] = new RunState(runStart, dataStart, entryCount);
+        }
+
+        PriorityQueue<int, DataValue> queue = new(
+            Comparer<DataValue>.Create((a, b) => StatisticsPredicateEvaluator.CompareValues(a, b)));
+
+        for (int runIndex = 0; runIndex < runCount; runIndex++)
+        {
+            if (runs[runIndex].RemainingCount > 0)
+            {
+                fileStream.Position = runs[runIndex].DataPosition;
+                ValueIndexEntry entry = ReadEntry(reader);
+                runs[runIndex].Current = entry;
+                runs[runIndex].DataPosition = fileStream.Position;
+                runs[runIndex].RemainingCount--;
+                queue.Enqueue(runIndex, entry.Key);
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            int runIndex = queue.Dequeue();
+            yield return runs[runIndex].Current;
+
+            if (runs[runIndex].RemainingCount > 0)
+            {
+                fileStream.Position = runs[runIndex].DataPosition;
+                ValueIndexEntry nextEntry = ReadEntry(reader);
+                runs[runIndex].Current = nextEntry;
+                runs[runIndex].DataPosition = fileStream.Position;
+                runs[runIndex].RemainingCount--;
+                queue.Enqueue(runIndex, nextEntry.Key);
+            }
+        }
+    }
+
+    /// <summary>
     /// Flushes any remaining unflushed entries and closes spill file writers,
     /// making the spill files ready for reading. Idempotent.
     /// </summary>
@@ -284,15 +458,19 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// </summary>
     /// <param name="output">The binary writer to receive the sorted indexes in
     /// <see cref="IndexWriter"/> format.</param>
-    internal void WriteSortedIndexesToStream(BinaryWriter output)
+    /// <param name="excludeColumns">
+    /// Columns to skip (e.g. columns assigned to B+Tree). When <c>null</c>, all columns are written.
+    /// </param>
+    internal void WriteSortedIndexesToStream(BinaryWriter output, IReadOnlySet<string>? excludeColumns = null)
     {
         PrepareForReading();
 
         int columnCount = 0;
 
-        foreach (int runCount in _spillRunCounts.Values)
+        foreach (KeyValuePair<string, int> pair in _spillRunCounts)
         {
-            if (runCount > 0)
+            if (pair.Value > 0
+                && (excludeColumns is null || !excludeColumns.Contains(pair.Key)))
             {
                 columnCount++;
             }
@@ -306,6 +484,11 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             int runCount = pair.Value;
 
             if (runCount == 0)
+            {
+                continue;
+            }
+
+            if (excludeColumns is not null && excludeColumns.Contains(columnName))
             {
                 continue;
             }
@@ -325,15 +508,19 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// compressed payload.
     /// </summary>
     /// <param name="output">The binary writer to receive the compressed sorted indexes.</param>
-    internal void WriteCompressedSortedIndexesToStream(BinaryWriter output)
+    /// <param name="excludeColumns">
+    /// Columns to skip (e.g. columns assigned to B+Tree). When <c>null</c>, all columns are written.
+    /// </param>
+    internal void WriteCompressedSortedIndexesToStream(BinaryWriter output, IReadOnlySet<string>? excludeColumns = null)
     {
         PrepareForReading();
 
         int columnCount = 0;
 
-        foreach (int runCount in _spillRunCounts.Values)
+        foreach (KeyValuePair<string, int> pair in _spillRunCounts)
         {
-            if (runCount > 0)
+            if (pair.Value > 0
+                && (excludeColumns is null || !excludeColumns.Contains(pair.Key)))
             {
                 columnCount++;
             }
@@ -347,6 +534,11 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             int runCount = pair.Value;
 
             if (runCount == 0)
+            {
+                continue;
+            }
+
+            if (excludeColumns is not null && excludeColumns.Contains(columnName))
             {
                 continue;
             }

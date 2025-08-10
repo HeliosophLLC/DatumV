@@ -1,4 +1,5 @@
 using DatumIngest.DatumFile.Compression;
+using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
@@ -41,7 +42,19 @@ public sealed class IndexWriter
     /// When <c>true</c>, the sorted indexes section is Zstd-compressed per column.
     /// This typically achieves 5–10× size reduction for large sorted index sections.
     /// </param>
-    internal void Write(SourceIndexSet indexSet, Stream output, SortedIndexSpillWriter? sortedIndexSpillWriter, bool compressIndexes = false)
+    /// <param name="indexStrategy">
+    /// Controls which index implementation is used when streaming from a spill writer.
+    /// When <see cref="IndexStrategy.Auto"/>, columns exceeding
+    /// <see cref="IndexConstants.BPlusTreeAutoThreshold"/> use B+Tree; smaller columns
+    /// use sorted value indexes. Ignored when <paramref name="sortedIndexSpillWriter"/>
+    /// is <c>null</c>.
+    /// </param>
+    internal void Write(
+        SourceIndexSet indexSet,
+        Stream output,
+        SortedIndexSpillWriter? sortedIndexSpillWriter,
+        bool compressIndexes = false,
+        IndexStrategy indexStrategy = IndexStrategy.Sorted)
     {
         using BinaryWriter writer = new(output, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -81,17 +94,34 @@ public sealed class IndexWriter
 
             if (sortedIndexSpillWriter is not null && sortedIndexSpillWriter.HasSortedIndexes)
             {
-                RecordSection(sections, IndexSectionType.SortedIndexes, tableIndexByte, writer, () =>
+                // Categorize columns into sorted vs. B+Tree based on the index strategy.
+                HashSet<string>? bTreeColumns = CategorizeBPlusTreeColumns(
+                    sortedIndexSpillWriter, indexStrategy);
+
+                bool hasSortedColumns = bTreeColumns is null
+                    || bTreeColumns.Count < CountColumnsWithEntries(sortedIndexSpillWriter);
+
+                if (hasSortedColumns)
                 {
-                    if (compressIndexes)
+                    RecordSection(sections, IndexSectionType.SortedIndexes, tableIndexByte, writer, () =>
                     {
-                        sortedIndexSpillWriter.WriteCompressedSortedIndexesToStream(writer);
-                    }
-                    else
-                    {
-                        sortedIndexSpillWriter.WriteSortedIndexesToStream(writer);
-                    }
-                });
+                        if (compressIndexes)
+                        {
+                            sortedIndexSpillWriter.WriteCompressedSortedIndexesToStream(writer, bTreeColumns);
+                        }
+                        else
+                        {
+                            sortedIndexSpillWriter.WriteSortedIndexesToStream(writer, bTreeColumns);
+                        }
+                    });
+                }
+
+                if (bTreeColumns is not null && bTreeColumns.Count > 0)
+                {
+                    RecordSection(sections, IndexSectionType.BTreeIndexes, tableIndexByte, writer, () =>
+                        sortedIndexSpillWriter.WriteBPlusTreeIndexesToStream(
+                            writer, index.Schema.Schema, bTreeColumns));
+                }
             }
             else if (index.SortedIndexes is not null)
             {
@@ -112,6 +142,12 @@ public sealed class IndexWriter
             {
                 RecordSection(sections, IndexSectionType.ZipDirectory, tableIndexByte, writer, () =>
                     WriteZipDirectory(writer, index.ZipDirectory));
+            }
+
+            if (index.BPlusTreeIndexes is not null)
+            {
+                RecordSection(sections, IndexSectionType.BTreeIndexes, tableIndexByte, writer, () =>
+                    WriteBPlusTreeIndexes(writer, index.BPlusTreeIndexes));
             }
         }
 
@@ -330,6 +366,32 @@ public sealed class IndexWriter
         }
     }
 
+    /// <summary>
+    /// Writes a B+Tree indexes section containing all columns' trees.
+    /// Each column's tree is written as a section header followed by its raw pages.
+    /// </summary>
+    private static void WriteBPlusTreeIndexes(BinaryWriter writer, BPlusTreeIndexSet bPlusTreeIndexes)
+    {
+        IReadOnlyCollection<string> columnNames = bPlusTreeIndexes.ColumnNames;
+        writer.Write(columnNames.Count);
+
+        foreach (string columnName in columnNames)
+        {
+            if (!bPlusTreeIndexes.TryGetIndex(columnName, out BPlusTreeColumnIndex? columnIndex))
+            {
+                continue;
+            }
+
+            BPlusTreeReader reader = columnIndex.Reader;
+            BPlusTreeBulkLoader.WriteSectionHeader(writer, reader.Header);
+
+            foreach (byte[] rawPage in reader.RawPages)
+            {
+                writer.Write(rawPage);
+            }
+        }
+    }
+
     internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
     {
         if (value is null || value.IsNull)
@@ -440,5 +502,58 @@ public sealed class IndexWriter
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }
+    }
+
+    /// <summary>
+    /// Determines which columns from the spill writer should be written as B+Tree indexes
+    /// based on the <paramref name="strategy"/>.
+    /// </summary>
+    /// <returns>
+    /// A set of column names that should use B+Tree, or <c>null</c> if no columns qualify
+    /// (i.e. all columns should use sorted value indexes).
+    /// </returns>
+    private static HashSet<string>? CategorizeBPlusTreeColumns(
+        SortedIndexSpillWriter spillWriter,
+        IndexStrategy strategy)
+    {
+        if (strategy == IndexStrategy.Sorted)
+        {
+            return null;
+        }
+
+        HashSet<string> bTreeColumns = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string columnName in spillWriter.IndexedColumnNames)
+        {
+            bool useBTree = strategy switch
+            {
+                IndexStrategy.BTree => true,
+                IndexStrategy.Auto =>
+                    spillWriter.GetTotalEntryCount(columnName) > IndexConstants.BPlusTreeAutoThreshold,
+                _ => false,
+            };
+
+            if (useBTree)
+            {
+                bTreeColumns.Add(columnName);
+            }
+        }
+
+        return bTreeColumns.Count > 0 ? bTreeColumns : null;
+    }
+
+    /// <summary>
+    /// Counts the number of columns in the spill writer that have at least one entry.
+    /// </summary>
+    private static int CountColumnsWithEntries(SortedIndexSpillWriter spillWriter)
+    {
+        int count = 0;
+
+        foreach (string _ in spillWriter.IndexedColumnNames)
+        {
+            count++;
+        }
+
+        return count;
     }
 }

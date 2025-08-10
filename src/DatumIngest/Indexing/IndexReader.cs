@@ -1,4 +1,5 @@
 using DatumIngest.DatumFile.Compression;
+using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
@@ -95,7 +96,11 @@ public sealed class IndexReader
                 ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.ZipDirectory, ReadZipDirectory)
                 : null;
 
-            tables[tableNames[i]] = new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory);
+            BPlusTreeIndexSet? bPlusTreeIndexes = sectionMap.ContainsKey(IndexSectionType.BTreeIndexes)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.BTreeIndexes, ReadBPlusTreeIndexes)
+                : null;
+
+            tables[tableNames[i]] = new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory, bPlusTreeIndexes);
         }
 
         return new SourceIndexSet(fingerprint, tables);
@@ -353,6 +358,34 @@ public sealed class IndexReader
         }
 
         return new SortedValueIndexSet(indexes);
+    }
+
+    /// <summary>
+    /// Reads a B+Tree indexes section containing one or more column-level B+Trees.
+    /// Each column's tree is stored as a section header followed by contiguous 8 KiB pages.
+    /// Pages are loaded as raw byte arrays and decoded on demand by <see cref="BPlusTreeReader"/>.
+    /// </summary>
+    private static BPlusTreeIndexSet ReadBPlusTreeIndexes(BinaryReader reader)
+    {
+        int columnCount = reader.ReadInt32();
+        Dictionary<string, BPlusTreeColumnIndex> indexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < columnCount; i++)
+        {
+            BPlusTreeSectionHeader header = BPlusTreeBulkLoader.ReadSectionHeader(reader);
+
+            byte[][] rawPages = new byte[header.PageCount][];
+
+            for (uint pageIndex = 0; pageIndex < header.PageCount; pageIndex++)
+            {
+                rawPages[pageIndex] = reader.ReadBytes(BPlusTreeConstants.PageSize);
+            }
+
+            BPlusTreeReader treeReader = new(header, rawPages);
+            indexes[header.ColumnName] = new BPlusTreeColumnIndex(treeReader);
+        }
+
+        return new BPlusTreeIndexSet(indexes);
     }
 
     private static ZipDirectoryCache ReadZipDirectory(BinaryReader reader)

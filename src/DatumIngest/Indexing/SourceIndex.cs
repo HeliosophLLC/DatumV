@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using DatumIngest.Indexing.BTree;
 
 namespace DatumIngest.Indexing;
 
@@ -38,6 +39,12 @@ public sealed class SourceIndex
     public ZipDirectoryCache? ZipDirectory { get; }
 
     /// <summary>
+    /// Per-column B+Tree indexes for demand-paged key lookup on large datasets,
+    /// or <c>null</c> if no B+Tree indexes were built.
+    /// </summary>
+    internal BPlusTreeIndexSet? BPlusTreeIndexes { get; }
+
+    /// <summary>
     /// Creates a new source index.
     /// </summary>
     /// <param name="fingerprint">Source file fingerprint.</param>
@@ -53,6 +60,21 @@ public sealed class SourceIndex
         BloomFilterSet? bloomFilters = null,
         SortedValueIndexSet? sortedIndexes = null,
         ZipDirectoryCache? zipDirectory = null)
+        : this(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory, bPlusTreeIndexes: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new source index with optional B+Tree indexes.
+    /// </summary>
+    internal SourceIndex(
+        SourceFingerprint fingerprint,
+        IndexSchema schema,
+        IReadOnlyList<IndexChunk> chunks,
+        BloomFilterSet? bloomFilters,
+        SortedValueIndexSet? sortedIndexes,
+        ZipDirectoryCache? zipDirectory,
+        BPlusTreeIndexSet? bPlusTreeIndexes)
     {
         Fingerprint = fingerprint;
         Schema = schema;
@@ -60,6 +82,7 @@ public sealed class SourceIndex
         BloomFilters = bloomFilters;
         SortedIndexes = sortedIndexes;
         ZipDirectory = zipDirectory;
+        BPlusTreeIndexes = bPlusTreeIndexes;
     }
 
     /// <summary>
@@ -76,6 +99,12 @@ public sealed class SourceIndex
         if (SortedIndexes is not null && SortedIndexes.TryGetIndex(columnName, out SortedValueIndex? sortedIndex))
         {
             index = sortedIndex;
+            return true;
+        }
+
+        if (BPlusTreeIndexes is not null && BPlusTreeIndexes.TryGetIndex(columnName, out BPlusTreeColumnIndex? btreeIndex))
+        {
+            index = btreeIndex;
             return true;
         }
 
