@@ -65,4 +65,10 @@ public sealed class DatumIngestionTableResult
 
     /// <summary>Byte count of <see cref="ManifestJson"/> when UTF-8 encoded.</summary>
     public int ManifestByteCount => System.Text.Encoding.UTF8.GetByteCount(ManifestJson);
+
+    /// <summary>
+    /// Gets an optional sample preview containing a representative subset of rows
+    /// collected via reservoir sampling during ingestion.
+    /// </summary>
+    public SamplePreview? SamplePreview { get; init; }
 }

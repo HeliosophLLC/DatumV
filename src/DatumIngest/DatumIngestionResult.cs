@@ -58,6 +58,14 @@ public sealed class DatumIngestionResult : IAsyncDisposable
     /// <summary>Byte count of <see cref="ManifestJson"/> when UTF-8 encoded.</summary>
     public int ManifestByteCount => System.Text.Encoding.UTF8.GetByteCount(ManifestJson);
 
+    /// <summary>
+    /// Gets the per-table sample previews, keyed by logical table name.
+    /// Each preview contains a representative subset of rows collected via reservoir
+    /// sampling during ingestion.
+    /// </summary>
+    public IReadOnlyDictionary<string, SamplePreview> Samples { get; init; } =
+        new Dictionary<string, SamplePreview>(StringComparer.OrdinalIgnoreCase);
+
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
     {

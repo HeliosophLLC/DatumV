@@ -228,6 +228,15 @@ public static class DatumIngester
         string schemaJson = SchemaSerializer.Serialize(sourceSchema);
         string manifestJson = ManifestSerializer.Serialize(sourceManifest);
 
+        Dictionary<string, SamplePreview> samples = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string tableName, DatumIngestionTableResult tableResult) in tables)
+        {
+            if (tableResult.SamplePreview is not null)
+            {
+                samples[tableName] = tableResult.SamplePreview;
+            }
+        }
+
         return new DatumIngestionResult
         {
             Fingerprint = fingerprint,
@@ -236,6 +245,7 @@ public static class DatumIngester
             SourceManifest = sourceManifest,
             SchemaJson = schemaJson,
             ManifestJson = manifestJson,
+            Samples = samples,
         };
     }
 
@@ -268,11 +278,14 @@ public static class DatumIngester
             totalRows = capabilities.EstimatedRowCount;
         }
 
+        SamplePreviewCollector sampleCollector = new();
+
         long rowCount = 0;
         await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
             await datumWriter.WriteRowAsync(row, cancellationToken).ConfigureAwait(false);
+            sampleCollector.Consider(row);
             rowCount++;
 
             if (progress is not null && totalRows is > 0)
@@ -306,6 +319,8 @@ public static class DatumIngester
 
         datumStream.Position = 0;
 
+        SamplePreview samplePreview = sampleCollector.Build(schema);
+
         return new DatumIngestionTableResult
         {
             TableName = descriptor.Name,
@@ -318,6 +333,7 @@ public static class DatumIngester
             ManifestJson = manifestJson,
             RowCount = rowCount,
             FeatureCount = queryManifest.Features.Count,
+            SamplePreview = samplePreview,
         };
     }
 
