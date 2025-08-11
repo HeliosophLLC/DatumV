@@ -50,7 +50,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
-- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, sorted value indexes for equality/range predicates, ORDER BY elimination via index scan, automatic column selection for compact types, per-column Zstd compression (5–10× size reduction), and configurable column caps
+- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, sorted value indexes for equality/range predicates, B+Tree indexes for large columns (≥5M entries, demand-paged 8 KiB pages with Zstd-compressed leaves), ORDER BY elimination via index scan, automatic column selection for compact types, per-column Zstd compression (5–10× size reduction), configurable index strategy (`auto`/`sorted`/`btree`), and configurable column caps
 - **Memory-bounded execution** — configurable memory budget with spill-to-disk for datasets larger than available memory (hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT); index nested-loop join for LIMIT-bounded queries with sorted indexes
 - **Schema sidecars** — `.datum-schema` files cache column metadata, eliminating schema inference I/O on subsequent loads
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
@@ -171,6 +171,7 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
 | `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
 | `--memory-budget <bytes>` | Memory budget in bytes for spill-to-disk operators (default: 2 GB; 0 disables). |
+| `--index-strategy <strategy>` | Index implementation strategy: `auto` (default), `sorted`, or `btree`. See [Source Indexes](docs/indexes.md#index-strategy). |
 
 ### Source definition format
 

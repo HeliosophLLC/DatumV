@@ -1,3 +1,4 @@
+using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 
 namespace DatumIngest;
@@ -74,4 +75,11 @@ public sealed class DatumIndexerOptions
     /// Defaults to <see cref="Indexing.IndexStrategy.Auto"/>.
     /// </summary>
     public IndexStrategy IndexStrategy { get; init; } = IndexStrategy.Auto;
+
+    /// <summary>
+    /// Optional diagnostic callback invoked at key lifecycle points during index building:
+    /// chunk flushes, scan completion, and index writing. When <c>null</c> (default),
+    /// no diagnostic events are emitted and there is no overhead on hot paths.
+    /// </summary>
+    public Action<IndexingDiagnosticEvent>? Diagnostics { get; init; }
 }

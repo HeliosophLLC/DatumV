@@ -233,7 +233,7 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
     foreach (IGrouping<string, TableDescriptor> group in descriptors
         .GroupBy(d => d.FilePath, StringComparer.OrdinalIgnoreCase))
     {
-        await BuildGroupedIndexAsync(group, catalog, builder, options.ChunkSize);
+        await BuildGroupedIndexAsync(group, catalog, builder, options.ChunkSize, options.IndexStrategy);
     }
 
     return 0;
@@ -243,7 +243,8 @@ static async Task BuildGroupedIndexAsync(
     IGrouping<string, TableDescriptor> group,
     TableCatalog catalog,
     SourceIndexBuilder builder,
-    int chunkSize)
+    int chunkSize,
+    IndexStrategy indexStrategy)
 {
     string filePath = group.Key;
     Stream? sourceStream = null;
@@ -260,16 +261,17 @@ static async Task BuildGroupedIndexAsync(
                 sourceStream, CancellationToken.None).ConfigureAwait(false)
             : new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
 
-        Dictionary<string, SourceIndex> tableIndexes = new();
-
         foreach (TableDescriptor descriptor in group)
         {
             ITableProvider provider = catalog.CreateProvider(descriptor);
+            IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
 
-            SourceIndex index = await builder.BuildAsync(
-                descriptor, provider, sourceStream: null, fingerprint, CancellationToken.None);
+            await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, CancellationToken.None))
+            {
+                indexBuilder.AddRow(row);
+            }
 
-            tableIndexes[descriptor.Name] = index;
+            SourceIndex index = indexBuilder.Finalize();
 
             Console.WriteLine($"  Table '{descriptor.Name}':");
             Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
@@ -280,20 +282,20 @@ static async Task BuildGroupedIndexAsync(
                 Console.WriteLine($"    Bloom filters: {string.Join(", ", index.BloomFilters.ColumnNames)}");
             }
 
-            if (index.SortedIndexes is not null)
-            {
-                Console.WriteLine($"    Sorted indexes: {string.Join(", ", index.SortedIndexes.ColumnNames)}");
-            }
+            // Write the index using the streaming spill writer path, avoiding materialization
+            // of full ValueIndexEntry arrays that cause OOM for large datasets.
+            SourceIndexSet indexSet = SourceIndexSet.Create(descriptor.Name, index);
+            string indexPath = filePath + ".datum-index";
+
+            using FileStream outputStream = File.Create(indexPath);
+            IndexWriter writer = new();
+            writer.Write(indexSet, outputStream, indexBuilder.SpillWriter,
+                compressIndexes: true, indexStrategy: indexStrategy);
+
+            indexBuilder.Dispose();
+
+            Console.WriteLine($"Index created: {indexPath}");
         }
-
-        SourceIndexSet indexSet = new(fingerprint, tableIndexes);
-        string indexPath = filePath + ".datum-index";
-
-        using FileStream outputStream = File.Create(indexPath);
-        IndexWriter writer = new();
-        writer.Write(indexSet, outputStream);
-
-        Console.WriteLine($"Index created: {indexPath}");
     }
     finally
     {

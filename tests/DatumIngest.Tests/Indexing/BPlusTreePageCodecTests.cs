@@ -291,6 +291,29 @@ public sealed class BPlusTreePageCodecTests
         Assert.Equal(BPlusTreePageType.Internal, BPlusTreePageCodec.ReadPageType(encoded));
     }
 
+    // ───────────────────────── Overflow regression ─────────────────────────
+
+    /// <summary>
+    /// Regression: <see cref="BPlusTreePageCodec.EncodeInternalPage"/> previously used a
+    /// non-expandable <see cref="MemoryStream"/> backed by a fixed 8 KiB array. When keys
+    /// were large enough to overflow the page, the stream threw
+    /// <see cref="NotSupportedException"/> instead of <see cref="InvalidOperationException"/>,
+    /// causing <c>FindMaxInternalKeys</c> to miss the catch and crash the index build.
+    /// </summary>
+    [Fact]
+    public void EncodeInternalPage_OversizedKeys_ThrowsInvalidOperationException()
+    {
+        // A single string key larger than the 8 KiB page capacity guarantees overflow.
+        string longKey = new('x', 8192);
+        DataValue[] keys = [DataValue.FromString(longKey)];
+        uint[] children = [0, 1];
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            () => BPlusTreePageCodec.EncodeInternalPage(keys, children));
+
+        Assert.Contains("exceeds page size", exception.Message);
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     private static void AssertEntryEqual(ValueIndexEntry expected, ValueIndexEntry actual)

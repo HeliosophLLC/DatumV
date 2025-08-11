@@ -709,7 +709,6 @@ public sealed class IncrementalIndexBuilder : IDisposable
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
         _maxIndexedColumns = maxIndexedColumns;
-        _autoIndexColumns = autoIndexColumns;
         bool needsBloom = bloomAllColumns || (bloomColumns is not null && bloomColumns.Count > 0);
         bool needsIndex = indexAllColumns || (indexColumns is not null && indexColumns.Count > 0) || autoIndexColumns;
         _allChunkBloomFilters = needsBloom ? new() : null;
@@ -778,6 +777,12 @@ public sealed class IncrementalIndexBuilder : IDisposable
     internal SortedIndexSpillWriter? SpillWriter => _spillWriter;
 
     /// <summary>
+    /// Optional callback invoked when a chunk is finalized and flushed.
+    /// Parameters: zero-based chunk index, total row count processed so far.
+    /// </summary>
+    public Action<int, long>? OnChunkFlushed { get; set; }
+
+    /// <summary>
     /// Finalizes the index after all rows have been observed.
     /// The spill writer is prepared for reading but not materialized or disposed —
     /// callers that need to serialize sorted indexes should pass <see cref="SpillWriter"/>
@@ -840,6 +845,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         }
 
         _spillWriter?.FlushChunk();
+        OnChunkFlushed?.Invoke(_currentChunkIndex, _totalRowCount);
 
         _currentChunkRowOffset = _totalRowCount;
         _rowsInCurrentChunk = 0;

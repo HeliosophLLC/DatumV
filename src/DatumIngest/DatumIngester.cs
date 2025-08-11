@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -381,6 +382,20 @@ public static class DatumIngester
                 indexStrategy: options.IndexStrategy)
             .CreateIncrementalBuilder(fingerprint);
 
+        Action<IndexingDiagnosticEvent>? diagnostics = options.Diagnostics;
+
+        if (diagnostics is not null)
+        {
+            indexBuilder.OnChunkFlushed = (chunkIndex, rowCount) =>
+                diagnostics(new IndexingDiagnosticEvent
+                {
+                    Kind = IndexingDiagnosticEventKind.ChunkFlushed,
+                    TableName = descriptor.Name,
+                    ChunkIndex = chunkIndex,
+                    RowsProcessed = rowCount,
+                });
+        }
+
         long? totalRows = null;
         int lastReportedPercent = -1;
 
@@ -419,6 +434,14 @@ public static class DatumIngester
 
         SourceIndex index = indexBuilder.Finalize();
 
+        diagnostics?.Invoke(new IndexingDiagnosticEvent
+        {
+            Kind = IndexingDiagnosticEventKind.ScanningCompleted,
+            TableName = descriptor.Name,
+            RowsProcessed = rowsProcessed,
+            TotalChunks = index.Chunks.Count,
+        });
+
         // Write the index to a temporary file using streaming sorted indexes from the spill
         // writer. This avoids materializing the full ValueIndexEntry arrays (~5 GB for 32M rows)
         // and bypasses the 2 GB MemoryStream capacity limit.
@@ -433,6 +456,15 @@ public static class DatumIngester
             indexBuilder.SpillWriter,
             compressIndexes: options.CompressIndexes,
             indexStrategy: options.IndexStrategy);
+
+        diagnostics?.Invoke(new IndexingDiagnosticEvent
+        {
+            Kind = IndexingDiagnosticEventKind.IndexWriteCompleted,
+            TableName = descriptor.Name,
+            RowsProcessed = rowsProcessed,
+            TotalChunks = index.Chunks.Count,
+            BytesWritten = indexStream.Length,
+        });
 
         indexBuilder.Dispose();
 

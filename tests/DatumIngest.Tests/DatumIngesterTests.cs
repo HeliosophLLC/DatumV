@@ -1,5 +1,6 @@
 namespace DatumIngest.Tests;
 
+using DatumIngest.Diagnostics;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 
@@ -350,5 +351,110 @@ public sealed class DatumIngesterTests
 
         Assert.NotEmpty(reports);
         Assert.Equal(100, reports[^1].PercentComplete);
+    }
+
+    // ──────────────────── Diagnostics callback ────────────────────
+
+    /// <summary>
+    /// Verifies that the <see cref="DatumIndexerOptions.Diagnostics"/> callback fires
+    /// <see cref="IndexingDiagnosticEventKind.ScanningCompleted"/> and
+    /// <see cref="IndexingDiagnosticEventKind.IndexWriteCompleted"/> events with correct data.
+    /// </summary>
+    [Fact]
+    public async Task BuildIndexAsync_WithDiagnostics_FiresScanAndWriteEvents()
+    {
+        await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
+            FixturePath("array.json"), cancellationToken: CancellationToken.None);
+
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
+
+        string tempDatumPath = Path.Combine(Path.GetTempPath(), $"test_diag_{Guid.NewGuid():N}.datum");
+        try
+        {
+            await using (FileStream output = File.Create(tempDatumPath))
+            {
+                await table.DatumStream.CopyToAsync(output, CancellationToken.None);
+            }
+
+            List<IndexingDiagnosticEvent> events = [];
+
+            DatumIndexerOptions options = new() { Diagnostics = events.Add };
+
+            await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
+                tempDatumPath, options, cancellationToken: CancellationToken.None);
+
+            // Must have at least ScanningCompleted and IndexWriteCompleted.
+            Assert.Contains(events, e => e.Kind == IndexingDiagnosticEventKind.ScanningCompleted);
+            Assert.Contains(events, e => e.Kind == IndexingDiagnosticEventKind.IndexWriteCompleted);
+
+            IndexingDiagnosticEvent scanComplete = events.First(
+                e => e.Kind == IndexingDiagnosticEventKind.ScanningCompleted);
+            Assert.NotEmpty(scanComplete.TableName);
+            Assert.Equal(3, scanComplete.RowsProcessed);
+            Assert.True(scanComplete.TotalChunks >= 1);
+
+            IndexingDiagnosticEvent writeComplete = events.First(
+                e => e.Kind == IndexingDiagnosticEventKind.IndexWriteCompleted);
+            Assert.NotEmpty(writeComplete.TableName);
+            Assert.True(writeComplete.BytesWritten > 0);
+        }
+        finally
+        {
+            if (File.Exists(tempDatumPath))
+            {
+                File.Delete(tempDatumPath);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="IndexingDiagnosticEventKind.ChunkFlushed"/> events fire
+    /// when multiple chunks are produced (small chunk size forces multiple chunks).
+    /// </summary>
+    [Fact]
+    public async Task BuildIndexAsync_SmallChunkSize_FiresChunkFlushedEvents()
+    {
+        await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync(
+            FixturePath("array.json"), cancellationToken: CancellationToken.None);
+
+        DatumIngestionTableResult table = ingestion.Tables["array_json"];
+
+        string tempDatumPath = Path.Combine(Path.GetTempPath(), $"test_cf_{Guid.NewGuid():N}.datum");
+        try
+        {
+            await using (FileStream output = File.Create(tempDatumPath))
+            {
+                await table.DatumStream.CopyToAsync(output, CancellationToken.None);
+            }
+
+            List<IndexingDiagnosticEvent> events = [];
+
+            // Chunk size 1 forces a flush per row → 3 rows → 3 ChunkFlushed events.
+            DatumIndexerOptions options = new() { ChunkSize = 1, Diagnostics = events.Add };
+
+            await using DatumIndexResult indexResult = await DatumIngester.BuildIndexAsync(
+                tempDatumPath, options, cancellationToken: CancellationToken.None);
+
+            List<IndexingDiagnosticEvent> chunkEvents = events
+                .Where(e => e.Kind == IndexingDiagnosticEventKind.ChunkFlushed)
+                .ToList();
+
+            // With 3 rows and chunk size 1, at least 2 chunks should be flushed mid-scan
+            // (the last chunk is finalized in Finalize(), which also fires the callback).
+            Assert.True(chunkEvents.Count >= 2, $"Expected ≥2 ChunkFlushed events, got {chunkEvents.Count}.");
+
+            // Chunk indexes should be ascending.
+            for (int i = 1; i < chunkEvents.Count; i++)
+            {
+                Assert.True(chunkEvents[i].ChunkIndex > chunkEvents[i - 1].ChunkIndex);
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempDatumPath))
+            {
+                File.Delete(tempDatumPath);
+            }
+        }
     }
 }

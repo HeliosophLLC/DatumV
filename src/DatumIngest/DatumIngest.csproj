@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DatumIngest.Tests" />
+    <InternalsVisibleTo Include="DatumIngest.Cli" />
   </ItemGroup>
 
   <ItemGroup>

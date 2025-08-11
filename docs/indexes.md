@@ -24,6 +24,7 @@ A `.datum-index` file uses a TOC-at-end layout (like ZIP), enabling sequential w
 │  Section: ZipDirectory     (opt)│
 │  Section: RowOffsets       (opt)│
 │  Section: TableDirectory   (opt)│
+│  Section: BTreeIndexes     (opt)│
 ├─────────────────────────────────┤
 │  Table of Contents              │
 │    Count: int32                 │
@@ -43,8 +44,9 @@ Each section is identified by an `IndexSectionType`:
 | 5 | ZipDirectory | Cached ZIP archive central directory |
 | 6 | RowOffsets | Per-chunk row byte offsets for line-oriented seeking |
 | 7 | TableDirectory | Multi-table index mapping (table name → section ranges) |
+| 8 | BTreeIndexes | Per-column B+Tree indexes with compressed leaf pages for disk-resident key lookup |
 
-Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, SortedIndexes, ZipDirectory, RowOffsets, and TableDirectory are written only when applicable.
+Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, SortedIndexes, BTreeIndexes, ZipDirectory, RowOffsets, and TableDirectory are written only when applicable.
 
 ### Format versions
 
@@ -52,7 +54,7 @@ Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, Sorted
 |---------|--------|
 | 1 | Initial format |
 | 2 | Added RowOffsets section, multi-table TableDirectory |
-| 3 | Added per-column Zstd compression for SortedIndexes section |
+| 3 | Added per-column Zstd compression for SortedIndexes section, BTreeIndexes section type |
 
 ## Staleness detection
 
@@ -132,6 +134,18 @@ Auto-indexing is controlled by the `AutoIndexColumns` option (default: `true`). 
 
 To cap how many columns are indexed (useful in multi-tenant environments where index size must be bounded), set `MaxIndexedColumns` to the desired limit. Only the first N eligible columns in schema order are indexed.
 
+### Index strategy
+
+The `IndexStrategy` setting controls whether a column is stored as a sorted value index or a B+Tree index:
+
+| Strategy | Behavior |
+|----------|----------|
+| `Auto` (default) | Columns with fewer than 5,000,000 entries use sorted value indexes; columns at or above this threshold use B+Tree indexes |
+| `Sorted` | Forces flat sorted value indexes for all columns |
+| `BTree` | Forces B+Tree indexes for all columns (useful for testing the B+Tree path on small datasets) |
+
+When `Auto` is selected, the engine inspects each column's total entry count after scanning all rows and chooses the most efficient representation per column. A single index file may contain both sorted value index sections and B+Tree sections for different columns.
+
 ### Sorted index compression
 
 As of format version 3, sorted indexes are compressed per-column using Zstd. This typically achieves 5–10× size reduction with negligible read latency impact (decompression is sub-millisecond).
@@ -147,6 +161,108 @@ The compressed envelope format per column is:
 | CompressedPayload | byte[] | Zstd-compressed entry data |
 
 Compression is enabled by default in the `DatumIndexerOptions` (`CompressIndexes = true`). The CLI `--with-index` flag writes uncompressed indexes (version 2) for maximum compatibility. The reader accepts both compressed (v3) and uncompressed (v2) indexes transparently.
+
+## B+Tree indexes
+
+For columns with millions of entries, flat sorted value indexes require loading the entire array into memory for binary search — impractical for datasets with tens of millions of rows. B+Tree indexes solve this by storing entries in a disk-resident tree structure with demand-paged 8 KiB pages, enabling O(log n) lookups without materializing the full index.
+
+### When B+Trees are used
+
+B+Tree indexes are selected automatically when a column exceeds 5,000,000 entries (`IndexStrategy.Auto`, the default). Override this with `--index-strategy btree` to force B+Trees for all columns, or `--index-strategy sorted` to force flat sorted arrays. See [Index strategy](#index-strategy) above.
+
+### On-disk format
+
+Each B+Tree column is stored as a contiguous sequence of fixed-size 8 KiB pages within a `BTreeIndexes` section:
+
+```
+[BTreeSectionHeader]
+[Leaf₀] [Leaf₁] ... [Leafₙ]
+[Internal₀] [Internal₁] ... [Internalₘ]
+[Root page]
+```
+
+Pages are written bottom-up: leaf pages first (in sort order), then internal levels, ending with the root. The section header records the root page index, total entry count, tree height, page size, and page count.
+
+**Section header layout:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| ColumnName | string | Indexed column name (length-prefixed UTF-8) |
+| KeyKind | byte | `DataKind` of the key values |
+| RootPageIndex | uint32 | Zero-based index of the root page within the section |
+| EntryCount | int64 | Total key-pointer pairs across all leaves |
+| TreeHeight | uint16 | Number of levels (1 = leaf-only, 2 = root + leaves, …) |
+| PageSize | uint16 | Always 8,192 bytes |
+| PageCount | uint32 | Total pages (leaves + internals) |
+
+**Leaf page layout (8 KiB):**
+
+| Field | Bytes | Description |
+|-------|-------|-------------|
+| PageType | 1 | `0x01` = leaf |
+| KeyCount | 2 | Number of entries in this leaf |
+| Reserved | 1 | Padding |
+| PreviousLeaf | 4 | Page index of previous leaf (`0xFFFFFFFF` if first) |
+| NextLeaf | 4 | Page index of next leaf (`0xFFFFFFFF` if last) |
+| UncompressedSize | 4 | Byte length of entries before compression |
+| CompressedSize | 4 | Byte length of Zstd-compressed payload |
+| CompressedPayload | variable | Zstd-compressed entry data (key + chunk index + row offset per entry) |
+
+Leaf pages form a doubly-linked list for efficient range scans and ordered traversal. Entries within each leaf are Zstd-compressed, typically fitting hundreds of entries per 8 KiB page.
+
+**Internal page layout (8 KiB):**
+
+| Field | Bytes | Description |
+|-------|-------|-------------|
+| PageType | 1 | `0x02` = internal |
+| KeyCount | 2 | Number of separator keys |
+| Reserved | 1 | Padding |
+| Payload | 8,188 | Alternating child pointers (uint32) and separator keys |
+
+Internal pages store separator keys and child pointers. For *k* separator keys, there are *k + 1* child pointers. The tree is navigated top-down from the root: compare the search key against separators to choose the correct child pointer, descending until a leaf is reached.
+
+### Bulk loading
+
+B+Trees are built using a streaming bulk-load algorithm during index construction. The bulk loader:
+
+1. Consumes sorted entries from the spill writer's k-way merge (no materialization)
+2. Packs entries into Zstd-compressed leaf pages, dynamically adjusting the entries-per-leaf target based on actual compression ratios
+3. Collects separator keys (first key of each new leaf) for internal node construction
+4. Builds internal levels bottom-up from the separator key list
+
+The bulk loader holds at most one leaf page worth of entries plus the separator key list in memory. For a 32-million-row column with ~22,000 leaves, the separator list is a few megabytes.
+
+### Runtime behavior
+
+At query time, B+Tree indexes are accessed through the same `IColumnIndex` interface as sorted value indexes — query operators are polymorphic and work identically with either implementation. The `BPlusTreeReader` decodes pages on demand and caches recently accessed pages in an LRU cache (default capacity: 128 pages = 1 MB).
+
+Supported operations:
+
+| Method | Description |
+|--------|-------------|
+| `FindExact(key)` | Point lookup — returns all entries matching a key |
+| `FindRange(low, high)` | Range scan — returns entries within bounds |
+| `FindChunksContaining(key)` | Chunk-level point lookup |
+| `FindChunksInRange(low, high)` | Chunk-level range lookup |
+| `FindChunksLessThan(key)` | Chunk-level less-than |
+| `FindChunksGreaterThan(key)` | Chunk-level greater-than |
+| `TraverseForward()` | Full ascending scan (leaf chain traversal) |
+| `TraverseBackward()` | Full descending scan (reverse leaf chain) |
+
+All chunk-level methods return the same `IReadOnlySet<int>` as sorted value indexes, so `ScanOperator` pruning works transparently. `IndexScanOperator` uses `TraverseForward` / `TraverseBackward` for ORDER BY elimination, also transparently — B+Tree-backed columns benefit from the same ORDER BY optimization as sorted-indexed columns.
+
+### Memory profile
+
+B+Tree indexes are designed for bounded memory usage regardless of dataset size:
+
+| Component | Memory | Notes |
+|-----------|--------|-------|
+| Page cache | ~1 MB | 128 × 8 KiB pages (LRU eviction) |
+| Separator keys (build) | ~1–5 MB | Per-column, freed after building |
+| Bloom filters (build) | ~2.5 KB/chunk/column | Persistent during build if bloom is enabled |
+| Spill files | Disk only | Sorted runs flushed per chunk, k-way merged at write time |
+
+The streaming build path peaks at approximately 300–900 MB for a 32-million-row dataset (depending on column count and whether bloom filters are enabled), compared to multiple gigabytes for the flat sorted array approach.
 
 ## ZIP directory cache
 
@@ -260,6 +376,16 @@ datum-ingest index --source "csv:data=./large_dataset.csv" \
 
 This creates `large_dataset.csv.datum-index` alongside the source file.
 
+### Force B+Tree indexes
+
+```bash
+datum-ingest index --source "csv:data=./large_dataset.csv" \
+  --index-columns "user_id,timestamp" \
+  --index-strategy btree
+```
+
+Forcing `btree` is useful for testing or when all indexed columns are known to be large. With the default `auto` strategy, columns exceeding 5 million entries are automatically promoted to B+Tree.
+
 ### Co-generate an index and manifest
 
 ```bash
@@ -303,6 +429,7 @@ The engine validates the index fingerprint against the source, applies chunk-lev
 | `--chunk-size <n>` | Rows per index chunk (default: 10,000). |
 | `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
 | `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
+| `--index-strategy <strategy>` | Index implementation strategy: `auto` (default), `sorted`, or `btree`. |
 
 ## Programmatic API
 
@@ -341,6 +468,20 @@ SourceIndex index = await builder.BuildAsync(
     descriptor, provider, sourceStream, CancellationToken.None);
 ```
 
+### Force B+Tree indexes
+
+```csharp
+// Force B+Tree for all indexed columns (useful for testing or known-large datasets)
+DatumIndexerOptions options = new()
+{
+    AutoIndexColumns = true,
+    CompressIndexes = true,
+    IndexStrategy = IndexStrategy.BTree,
+};
+
+await using DatumIndexResult result = await DatumIngester.BuildIndexAsync("data.csv.datum", options);
+```
+
 ### Co-generate during output writing
 
 ```csharp
@@ -374,6 +515,7 @@ DatumIndexerOptions options = new()
     AutoIndexColumns = true,
     CompressIndexes = true,
     MaxIndexedColumns = 8,
+    IndexStrategy = IndexStrategy.Auto, // Auto-promotes columns with ≥5M entries to B+Tree
 };
 
 await using DatumIndexResult index = await DatumIngester.BuildIndexAsync("data.csv.datum", options);

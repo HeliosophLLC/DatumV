@@ -342,6 +342,51 @@ public sealed class BPlusTreeBulkLoaderTests
         Assert.Equal(entryCount, traversedCount);
     }
 
+    // ───────────────────────── Long string keys (overflow regression) ─────────────────────────
+
+    /// <summary>
+    /// Regression: when string keys are long enough that internal-page separator keys
+    /// exceed the 8 KiB page capacity, <c>FindMaxInternalKeys</c> must correctly fall
+    /// back to fewer keys per page. Previously the probing threw
+    /// <see cref="NotSupportedException"/> from a non-expandable <see cref="MemoryStream"/>,
+    /// which was not caught by the <see cref="InvalidOperationException"/> handler.
+    /// </summary>
+    [Fact]
+    public void Build_LongStringKeys_ProducesValidTree()
+    {
+        // Use strings ~500 chars each — enough that only a handful of separator keys
+        // fit per 8 KiB internal page, forcing the probing loop.
+        int entryCount = 500;
+        ValueIndexEntry[] entries = new ValueIndexEntry[entryCount];
+        int chunkSize = 100;
+
+        for (int index = 0; index < entryCount; index++)
+        {
+            string key = new string((char)('A' + (index % 26)), 500) + index.ToString("D5");
+            int chunkIndex = index / chunkSize;
+            long rowOffset = index % chunkSize;
+            entries[index] = new ValueIndexEntry(
+                DataValue.FromString(key), chunkIndex, rowOffset);
+        }
+
+        Array.Sort(entries, (left, right) =>
+            string.Compare(left.Key.AsString(), right.Key.AsString(), StringComparison.Ordinal));
+
+        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "long_strings", DataKind.String);
+
+        Assert.Equal(entryCount, header.EntryCount);
+        Assert.True(header.TreeHeight >= 1, "Tree should have at least one level.");
+
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "long_strings", DataKind.String);
+
+        // Verify every entry is retrievable.
+        for (int index = 0; index < entryCount; index++)
+        {
+            IReadOnlyList<ValueIndexEntry> found = reader.FindExact(entries[index].Key);
+            Assert.True(found.Count >= 1, $"Entry {index} not found by exact lookup.");
+        }
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     /// <summary>

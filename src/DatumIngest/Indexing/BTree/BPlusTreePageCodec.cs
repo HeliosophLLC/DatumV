@@ -134,8 +134,11 @@ internal static class BPlusTreePageCodec
         ReadOnlySpan<DataValue> keys,
         ReadOnlySpan<uint> childPageIndexes)
     {
-        byte[] page = new byte[BPlusTreeConstants.PageSize];
-        using MemoryStream stream = new(page);
+        // Use a growable stream so that oversized payloads are detected by the
+        // size check below rather than causing a NotSupportedException from a
+        // fixed-capacity MemoryStream. FindMaxInternalKeys relies on catching
+        // InvalidOperationException to probe the maximum key count per page.
+        using MemoryStream stream = new();
         using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
 
         // Common header.
@@ -165,6 +168,10 @@ internal static class BPlusTreePageCodec
                 $"Internal page payload ({bytesWritten} bytes) exceeds page size " +
                 $"({BPlusTreeConstants.PageSize} bytes) for {keys.Length} keys.");
         }
+
+        byte[] page = new byte[BPlusTreeConstants.PageSize];
+        stream.Position = 0;
+        stream.ReadExactly(page, 0, (int)bytesWritten);
 
         return page;
     }

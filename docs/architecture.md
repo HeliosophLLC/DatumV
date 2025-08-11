@@ -96,7 +96,7 @@ DatumIngest/
       Catalog/                    # Table catalog, providers (CSV, JSON, JSONL, ZIP, HDF5, Parquet)
       Execution/                  # Query planner, operators, expression evaluator
       Functions/                  # Scalar and table-valued functions
-      Indexing/                   # Source indexes, bloom filters, sorted indexes, binary I/O
+      Indexing/                   # Source indexes, bloom filters, sorted indexes, B+Tree indexes, binary I/O
       Manifest/                   # Manifest model, serialization, cross-manifest analysis
       Statistics/                 # Column statistics with pluggable accumulators
       Analysis/                   # SourceAnalyzer: single-pass co-generation of schema, index, manifest
