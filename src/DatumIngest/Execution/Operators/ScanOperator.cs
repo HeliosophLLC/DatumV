@@ -135,11 +135,12 @@ public sealed class ScanOperator : IQueryOperator
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
 
         // When a source index is available and either a filter hint, bloom pruning
-        // keys, sorted index pruning keys, or sorted indexes are present, apply chunk-level pruning.
+        // keys, sorted index pruning keys, or column indexes are present, apply chunk-level pruning.
         bool hasIndexPruning = _sourceIndex is not null
             && (_filterHint is not null || _bloomPruningKeys is not null
                 || _sortedIndexPruningKeys is not null
-                || _sourceIndex.SortedIndexes is not null);
+                || _sourceIndex.SortedIndexes is not null
+                || _sourceIndex.BPlusTreeIndexes is not null);
 
         if (hasIndexPruning)
         {

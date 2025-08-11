@@ -1,9 +1,11 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
+using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
@@ -867,6 +869,260 @@ public sealed class IndexScanOperatorTests
         // value < 5 → rows with values 1,2,3,4 from chunk 0.
         Assert.Equal(4, results.Count);
         Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
+    // ───────────────────── B+Tree index tests ─────────────────────
+
+    [Fact]
+    public async Task Scan_WhereEqualityWithBPlusTreeIndex_PrunesChunks()
+    {
+        // 10 rows in 2 chunks of 5: chunk 0 [1-5], chunk 1 [6-10].
+        // WHERE value = 3 → chunk 1 should be pruned (no key=3 there).
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateMultiChunkSourceIndexWithBPlusTree("value", rows, chunkSize: 5);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.Equal,
+            new LiteralExpression(3.0)));
+
+        FilterOperator filter = new(scan, new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.Equal,
+            new LiteralExpression(3.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Single(results);
+        Assert.Equal(3f, results[0]["value"].AsScalar());
+        Assert.Equal(1, scan.PrunedIndexChunks);
+    }
+
+    [Fact]
+    public async Task Scan_WhereEqualityWithBPlusTreeIndex_SeeksToMatchingRow()
+    {
+        // Single chunk with 10 rows. WHERE value = 5 should use exact seek.
+        Row[] rows = CreateNumberedRows(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithBPlusTree("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        ScanOperator scan = new(descriptor, null);
+        scan.SetSourceIndex(sourceIndex);
+        scan.AddFilterHint(new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.Equal,
+            new LiteralExpression(5.0)));
+
+        FilterOperator filter = new(scan, new BinaryExpression(
+            new ColumnReference("value"),
+            BinaryOperator.Equal,
+            new LiteralExpression(5.0)));
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
+
+        Assert.Single(results);
+        Assert.Equal(5f, results[0]["value"].AsScalar());
+        Assert.Equal(1, scan.ExactSeekRowsFetched);
+    }
+
+    [Fact]
+    public void Plan_OrderByWithBPlusTreeIndex_SubstitutesIndexScan()
+    {
+        Row[] rows = CreateNumberedRows(3f, 1f, 2f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithBPlusTree("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("value"), SortDirection.Ascending)
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<IndexScanOperator>(plan);
+    }
+
+    [Fact]
+    public async Task Plan_OrderByWithBPlusTreeIndex_ExecutesCorrectly()
+    {
+        Row[] rows = CreateNumberedRows(30f, 10f, 50f, 20f, 40f);
+        SeekableInMemoryProvider provider = new(rows);
+
+        TableDescriptor descriptor = CreateDescriptor("data");
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(descriptor);
+
+        SourceIndex sourceIndex = CreateSourceIndexWithBPlusTree("value", rows);
+        catalog.RegisterIndex("data", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("data")),
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("value"), SortDirection.Ascending)
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
+
+        Assert.Equal(5, results.Count);
+        Assert.Equal(10f, results[0]["value"].AsScalar());
+        Assert.Equal(20f, results[1]["value"].AsScalar());
+        Assert.Equal(30f, results[2]["value"].AsScalar());
+        Assert.Equal(40f, results[3]["value"].AsScalar());
+        Assert.Equal(50f, results[4]["value"].AsScalar());
+    }
+
+    // ───────────────────── B+Tree helpers ─────────────────────
+
+    /// <summary>
+    /// Creates a <see cref="SourceIndex"/> with a B+Tree index (no sorted indexes)
+    /// on the given column, with all rows in a single chunk.
+    /// </summary>
+    private static SourceIndex CreateSourceIndexWithBPlusTree(string columnName, Row[] rows)
+    {
+        ValueIndexEntry[] entries = new ValueIndexEntry[rows.Length];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            entries[i] = new ValueIndexEntry(rows[i][columnName], ChunkIndex: 0, RowOffsetInChunk: i);
+        }
+
+        // Sort entries by key for the bulk loader.
+        Array.Sort(entries, (a, b) => StatisticsPredicateEvaluator.CompareValues(a.Key, b.Key));
+
+        BPlusTreeIndexSet bTreeSet = BuildBPlusTreeIndexSet(columnName, DataKind.Scalar, entries);
+
+        IndexChunk chunk = new(0, rows.Length, -1, -1,
+            new Dictionary<string, ChunkColumnStatistics>());
+
+        return new SourceIndex(
+            new SourceFingerprint(100, DummyHash),
+            new IndexSchema(
+                new Schema([
+                    new ColumnInfo("index", DataKind.Scalar, false),
+                    new ColumnInfo("value", DataKind.Scalar, false),
+                ]),
+                rows.Length),
+            [chunk],
+            bloomFilters: null,
+            sortedIndexes: null,
+            zipDirectory: null,
+            bPlusTreeIndexes: bTreeSet);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="SourceIndex"/> with a B+Tree index (no sorted indexes)
+    /// distributed across multiple chunks.
+    /// </summary>
+    private static SourceIndex CreateMultiChunkSourceIndexWithBPlusTree(
+        string columnName, Row[] allRows, int chunkSize)
+    {
+        int chunkCount = (allRows.Length + chunkSize - 1) / chunkSize;
+        List<IndexChunk> chunks = new();
+        List<ValueIndexEntry> entries = new();
+
+        for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+        {
+            int start = chunkIndex * chunkSize;
+            int count = Math.Min(chunkSize, allRows.Length - start);
+            chunks.Add(new IndexChunk(start, count, -1, -1,
+                new Dictionary<string, ChunkColumnStatistics>()));
+
+            for (int row = 0; row < count; row++)
+            {
+                entries.Add(new ValueIndexEntry(
+                    allRows[start + row][columnName], chunkIndex, row));
+            }
+        }
+
+        ValueIndexEntry[] sorted = entries.ToArray();
+        Array.Sort(sorted, (a, b) => StatisticsPredicateEvaluator.CompareValues(a.Key, b.Key));
+
+        BPlusTreeIndexSet bTreeSet = BuildBPlusTreeIndexSet(columnName, DataKind.Scalar, sorted);
+
+        ColumnInfo[] columns = allRows[0].ColumnNames
+            .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+            .ToArray();
+
+        return new SourceIndex(
+            new SourceFingerprint(100, DummyHash),
+            new IndexSchema(new Schema(columns), allRows.Length),
+            chunks,
+            bloomFilters: null,
+            sortedIndexes: null,
+            zipDirectory: null,
+            bPlusTreeIndexes: bTreeSet);
+    }
+
+    private static BPlusTreeIndexSet BuildBPlusTreeIndexSet(
+        string columnName, DataKind keyKind, ValueIndexEntry[] sortedEntries)
+    {
+        using MemoryStream stream = new();
+        using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+
+        BPlusTreeSectionHeader? header = BPlusTreeBulkLoader.Build(
+            sortedEntries, columnName, keyKind, writer);
+
+        if (header is null)
+        {
+            throw new InvalidOperationException("BPlusTreeBulkLoader.Build returned null for non-empty entries.");
+        }
+
+        stream.Position = 0;
+        using BinaryReader binaryReader = new(stream, Encoding.UTF8, leaveOpen: true);
+        BPlusTreeSectionHeader readHeader = BPlusTreeBulkLoader.ReadSectionHeader(binaryReader);
+
+        byte[][] pages = new byte[readHeader.PageCount][];
+
+        for (uint pageIndex = 0; pageIndex < readHeader.PageCount; pageIndex++)
+        {
+            pages[pageIndex] = binaryReader.ReadBytes(BPlusTreeConstants.PageSize);
+        }
+
+        BPlusTreeReader treeReader = new(readHeader, pages);
+        Dictionary<string, BPlusTreeColumnIndex> indexes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [columnName] = new BPlusTreeColumnIndex(treeReader),
+        };
+
+        return new BPlusTreeIndexSet(indexes);
     }
 
     // ───────────────────── Helpers ─────────────────────
