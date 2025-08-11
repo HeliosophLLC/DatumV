@@ -39,7 +39,25 @@ internal static class JoinEvidenceScorer
     /// Name similarity below which a scaling penalty is applied. Names too dissimilar
     /// suggest the columns were not designed as a join pair.
     /// </summary>
-    private const double WeakNameThreshold = 0.4;
+    private const double WeakNameThreshold = 0.5;
+
+    /// <summary>
+    /// Floor multiplier for the weak-name scaling penalty (applied when
+    /// <see cref="WeakNameThreshold"/> is not met and name similarity is zero).
+    /// </summary>
+    private const double WeakNameMinScale = 0.3;
+
+    /// <summary>
+    /// Confidence multiplier when neither side of the join has a unique key,
+    /// indicating a many-to-many relationship that is rarely intentional.
+    /// </summary>
+    private const double ManyToManyPenalty = 0.7;
+
+    /// <summary>
+    /// Unique key score below which the <see cref="ManyToManyPenalty"/> is applied.
+    /// A score below 0.1 means neither column is close to being a primary key.
+    /// </summary>
+    private const double ManyToManyUniqueKeyThreshold = 0.1;
 
     /// <summary>
     /// Computes the full join evidence for a candidate column pair.
@@ -336,7 +354,7 @@ internal static class JoinEvidenceScorer
         double confidence = totalWeight > 0.0 ? weightedSum / totalWeight : 0.0;
 
         confidence = ApplyMultiplicativePenalties(
-            confidence, nameSimilarity, typeCompatibility, topKJaccard, cardinalityRatio);
+            confidence, nameSimilarity, typeCompatibility, topKJaccard, cardinalityRatio, uniqueKeyScore);
 
         return confidence;
     }
@@ -352,7 +370,8 @@ internal static class JoinEvidenceScorer
         double nameSimilarity,
         double typeCompatibility,
         double topKJaccard,
-        double cardinalityRatio)
+        double cardinalityRatio,
+        double uniqueKeyScore)
     {
         // Incompatible types require a cast — penalise regardless of name match.
         if (typeCompatibility == 0.0)
@@ -375,11 +394,17 @@ internal static class JoinEvidenceScorer
         }
 
         // Very different column names — names are the strongest structural signal.
-        // Scales from 0.5× at name=0 to 1.0× at name=0.4.
+        // Scales from 0.3× at name=0 to 1.0× at name=0.5.
         if (nameSimilarity < WeakNameThreshold)
         {
-            double scale = (WeakNameThreshold + nameSimilarity) / (2.0 * WeakNameThreshold);
+            double scale = WeakNameMinScale + ((1.0 - WeakNameMinScale) * nameSimilarity / WeakNameThreshold);
             confidence *= scale;
+        }
+
+        // Neither side is a unique key — likely many-to-many, rarely a real join.
+        if (uniqueKeyScore < ManyToManyUniqueKeyThreshold)
+        {
+            confidence *= ManyToManyPenalty;
         }
 
         return confidence;

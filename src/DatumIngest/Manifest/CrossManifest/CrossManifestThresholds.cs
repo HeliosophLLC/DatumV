@@ -48,9 +48,9 @@ public sealed class CrossManifestThresholds
 
     /// <summary>
     /// Minimum composite confidence for a join candidate to be included in results.
-    /// Default: 0.3.
+    /// Default: 0.45.
     /// </summary>
-    public double CandidateMinConfidence { get; init; } = 0.3;
+    public double CandidateMinConfidence { get; init; } = 0.45;
 
     /// <summary>
     /// Minimum composite confidence for a join candidate to appear in the join graph.
@@ -70,8 +70,8 @@ public sealed class CrossManifestThresholds
     // ── Evidence Weights ──
     // Weights for the composite confidence calculation. Must sum to ~1.0.
 
-    /// <summary>Weight for name similarity in composite confidence. Default: 0.35.</summary>
-    public double WeightNameSimilarity { get; init; } = 0.35;
+    /// <summary>Weight for name similarity in composite confidence. Default: 0.40.</summary>
+    public double WeightNameSimilarity { get; init; } = 0.40;
 
     /// <summary>Weight for type compatibility in composite confidence. Default: 0.10.</summary>
     public double WeightTypeCompatibility { get; init; } = 0.10;
@@ -85,8 +85,8 @@ public sealed class CrossManifestThresholds
     /// <summary>Weight for numeric range overlap in composite confidence. Default: 0.15.</summary>
     public double WeightRangeOverlap { get; init; } = 0.15;
 
-    /// <summary>Weight for unique key score in composite confidence. Default: 0.10.</summary>
-    public double WeightUniqueKeyScore { get; init; } = 0.10;
+    /// <summary>Weight for unique key score in composite confidence. Default: 0.05.</summary>
+    public double WeightUniqueKeyScore { get; init; } = 0.05;
 
     // ── Insight Thresholds ──
 

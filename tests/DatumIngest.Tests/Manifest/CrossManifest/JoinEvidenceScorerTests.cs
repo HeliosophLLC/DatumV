@@ -293,9 +293,9 @@ public sealed class JoinEvidenceScorerTests
         JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
             left, 3421083, right, 49688, match, CrossManifestThresholds.Default);
 
-        // Weak name + zero overlap + name mismatch penalties should all apply.
-        Assert.True(evidence.CompositeConfidence < 0.40,
-            $"Expected < 0.40 but was {evidence.CompositeConfidence:F4}");
+        // Weak name + zero overlap + name mismatch + ManyToMany penalties should all apply.
+        Assert.True(evidence.CompositeConfidence < 0.25,
+            $"Expected < 0.25 but was {evidence.CompositeConfidence:F4}");
     }
 
     [Fact]
@@ -336,6 +336,28 @@ public sealed class JoinEvidenceScorerTests
         // Low name similarity + zero overlap + cardinality mismatch → should be well below 0.3.
         Assert.True(evidence.CompositeConfidence < 0.25,
             $"Expected < 0.25 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
+    public void ScoreEvidence_ManyToManyUnrelatedColumns_PenalisesConfidence()
+    {
+        // reordered (2 values in 32M rows) vs order_dow (7 values in 3.4M rows).
+        // Neither side is a unique key → ManyToMany penalty applies.
+        NumericFeatureManifest left = MakeIntegerFeature("reordered",
+            estimatedDistinctCount: 2, min: 0, max: 1,
+            topK: [new FrequencyEntry("0", 19000000), new FrequencyEntry("1", 13000000)]);
+        NumericFeatureManifest right = MakeIntegerFeature("order_dow",
+            estimatedDistinctCount: 7, min: 0, max: 6,
+            topK: [new FrequencyEntry("0", 600000), new FrequencyEntry("1", 500000)]);
+
+        ColumnMatchCandidate match = new("reordered", "order_dow", 0.444, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 32434489, right, 3421083, match, CrossManifestThresholds.Default);
+
+        // Weak name + ManyToMany penalty should push confidence well below candidate threshold.
+        Assert.True(evidence.CompositeConfidence < 0.30,
+            $"Expected < 0.30 but was {evidence.CompositeConfidence:F4}");
     }
 
     // ── Helpers ──
