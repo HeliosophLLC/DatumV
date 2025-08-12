@@ -60,6 +60,56 @@ public sealed class JoinOperator : IQueryOperator
     /// <summary>The ON condition expression.</summary>
     public Expression? OnCondition => _onCondition;
 
+    /// <summary>
+    /// When <c>true</c> and the join type is <see cref="JoinType.LeftAntiSemi"/>,
+    /// applies SQL-standard NOT IN null semantics: if any right-side key is NULL the
+    /// entire result is empty, and left rows with a NULL key are excluded.
+    /// </summary>
+    public bool NullSensitiveAntiSemi => _nullSensitiveAntiSemi;
+
+    /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        string joinTypeName = _joinType switch
+        {
+            JoinType.Inner => "Inner",
+            JoinType.Left => "Left",
+            JoinType.Right => "Right",
+            JoinType.FullOuter => "Full Outer",
+            JoinType.Cross => "Cross",
+            JoinType.LeftSemi => "Left Semi",
+            JoinType.LeftAntiSemi => "Left Anti-Semi",
+            _ => _joinType.ToString(),
+        };
+
+        Dictionary<string, string> properties = new()
+        {
+            ["type"] = joinTypeName,
+        };
+
+        if (_onCondition is not null)
+        {
+            properties["on"] = QueryExplainer.FormatExpression(_onCondition);
+        }
+
+        List<string> warnings = [];
+        if (_joinType == JoinType.Cross)
+        {
+            warnings.Add("cross join — produces cartesian product");
+        }
+        else if (_joinType == JoinType.FullOuter)
+        {
+            warnings.Add("full outer join — materializes both sides");
+        }
+
+        return new OperatorPlanDescription($"{joinTypeName} Join")
+        {
+            Properties = properties,
+            Children = [(Left, "probe"), (Right, "build")],
+            Warnings = warnings,
+        };
+    }
+
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {

@@ -25,6 +25,7 @@ public sealed class IndexScanOperator : IQueryOperator
     private readonly IColumnIndex _columnIndex;
     private readonly IReadOnlyList<IndexChunk> _chunks;
     private readonly bool _descending;
+    private readonly string _columnName;
 
     /// <summary>
     /// Creates an index scan operator.
@@ -34,18 +35,21 @@ public sealed class IndexScanOperator : IQueryOperator
     /// <param name="columnIndex">The column index defining scan order.</param>
     /// <param name="chunks">The chunk directory for translating chunk-relative offsets to absolute row positions.</param>
     /// <param name="descending">Whether to walk the index in reverse (descending) order.</param>
+    /// <param name="columnName">The name of the indexed column, used for plan descriptions.</param>
     public IndexScanOperator(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         IColumnIndex columnIndex,
         IReadOnlyList<IndexChunk> chunks,
-        bool descending)
+        bool descending,
+        string columnName = "unknown")
     {
         _descriptor = descriptor;
         _requiredColumns = requiredColumns;
         _columnIndex = columnIndex;
         _chunks = chunks;
         _descending = descending;
+        _columnName = columnName;
     }
 
     /// <summary>The table descriptor this operator scans.</summary>
@@ -56,6 +60,33 @@ public sealed class IndexScanOperator : IQueryOperator
 
     /// <summary>Whether the scan walks the index in descending order.</summary>
     public bool Descending => _descending;
+
+    /// <summary>The name of the indexed column.</summary>
+    public string ColumnName => _columnName;
+
+    /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["table"] = _descriptor.Name,
+            ["provider"] = _descriptor.Provider,
+            ["column"] = _columnName,
+            ["direction"] = _descending ? "DESC" : "ASC",
+        };
+
+        if (_requiredColumns is not null)
+        {
+            properties["columns"] = string.Join(", ", _requiredColumns);
+        }
+
+        return new OperatorPlanDescription("Index Scan")
+        {
+            Properties = properties,
+            AccessStrategy = new AccessStrategyDescription(AccessMethod.IndexScan),
+            Annotations = ["produces sorted output without materializing; eliminates separate Sort operator"],
+        };
+    }
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)

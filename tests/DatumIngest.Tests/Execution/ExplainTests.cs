@@ -3,6 +3,7 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
+using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -1291,8 +1292,8 @@ public class ExplainTests
 
         Assert.Equal("INNER Join", node.OperatorName);
         Assert.NotNull(node.EstimatedRows);
-        // 1000 * 500 * 0.10 = 50,000
-        Assert.Equal(50_000, node.EstimatedRows);
+        // No NDV stats available → containment heuristic: max(1000, 500) = 1000
+        Assert.Equal(1_000, node.EstimatedRows);
     }
 
     [Fact]
@@ -1340,7 +1341,7 @@ public class ExplainTests
 
         ExplainPlanNode node = QueryExplainer.Explain(join);
 
-        // 1000 * 10 * 0.10 = 1000, but LEFT JOIN preserves left side → max(1000, 1000) = 1000
+        // No stats → containment heuristic: max(1000, 10) = 1000, LEFT JOIN preserves left → max(1000, 1000) = 1000
         Assert.True(node.EstimatedRows!.Value >= 1_000);
     }
 
@@ -1815,5 +1816,97 @@ public class ExplainTests
         // max(NDV_left=1000, NDV_right=800) = 1000
         // 1000 * 5000 / 1000 = 5000
         Assert.Equal(5_000, node.EstimatedRows);
+    }
+
+    // ──────────────── Access strategy & pruning annotations ────────────────
+
+    [Fact]
+    public void Explain_ScanWithBloomFilters_ShowsPruningAnnotation()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("datum", "orders", "orders.datum", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 10_000;
+
+        BloomFilterSet bloomFilters = new(
+            new Dictionary<string, BloomFilter[]>
+            {
+                ["product_id"] = [new BloomFilter(100)],
+            },
+            chunkCount: 1);
+
+        SourceIndex index = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(new Schema([new ColumnInfo("product_id", DataKind.Scalar, false)]), 10_000),
+            []);
+        scan.SetSourceIndex(new SourceIndex(
+            index.Fingerprint, index.Schema, index.Chunks, bloomFilters));
+
+        ExplainPlanNode node = QueryExplainer.Explain(scan);
+
+        Assert.Equal("Scan", node.OperatorName);
+        Assert.Contains(node.Annotations, annotation => annotation.Contains("bloom filter pruning"));
+        Assert.Contains(node.Annotations, annotation => annotation.Contains("product_id"));
+    }
+
+    [Fact]
+    public void Explain_ScanWithSortedIndex_ShowsPruningAnnotation()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("datum", "data", "data.datum", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 5_000;
+
+        SortedValueIndexSet sortedIndexes = new(
+            new Dictionary<string, SortedValueIndex>
+            {
+                ["timestamp"] = new SortedValueIndex([]),
+            });
+
+        SourceIndex index = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(new Schema([new ColumnInfo("timestamp", DataKind.Scalar, false)]), 5_000),
+            [],
+            bloomFilters: null,
+            sortedIndexes: sortedIndexes);
+        scan.SetSourceIndex(index);
+
+        ExplainPlanNode node = QueryExplainer.Explain(scan);
+
+        Assert.Equal("Scan", node.OperatorName);
+        Assert.Contains(node.Annotations, annotation => annotation.Contains("sorted index pruning"));
+        Assert.Contains(node.Annotations, annotation => annotation.Contains("timestamp"));
+    }
+
+    [Fact]
+    public void Explain_ScanWithoutIndex_HasNoPruningAnnotations()
+    {
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "data.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 1_000;
+
+        ExplainPlanNode node = QueryExplainer.Explain(scan);
+
+        Assert.Equal("Scan", node.OperatorName);
+        Assert.Empty(node.Annotations);
+    }
+
+    [Fact]
+    public void Explain_GenericFallback_UsesDescribeForExplain()
+    {
+        // DistinctOperator is not in the BuildNode switch, so it exercises the generic fallback.
+        ScanOperator scan = new(
+            new TableDescriptor("csv", "data", "data.csv", new Dictionary<string, string>()),
+            requiredColumns: null);
+        scan.EstimatedRowCount = 1_000;
+
+        DistinctOperator distinct = new(scan);
+
+        ExplainPlanNode node = QueryExplainer.Explain(distinct);
+
+        Assert.Equal("Distinct", node.OperatorName);
+        Assert.Single(node.Children);
+        Assert.NotEmpty(node.Warnings);
     }
 }

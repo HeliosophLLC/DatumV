@@ -505,8 +505,19 @@ SourceIndex index = incremental.Finalize();
 The `DatumIngester` class provides a two-step API: ingest source files into `.datum` format with statistics, then build indexes separately:
 
 ```csharp
-// Step 1: Ingest source file → .datum + manifest (no index)
+// Step 1: Ingest source file → .datum + manifest + sample preview (no index)
 await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
+
+// Access the sample preview (25 representative rows collected via reservoir sampling)
+foreach ((string tableName, SamplePreview preview) in ingestion.Samples)
+{
+    Console.WriteLine($"Table {tableName}: {preview.Features.Count} features, {preview.Samples.Count} samples");
+}
+
+// Serialize the sample preview to JSON
+string sampleJson = SamplePreviewSerializer.Serialize(ingestion.Samples.Values.First());
+await SamplePreviewSerializer.WriteToFileAsync(
+    ingestion.Samples.Values.First(), "data.csv.datum-sample");
 
 // Step 2: Build index from the .datum file
 DatumIndexerOptions options = new()
@@ -526,7 +537,20 @@ await using DatumIndexResult indexWithProgress = await DatumIngester.BuildIndexA
         Console.WriteLine($"{snapshot.TableName}: {snapshot.PercentComplete}% ({snapshot.RowsProcessed}/{snapshot.TotalRows})"));
 ```
 
-`DatumIngester.IngestAsync` handles format conversion and statistics collection. `DatumIngester.BuildIndexAsync` handles index building, compression, and sidecar file writing. See [Programmatic API](api.md) for additional usage patterns.
+`DatumIngester.IngestAsync` handles format conversion, statistics collection, and sample preview generation. During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), ensuring a uniform random sample regardless of dataset size. Each row is converted to a JSON-friendly representation:
+
+| Data kind | JSON representation |
+|-----------|---------------------|
+| Scalar, UInt8, Boolean | Number or boolean primitive |
+| String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
+| Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
+| Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
+| Tensor | Recursively nested arrays following shape dimensions |
+| Image | `"base64://…"` — resized to fit 128×128 max (aspect-preserving), re-encoded as PNG |
+| UInt8Array | `"[binary data]"` sentinel |
+| Array | Recursively converted element array |
+
+`DatumIngester.BuildIndexAsync` handles index building, compression, and sidecar file writing. See [Programmatic API](api.md) for additional usage patterns.
 
 ### Read an index
 

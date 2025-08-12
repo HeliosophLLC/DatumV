@@ -30,6 +30,27 @@ public sealed class FilterOperator : IQueryOperator
     public Expression Predicate => _predicate;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        List<string> warnings = [];
+
+        if (QueryExplainer.ContainsPatternMatch(_predicate))
+        {
+            warnings.Add("LIKE/ILIKE pattern match — may scan all rows");
+        }
+
+        return new OperatorPlanDescription("Filter")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["predicate"] = QueryExplainer.FormatExpression(_predicate),
+            },
+            Children = [(Source, null)],
+            Warnings = warnings,
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

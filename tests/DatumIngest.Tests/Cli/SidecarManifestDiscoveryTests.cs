@@ -108,6 +108,21 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
         Assert.Equal(2, discovered.Features[0].EstimatedDistinctCount);
     }
 
+    [Fact]
+    public void DiscoversSidecarManifest_WhenEntryKeyUsesDerivedTableName()
+    {
+        string datumPath = CreateCsvFile("orders.csv", "id\n1\n");
+        QueryResultsManifest manifest = CreateTestManifest(rowCount: 1, columnName: "id", ndv: 1);
+        WriteSidecar(datumPath, "orders_csv", manifest);
+
+        TableCatalog catalog = CreateCatalog("orders_alias", datumPath);
+
+        DiscoverSidecarManifests(catalog);
+
+        Assert.True(catalog.TryGetManifest("orders_alias", out QueryResultsManifest? discovered));
+        Assert.Equal(1, discovered!.RowCount);
+    }
+
 
 
     /// <summary>

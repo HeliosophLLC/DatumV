@@ -69,6 +69,22 @@ public sealed class UnpivotOperator : IQueryOperator
     public bool IncludeNulls => _includeNulls;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Unpivot")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["value column"] = _valueColumnName,
+                ["name column"] = _nameColumnName,
+                ["source columns"] = string.Join(", ", _sourceColumnNames),
+                ["include nulls"] = _includeNulls.ToString(),
+            },
+            Children = [(Source, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         // Output schema is derived from the first row: key columns + value + name.

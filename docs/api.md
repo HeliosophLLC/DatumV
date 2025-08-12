@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Compute Backend](compute.md)
 
-DatumIngest exposes a C# API for embedding query execution, schema resolution, manifest generation, and checkpointing into .NET applications.
+DatumIngest exposes a C# API for embedding ingestion, query execution, schema resolution, manifest generation, and checkpointing into .NET applications.
 
 ## Manifest
 
@@ -121,6 +121,81 @@ SourceManifest manifest = result.Manifest;      // Per-table column statistics
 Schema tableSchema = schema.Tables["data"];
 SourceIndex tableIndex = indexSet.Tables["data"];
 QueryResultsManifest tableManifest = manifest.Tables["data"];
+```
+
+## Ingestion
+
+`DatumIngester` converts source files into `.datum` columnar format with statistics and a sample preview in a single streaming pass. Unlike `SourceAnalyzer` (which produces all three sidecar artifacts including indexes), `DatumIngester.IngestAsync` focuses on format conversion, statistics, and sample collection — indexing is a separate step via `BuildIndexAsync`.
+
+### Basic usage
+
+```csharp
+await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
+
+// Per-table results
+DatumIngestionTableResult table = ingestion.Tables["data_csv"];
+Stream datumStream = table.DatumStream;          // .datum binary, positioned at 0
+Schema schema = table.Schema;                     // Discovered schema
+SourceManifest manifest = table.Manifest;         // Column statistics
+long rows = table.RowCount;                       // Total rows ingested
+```
+
+### Ingesting from an in-memory stream
+
+```csharp
+using MemoryStream source = new(csvBytes);
+await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("upload.csv", source);
+```
+
+### Sample preview
+
+During ingestion, 25 representative rows are collected via reservoir sampling (Algorithm R), producing a uniform random sample regardless of dataset size. The preview is available immediately after ingestion — no need to wait for indexing.
+
+```csharp
+await using DatumIngestionResult ingestion = await DatumIngester.IngestAsync("data.csv");
+
+// Access the per-table sample preview
+SamplePreview preview = ingestion.Samples["data_csv"];
+
+// Features describe the column structure
+foreach (SampleFeature feature in preview.Features)
+{
+    Console.WriteLine($"{feature.Name}: {feature.Kind}");
+}
+
+// Samples contains the row data as JSON-friendly primitives
+foreach (object?[] row in preview.Samples)
+{
+    Console.WriteLine(string.Join(", ", row));
+}
+```
+
+Sample values are converted to JSON-friendly representations:
+
+| Data kind | JSON representation |
+|-----------|---------------------|
+| Scalar, UInt8, Boolean | Number or boolean primitive |
+| String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
+| Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
+| Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
+| Tensor | Recursively nested arrays following shape dimensions |
+| Image | `"base64://…"` — resized to fit 128×128 max (aspect-preserving), re-encoded as PNG |
+| UInt8Array | `"[binary data]"` sentinel string |
+| Array | Recursively converted element array |
+
+### Serialization
+
+`SamplePreviewSerializer` reads and writes the preview as JSON:
+
+```csharp
+// Serialize to string
+string json = SamplePreviewSerializer.Serialize(preview);
+
+// Write to file
+await SamplePreviewSerializer.WriteToFileAsync(preview, "data.csv.datum-sample");
+
+// Deserialize
+SamplePreview? loaded = SamplePreviewSerializer.Deserialize(json);
 ```
 
 ## Schema Serialization

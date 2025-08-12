@@ -129,6 +129,60 @@ public sealed class ScanOperator : IQueryOperator
     public IFilterableTableProvider? LastFilterableProvider { get; private set; }
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["table"] = _descriptor.Name,
+            ["provider"] = _descriptor.Provider,
+            ["columns"] = _requiredColumns is not null
+                ? string.Join(", ", _requiredColumns)
+                : "*",
+        };
+
+        if (_filterHint is not null)
+        {
+            properties["statistics filter"] = QueryExplainer.FormatExpression(_filterHint);
+        }
+
+        // Build access strategy with pruning capabilities.
+        List<PruningCapability> pruningCapabilities = [];
+
+        if (_filterHint is not null && _sourceIndex is not null)
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.StatisticsPruning, [], pendingRuntime: false));
+        }
+
+        if (_sourceIndex?.BloomFilters is not null)
+        {
+            List<string> bloomColumns = [.. _sourceIndex.BloomFilters.ColumnNames];
+            if (bloomColumns.Count > 0)
+            {
+                pruningCapabilities.Add(new PruningCapability(
+                    PruningTechnique.BloomFilterPruning, bloomColumns, pendingRuntime: true));
+            }
+        }
+
+        if (_sourceIndex?.SortedIndexes is { Count: > 0 } sortedIndexes)
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.SortedIndexPruning, [.. sortedIndexes.ColumnNames], pendingRuntime: false));
+        }
+
+        AccessStrategyDescription accessStrategy = new(
+            AccessMethod.TableScan,
+            pruningCapabilities.Count > 0 ? pruningCapabilities : null);
+
+        return new OperatorPlanDescription("Scan")
+        {
+            Properties = properties,
+            EstimatedRows = EstimatedRowCount,
+            AccessStrategy = accessStrategy,
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;

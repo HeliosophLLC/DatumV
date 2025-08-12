@@ -97,6 +97,23 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         Assert.True(catalog.TryGetIndex("labels", out _));
     }
 
+    [Fact]
+    public void DiscoversSidecarIndex_WhenEntryKeyUsesDerivedTableName()
+    {
+        string datumPath = CreateCsvFile("orders.csv", "id\n1\n");
+        SourceIndex index = CreateTestIndex(rowCount: 1);
+        WriteSidecar(datumPath, "orders_csv", index);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "orders_alias", datumPath, new Dictionary<string, string>()));
+
+        DiscoverSidecarIndexes(catalog);
+
+        Assert.True(catalog.TryGetIndex("orders_alias", out SourceIndex? discovered));
+        Assert.Equal(1, discovered!.Schema.TotalRowCount);
+    }
+
     /// <summary>
     /// Delegates to the unified <see cref="TableCatalog.DiscoverSidecars"/> method.
     /// </summary>

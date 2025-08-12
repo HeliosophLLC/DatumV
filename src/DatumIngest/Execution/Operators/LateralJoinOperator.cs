@@ -53,6 +53,34 @@ public sealed class LateralJoinOperator : IQueryOperator
     public Expression? OnCondition => _onCondition;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        string joinTypeName = _joinType switch
+        {
+            JoinType.Cross => "Cross",
+            JoinType.Left => "Left",
+            _ => _joinType.ToString(),
+        };
+
+        Dictionary<string, string> properties = new()
+        {
+            ["type"] = joinTypeName,
+        };
+
+        if (_onCondition is not null)
+        {
+            properties["on"] = QueryExplainer.FormatExpression(_onCondition);
+        }
+
+        return new OperatorPlanDescription($"Lateral {joinTypeName} Join")
+        {
+            Properties = properties,
+            Children = [(Left, "driving"), (Right, "lateral")],
+            Warnings = ["re-executes lateral side per driving row"],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

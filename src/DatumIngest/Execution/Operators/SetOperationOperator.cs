@@ -63,6 +63,23 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     /// <summary>Whether ALL (multiset) semantics are used.</summary>
     public bool All => _all;
 
+    /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        string operationName = _operationType switch
+        {
+            SetOperationType.Union => _all ? "Union All" : "Union",
+            SetOperationType.Intersect => _all ? "Intersect All" : "Intersect",
+            SetOperationType.Except => _all ? "Except All" : "Except",
+            _ => _operationType.ToString(),
+        };
+
+        return new OperatorPlanDescription(operationName)
+        {
+            Children = [(Left, "left"), (Right, "right")],
+        };
+    }
+
     /// <inheritdoc />
     public IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {

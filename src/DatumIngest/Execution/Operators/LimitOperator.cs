@@ -36,6 +36,27 @@ public sealed class LimitOperator : IQueryOperator
     public int Offset => _offset;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["limit"] = _limit.ToString(),
+        };
+
+        if (_offset > 0)
+        {
+            properties["offset"] = _offset.ToString();
+        }
+
+        return new OperatorPlanDescription("Limit")
+        {
+            Properties = properties,
+            Children = [(Source, null)],
+            EstimatedRows = _limit,
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         // Propagate the row limit hint so downstream operators (e.g. join) can

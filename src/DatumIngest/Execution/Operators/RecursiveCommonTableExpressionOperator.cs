@@ -62,6 +62,20 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     public IQueryOperator AnchorOperator => _anchorOperator;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Recursive CTE")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["name"] = _name,
+            },
+            Children = [(AnchorOperator, "anchor")],
+            Annotations = ["recursive member is generated at runtime"],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         if (!_materialized)
@@ -318,6 +332,15 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         public WorkingTableOperator(List<Row> rows)
         {
             _rows = rows;
+        }
+
+        /// <inheritdoc/>
+        public OperatorPlanDescription DescribeForExplain()
+        {
+            return new OperatorPlanDescription("Working Table")
+            {
+                EstimatedRows = _rows.Count,
+            };
         }
 
 #pragma warning disable CS1998 // Async method lacks 'await' operators

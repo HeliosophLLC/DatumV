@@ -55,6 +55,27 @@ public sealed class SampleScanOperator : IQueryOperator
     public int? Seed => _seed;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["method"] = _method.ToString(),
+            ["percentage"] = $"{_percentage:F1}%",
+        };
+
+        if (_seed is not null)
+        {
+            properties["seed"] = _seed.Value.ToString();
+        }
+
+        return new OperatorPlanDescription("Sample Scan")
+        {
+            Properties = properties,
+            Children = [(Source, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(
         ExecutionContext context)
     {

@@ -81,6 +81,34 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
     public IReadOnlyList<DataValue>? ExplicitValues => _explicitValues;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["pivot column"] = QueryExplainer.FormatExpression(_pivotColumnExpression),
+            ["aggregates"] = string.Join(", ",
+                _aggregateColumns.Select(aggregate => $"{aggregate.Function.Name}() AS {aggregate.OutputName}")),
+        };
+
+        if (_explicitValues is not null)
+        {
+            properties["values"] = string.Join(", ",
+                _explicitValues.Select(value => value.ToString()));
+        }
+        else
+        {
+            properties["values"] = "(auto-discover)";
+        }
+
+        return new OperatorPlanDescription("Pivot")
+        {
+            Properties = properties,
+            Children = [(Source, null)],
+            Warnings = ["materializes all rows to collect pivot values"],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

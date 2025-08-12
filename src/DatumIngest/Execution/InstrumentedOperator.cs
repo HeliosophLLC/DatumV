@@ -60,6 +60,12 @@ public sealed class InstrumentedOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return _inner.DescribeForExplain();
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         _stopwatch.Start();
@@ -169,16 +175,6 @@ public sealed class InstrumentedOperator : IQueryOperator
 
     private static IEnumerable<IQueryOperator> GetDirectChildren(IQueryOperator op)
     {
-        return op switch
-        {
-            Operators.FilterOperator filter => [filter.Source],
-            Operators.ProjectOperator project => [project.Source],
-            Operators.JoinOperator join => [join.Left, join.Right],
-            Operators.OrderByOperator orderBy => [orderBy.Source],
-            Operators.LimitOperator limit => [limit.Source],
-            Operators.AliasOperator alias => [alias.Source],
-            Operators.SubqueryOperator subquery => [subquery.InnerOperator],
-            _ => [],
-        };
+        return op.DescribeForExplain().Children.Select(child => child.Child);
     }
 }

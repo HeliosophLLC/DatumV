@@ -237,6 +237,7 @@ public sealed class CommandDispatcher
             .functions                     List available scalar and table-valued functions
             .source <definition>           Add a data source (admin only)
             .explain <sql>                 Show the query execution plan
+            .explain analyze <sql>         Run query and show plan with runtime metrics
             .sessions                      List all active sessions (admin only)
             .kill <session_id>             Cancel a query on another session (admin only)
             .cancel                        Cancel the active query on this session
@@ -384,11 +385,33 @@ public sealed class CommandDispatcher
             return CommandResult.Error("Usage: .explain <sql_query>");
         }
 
-        QueryExpression query = SqlParser.Parse(sql);
+        // Detect "analyze" prefix for EXPLAIN ANALYZE.
+        bool analyze = sql.StartsWith("analyze ", StringComparison.OrdinalIgnoreCase);
+        string actualSql = analyze ? sql["analyze ".Length..] : sql;
+
+        QueryExpression query = SqlParser.Parse(actualSql);
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
         IQueryOperator plan = await planner.PlanAsync(query, cancellationToken).ConfigureAwait(false);
 
         ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
+
+        if (analyze)
+        {
+            InstrumentedOperator instrumentedRoot = InstrumentedOperator.InstrumentTree(plan);
+            ExecutionContext context = new(
+                cancellationToken,
+                session.FunctionRegistry,
+                session.Catalog,
+                memoryBudgetBytes: session.Governor.MemoryBudgetBytes);
+
+            await foreach (Row _ in instrumentedRoot.ExecuteAsync(context).ConfigureAwait(false))
+            {
+                // Drain the stream to collect runtime metrics.
+            }
+
+            InstrumentedOperator.PopulateMetrics(explainPlan, instrumentedRoot);
+        }
+
         return CommandResult.ExplainResult(explainPlan.Render(), explainPlan);
     }
 

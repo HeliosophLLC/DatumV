@@ -22,6 +22,8 @@ internal sealed class MockOperator : IQueryOperator
         _rows = rows;
     }
 
+    public OperatorPlanDescription DescribeForExplain() => new("Mock");
+
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         foreach (Row row in _rows)
@@ -47,6 +49,8 @@ internal sealed class CountingOperator : IQueryOperator
         _rows = rows;
         _onRowYielded = onRowYielded;
     }
+
+    public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
 
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {

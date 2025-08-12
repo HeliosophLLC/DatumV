@@ -31,6 +31,26 @@ public sealed class FunctionSourceOperator : IQueryOperator
     public IReadOnlyList<Expression> Arguments => _arguments;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["function"] = _function.Name,
+        };
+
+        if (_arguments.Count > 0)
+        {
+            properties["arguments"] = string.Join(", ",
+                _arguments.Select(QueryExplainer.FormatExpression));
+        }
+
+        return new OperatorPlanDescription("Function Source")
+        {
+            Properties = properties,
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

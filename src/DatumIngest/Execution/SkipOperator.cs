@@ -29,6 +29,19 @@ public sealed class SkipOperator : IQueryOperator
     }
 
     /// <inheritdoc />
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Skip")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["count"] = _count.ToString(),
+            },
+            Children = [(_child, null)],
+        };
+    }
+
+    /// <inheritdoc />
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         long skipped = 0;

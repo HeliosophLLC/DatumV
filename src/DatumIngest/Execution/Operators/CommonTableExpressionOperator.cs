@@ -73,6 +73,22 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     public IQueryOperator InnerOperator => _innerOperator;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["name"] = _name,
+            ["mode"] = _isMaterialized ? "materialized" : "inline",
+        };
+
+        return new OperatorPlanDescription("CTE")
+        {
+            Properties = properties,
+            Children = [(InnerOperator, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         if (!_isMaterialized)

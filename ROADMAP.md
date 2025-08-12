@@ -45,6 +45,7 @@ The following features are architecturally accounted for but deferred from V1:
 - ~~**Language server — WASM size optimization**: Extract `DatumIngest.Parsing` with manifest POCOs to eliminate all transitive heavy dependencies from LanguageServer/Wasm~~ ✅
 - ~~**CASE / WHEN expressions**: Searched CASE (`CASE WHEN cond THEN ... END`) and simple CASE (`CASE expr WHEN value THEN ... ELSE ... END`). Requires new lexer tokens, AST nodes, and evaluator support. `iif()` provides basic inline conditional as a function today.~~ ✅
 - **NULLIF function**: `NULLIF(a, b)` returns NULL when a equals b. `COALESCE(a, b, ...)` is already ✅ implemented as a registered function. `NULLIF` has no implementation yet — not registered as a function, not available as expression syntax. Straightforward to add alongside `CoalesceFunction`.
+- **`WithChildren` method on `IQueryOperator`**: A method like `IQueryOperator WithChildren(IReadOnlyList<IQueryOperator> children)` that returns a copy of the operator with replaced children. Enables `InstrumentedOperator.InstrumentRecursive` to use generic child discovery from `DescribeForExplain().Children` instead of operator-specific switch statements, and unlocks future copy-on-write tree rewrites.
 
 ---
 

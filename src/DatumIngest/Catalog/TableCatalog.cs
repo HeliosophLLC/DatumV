@@ -447,6 +447,7 @@ public sealed class TableCatalog
         string filePath,
         List<string> tableNames,
         Action<string, T> register)
+        where T : class
     {
         foreach (string name in tableNames)
         {
@@ -456,11 +457,36 @@ public sealed class TableCatalog
                 continue;
             }
 
-            if (sidecarEntries.TryGetValue(name, out T? value))
+            T? value = ResolveSidecarEntry(sidecarEntries, name, d.FilePath);
+            if (value is not null)
             {
                 register(name, value);
             }
         }
+    }
+
+    private static T? ResolveSidecarEntry<T>(
+        IReadOnlyDictionary<string, T> sidecarEntries,
+        string tableName,
+        string sourceFilePath)
+        where T : class
+    {
+        T? value;
+
+        // Primary key: registered catalog table name (for current sidecar format).
+        if (sidecarEntries.TryGetValue(tableName, out value))
+        {
+            return value;
+        }
+
+        // Fallback: name derived from file conventions (e.g. orders_csv).
+        string derivedTableName = FileFormatDetector.DeriveTableName(sourceFilePath);
+        if (sidecarEntries.TryGetValue(derivedTableName, out value))
+        {
+            return value;
+        }
+
+        return null;
     }
 
     /// <summary>

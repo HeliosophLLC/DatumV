@@ -53,6 +53,37 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     public int? TopNRows => _topNRows;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        List<string> items = [];
+        foreach (OrderByItem item in _orderByItems)
+        {
+            string direction = item.Direction == SortDirection.Descending ? "DESC" : "ASC";
+            items.Add($"{QueryExplainer.FormatExpression(item.Expression)} {direction}");
+        }
+
+        Dictionary<string, string> properties = new()
+        {
+            ["order"] = string.Join(", ", items),
+        };
+
+        List<string> annotations = [];
+        if (_topNRows is not null)
+        {
+            annotations.Add($"bounded top-N sort (N={_topNRows})");
+            properties["top"] = _topNRows.Value.ToString();
+        }
+
+        return new OperatorPlanDescription("Sort")
+        {
+            Properties = properties,
+            Children = [(Source, null)],
+            Annotations = annotations,
+            Warnings = _topNRows is null ? ["materializes all rows for sorting"] : [],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

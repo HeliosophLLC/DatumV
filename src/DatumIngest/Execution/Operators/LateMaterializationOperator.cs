@@ -71,6 +71,28 @@ public sealed class LateMaterializationOperator : IQueryOperator
     public string? Alias => _alias;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new()
+        {
+            ["table"] = _descriptor.Name,
+            ["key"] = _keyColumn,
+            ["deferred columns"] = string.Join(", ", _deferredColumns),
+        };
+
+        if (_alias is not null)
+        {
+            properties["alias"] = _alias;
+        }
+
+        return new OperatorPlanDescription("Late Materialization")
+        {
+            Properties = properties,
+            Children = [(Child, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;

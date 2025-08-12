@@ -45,6 +45,35 @@ public sealed class ProjectOperator : IQueryOperator
     public IReadOnlyList<LetBinding>? LetBindings => _letBindings;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        List<string> columnDescriptions = [];
+        foreach (SelectColumn column in _columns)
+        {
+            string formatted = QueryExplainer.FormatExpression(column.Expression);
+            columnDescriptions.Add(column.Alias is not null
+                ? $"{formatted} AS {column.Alias}"
+                : formatted);
+        }
+
+        Dictionary<string, string> properties = new()
+        {
+            ["columns"] = string.Join(", ", columnDescriptions),
+        };
+
+        if (_letBindings is { Count: > 0 })
+        {
+            properties["let"] = string.Join(", ", _letBindings.Select(binding => binding.Name));
+        }
+
+        return new OperatorPlanDescription("Project")
+        {
+            Properties = properties,
+            Children = [(Source, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

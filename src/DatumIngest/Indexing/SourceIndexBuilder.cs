@@ -299,10 +299,21 @@ public sealed class SourceIndexBuilder
                 descriptor, provider, sourceStream: null, fingerprint, cancellationToken)
                 .ConfigureAwait(false);
 
-            tableIndexes[descriptor.Name] = index;
+            string sidecarTableName = GetSidecarTableName(descriptor);
+            tableIndexes[sidecarTableName] = index;
         }
 
         return new SourceIndexSet(fingerprint, tableIndexes);
+    }
+
+    private static string GetSidecarTableName(TableDescriptor descriptor)
+    {
+        if (descriptor.Options.ContainsKey(TableCatalog.SubTableKeyOption))
+        {
+            return descriptor.Name;
+        }
+
+        return FileFormatDetector.DeriveTableName(descriptor.FilePath);
     }
 
     /// <summary>

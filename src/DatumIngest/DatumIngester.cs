@@ -466,8 +466,10 @@ public static class DatumIngester
             indexTempPath, FileMode.Create, FileAccess.ReadWrite,
             FileShare.None, bufferSize: 65536, FileOptions.DeleteOnClose);
         IndexWriter indexWriter = new();
+        string sidecarTableName = GetSidecarTableName(descriptor);
+
         indexWriter.Write(
-            SourceIndexSet.Create(descriptor.Name, index),
+            SourceIndexSet.Create(sidecarTableName, index),
             indexStream,
             indexBuilder.SpillWriter,
             compressIndexes: options.CompressIndexes,
@@ -489,9 +491,19 @@ public static class DatumIngester
         return new DatumIndexTableResult
         {
             TableName = descriptor.Name,
-            IndexFileName = $"{descriptor.Name}.datum-index",
+            IndexFileName = $"{sidecarTableName}.datum-index",
             Index = index,
             IndexStream = indexStream,
         };
+    }
+
+    private static string GetSidecarTableName(TableDescriptor descriptor)
+    {
+        if (descriptor.Options.ContainsKey(TableCatalog.SubTableKeyOption))
+        {
+            return descriptor.Name;
+        }
+
+        return FileFormatDetector.DeriveTableName(descriptor.FilePath);
     }
 }

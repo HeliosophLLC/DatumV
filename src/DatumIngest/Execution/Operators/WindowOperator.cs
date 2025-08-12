@@ -49,6 +49,25 @@ public sealed class WindowOperator : IQueryOperator
     public IReadOnlyList<WindowColumn> WindowColumns => _windowColumns;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        List<string> functionDescriptions = [];
+        foreach (WindowColumn column in _windowColumns)
+        {
+            functionDescriptions.Add($"{column.Function.Name}() AS {column.OutputName}");
+        }
+
+        return new OperatorPlanDescription("Window")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["functions"] = string.Join(", ", functionDescriptions),
+            },
+            Children = [(Source, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);

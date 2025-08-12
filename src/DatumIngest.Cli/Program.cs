@@ -284,8 +284,9 @@ static async Task BuildGroupedIndexAsync(
 
             // Write the index using the streaming spill writer path, avoiding materialization
             // of full ValueIndexEntry arrays that cause OOM for large datasets.
-            SourceIndexSet indexSet = SourceIndexSet.Create(descriptor.Name, index);
-            string indexPath = filePath + ".datum-index";
+            string sidecarTableName = GetSidecarTableName(descriptor);
+            SourceIndexSet indexSet = SourceIndexSet.Create(sidecarTableName, index);
+            string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
 
             using FileStream outputStream = File.Create(indexPath);
             IndexWriter writer = new();
@@ -406,7 +407,8 @@ static async Task BuildGroupedIndexAndManifestAsync(
             progress.WriteSummary();
 
             SourceIndex index = indexBuilder.Finalize();
-            tableIndexes[descriptor.Name] = index;
+            string sidecarTableName = GetSidecarTableName(descriptor);
+            tableIndexes[sidecarTableName] = index;
 
             Console.WriteLine($"  Table '{descriptor.Name}':");
             Console.WriteLine($"    Schema: {index.Schema.Schema.Columns.Count} columns, {index.Schema.TotalRowCount} rows");
@@ -425,7 +427,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
             IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
             IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
             QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
-            tableManifests[descriptor.Name] = manifest;
+            tableManifests[sidecarTableName] = manifest;
 
             Console.WriteLine($"    Features: {manifest.Features.Count}");
 
@@ -437,7 +439,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
 
         // Write grouped index sidecar.
         SourceIndexSet indexSet = new(fingerprint, tableIndexes);
-        string indexPath = filePath + ".datum-index";
+        string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
         using (FileStream outputStream = File.Create(indexPath))
         {
             IndexWriter writer = new();
@@ -448,7 +450,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
 
         // Write grouped manifest sidecar.
         SourceManifest sourceManifest = new() { Tables = tableManifests };
-        string manifestPath = options.OutputPath ?? filePath + ".datum-manifest";
+        string manifestPath = options.OutputPath ?? FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-manifest";
         await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
 
         Console.WriteLine($"Manifest created: {manifestPath}");
@@ -460,6 +462,18 @@ static async Task BuildGroupedIndexAndManifestAsync(
             await sourceStream.DisposeAsync();
         }
     }
+}
+
+static string GetSidecarTableName(TableDescriptor descriptor)
+{
+    // Expanded multi-table sources already use a stable qualified name.
+    if (descriptor.Options.ContainsKey(TableCatalog.SubTableKeyOption))
+    {
+        return descriptor.Name;
+    }
+
+    // Single-table sources should always key sidecars by the derived SQL table name.
+    return FileFormatDetector.DeriveTableName(descriptor.FilePath);
 }
 
 static void LoadCatalogFile(TableCatalog catalog, string catalogPath)

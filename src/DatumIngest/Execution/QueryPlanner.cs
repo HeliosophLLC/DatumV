@@ -292,12 +292,19 @@ public sealed class QueryPlanner
                 plannedJoins.Add((join, rightSide, rightAliases));
             }
 
+            // When ORDER BY has a single qualified column reference, check whether
+            // the referenced table has a sorted column index on that column. If so,
+            // pass the alias to TryReorderJoins so it protects that table as the
+            // outermost probe, enabling sort elimination via IndexScanOperator.
+            string? orderBySortTableAlias = GetOrderBySortTableAlias(
+                statement.OrderBy, source, leftAliases, plannedJoins);
+
             // Greedy join reordering: place the largest table on the probe
             // (streaming) side so LIMIT can short-circuit earlier, and build
             // the smaller tables into hash tables. Only applied when every
             // join is a non-lateral INNER join and all sources have estimated
             // row counts. This is a heuristic — the roadmap CBO will replace it.
-            if (TryReorderJoins(source, leftAliases, plannedJoins,
+            if (TryReorderJoins(source, leftAliases, plannedJoins, orderBySortTableAlias,
                 out IQueryOperator? reorderedSource, out HashSet<string>? reorderedFromAliases,
                 out List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins))
             {
@@ -1095,6 +1102,7 @@ public sealed class QueryPlanner
         IQueryOperator fromOperator,
         HashSet<string> fromAliases,
         List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins,
+        string? preferredProbeTableAlias,
         [NotNullWhen(true)] out IQueryOperator? reorderedSource,
         [NotNullWhen(true)] out HashSet<string>? reorderedFromAliases,
         [NotNullWhen(true)] out List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)>? reorderedJoins)
@@ -1149,7 +1157,8 @@ public sealed class QueryPlanner
             }
         }
 
-        // Find the source with the largest estimated row count — it becomes the probe.
+        // Find the source with the largest estimated row count — it becomes the probe
+        // when no ORDER BY sort-table preference is in effect.
         int largestIndex = 0;
         long largestCount = rowCounts[0]!.Value;
 
@@ -1162,14 +1171,41 @@ public sealed class QueryPlanner
             }
         }
 
-        // If the largest source is already the FROM, no reordering needed.
-        if (largestIndex == 0)
+        // Determine the chosen outermost probe.
+        // When a preferred probe table exists (ORDER BY table with a sorted column index),
+        // use it so that the sort can later be eliminated by replacing its scan with an
+        // IndexScanOperator. The existing row-count heuristic is the fallback.
+        int chosenIndex = largestIndex;
+
+        if (preferredProbeTableAlias is not null)
+        {
+            if (fromAliases.Contains(preferredProbeTableAlias))
+            {
+                // The preferred table is already the outermost FROM — no reordering
+                // is needed and we must not displace it with the largest-table heuristic.
+                ExecutionTracer.Write($"JOIN REORDER  skipped: ORDER BY table '{preferredProbeTableAlias}' is already outermost FROM");
+                return false;
+            }
+
+            for (int index = 0; index < plannedJoins.Count; index++)
+            {
+                if (plannedJoins[index].Aliases.Contains(preferredProbeTableAlias))
+                {
+                    chosenIndex = index + 1;
+                    ExecutionTracer.Write($"JOIN REORDER  promoting ORDER BY table '{preferredProbeTableAlias}' as outermost probe for sort elimination");
+                    break;
+                }
+            }
+        }
+
+        // If the chosen source is already the FROM, no reordering is needed.
+        if (chosenIndex == 0)
         {
             ExecutionTracer.Write($"JOIN REORDER  skipped: FROM is already largest ({GetOperatorName(fromOperator)} rows={largestCount:N0})");
             return false;
         }
 
-        ExecutionTracer.Write($"JOIN REORDER  new probe (FROM) = {GetOperatorName(largestIndex == 0 ? fromOperator : plannedJoins[largestIndex - 1].Operator)}  rows={largestCount:N0}");
+        ExecutionTracer.Write($"JOIN REORDER  new probe (FROM) = {GetOperatorName(plannedJoins[chosenIndex - 1].Operator)}  rows={rowCounts[chosenIndex]:N0}");
 
         // Build the pool of remaining sources to schedule.
         // Each entry: (Operator, Aliases, RowCount, JoinClause or null for the original FROM).
@@ -1182,7 +1218,7 @@ public sealed class QueryPlanner
 
         for (int index = 0; index < plannedJoins.Count; index++)
         {
-            if (index + 1 == largestIndex)
+            if (index + 1 == chosenIndex)
             {
                 continue; // Skip the one we chose as the new FROM.
             }
@@ -1200,21 +1236,13 @@ public sealed class QueryPlanner
             onConditionPool.Add(join.OnCondition!);
         }
 
-        // Set up the new FROM from the largest source.
+        // Set up the new FROM from the chosen source.
         IQueryOperator newFrom;
         HashSet<string> joinedAliases;
 
-        if (largestIndex == 0)
-        {
-            newFrom = fromOperator;
-            joinedAliases = new HashSet<string>(fromAliases, StringComparer.OrdinalIgnoreCase);
-        }
-        else
-        {
-            int joinIndex = largestIndex - 1;
-            newFrom = plannedJoins[joinIndex].Operator;
-            joinedAliases = new HashSet<string>(plannedJoins[joinIndex].Aliases, StringComparer.OrdinalIgnoreCase);
-        }
+        int chosenJoinIndex = chosenIndex - 1;
+        newFrom = plannedJoins[chosenJoinIndex].Operator;
+        joinedAliases = new HashSet<string>(plannedJoins[chosenJoinIndex].Aliases, StringComparer.OrdinalIgnoreCase);
 
         // Greedy scheduling: at each step pick the smallest remaining source whose
         // ON condition is satisfiable (all referenced aliases are in the joined set).
@@ -1306,7 +1334,7 @@ public sealed class QueryPlanner
 
         reorderedSource = newFrom;
         reorderedFromAliases = new HashSet<string>(
-            largestIndex == 0 ? fromAliases : plannedJoins[largestIndex - 1].Aliases,
+            plannedJoins[chosenIndex - 1].Aliases,
             StringComparer.OrdinalIgnoreCase);
         reorderedJoins = result;
 
@@ -1420,7 +1448,8 @@ public sealed class QueryPlanner
             scan.RequiredColumns,
             columnIndex,
             scan.SourceIndex.Chunks,
-            descending);
+            descending,
+            sortColumn);
 
         // Replace the ScanOperator in the tree with the IndexScanOperator.
         source = ReplaceScanOperator(source, scan, indexScan);
@@ -1428,11 +1457,151 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
-    /// Finds the <see cref="ScanOperator"/> in a simple operator chain
-    /// (ScanOperator, possibly wrapped in AliasOperator and/or FilterOperator).
-    /// Returns <c>null</c> if the tree shape is too complex for index scan substitution.
+    /// Finds the <see cref="ScanOperator"/> at the outermost probe position in the operator
+    /// tree. Walks through <see cref="AliasOperator"/>, <see cref="FilterOperator"/>,
+    /// <see cref="ProjectOperator"/>, <see cref="DistinctOperator"/>, and
+    /// the <em>left (probe) side</em> of <see cref="JoinOperator"/> nodes, following the
+    /// probe chain down to the leaf scan.
+    /// Returns <c>null</c> if no scan is reachable via this path.
     /// </summary>
     private static ScanOperator? FindScanOperator(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+
+        while (true)
+        {
+            switch (current)
+            {
+                case ScanOperator scan:
+                    return scan;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                case ProjectOperator project:
+                    current = project.Source;
+                    break;
+                case DistinctOperator distinct:
+                    current = distinct.Source;
+                    break;
+                case JoinOperator join:
+                    // Follow the probe (left) side of the join to find the outermost
+                    // driving scan. This allows sort elimination when the ORDER BY table
+                    // has been placed as the outermost probe by join reordering.
+                    current = join.Left;
+                    break;
+                default:
+                    return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replaces the target <see cref="ScanOperator"/> in the operator tree with the given
+    /// <see cref="IndexScanOperator"/>, preserving any wrapping operators (alias, filter,
+    /// project, distinct, join). For <see cref="JoinOperator"/> nodes the left (probe) chain
+    /// is searched recursively; the right (build) side is never modified.
+    /// </summary>
+    private static IQueryOperator ReplaceScanOperator(
+        IQueryOperator root, ScanOperator target, IndexScanOperator replacement)
+    {
+        if (ReferenceEquals(root, target))
+        {
+            return replacement;
+        }
+
+        // Rebuild the wrapper chain with the replacement at the leaf.
+        return root switch
+        {
+            AliasOperator alias => new AliasOperator(
+                ReplaceScanOperator(alias.Source, target, replacement), alias.Alias),
+            FilterOperator filter => new FilterOperator(
+                ReplaceScanOperator(filter.Source, target, replacement), filter.Predicate),
+            ProjectOperator project => new ProjectOperator(
+                ReplaceScanOperator(project.Source, target, replacement),
+                project.Columns, project.LetBindings),
+            DistinctOperator distinct => new DistinctOperator(
+                ReplaceScanOperator(distinct.Source, target, replacement)),
+            // Rebuild join with the replaced probe side; the build side is untouched.
+            JoinOperator join => new JoinOperator(
+                ReplaceScanOperator(join.Left, target, replacement),
+                join.Right,
+                join.Type,
+                join.OnCondition,
+                join.NullSensitiveAntiSemi),
+            _ => root,
+        };
+    }
+
+    /// <summary>
+    /// Returns the qualified table alias from a single-column ORDER BY if the referenced
+    /// table has a sorted column index on that sort column. The result is passed to
+    /// <see cref="TryReorderJoins"/> so the relevant table is protected as the outermost
+    /// probe, enabling sort elimination via <see cref="TryReplaceWithIndexScan"/>.
+    /// Returns <c>null</c> when the ORDER BY is multi-column, unqualified, or the table
+    /// lacks the required sorted column index.
+    /// </summary>
+    private static string? GetOrderBySortTableAlias(
+        OrderByClause? orderBy,
+        IQueryOperator fromOperator,
+        HashSet<string> fromAliases,
+        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins)
+    {
+        if (orderBy is null || orderBy.Items.Count != 1)
+        {
+            return null;
+        }
+
+        if (orderBy.Items[0].Expression is not ColumnReference { TableName: string tableName, ColumnName: string columnName })
+        {
+            return null;
+        }
+
+        // Locate the operator for the ORDER BY table alias.
+        IQueryOperator? tableOperator = null;
+
+        if (fromAliases.Contains(tableName))
+        {
+            tableOperator = fromOperator;
+        }
+        else
+        {
+            foreach ((_, IQueryOperator op, HashSet<string> aliases) in plannedJoins)
+            {
+                if (aliases.Contains(tableName))
+                {
+                    tableOperator = op;
+                    break;
+                }
+            }
+        }
+
+        if (tableOperator is null)
+        {
+            return null;
+        }
+
+        // Verify the table has a sorted column index on the ORDER BY column.
+        // Use the simple chain-only scan finder (no join traversal) since each
+        // individual table operator is a scan chain, not a join tree.
+        ScanOperator? scan = FindScanOperatorInChain(tableOperator);
+
+        if (scan?.SourceIndex is null)
+        {
+            return null;
+        }
+
+        return scan.SourceIndex.TryGetColumnIndex(columnName, out _) ? tableName : null;
+    }
+
+    /// <summary>
+    /// Finds the <see cref="ScanOperator"/> in a simple operator chain without crossing
+    /// into join subtrees. This variant is used when inspecting a single planned table
+    /// operator (which is always a chain, never a join).
+    /// </summary>
+    private static ScanOperator? FindScanOperatorInChain(IQueryOperator operatorNode)
     {
         IQueryOperator current = operatorNode;
 
@@ -1452,29 +1621,6 @@ public sealed class QueryPlanner
                     return null;
             }
         }
-    }
-
-    /// <summary>
-    /// Replaces the target <see cref="ScanOperator"/> in the operator tree with the given
-    /// <see cref="IndexScanOperator"/>, preserving any wrapping operators (alias, filter).
-    /// </summary>
-    private static IQueryOperator ReplaceScanOperator(
-        IQueryOperator root, ScanOperator target, IndexScanOperator replacement)
-    {
-        if (ReferenceEquals(root, target))
-        {
-            return replacement;
-        }
-
-        // Rebuild the wrapper chain with the replacement at the leaf.
-        return root switch
-        {
-            AliasOperator alias => new AliasOperator(
-                ReplaceScanOperator(alias.Source, target, replacement), alias.Alias),
-            FilterOperator filter => new FilterOperator(
-                ReplaceScanOperator(filter.Source, target, replacement), filter.Predicate),
-            _ => root,
-        };
     }
 
     /// <summary>

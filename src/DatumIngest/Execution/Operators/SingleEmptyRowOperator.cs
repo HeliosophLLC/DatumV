@@ -9,6 +9,15 @@ namespace DatumIngest.Execution.Operators;
 internal sealed class SingleEmptyRowOperator : IQueryOperator
 {
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Single Empty Row")
+        {
+            EstimatedRows = 1,
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         await Task.CompletedTask.ConfigureAwait(false);

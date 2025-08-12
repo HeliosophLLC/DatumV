@@ -15,7 +15,6 @@ public static class QueryExplainer
     // Default selectivity when no statistics are available.
     // These are intentionally conservative heuristics, not data-driven.
     private const double DefaultFilterSelectivity = 0.33;
-    private const double DefaultEquiJoinSelectivity = 0.10;
 
     /// <summary>
     /// Builds an explain plan tree from the root operator.
@@ -34,6 +33,7 @@ public static class QueryExplainer
         {
             InstrumentedOperator instrumented => BuildNode(instrumented.Inner, stats),
             ScanOperator scan => BuildScanNode(scan),
+            IndexScanOperator indexScan => BuildIndexScanNode(indexScan),
             FilterOperator filter => BuildFilterNode(filter, stats),
             ProjectOperator project => BuildProjectNode(project, stats),
             JoinOperator join => BuildJoinNode(join, stats),
@@ -46,16 +46,14 @@ public static class QueryExplainer
             CommonTableExpressionOperator cte => BuildCommonTableExpressionNode(cte, stats),
             RecursiveCommonTableExpressionOperator recursiveCte => BuildRecursiveCommonTableExpressionNode(recursiveCte, stats),
             SetOperationOperator setOp => BuildSetOperationNode(setOp, stats),
-            _ => new ExplainPlanNode
-            {
-                OperatorName = op.GetType().Name,
-                Details = "unknown operator",
-            },
+            _ => BuildGenericNode(op, stats),
         };
     }
 
     private static ExplainPlanNode BuildScanNode(ScanOperator scan)
     {
+        OperatorPlanDescription description = scan.DescribeForExplain();
+
         string tableName = scan.Descriptor.Name;
         string provider = scan.Descriptor.Provider;
         string columns = scan.RequiredColumns is not null
@@ -69,12 +67,127 @@ public static class QueryExplainer
             details += $", statistics filter: {FormatExpression(scan.FilterHint)}";
         }
 
-        return new ExplainPlanNode
+        ExplainPlanNode node = new()
         {
-            OperatorName = "Scan",
+            OperatorName = description.AccessStrategy?.Method switch
+            {
+                AccessMethod.IndexScan => "Index Scan",
+                _ => "Scan",
+            },
             Details = details,
             EstimatedRows = scan.EstimatedRowCount,
         };
+
+        AppendAccessStrategyAnnotations(node, description.AccessStrategy);
+
+        return node;
+    }
+
+    private static ExplainPlanNode BuildIndexScanNode(IndexScanOperator indexScan)
+    {
+        OperatorPlanDescription description = indexScan.DescribeForExplain();
+
+        StringBuilder details = new();
+        if (description.Properties is not null)
+        {
+            details.AppendJoin(", ", description.Properties.Select(
+                keyValuePair => $"{keyValuePair.Key}: {keyValuePair.Value}"));
+        }
+
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Index Scan",
+            Details = details.ToString(),
+            EstimatedRows = description.EstimatedRows,
+        };
+
+        AppendAccessStrategyAnnotations(node, description.AccessStrategy);
+
+        foreach (string annotation in description.Annotations)
+        {
+            node.Annotations.Add(annotation);
+        }
+
+        return node;
+    }
+
+    /// <summary>
+    /// Builds a generic explain node from an operator's <see cref="OperatorPlanDescription"/>.
+    /// Used as the fallback for operators without dedicated BuildXxxNode methods.
+    /// </summary>
+    private static ExplainPlanNode BuildGenericNode(IQueryOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        OperatorPlanDescription description = op.DescribeForExplain();
+
+        StringBuilder details = new();
+        if (description.Properties is not null)
+        {
+            details.AppendJoin(", ", description.Properties.Select(
+                keyValuePair => $"{keyValuePair.Key}: {keyValuePair.Value}"));
+        }
+
+        List<ExplainPlanNode> children = [];
+        foreach ((IQueryOperator child, string? label) in description.Children)
+        {
+            ExplainPlanNode childNode = BuildNode(child, stats);
+            childNode.ChildLabel = label;
+            children.Add(childNode);
+        }
+
+        ExplainPlanNode node = new()
+        {
+            OperatorName = description.OperatorName,
+            Details = details.ToString(),
+            Children = children,
+            EstimatedRows = description.EstimatedRows,
+        };
+
+        AppendAccessStrategyAnnotations(node, description.AccessStrategy);
+
+        foreach (string warning in description.Warnings)
+        {
+            node.Warnings.Add(warning);
+        }
+
+        foreach (string annotation in description.Annotations)
+        {
+            node.Annotations.Add(annotation);
+        }
+
+        return node;
+    }
+
+    /// <summary>
+    /// Appends annotations describing data access strategy and pruning capabilities
+    /// to an explain plan node.
+    /// </summary>
+    private static void AppendAccessStrategyAnnotations(
+        ExplainPlanNode node, AccessStrategyDescription? accessStrategy)
+    {
+        if (accessStrategy is null)
+        {
+            return;
+        }
+
+        foreach (PruningCapability pruning in accessStrategy.PruningCapabilities)
+        {
+            string technique = pruning.Technique switch
+            {
+                PruningTechnique.StatisticsPruning => "statistics pruning (min/max bounds)",
+                PruningTechnique.BloomFilterPruning => "bloom filter pruning",
+                PruningTechnique.SortedIndexPruning => "sorted index pruning",
+                PruningTechnique.ExactSeek => "exact index seek",
+                _ => pruning.Technique.ToString(),
+            };
+
+            string columns = pruning.Columns.Count > 0
+                ? $" on [{string.Join(", ", pruning.Columns)}]"
+                : "";
+
+            string pending = pruning.PendingRuntime ? " (pending runtime)" : "";
+
+            node.Annotations.Add($"{technique}{columns}{pending}");
+        }
     }
 
     private static ExplainPlanNode BuildFilterNode(FilterOperator filter, IReadOnlyDictionary<string, FeatureManifest>? stats)
@@ -166,14 +279,22 @@ public static class QueryExplainer
         ExplainPlanNode rightChild = BuildNode(join.Right, stats);
         rightChild.ChildLabel = "build";
 
+        long? estimatedRows = EstimateJoinRows(
+            join.Type, leftChild.EstimatedRows, rightChild.EstimatedRows,
+            extraction, stats, out bool usedFallback);
+
         ExplainPlanNode node = new()
         {
             OperatorName = $"{joinType} Join",
             Details = $"strategy: {strategy}{condition}",
             Children = { leftChild, rightChild },
-            EstimatedRows = EstimateJoinRows(
-                join.Type, leftChild.EstimatedRows, rightChild.EstimatedRows, extraction, stats),
+            EstimatedRows = estimatedRows,
         };
+
+        if (usedFallback)
+        {
+            node.Annotations.Add("no column statistics — row estimate uses containment heuristic");
+        }
 
         // Warn about cross joins (can produce very large output).
         if (join.Type == JoinType.Cross)
@@ -586,15 +707,24 @@ public static class QueryExplainer
     /// <summary>
     /// Estimates the number of rows produced by a join.
     /// Cross joins return left × right. Equi-joins use NDV-based estimation when
-    /// column statistics are available, falling back to a fixed selectivity factor.
+    /// column statistics are available, falling back to the containment principle.
     /// </summary>
+    /// <param name="joinType">The type of join.</param>
+    /// <param name="leftRows">Estimated rows from the left (probe) side.</param>
+    /// <param name="rightRows">Estimated rows from the right (build) side.</param>
+    /// <param name="extraction">Extracted equi-join key pairs, or null for non-equi joins.</param>
+    /// <param name="stats">Per-column feature statistics, or null.</param>
+    /// <param name="usedFallback">Set to true when the estimate uses the no-stats heuristic.</param>
     private static long? EstimateJoinRows(
         JoinType joinType,
         long? leftRows,
         long? rightRows,
         JoinKeyExtractionResult? extraction,
-        IReadOnlyDictionary<string, FeatureManifest>? stats)
+        IReadOnlyDictionary<string, FeatureManifest>? stats,
+        out bool usedFallback)
     {
+        usedFallback = false;
+
         if (leftRows is null || rightRows is null)
         {
             return null;
@@ -610,27 +740,34 @@ public static class QueryExplainer
 
         if (extraction is not null)
         {
-            // When NDV statistics are available for the join key, use
-            // left * right / max(NDV_left, NDV_right) which models
-            // a uniform key distribution across both sides.
-            double joinSelectivity = DefaultEquiJoinSelectivity;
+            long maxNdv = 0;
 
             if (stats is not null && extraction.KeyPairs.Count > 0)
             {
                 FeatureManifest? leftFeature = FindColumnStatistics(extraction.KeyPairs[0].Left, stats);
                 FeatureManifest? rightFeature = FindColumnStatistics(extraction.KeyPairs[0].Right, stats);
 
-                long maxNdv = Math.Max(
+                maxNdv = Math.Max(
                     leftFeature?.EstimatedDistinctCount ?? 0,
                     rightFeature?.EstimatedDistinctCount ?? 0);
-
-                if (maxNdv > 0)
-                {
-                    joinSelectivity = 1.0 / maxNdv;
-                }
             }
 
-            long estimate = Math.Max(1, (long)(left * right * joinSelectivity));
+            long estimate;
+
+            if (maxNdv > 0)
+            {
+                // NDV-based: left × right / max(NDV_left, NDV_right)
+                // models uniform key distribution across both sides.
+                estimate = Math.Max(1, (long)((double)left * right / maxNdv));
+            }
+            else
+            {
+                // No statistics available — apply the containment principle:
+                // assume every key in the smaller side exists in the larger side,
+                // producing a 1:many foreign-key relationship.
+                estimate = Math.Max(left, right);
+                usedFallback = true;
+            }
 
             // For outer joins, the minimum is the preserved side.
             return joinType switch
@@ -806,7 +943,12 @@ public static class QueryExplainer
         };
     }
 
-    private static bool ContainsPatternMatch(Expression expression)
+    /// <summary>
+    /// Returns whether the given expression contains a LIKE, ILIKE, or REGEXP operator.
+    /// </summary>
+    /// <param name="expression">The expression to inspect.</param>
+    /// <returns><c>true</c> if a pattern-matching operator is found.</returns>
+    public static bool ContainsPatternMatch(Expression expression)
     {
         return expression switch
         {

@@ -1,5 +1,6 @@
 using System.Text;
 using DatumIngest.Catalog;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -164,6 +165,14 @@ internal sealed class InteractiveShell
                 string sql = inputBuffer.ToString();
                 inputBuffer.Clear();
 
+                // Intercept EXPLAIN [ANALYZE] prefix and route to .explain dot-command.
+                string sqlTrimmed = sql.TrimEnd(';').TrimEnd();
+                if (sqlTrimmed.StartsWith("EXPLAIN ", StringComparison.OrdinalIgnoreCase))
+                {
+                    string remainder = sqlTrimmed["EXPLAIN ".Length..].TrimStart();
+                    sql = $".explain {remainder}";
+                }
+
                 await ExecuteAndRenderAsync(dispatcher, session, sql, formatter, timerEnabled, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -218,7 +227,11 @@ internal sealed class InteractiveShell
                 break;
 
             case CommandResultKind.Success:
-                if (!string.IsNullOrEmpty(result.Message))
+                if (result.ExplainPlan is not null)
+                {
+                    RenderExplainPlan(result.ExplainPlan);
+                }
+                else if (!string.IsNullOrEmpty(result.Message))
                 {
                     AnsiConsole.MarkupLine($"[green]{Markup.Escape(result.Message)}[/]");
                 }
@@ -354,6 +367,7 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green].providers[/]           List registered format providers");
         AnsiConsole.MarkupLine("  [green].functions[/]           List available functions");
         AnsiConsole.MarkupLine("  [green].explain <sql>[/]       Show query execution plan");
+        AnsiConsole.MarkupLine("  [green].explain analyze <sql>[/] Run query and show plan with runtime metrics");
         AnsiConsole.MarkupLine("  [green].sessions[/]            List active sessions (admin)");
         AnsiConsole.MarkupLine("  [green].kill <session_id>[/]   Cancel a running query (admin)");
         AnsiConsole.MarkupLine("  [green].cancel[/]              Cancel the active query on this session");
@@ -363,6 +377,117 @@ internal sealed class InteractiveShell
         AnsiConsole.MarkupLine("  [green].quit[/] / [green].exit[/]        Exit the shell");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[grey]SQL queries must end with a semicolon (;).[/]");
-        AnsiConsole.MarkupLine("[grey]Multi-line input is supported — keep typing until ;[/]");
+        AnsiConsole.MarkupLine("[grey]Multi-line input is supported — keep typing until ;[/]");        AnsiConsole.MarkupLine("[grey]SQL-prefix syntax: EXPLAIN <sql>; or EXPLAIN ANALYZE <sql>;[/]");
     }
+
+    /// <summary>
+    /// Renders an <see cref="ExplainPlanNode"/> tree with Spectre.Console
+    /// colored markup for operator names, details, metrics, and warnings.
+    /// </summary>
+    private static void RenderExplainPlan(ExplainPlanNode root)
+    {
+        AnsiConsole.WriteLine();
+        RenderPlanNode(root, prefix: "", isLast: true, isRoot: true);
+        AnsiConsole.WriteLine();
+    }
+
+    private static void RenderPlanNode(
+        ExplainPlanNode node, string prefix, bool isLast, bool isRoot)
+    {
+        string connector = isRoot ? "" : (isLast ? "\u2514\u2500 " : "\u251c\u2500 ");
+        string labelPrefix = node.ChildLabel is not null ? $"[grey][[{Markup.Escape(node.ChildLabel)}]][/] " : "";
+
+        // Build the line: connector + label + operator name + details + cost
+        StringBuilder line = new();
+        line.Append(Markup.Escape(prefix));
+        line.Append(Markup.Escape(connector));
+
+        AnsiConsole.Markup(line.ToString());
+        AnsiConsole.Markup(labelPrefix);
+        AnsiConsole.Markup($"[bold cyan]{Markup.Escape(node.OperatorName)}[/]");
+
+        if (!string.IsNullOrEmpty(node.Details))
+        {
+            AnsiConsole.Markup($" [dim]({Markup.Escape(node.Details)})[/]");
+        }
+
+        if (node.EstimatedRows.HasValue)
+        {
+            AnsiConsole.Markup($"  [blue]~{node.EstimatedRows.Value:N0} rows[/]");
+        }
+
+        // Runtime metrics (EXPLAIN ANALYZE)
+        if (node.RowsProduced.HasValue || node.SelfTime.HasValue)
+        {
+            AnsiConsole.Markup("  [dim]|[/]");
+
+            if (node.RowsConsumed.HasValue && node.RowsConsumed.Value != node.RowsProduced)
+            {
+                double selectivity = node.RowsConsumed.Value > 0
+                    ? (double)node.RowsProduced!.Value / node.RowsConsumed.Value * 100.0
+                    : 0;
+                AnsiConsole.Markup(
+                    $"  rows in: [white]{node.RowsConsumed.Value:N0}[/] \u2192 out: [white]{node.RowsProduced!.Value:N0}[/] ({selectivity:F1}%)");
+            }
+            else if (node.RowsProduced.HasValue)
+            {
+                AnsiConsole.Markup($"  rows: [white]{node.RowsProduced.Value:N0}[/]");
+            }
+
+            if (node.SelfTime.HasValue)
+            {
+                AnsiConsole.Markup($"  [dim]|[/]  self: [green]{FormatTime(node.SelfTime.Value)}[/]");
+            }
+
+            if (node.TotalTime.HasValue)
+            {
+                AnsiConsole.Markup($"  [dim]|[/]  total: [grey]{FormatTime(node.TotalTime.Value)}[/]");
+            }
+        }
+
+        AnsiConsole.WriteLine();
+
+        string childPrefix = isRoot ? "" : (prefix + (isLast ? "    " : "\u2502   "));
+
+        // Runtime annotations
+        foreach (string annotation in node.RuntimeAnnotations)
+        {
+            AnsiConsole.MarkupLine(
+                $"{Markup.Escape(childPrefix)}    [grey]{Markup.Escape(annotation)}[/]");
+        }
+
+        // Static annotations
+        foreach (string annotation in node.Annotations)
+        {
+            AnsiConsole.MarkupLine(
+                $"{Markup.Escape(childPrefix)}    [dim]\u2192 {Markup.Escape(annotation)}[/]");
+        }
+
+        // Warnings
+        foreach (string warning in node.Warnings)
+        {
+            AnsiConsole.MarkupLine(
+                $"{Markup.Escape(childPrefix)}    [yellow]\u26a0 {Markup.Escape(warning)}[/]");
+        }
+
+        // Children
+        for (int i = 0; i < node.Children.Count; i++)
+        {
+            RenderPlanNode(node.Children[i], childPrefix, isLast: i == node.Children.Count - 1, isRoot: false);
+        }
+    }
+
+    private static string FormatTime(TimeSpan time)
+    {
+        if (time.TotalMilliseconds < 1.0)
+        {
+            return $"{time.TotalMicroseconds:F1} \u03bcs";
+        }
+
+        if (time.TotalSeconds < 1.0)
+        {
+            return $"{time.TotalMilliseconds:F1} ms";
+        }
+
+        return $"{time.TotalSeconds:F2} s";    }
 }

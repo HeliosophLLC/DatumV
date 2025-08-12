@@ -685,6 +685,8 @@ public sealed class BloomJoinPruningTests
             _rows = rows;
         }
 
+        public OperatorPlanDescription DescribeForExplain() => new("Mock");
+
         public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
         {
             foreach (Row row in _rows)

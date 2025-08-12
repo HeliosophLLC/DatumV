@@ -31,6 +31,29 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
         _syntheticColumnName = syntheticColumnName;
     }
 
+    /// <summary>The outer operator producing rows.</summary>
+    public IQueryOperator Source => _source;
+
+    /// <summary>The correlated inner subquery operator tree.</summary>
+    public IQueryOperator InnerPlan => _innerPlan;
+
+    /// <summary>The synthetic column name for the scalar result.</summary>
+    public string SyntheticColumnName => _syntheticColumnName;
+
+    /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Scalar Subquery")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["column"] = _syntheticColumnName,
+            },
+            Children = [(Source, "outer"), (InnerPlan, "inner")],
+            Warnings = ["executes inner subquery per outer row"],
+        };
+    }
+
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {

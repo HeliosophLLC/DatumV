@@ -30,6 +30,19 @@ public sealed class AliasOperator : IQueryOperator
     public string Alias => _alias;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Alias")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["alias"] = _alias,
+            },
+            Children = [(Source, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         AliasSchema? schema = null;

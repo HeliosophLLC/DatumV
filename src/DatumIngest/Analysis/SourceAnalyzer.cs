@@ -169,17 +169,18 @@ public sealed class SourceAnalyzer
             }
 
             SourceIndex index = incremental.Finalize();
-            tableIndexes[descriptor.Name] = index;
+            string sidecarTableName = GetSidecarTableName(descriptor);
+            tableIndexes[sidecarTableName] = index;
 
             if (columnInfos.Count > 0)
             {
-                tableSchemas[descriptor.Name] = new Schema(columnInfos);
+                tableSchemas[sidecarTableName] = new Schema(columnInfos);
             }
 
             IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
             IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
             QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
-            tableManifests[descriptor.Name] = manifest;
+            tableManifests[sidecarTableName] = manifest;
         }
 
         SourceSchema sourceSchema = new() { Tables = tableSchemas };
@@ -187,6 +188,16 @@ public sealed class SourceAnalyzer
         SourceManifest manifest2 = new() { Tables = tableManifests };
 
         return new SourceAnalysisResult(sourceSchema, indexSet, manifest2);
+    }
+
+    private static string GetSidecarTableName(TableDescriptor descriptor)
+    {
+        if (descriptor.Options.ContainsKey(TableCatalog.SubTableKeyOption))
+        {
+            return descriptor.Name;
+        }
+
+        return FileFormatDetector.DeriveTableName(descriptor.FilePath);
     }
 
     /// <summary>

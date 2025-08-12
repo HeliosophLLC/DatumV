@@ -30,6 +30,19 @@ public sealed class SubqueryOperator : IQueryOperator
     public string Alias => _alias;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Subquery")
+        {
+            Properties = new Dictionary<string, string>
+            {
+                ["alias"] = _alias,
+            },
+            Children = [(InnerOperator, null)],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         // The inner operator already produces correctly-named rows.

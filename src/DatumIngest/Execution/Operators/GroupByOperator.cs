@@ -60,6 +60,32 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     public IReadOnlyList<AggregateColumn> AggregateColumns => _aggregateColumns;
 
     /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        Dictionary<string, string> properties = new();
+
+        if (_groupByExpressions.Count > 0)
+        {
+            properties["keys"] = string.Join(", ",
+                _groupByExpressions.Select(QueryExplainer.FormatExpression));
+        }
+        else
+        {
+            properties["keys"] = "(global)";
+        }
+
+        properties["aggregates"] = string.Join(", ",
+            _aggregateColumns.Select(aggregate => $"{aggregate.Function.Name}() AS {aggregate.OutputName}"));
+
+        return new OperatorPlanDescription("Group By")
+        {
+            Properties = properties,
+            Children = [(Source, null)],
+            Warnings = ["materializes all rows per group"],
+        };
+    }
+
+    /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);

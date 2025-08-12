@@ -35,6 +35,16 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
     /// <summary>The upstream operator.</summary>
     public IQueryOperator Source => _source;
 
+    /// <inheritdoc/>
+    public OperatorPlanDescription DescribeForExplain()
+    {
+        return new OperatorPlanDescription("Distinct")
+        {
+            Children = [(Source, null)],
+            Warnings = ["materializes all unique rows in memory"],
+        };
+    }
+
     /// <inheritdoc />
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {

@@ -538,6 +538,9 @@ public sealed class CommonTableExpressionTests
         }
 
         /// <inheritdoc/>
+        public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
+
+        /// <inheritdoc/>
         public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
         {
             _onExecute();
@@ -622,6 +625,9 @@ public sealed class CommonTableExpressionTests
         {
             _rows = rows;
         }
+
+        /// <inheritdoc/>
+        public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
         /// <inheritdoc/>
         public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
