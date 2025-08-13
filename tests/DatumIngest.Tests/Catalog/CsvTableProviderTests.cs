@@ -414,4 +414,33 @@ public sealed class CsvTableProviderTests
         Assert.False(rows[0]["event_time"].IsNull);
         Assert.Equal(DataKind.DateTime, rows[0]["event_time"].Kind);
     }
+
+    // ───────── Date columns with zero-time suffix (e.g. "2018-01-18 00:00:00") ─────────
+
+    [Fact]
+    public async Task GetSchema_DateWithZeroTimeSuffix_DetectedAsDate()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("dates_with_zero_time.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.Date, schema.Columns[1].Kind);     // review_date — zero time
+        Assert.Equal(DataKind.DateTime, schema.Columns[2].Kind); // review_timestamp — non-zero time
+    }
+
+    [Fact]
+    public async Task Open_DateWithZeroTimeSuffix_ParsesCorrectly()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("dates_with_zero_time.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+
+        // All review_date values must parse as non-null Date values.
+        Assert.False(rows[0]["review_date"].IsNull);
+        Assert.Equal(new DateOnly(2018, 1, 18), rows[0]["review_date"].AsDate());
+        Assert.Equal(new DateOnly(2018, 3, 10), rows[1]["review_date"].AsDate());
+        Assert.Equal(new DateOnly(2018, 2, 17), rows[2]["review_date"].AsDate());
+    }
 }

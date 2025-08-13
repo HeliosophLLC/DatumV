@@ -469,6 +469,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             DataKind.Scalar => DataValue.Null(DataKind.Scalar),
             DataKind.Date when DateOnly.TryParse(field, CultureInfo.InvariantCulture, out DateOnly date)
                 => DataValue.FromDate(date),
+            DataKind.Date when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out DateTimeOffset dateTimeAsDate)
+                => DataValue.FromDate(DateOnly.FromDateTime(dateTimeAsDate.DateTime)),
             DataKind.Date => DataValue.Null(DataKind.Date),
             DataKind.DateTime when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind, out DateTimeOffset dateTime)
