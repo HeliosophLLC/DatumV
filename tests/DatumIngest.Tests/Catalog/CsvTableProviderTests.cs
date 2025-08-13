@@ -443,4 +443,41 @@ public sealed class CsvTableProviderTests
         Assert.Equal(new DateOnly(2018, 3, 10), rows[1]["review_date"].AsDate());
         Assert.Equal(new DateOnly(2018, 2, 17), rows[2]["review_date"].AsDate());
     }
+
+    // ───────── Hyphenated UUID auto-detection ─────────
+
+    [Fact]
+    public async Task GetSchema_HyphenatedUuids_DetectedAsUuid()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("uuids.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.Uuid, schema.Columns[1].Kind); // session_id
+    }
+
+    [Fact]
+    public async Task Open_HyphenatedUuids_ParsesCorrectly()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("uuids.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.False(rows[0]["session_id"].IsNull);
+        Assert.Equal(DataKind.Uuid, rows[0]["session_id"].Kind);
+        Assert.Equal(Guid.Parse("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), rows[0]["session_id"].AsUuid());
+        Assert.Equal(Guid.Parse("f47ac10b-58cc-4372-a567-0e02b2c3d479"), rows[1]["session_id"].AsUuid());
+        Assert.Equal(Guid.Parse("550e8400-e29b-41d4-a716-446655440000"), rows[2]["session_id"].AsUuid());
+    }
+
+    [Fact]
+    public async Task GetSchema_BareHexStrings_RemainString()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("hex_strings.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.String, schema.Columns[1].Kind); // product_hash — 32-char hex, not UUID
+    }
 }

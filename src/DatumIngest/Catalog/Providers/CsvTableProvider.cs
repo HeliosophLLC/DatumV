@@ -165,6 +165,42 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             }
         }
 
+        // Third pass: detect hyphenated UUIDs (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) in String columns.
+        for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
+        {
+            if (kinds[columnIndex] != DataKind.String || !hasData[columnIndex])
+            {
+                continue;
+            }
+
+            bool allUuids = true;
+
+            foreach (string[] fields in dataRows)
+            {
+                if (columnIndex >= fields.Length)
+                {
+                    continue;
+                }
+
+                string field = fields[columnIndex].Trim();
+                if (field.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!Guid.TryParseExact(field, "D", out _))
+                {
+                    allUuids = false;
+                    break;
+                }
+            }
+
+            if (allUuids)
+            {
+                kinds[columnIndex] = DataKind.Uuid;
+            }
+        }
+
         List<ColumnInfo> columns = new(headers.Length);
         for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
         {
@@ -477,6 +513,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 DateTimeStyles.RoundtripKind, out DateTimeOffset dateTime)
                 => DataValue.FromDateTime(dateTime),
             DataKind.DateTime => DataValue.Null(DataKind.DateTime),
+            DataKind.Uuid when Guid.TryParse(field, out Guid uuid)
+                => DataValue.FromUuid(uuid),
+            DataKind.Uuid => DataValue.Null(DataKind.Uuid),
             _ => DataValue.FromString(field)
         };
     }
