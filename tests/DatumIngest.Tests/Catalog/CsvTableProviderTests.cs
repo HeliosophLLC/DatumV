@@ -535,4 +535,54 @@ public sealed class CsvTableProviderTests
         Assert.Equal("Alice", rows[0]["name"].AsString());
         Assert.Equal(91f, rows[2]["score"].AsScalar());
     }
+
+    // ───────── All-string header detection (value disjointness) ─────────
+
+    [Fact]
+    public async Task GetSchema_AllStringWithHeader_DetectsColumnNames()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("all_string_header.csv"), CancellationToken.None);
+
+        Assert.Equal(2, schema.Columns.Count);
+        Assert.Equal("product_category_name", schema.Columns[0].Name);
+        Assert.Equal("product_category_name_english", schema.Columns[1].Name);
+    }
+
+    [Fact]
+    public async Task Open_AllStringWithHeader_FirstRowIsNotData()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("all_string_header.csv"), null, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count);
+        Assert.Equal("beleza_saude", rows[0]["product_category_name"].AsString());
+        Assert.Equal("health_beauty", rows[0]["product_category_name_english"].AsString());
+    }
+
+    [Fact]
+    public async Task GetSchema_AllStringNoHeader_GeneratesColumnNames()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("all_string_no_header.csv"), CancellationToken.None);
+
+        // "New York" in first row also appears in data rows → no header detected.
+        Assert.Equal("col_0", schema.Columns[0].Name);
+        Assert.Equal("col_1", schema.Columns[1].Name);
+    }
+
+    [Fact]
+    public async Task Open_AllStringNoHeader_FirstRowIsData()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("all_string_no_header.csv"), null, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count);
+        Assert.Equal("Alice", rows[0]["col_0"].AsString());
+        Assert.Equal("New York", rows[0]["col_1"].AsString());
+    }
 }

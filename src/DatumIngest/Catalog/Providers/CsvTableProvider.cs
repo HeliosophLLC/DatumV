@@ -13,11 +13,12 @@ namespace DatumIngest.Catalog.Providers;
 /// <remarks>
 /// <para>
 /// When the <c>header</c> option is absent or set to <c>"auto"</c>, the provider
-/// infers whether the first row is a header by comparing its type profile against
-/// subsequent rows. If any column is predominantly numeric in rows 2–20 but the
-/// corresponding row-1 value is non-numeric, the first row is treated as a header.
-/// Otherwise it is treated as data and columns receive generated names
-/// (<c>col_0</c>, <c>col_1</c>, …).
+/// infers whether the first row is a header using two heuristics applied in order:
+/// (1) if any column is predominantly numeric in subsequent rows but the first-row
+/// value is non-numeric, the first row is a header; (2) for all-string files, if
+/// every first-row value is absent from all sampled data rows for its column, the
+/// first row is a header. When neither heuristic fires, the first row is treated as
+/// data and columns receive generated names (<c>col_0</c>, <c>col_1</c>, …).
 /// </para>
 /// <para>
 /// Set <c>header=true</c> to force the original behavior (first row is always a header)
@@ -583,13 +584,28 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     /// type profile against subsequent data rows.
     /// </summary>
     /// <remarks>
-    /// The heuristic: if any column is predominantly numeric in <paramref name="dataRows"/>
-    /// (rows 2–N) but the corresponding <paramref name="firstRowFields"/> value is
-    /// non-numeric, the first row is treated as a header. This catches the common case
-    /// of <c>age,income</c> followed by <c>39,77516</c>.
-    /// When all columns have matching type profiles between row 1 and subsequent rows
-    /// (e.g. all-numeric or all-string), the first row is treated as data and columns
-    /// receive generated names.
+    /// <para>
+    /// Two heuristics are applied in order:
+    /// </para>
+    /// <list type="number">
+    /// <item>
+    /// <description>
+    /// <b>Numeric mismatch.</b> If any column is predominantly numeric in
+    /// <paramref name="dataRows"/> (rows 2–N) but the corresponding
+    /// <paramref name="firstRowFields"/> value is non-numeric, the first row is
+    /// a header. This catches <c>age,income</c> followed by <c>39,77516</c>.
+    /// </description>
+    /// </item>
+    /// <item>
+    /// <description>
+    /// <b>Value disjointness.</b> For all-string files (no numeric mismatch),
+    /// if every non-empty first-row value is absent from all sampled data rows
+    /// for its column and at least two data rows are available, the first row is
+    /// a header. This catches <c>product_category_name,product_category_name_english</c>
+    /// followed by <c>beleza_saude,health_beauty</c>.
+    /// </description>
+    /// </item>
+    /// </list>
     /// </remarks>
     private static bool DetectHeader(string[] firstRowFields, List<string[]> dataRows, char delimiter)
     {
@@ -601,6 +617,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
 
         int columnCount = firstRowFields.Length;
 
+        // --- Pass 1: numeric mismatch ---
         for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
         {
             string firstValue = firstRowFields[columnIndex].Trim();
@@ -636,6 +653,50 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
 
             // If data is numeric but row 1 is not numeric → row 1 is a header.
             if (columnIsNumeric && !firstIsNumeric)
+            {
+                return true;
+            }
+        }
+
+        // --- Pass 2: value disjointness (for all-string files) ---
+        // If every first-row value is absent from all data rows for that column,
+        // the first row is likely a header row rather than data.
+        if (dataRows.Count >= 2)
+        {
+            bool allDisjoint = true;
+            int nonEmptyFirstRowValues = 0;
+
+            for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
+            {
+                string firstValue = firstRowFields[columnIndex].Trim();
+                if (firstValue.Length == 0)
+                {
+                    continue;
+                }
+
+                nonEmptyFirstRowValues++;
+
+                foreach (string[] row in dataRows)
+                {
+                    if (columnIndex >= row.Length)
+                    {
+                        continue;
+                    }
+
+                    if (row[columnIndex].Trim().Equals(firstValue, StringComparison.OrdinalIgnoreCase))
+                    {
+                        allDisjoint = false;
+                        break;
+                    }
+                }
+
+                if (!allDisjoint)
+                {
+                    break;
+                }
+            }
+
+            if (allDisjoint && nonEmptyFirstRowValues > 0)
             {
                 return true;
             }
