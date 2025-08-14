@@ -74,6 +74,18 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         {
             headers = firstRowFields;
             dataRows = sampleRows;
+
+            // Strip trailing empty headers produced by a trailing delimiter on the header line.
+            int usableColumns = headers.Length;
+            while (usableColumns > 0 && headers[usableColumns - 1].Trim().Length == 0)
+            {
+                usableColumns--;
+            }
+
+            if (usableColumns < headers.Length)
+            {
+                headers = headers[..usableColumns];
+            }
         }
         else
         {
@@ -731,6 +743,11 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 if (position < line.Length && line[position] == delimiter)
                 {
                     position++;
+                }
+                else if (position >= line.Length)
+                {
+                    // End of line after closing quote — no more fields to parse.
+                    break;
                 }
             }
             else

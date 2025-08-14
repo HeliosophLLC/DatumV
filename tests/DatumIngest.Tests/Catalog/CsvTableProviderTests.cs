@@ -480,4 +480,59 @@ public sealed class CsvTableProviderTests
 
         Assert.Equal(DataKind.String, schema.Columns[1].Kind); // product_hash — 32-char hex, not UUID
     }
+
+    // ───────── Trailing delimiter handling ─────────
+
+    [Fact]
+    public async Task GetSchema_TrailingCommaInHeader_DoesNotCreatePhantomColumn()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("trailing_comma.csv"), CancellationToken.None);
+
+        Assert.Equal(3, schema.Columns.Count);
+        Assert.Equal("id", schema.Columns[0].Name);
+        Assert.Equal("name", schema.Columns[1].Name);
+        Assert.Equal("score", schema.Columns[2].Name);
+    }
+
+    [Fact]
+    public async Task Open_TrailingCommaInHeader_NoExtraNullColumn()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("trailing_comma.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(3, rows[0].FieldCount);
+        Assert.Equal("Alice", rows[0]["name"].AsString());
+    }
+
+    // ───────── Lines ending with quoted fields ─────────
+
+    [Fact]
+    public async Task GetSchema_QuotedLastField_DoesNotCreatePhantomColumn()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("quoted_fields.csv"), CancellationToken.None);
+
+        Assert.Equal(3, schema.Columns.Count);
+        Assert.Equal("id", schema.Columns[0].Name);
+        Assert.Equal("name", schema.Columns[1].Name);
+        Assert.Equal("score", schema.Columns[2].Name);
+    }
+
+    [Fact]
+    public async Task Open_QuotedLastField_NoExtraNullColumn()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("quoted_fields.csv"), null, CancellationToken.None));
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(3, rows[0].FieldCount);
+        Assert.Equal("Alice", rows[0]["name"].AsString());
+        Assert.Equal(91f, rows[2]["score"].AsScalar());
+    }
 }
