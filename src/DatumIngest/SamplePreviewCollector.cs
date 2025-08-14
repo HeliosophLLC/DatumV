@@ -22,7 +22,7 @@ namespace DatumIngest;
 internal sealed class SamplePreviewCollector
 {
     /// <summary>Maximum width or height for image thumbnails in the preview.</summary>
-    internal const int MaxThumbnailDimension = 128;
+    internal const int MaxThumbnailDimension = 64;
 
     private const string BinarySentinel = "[binary data]";
 
@@ -210,7 +210,7 @@ internal sealed class SamplePreviewCollector
 
     /// <summary>
     /// Converts an image to a base64 string prefixed with <c>base64://</c>.
-    /// The image is resized to fit within 128×128 pixels, preserving aspect ratio.
+    /// The image is resized to fit within 64×64 pixels, preserving aspect ratio.
     /// </summary>
     private static object ConvertImage(DataValue value)
     {

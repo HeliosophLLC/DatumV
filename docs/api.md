@@ -179,7 +179,7 @@ Sample values are converted to JSON-friendly representations:
 | Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
 | Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
 | Tensor | Recursively nested arrays following shape dimensions |
-| Image | `"base64://…"` — resized to fit 128×128 max (aspect-preserving), re-encoded as PNG |
+| Image | `"base64://…"` — resized to fit 64×64 max (aspect-preserving), re-encoded as PNG |
 | UInt8Array | `"[binary data]"` sentinel string |
 | Array | Recursively converted element array |
 
