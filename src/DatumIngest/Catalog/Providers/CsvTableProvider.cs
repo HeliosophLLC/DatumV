@@ -34,6 +34,13 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     /// </summary>
     private const int MeasurementBufferSize = 65536;
 
+    /// <summary>
+    /// Buffer size for the <see cref="StreamReader"/> used by <see cref="OpenAsync"/>.
+    /// The .NET default (1,024 bytes) causes excessive buffer refills for large files;
+    /// 64 KiB keeps one I/O read worth ~3,800 lines of a typical numeric CSV.
+    /// </summary>
+    private const int ReaderBufferSize = 65536;
+
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -235,7 +242,11 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         Schema schema = await GetSchemaAsync(descriptor, cancellationToken);
         bool hasHeader = HasHeaderRow(descriptor, schema);
 
-        using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
+        using StreamReader reader = new(
+            CompressionStreamFactory.OpenRead(descriptor),
+            System.Text.Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: ReaderBufferSize);
         string? firstLine = await reader.ReadLineAsync(cancellationToken);
         if (firstLine is null)
         {
@@ -313,15 +324,52 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 break;
             }
 
-            string[] fields = ParseCsvLine(logicalLine, delimiter);
             DataValue[] values = new DataValue[projectedIndices.Length];
 
-            for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
+            // Fast path for unquoted lines: extract fields as spans and parse scalars
+            // directly, avoiding per-field substring allocations. This is the common case
+            // for numeric CSVs (e.g. Instacart order_products__prior).
+            if (!logicalLine.Contains('"'))
             {
-                int sourceIndex = projectedIndices[projectionIndex];
-                string field = sourceIndex < fields.Length ? fields[sourceIndex].Trim() : string.Empty;
+                ReadOnlySpan<char> lineSpan = logicalLine.AsSpan();
+                int fieldStart = 0;
+                int currentFieldIndex = 0;
+                int projectionIndex = 0;
 
-                values[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
+                for (int charIndex = 0; charIndex <= lineSpan.Length && projectionIndex < projectedIndices.Length; charIndex++)
+                {
+                    if (charIndex == lineSpan.Length || lineSpan[charIndex] == delimiter)
+                    {
+                        if (currentFieldIndex == projectedIndices[projectionIndex])
+                        {
+                            ReadOnlySpan<char> fieldSpan = lineSpan[fieldStart..charIndex].Trim();
+                            values[projectionIndex] = ParseFieldSpan(fieldSpan, projectedKinds[projectionIndex]);
+                            projectionIndex++;
+                        }
+
+                        currentFieldIndex++;
+                        fieldStart = charIndex + 1;
+                    }
+                }
+
+                while (projectionIndex < projectedIndices.Length)
+                {
+                    values[projectionIndex] = DataValue.Null(projectedKinds[projectionIndex]);
+                    projectionIndex++;
+                }
+            }
+            else
+            {
+                // Quoted line: fall back to full RFC 4180 parsing.
+                List<string> fields = ParseCsvLineList(logicalLine, delimiter);
+
+                for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
+                {
+                    int sourceIndex = projectedIndices[projectionIndex];
+                    string field = sourceIndex < fields.Count ? fields[sourceIndex].Trim() : string.Empty;
+
+                    values[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
+                }
             }
 
             yield return new Row(projectedNames, values, nameIndex);
@@ -541,6 +589,28 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             DataKind.Uuid => DataValue.Null(DataKind.Uuid),
             _ => DataValue.FromString(field)
         };
+    }
+
+    /// <summary>
+    /// Span-based overload that parses scalar fields directly from a <see cref="ReadOnlySpan{T}"/>
+    /// without allocating a substring. Falls back to the string-based overload for non-scalar types
+    /// that require materialized strings (dates, UUIDs, strings).
+    /// </summary>
+    private static DataValue ParseFieldSpan(ReadOnlySpan<char> field, DataKind kind)
+    {
+        if (field.IsEmpty)
+        {
+            return DataValue.Null(kind);
+        }
+
+        if (kind == DataKind.Scalar)
+        {
+            return float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
+                ? DataValue.FromScalar(number)
+                : DataValue.Null(DataKind.Scalar);
+        }
+
+        return ParseField(field.ToString(), kind);
     }
 
     /// <summary>
@@ -770,6 +840,17 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     /// </summary>
     private static string[] ParseCsvLine(string line, char delimiter)
     {
+        return ParseCsvLineList(line, delimiter).ToArray();
+    }
+
+    /// <summary>
+    /// Parses a CSV line into fields, returning the thread-local field list directly
+    /// to avoid a per-call array allocation. Callers that store the result must call
+    /// <c>.ToArray()</c>; callers that only index into the result can use it as-is.
+    /// The returned list is only valid until the next call to this method on the same thread.
+    /// </summary>
+    private static List<string> ParseCsvLineList(string line, char delimiter)
+    {
         List<string> fields = (_fieldBuffer ??= new(16));
         fields.Clear();
         int position = 0;
@@ -851,7 +932,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             }
         }
 
-        return fields.ToArray();
+        return fields;
     }
 
     /// <summary>
@@ -873,6 +954,13 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         if (firstLine is null)
         {
             return null;
+        }
+
+        // Lines without quotes (the vast majority of numeric CSVs) can be returned
+        // immediately. Contains uses SIMD-vectorised search in .NET 8+.
+        if (!firstLine.Contains('"'))
+        {
+            return firstLine;
         }
 
         // Count unescaped quotes — if odd, the logical line continues
