@@ -644,18 +644,30 @@ public sealed class SourceIndexBuilder
 
         private void AddToCardinality(DataValue value)
         {
-            string representation = value.Kind switch
+            switch (value.Kind)
             {
-                DataKind.Scalar => value.AsScalar().ToString("R"),
-                DataKind.UInt8 => value.AsUInt8().ToString(),
-                DataKind.String => value.AsString(),
-                DataKind.Date => value.AsDate().ToString("O"),
-                DataKind.DateTime => value.AsDateTime().ToString("O"),
-                DataKind.JsonValue => value.AsJsonValue(),
-                _ => value.GetHashCode().ToString()
-            };
-
-            _cardinality.Add(representation);
+                case DataKind.Scalar:
+                    _cardinality.Add(value.AsScalar());
+                    break;
+                case DataKind.UInt8:
+                    _cardinality.Add((int)value.AsUInt8());
+                    break;
+                case DataKind.String:
+                    _cardinality.Add(value.AsString());
+                    break;
+                case DataKind.Date:
+                    _cardinality.Add(value.AsDate().DayNumber);
+                    break;
+                case DataKind.DateTime:
+                    _cardinality.Add(value.AsDateTime().ToUnixTimeMilliseconds());
+                    break;
+                case DataKind.JsonValue:
+                    _cardinality.Add(value.AsJsonValue());
+                    break;
+                default:
+                    _cardinality.Add(value.GetHashCode());
+                    break;
+            }
         }
 
         private static bool IsComparableKind(DataKind kind)
@@ -1001,18 +1013,30 @@ internal sealed class SourceIndexBuilder_ChunkAccumulatorProxy
 
     private void AddToCardinality(DataValue value)
     {
-        string representation = value.Kind switch
+        switch (value.Kind)
         {
-            DataKind.Scalar => value.AsScalar().ToString("R"),
-            DataKind.UInt8 => value.AsUInt8().ToString(),
-            DataKind.String => value.AsString(),
-            DataKind.Date => value.AsDate().ToString("O"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            DataKind.JsonValue => value.AsJsonValue(),
-            _ => value.GetHashCode().ToString()
-        };
-
-        _cardinality.Add(representation);
+            case DataKind.Scalar:
+                _cardinality.Add(value.AsScalar());
+                break;
+            case DataKind.UInt8:
+                _cardinality.Add((int)value.AsUInt8());
+                break;
+            case DataKind.String:
+                _cardinality.Add(value.AsString());
+                break;
+            case DataKind.Date:
+                _cardinality.Add(value.AsDate().DayNumber);
+                break;
+            case DataKind.DateTime:
+                _cardinality.Add(value.AsDateTime().ToUnixTimeMilliseconds());
+                break;
+            case DataKind.JsonValue:
+                _cardinality.Add(value.AsJsonValue());
+                break;
+            default:
+                _cardinality.Add(value.GetHashCode());
+                break;
+        }
     }
 
     private static bool IsComparableKind(DataKind kind)
