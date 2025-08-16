@@ -15,8 +15,8 @@ public sealed class CompositeKeyDetectorTests
     {
         List<JoinCandidate> singles =
         [
-            MakeSingleCandidate("orders", "customers", "region_id", "region_id", 0.8, uniqueKeyScore: 0.5),
-            MakeSingleCandidate("orders", "customers", "year", "year", 0.7, uniqueKeyScore: 0.5),
+            MakeSingleCandidate("orders", "customers", "region_id", "region_id", 0.9, uniqueKeyScore: 0.5),
+            MakeSingleCandidate("orders", "customers", "year", "year", 0.85, uniqueKeyScore: 0.5),
         ];
 
         IReadOnlyList<JoinCandidate> composites =
@@ -65,10 +65,10 @@ public sealed class CompositeKeyDetectorTests
     {
         List<JoinCandidate> singles =
         [
-            MakeSingleCandidate("orders", "customers", "region_id", "region_id", 0.8, uniqueKeyScore: 0.5),
-            MakeSingleCandidate("orders", "customers", "year", "year", 0.7, uniqueKeyScore: 0.5),
-            MakeSingleCandidate("products", "categories", "dept_id", "dept_id", 0.8, uniqueKeyScore: 0.4),
-            MakeSingleCandidate("products", "categories", "brand_id", "brand_id", 0.7, uniqueKeyScore: 0.4),
+            MakeSingleCandidate("orders", "customers", "region_id", "region_id", 0.9, uniqueKeyScore: 0.5),
+            MakeSingleCandidate("orders", "customers", "year", "year", 0.85, uniqueKeyScore: 0.5),
+            MakeSingleCandidate("products", "categories", "dept_id", "dept_id", 0.9, uniqueKeyScore: 0.4),
+            MakeSingleCandidate("products", "categories", "brand_id", "brand_id", 0.85, uniqueKeyScore: 0.4),
         ];
 
         IReadOnlyList<JoinCandidate> composites =
@@ -102,19 +102,17 @@ public sealed class CompositeKeyDetectorTests
 
         List<JoinCandidate> singles =
         [
-            MakeSingleCandidate("orders", "customers", "a", "a", 0.7, uniqueKeyScore: 0.3),
-            MakeSingleCandidate("orders", "customers", "b", "b", 0.6, uniqueKeyScore: 0.3),
-            MakeSingleCandidate("orders", "customers", "c", "c", 0.5, uniqueKeyScore: 0.3),
+            MakeSingleCandidate("orders", "customers", "a", "a", 0.9, uniqueKeyScore: 0.3),
+            MakeSingleCandidate("orders", "customers", "b", "b", 0.85, uniqueKeyScore: 0.3),
+            MakeSingleCandidate("orders", "customers", "c", "c", 0.8, uniqueKeyScore: 0.3),
         ];
 
         IReadOnlyList<JoinCandidate> composites =
             CompositeKeyDetector.DetectCompositeKeys(singles, thresholds);
 
-        if (composites.Count > 0)
-        {
-            // Should take at most 2 columns.
-            Assert.True(composites[0].LeftColumns.Count <= 2);
-        }
+        Assert.Single(composites);
+        // Should take at most 2 columns.
+        Assert.True(composites[0].LeftColumns.Count <= 2);
     }
 
     [Fact]
@@ -122,8 +120,8 @@ public sealed class CompositeKeyDetectorTests
     {
         List<JoinCandidate> singles =
         [
-            MakeSingleCandidate("orders", "customers", "region", "region", 0.7, uniqueKeyScore: 0.3),
-            MakeSingleCandidate("orders", "customers", "year", "year", 0.7, uniqueKeyScore: 0.3),
+            MakeSingleCandidate("orders", "customers", "region", "region", 0.9, uniqueKeyScore: 0.3),
+            MakeSingleCandidate("orders", "customers", "year", "year", 0.85, uniqueKeyScore: 0.3),
         ];
 
         IReadOnlyList<JoinCandidate> composites =

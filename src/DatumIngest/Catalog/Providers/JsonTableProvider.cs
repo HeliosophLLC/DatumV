@@ -182,7 +182,7 @@ public sealed class JsonTableProvider : IMultiTableSource
         TableDescriptor descriptor,
         CancellationToken cancellationToken)
     {
-        using FileStream stream = File.OpenRead(descriptor.FilePath);
+        await using Stream stream = CompressionStreamFactory.OpenRead(descriptor);
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
     }
 

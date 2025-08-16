@@ -12,10 +12,16 @@ internal static class JoinGraphBuilder
     /// </summary>
     /// <param name="candidates">All scored join candidates (single-column + composite).</param>
     /// <param name="thresholds">Thresholds controlling graph edge inclusion.</param>
+    /// <param name="excludedTables">
+    /// Optional set of table names to exclude. Candidates touching any excluded table are
+    /// skipped but their indices are preserved, so <see cref="JoinGraphEdge.CandidateIndex"/>
+    /// values remain valid against the original <paramref name="candidates"/> list.
+    /// </param>
     /// <returns>Graph edges referencing candidates by index.</returns>
     internal static IReadOnlyList<JoinGraphEdge> BuildGraph(
         IReadOnlyList<JoinCandidate> candidates,
-        CrossManifestThresholds thresholds)
+        CrossManifestThresholds thresholds,
+        IReadOnlySet<string>? excludedTables = null)
     {
         List<JoinGraphEdge> edges = new();
 
@@ -23,14 +29,23 @@ internal static class JoinGraphBuilder
         {
             JoinCandidate candidate = candidates[i];
 
-            if (candidate.Confidence >= thresholds.GraphEdgeMinConfidence)
+            if (candidate.Confidence < thresholds.GraphEdgeMinConfidence)
             {
-                edges.Add(new JoinGraphEdge(
-                    candidate.LeftTable,
-                    candidate.RightTable,
-                    CandidateIndex: i,
-                    candidate.Confidence));
+                continue;
             }
+
+            if (excludedTables is not null &&
+                (excludedTables.Contains(candidate.LeftTable) ||
+                 excludedTables.Contains(candidate.RightTable)))
+            {
+                continue;
+            }
+
+            edges.Add(new JoinGraphEdge(
+                candidate.LeftTable,
+                candidate.RightTable,
+                CandidateIndex: i,
+                candidate.Confidence));
         }
 
         return edges;

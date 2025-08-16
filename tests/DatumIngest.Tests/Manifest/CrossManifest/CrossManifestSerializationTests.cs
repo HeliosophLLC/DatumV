@@ -23,7 +23,7 @@ public sealed class CrossManifestSerializationTests
         Assert.Equal(original.Tables.Count, deserialized.Tables.Count);
         Assert.Equal(original.Tables[0], deserialized.Tables[0]);
         Assert.Equal(original.Candidates.Count, deserialized.Candidates.Count);
-        Assert.Equal(original.JoinGraph.Count, deserialized.JoinGraph.Count);
+        Assert.Equal(original.JoinGraphs.Count, deserialized.JoinGraphs.Count);
     }
 
     [Fact]
@@ -78,8 +78,8 @@ public sealed class CrossManifestSerializationTests
         CrossManifestResult? deserialized = ManifestSerializer.DeserializeCrossManifest(json);
 
         Assert.NotNull(deserialized);
-        JoinGraphEdge originalEdge = original.JoinGraph[0];
-        JoinGraphEdge roundTripped = deserialized.JoinGraph[0];
+        JoinGraphEdge originalEdge = original.JoinGraphs[0].Edges[0];
+        JoinGraphEdge roundTripped = deserialized.JoinGraphs[0].Edges[0];
 
         Assert.Equal(originalEdge.LeftTable, roundTripped.LeftTable);
         Assert.Equal(originalEdge.RightTable, roundTripped.RightTable);
@@ -114,11 +114,9 @@ public sealed class CrossManifestSerializationTests
         {
             Tables = ["t1", "t2"],
             Candidates = [],
-            JoinGraph = [],
+            JoinGraphs = [],
             TransitiveChains = null,
             Insights = null,
-            RecommendedQuery = null,
-            QueryAnnotations = null,
         };
 
         string json = ManifestSerializer.SerializeCrossManifest(original);
@@ -127,8 +125,6 @@ public sealed class CrossManifestSerializationTests
         Assert.NotNull(deserialized);
         Assert.Null(deserialized.TransitiveChains);
         Assert.Null(deserialized.Insights);
-        Assert.Null(deserialized.RecommendedQuery);
-        Assert.Null(deserialized.QueryAnnotations);
     }
 
     [Fact]
@@ -151,7 +147,7 @@ public sealed class CrossManifestSerializationTests
         CrossManifestResult? deserialized = ManifestSerializer.DeserializeCrossManifest(json);
 
         Assert.NotNull(deserialized);
-        Assert.Equal(original.RecommendedQuery, deserialized.RecommendedQuery);
+        Assert.Equal(original.JoinGraphs[0].RecommendedQuery, deserialized.JoinGraphs[0].RecommendedQuery);
     }
 
     [Fact]
@@ -174,7 +170,7 @@ public sealed class CrossManifestSerializationTests
         {
             Tables = ["orders", "customers"],
             Candidates = [candidateWithWarnings],
-            JoinGraph = [],
+            JoinGraphs = [],
         };
 
         string json = ManifestSerializer.SerializeCrossManifest(original);
@@ -193,7 +189,7 @@ public sealed class CrossManifestSerializationTests
         {
             Tables = ["orders"],
             Candidates = [],
-            JoinGraph = [],
+            JoinGraphs = [],
             PerTableInsights = new Dictionary<string, IReadOnlyList<DatasetInsight>>
             {
                 ["orders"] =
@@ -249,14 +245,16 @@ public sealed class CrossManifestSerializationTests
                     QualityWarnings = null,
                 },
             ],
-            JoinGraph =
+            JoinGraphs =
             [
-                new JoinGraphEdge("orders", "customers", CandidateIndex: 0, Confidence: 0.85),
+                new JoinGraph
+                {
+                    Edges = [new JoinGraphEdge("orders", "customers", CandidateIndex: 0, Confidence: 0.85)],
+                    RecommendedQuery = "SELECT * FROM \"orders\" INNER JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"customer_id\"\nLIMIT 100;\n",
+                },
             ],
             TransitiveChains = null,
             Insights = null,
-            RecommendedQuery = "SELECT * FROM \"orders\" INNER JOIN \"customers\" ON \"orders\".\"customer_id\" = \"customers\".\"customer_id\"\nLIMIT 100;\n",
-            QueryAnnotations = null,
         };
     }
 
@@ -292,10 +290,16 @@ public sealed class CrossManifestSerializationTests
                     QualityWarnings = null,
                 },
             ],
-            JoinGraph =
+            JoinGraphs =
             [
-                new JoinGraphEdge("orders", "customers", CandidateIndex: 0, Confidence: 0.85),
-                new JoinGraphEdge("orders", "products", CandidateIndex: 1, Confidence: 0.75),
+                new JoinGraph
+                {
+                    Edges =
+                    [
+                        new JoinGraphEdge("orders", "customers", CandidateIndex: 0, Confidence: 0.85),
+                        new JoinGraphEdge("orders", "products", CandidateIndex: 1, Confidence: 0.75),
+                    ],
+                },
             ],
             TransitiveChains =
             [
@@ -305,8 +309,6 @@ public sealed class CrossManifestSerializationTests
                     MinConfidence: 0.75),
             ],
             Insights = null,
-            RecommendedQuery = null,
-            QueryAnnotations = null,
         };
     }
 

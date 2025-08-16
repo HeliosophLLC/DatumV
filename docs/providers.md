@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest reads from seven file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file.
+DatumIngest reads from seven file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file. All providers support transparent [gzip decompression](#gzip-compression).
 
 ## CSV
 
@@ -102,6 +102,44 @@ datum-ingest query \
   --source "labels=train-labels-idx1-ubyte"
 ```
 
+## Gzip compression
+
+All providers support transparent gzip decompression via the double-extension convention. A file named `data.csv.gz` is detected as a gzip-compressed CSV file — the outer `.gz` extension identifies the compression and the inner `.csv` extension identifies the data format.
+
+### Stream-compatible providers
+
+CSV, JSONL, and JSON read through a `GZipStream` wrapper without buffering the entire file to disk. Schema inference, delimiter detection, and row iteration all operate on the decompressed stream. Compressed sources report `SupportsSeek: false` in their capabilities since `GZipStream` is forward-only.
+
+### Seekable providers
+
+Parquet, HDF5, ZIP, IDX, and DatumFile require seekable file access. For these formats, the compressed file is decompressed to a temporary file before the provider opens it. The temporary file is cleaned up when the `TableCatalog` is disposed.
+
+### Usage
+
+```bash
+# Auto-detected from double extension
+datum-ingest explore "SELECT * FROM data" --source "data=./data.csv.gz"
+
+# Explicit provider prefix (escape hatch for bare .gz files)
+datum-ingest explore "SELECT * FROM data" --source "csv:data=./data.gz"
+```
+
+### Supported patterns
+
+Every known data extension can be paired with `.gz`:
+
+| Extension | Compressed variant |
+|-----------|-------------------|
+| `.csv` | `.csv.gz` |
+| `.tsv` | `.tsv.gz` |
+| `.json` | `.json.gz` |
+| `.jsonl`, `.ndjson` | `.jsonl.gz`, `.ndjson.gz` |
+| `.parquet`, `.pq` | `.parquet.gz`, `.pq.gz` |
+| `.hdf5`, `.h5`, `.hdf` | `.hdf5.gz`, `.h5.gz`, `.hdf.gz` |
+| `.zip` | `.zip.gz` |
+
+A bare `.gz` file with no inner extension (e.g. `data.gz`) is not auto-detected. Use the explicit `provider:name=path` form to specify the data format.
+
 ## Source definition format
 
 Sources can be specified with or without an explicit provider prefix:
@@ -156,6 +194,7 @@ When a `--source` definition omits the provider prefix, or when the programmatic
 | `.hdf5`, `.h5`, `.hdf` | hdf5 |
 | `.zip` | zip |
 | `.idx` | idx |
+| `*.gz` (double-extension) | inner format + gzip decompression |
 
 Extension matching is case-insensitive.
 

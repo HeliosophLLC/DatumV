@@ -31,6 +31,18 @@ internal static class CsvDelimiterDetector
     }
 
     /// <summary>
+    /// Detects the most likely delimiter by reading sample lines from a stream.
+    /// Used when the source is compressed and the raw file bytes are not directly readable.
+    /// </summary>
+    /// <param name="stream">A readable (possibly decompressed) stream positioned at the start.</param>
+    /// <returns>The detected delimiter character, or comma as the fallback.</returns>
+    public static char Detect(Stream stream)
+    {
+        string[] lines = ReadSampleLines(stream);
+        return DetectFromLines(lines);
+    }
+
+    /// <summary>
     /// Detects the most likely delimiter from pre-read lines.
     /// Exposed for testability without requiring file I/O.
     /// </summary>
@@ -128,9 +140,27 @@ internal static class CsvDelimiterDetector
     /// </summary>
     private static string[] ReadSampleLines(string filePath)
     {
-        List<string> lines = new(SampleLineCount + 1);
-
         using StreamReader reader = new(filePath);
+        return ReadSampleLines(reader);
+    }
+
+    /// <summary>
+    /// Reads the header line plus up to <see cref="SampleLineCount"/> data lines
+    /// from a stream, skipping empty lines.
+    /// </summary>
+    private static string[] ReadSampleLines(Stream stream)
+    {
+        using StreamReader reader = new(stream, leaveOpen: true);
+        return ReadSampleLines(reader);
+    }
+
+    /// <summary>
+    /// Reads the header line plus up to <see cref="SampleLineCount"/> data lines
+    /// from a reader, skipping empty lines.
+    /// </summary>
+    private static string[] ReadSampleLines(StreamReader reader)
+    {
+        List<string> lines = new(SampleLineCount + 1);
         int dataLinesRead = 0;
 
         while (dataLinesRead <= SampleLineCount)

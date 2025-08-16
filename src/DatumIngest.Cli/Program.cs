@@ -536,12 +536,12 @@ static TableDescriptor ParseSourceDefinition(string source)
         // Bare file path — auto-detect provider and derive name from the file name.
         if (File.Exists(source))
         {
-            string detectedProvider = FileFormatDetector.DetectProvider(source)
+            DetectedFormat format = FileFormatDetector.DetectFormat(source)
                 ?? throw new ArgumentException(
                     $"Cannot determine file format for '{source}'. " +
                     "Specify explicitly: name=path or provider:name=path");
             string derivedName = FileFormatDetector.DeriveTableName(source);
-            return new TableDescriptor(detectedProvider, derivedName, source, new Dictionary<string, string>());
+            return new TableDescriptor(format.Provider, derivedName, source, new Dictionary<string, string>(), format.Compression);
         }
 
         throw new ArgumentException(
@@ -595,11 +595,13 @@ static TableDescriptor ParseSourceDefinition(string source)
 
     if (!hasExplicitProvider)
     {
-        provider = FileFormatDetector.DetectProvider(filePath)
+        DetectedFormat format = FileFormatDetector.DetectFormat(filePath)
             ?? throw new ArgumentException(
                 $"Cannot detect file format for '{filePath}'. " +
                 $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
                 "Use the explicit format: provider:name=path");
+        provider = format.Provider;
+        return new TableDescriptor(provider, name, filePath, options, format.Compression);
     }
 
     return new TableDescriptor(provider, name, filePath, options);
@@ -971,7 +973,8 @@ static async Task<int> RunCrossManifestAsync(TableCatalog catalog, CliOptions op
         Console.WriteLine(resultJson);
     }
 
-    Console.Error.WriteLine($"({result.Tables.Count} table(s), {result.Candidates.Count} candidate(s), {result.JoinGraph.Count} edge(s))");
+    int totalEdges = result.JoinGraphs.Sum(g => g.Edges.Count);
+    Console.Error.WriteLine($"({result.Tables.Count} table(s), {result.Candidates.Count} candidate(s), {result.JoinGraphs.Count} graph(s), {totalEdges} edge(s))");
     return 0;
 }
 

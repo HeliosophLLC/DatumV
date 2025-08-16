@@ -29,7 +29,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
         Dictionary<string, DataKind> columnKinds = new(StringComparer.OrdinalIgnoreCase);
         int sampled = 0;
 
-        using StreamReader reader = new(descriptor.FilePath);
+        using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
 
         while (sampled < SchemaSampleSize)
         {
@@ -119,7 +119,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
             nameIndex[names[index]] = index;
         }
 
-        using StreamReader reader = new(descriptor.FilePath);
+        using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
 
         while (true)
         {
@@ -176,6 +176,16 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
                 EstimatedRowCount: null,
                 EstimatedRowSizeBytes: null,
                 SupportsSeek: true,
+                ColumnCosts: new Dictionary<string, ColumnCost>());
+        }
+
+        // Compressed files do not support byte-level seeking or estimation.
+        if (descriptor.Compression != CompressionKind.None)
+        {
+            return new ProviderCapabilities(
+                EstimatedRowCount: null,
+                EstimatedRowSizeBytes: null,
+                SupportsSeek: false,
                 ColumnCosts: new Dictionary<string, ColumnCost>());
         }
 

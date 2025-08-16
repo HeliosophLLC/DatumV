@@ -21,7 +21,18 @@ public static class FileFormatDetector
     private static readonly HashSet<string> ContainerExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".datum",
+        ".gz",
     };
+
+    /// <summary>
+    /// Extensions that represent a compression wrapper rather than a data format.
+    /// These are stripped to reveal the inner format extension during detection.
+    /// </summary>
+    private static readonly Dictionary<string, CompressionKind> CompressionExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".gz"] = CompressionKind.Gzip,
+        };
 
     /// <summary>
     /// Maps well-known file extensions to provider names.
@@ -99,9 +110,43 @@ public static class FileFormatDetector
     }
 
     /// <summary>
+    /// Detects the provider name and compression for the given file path.
+    /// Uses the double-extension convention for compressed files: the outer
+    /// <c>.gz</c> extension is stripped and the inner extension identifies
+    /// the data format (e.g. <c>data.csv.gz</c> → provider "csv", compression Gzip).
+    /// </summary>
+    /// <param name="filePath">Absolute or relative path to the data file.</param>
+    /// <returns>
+    /// A <see cref="DetectedFormat"/> with provider name and compression kind,
+    /// or <c>null</c> if the format cannot be determined.
+    /// </returns>
+    public static DetectedFormat? DetectFormat(string filePath)
+    {
+        string extension = Path.GetExtension(filePath);
+
+        // If the outer extension is a compression format, strip it and detect the inner format.
+        if (extension.Length > 0 && CompressionExtensions.TryGetValue(extension, out CompressionKind compression))
+        {
+            string innerPath = filePath[..^extension.Length];
+            string? innerProvider = DetectProvider(innerPath);
+            if (innerProvider is not null)
+            {
+                return new DetectedFormat(innerProvider, compression);
+            }
+
+            return null;
+        }
+
+        string? provider = DetectProvider(filePath);
+        return provider is not null ? new DetectedFormat(provider, CompressionKind.None) : null;
+    }
+
+    /// <summary>
     /// Attempts to detect the provider name for the given file path.
     /// Uses a three-tier strategy: file extension, filename pattern
     /// (for MNIST-style IDX files), then magic byte signatures.
+    /// Does not handle compression — use <see cref="DetectFormat"/> for
+    /// combined provider and compression detection.
     /// </summary>
     /// <param name="filePath">Absolute or relative path to the data file.</param>
     /// <returns>
@@ -272,6 +317,15 @@ public static class FileFormatDetector
         patterns.Add("*idx2-ubyte");
         patterns.Add("*idx3-ubyte");
         patterns.Add("*idx4-ubyte");
+
+        // Gzip-compressed variants of every known extension.
+        foreach (string compressionExtension in CompressionExtensions.Keys)
+        {
+            foreach (string dataExtension in ExtensionMap.Keys)
+            {
+                patterns.Add($"*{dataExtension}{compressionExtension}");
+            }
+        }
 
         string[] result = [.. patterns];
         Array.Sort(result, StringComparer.OrdinalIgnoreCase);

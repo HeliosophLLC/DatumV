@@ -42,7 +42,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         char delimiter = GetDelimiter(descriptor);
         bool? headerOverride = GetHeaderOverride(descriptor);
 
-        using StreamReader reader = new(descriptor.FilePath);
+        using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
         string? firstLine = await reader.ReadLineAsync(cancellationToken);
         if (firstLine is null)
         {
@@ -235,7 +235,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         Schema schema = await GetSchemaAsync(descriptor, cancellationToken);
         bool hasHeader = HasHeaderRow(descriptor, schema);
 
-        using StreamReader reader = new(descriptor.FilePath);
+        using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
         string? firstLine = await reader.ReadLineAsync(cancellationToken);
         if (firstLine is null)
         {
@@ -342,6 +342,16 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 EstimatedRowCount: null,
                 EstimatedRowSizeBytes: null,
                 SupportsSeek: true,
+                ColumnCosts: new Dictionary<string, ColumnCost>());
+        }
+
+        // Compressed files do not support byte-level seeking or estimation.
+        if (descriptor.Compression != CompressionKind.None)
+        {
+            return new ProviderCapabilities(
+                EstimatedRowCount: null,
+                EstimatedRowSizeBytes: null,
+                SupportsSeek: false,
                 ColumnCosts: new Dictionary<string, ColumnCost>());
         }
 
@@ -717,8 +727,15 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             return delimiterValue[0];
         }
 
-        // .tsv files always use tab.
-        string extension = Path.GetExtension(descriptor.FilePath);
+        // .tsv files always use tab. Strip compression extensions first
+        // so that "data.tsv.gz" is recognised as tab-separated.
+        string fileName = Path.GetFileName(descriptor.FilePath);
+        string extension = Path.GetExtension(fileName);
+        if (extension.Equals(".gz", StringComparison.OrdinalIgnoreCase))
+        {
+            extension = Path.GetExtension(Path.GetFileNameWithoutExtension(fileName));
+        }
+
         if (extension.Equals(".tsv", StringComparison.OrdinalIgnoreCase))
         {
             return '\t';
@@ -727,6 +744,12 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         // Sniff delimiter from file content when the file exists.
         if (File.Exists(descriptor.FilePath))
         {
+            if (descriptor.Compression != CompressionKind.None)
+            {
+                using Stream stream = CompressionStreamFactory.OpenRead(descriptor);
+                return CsvDelimiterDetector.Detect(stream);
+            }
+
             return CsvDelimiterDetector.Detect(descriptor.FilePath);
         }
 

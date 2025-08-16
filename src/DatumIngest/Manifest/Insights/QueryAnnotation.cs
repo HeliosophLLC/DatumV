@@ -1,5 +1,7 @@
 namespace DatumIngest.Manifest.Insights;
 
+using System.Text.Json.Serialization;
+
 /// <summary>
 /// Maps a column in the synthesized query output back to the <see cref="DatasetInsight"/>
 /// that produced it. Separated from the executable SQL so that queries remain paste-safe.
@@ -10,6 +12,7 @@ namespace DatumIngest.Manifest.Insights;
 /// <param name="Confidence">Confidence of the originating insight, enabling consumer-side partitioning of manual actions.</param>
 public sealed record QueryAnnotation(
     string Column,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<InsightKind>))]
     InsightKind InsightKind,
     string Note,
     double Confidence);

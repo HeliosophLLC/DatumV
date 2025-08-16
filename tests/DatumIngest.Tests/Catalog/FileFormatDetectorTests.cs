@@ -322,4 +322,121 @@ public sealed class FileFormatDetectorTests : IDisposable
 
         Assert.Equal(0, stream.Position);
     }
+
+    // ──────────────────────────────────────────────
+    //  Gzip: DetectFormat with .gz extension
+    // ──────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("data.csv.gz", "csv", CompressionKind.Gzip)]
+    [InlineData("data.tsv.gz", "csv", CompressionKind.Gzip)]
+    [InlineData("data.json.gz", "json", CompressionKind.Gzip)]
+    [InlineData("data.jsonl.gz", "jsonl", CompressionKind.Gzip)]
+    [InlineData("data.ndjson.gz", "jsonl", CompressionKind.Gzip)]
+    [InlineData("data.parquet.gz", "parquet", CompressionKind.Gzip)]
+    [InlineData("data.pq.gz", "parquet", CompressionKind.Gzip)]
+    [InlineData("data.hdf5.gz", "hdf5", CompressionKind.Gzip)]
+    [InlineData("data.idx.gz", "idx", CompressionKind.Gzip)]
+    [InlineData("data.datum.gz", "datum", CompressionKind.Gzip)]
+    public void DetectFormat_GzipExtension_ReturnsInnerProviderWithGzip(
+        string fileName, string expectedProvider, CompressionKind expectedCompression)
+    {
+        DetectedFormat? result = FileFormatDetector.DetectFormat(fileName);
+
+        Assert.NotNull(result);
+        Assert.Equal(expectedProvider, result.Provider);
+        Assert.Equal(expectedCompression, result.Compression);
+    }
+
+    [Theory]
+    [InlineData("DATA.CSV.GZ", "csv")]
+    [InlineData("File.Parquet.Gz", "parquet")]
+    public void DetectFormat_GzipCaseInsensitive_ReturnsInnerProvider(
+        string fileName, string expectedProvider)
+    {
+        DetectedFormat? result = FileFormatDetector.DetectFormat(fileName);
+
+        Assert.NotNull(result);
+        Assert.Equal(expectedProvider, result.Provider);
+        Assert.Equal(CompressionKind.Gzip, result.Compression);
+    }
+
+    [Fact]
+    public void DetectFormat_BareGzNoInnerExtension_ReturnsNull()
+    {
+        DetectedFormat? result = FileFormatDetector.DetectFormat("data.gz");
+
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("data.csv", "csv", CompressionKind.None)]
+    [InlineData("data.parquet", "parquet", CompressionKind.None)]
+    public void DetectFormat_UncompressedFile_ReturnsNoneCompression(
+        string fileName, string expectedProvider, CompressionKind expectedCompression)
+    {
+        DetectedFormat? result = FileFormatDetector.DetectFormat(fileName);
+
+        Assert.NotNull(result);
+        Assert.Equal(expectedProvider, result.Provider);
+        Assert.Equal(expectedCompression, result.Compression);
+    }
+
+    [Fact]
+    public void DetectFormat_UnknownExtension_ReturnsNull()
+    {
+        DetectedFormat? result = FileFormatDetector.DetectFormat("data.xyz");
+
+        Assert.Null(result);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Gzip: DeriveTableName strips .gz
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public void DeriveTableName_GzipCsv_StripsGzExtension()
+    {
+        string result = FileFormatDetector.DeriveTableName("orders.csv.gz");
+
+        Assert.Equal("orders_csv", result);
+    }
+
+    [Fact]
+    public void DeriveTableName_GzipParquet_StripsGzExtension()
+    {
+        string result = FileFormatDetector.DeriveTableName("sales.parquet.gz");
+
+        Assert.Equal("sales_parquet", result);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Gzip: SupportedFilePatterns includes .gz
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public void SupportedFilePatterns_ContainsGzipVariants()
+    {
+        IReadOnlyList<string> patterns = FileFormatDetector.SupportedFilePatterns;
+
+        Assert.Contains("*.csv.gz", patterns);
+        Assert.Contains("*.parquet.gz", patterns);
+        Assert.Contains("*.json.gz", patterns);
+        Assert.Contains("*.jsonl.gz", patterns);
+        Assert.Contains("*.hdf5.gz", patterns);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Gzip: DetectProvider does NOT handle .gz
+    //  (DetectFormat should be used instead)
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public void DetectProvider_GzipExtension_ReturnsNull()
+    {
+        string? result = FileFormatDetector.DetectProvider("data.csv.gz");
+
+        // DetectProvider does not handle .gz — use DetectFormat.
+        Assert.Null(result);
+    }
 }

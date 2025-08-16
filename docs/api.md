@@ -476,21 +476,30 @@ CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests);
 // Inspect results
 foreach (JoinCandidate candidate in result.Candidates)
 {
-    Console.WriteLine($"{candidate.LeftTable}.{candidate.LeftColumn} → " +
-                      $"{candidate.RightTable}.{candidate.RightColumn} " +
-                      $"({candidate.Confidence:P0}, {candidate.Classification})");
+    Console.WriteLine($"{candidate.LeftTable}.{string.Join(", ", candidate.LeftColumns)} → " +
+                      $"{candidate.RightTable}.{string.Join(", ", candidate.RightColumns)} " +
+                      $"({candidate.Confidence:P0}, {candidate.EstimatedJoinType})");
+}
+
+// Use the primary join graph's SQL
+if (result.JoinGraphs.Count > 0 && result.JoinGraphs[0].RecommendedQuery is not null)
+{
+    Console.WriteLine(result.JoinGraphs[0].RecommendedQuery);
 }
 
 // Transitive chains (3+ tables)
-foreach (JoinChain chain in result.Chains)
+foreach (JoinChain chain in result.TransitiveChains ?? [])
 {
     Console.WriteLine(string.Join(" → ", chain.Tables));
 }
 
-// Generated SQL
-foreach (string sql in result.SqlQueries)
+// Handle equivalent table partitions (train/test splits)
+if (result.JoinGraphs.Count > 1)
 {
-    Console.WriteLine(sql);
+    foreach (JoinGraph graph in result.JoinGraphs)
+    {
+        Console.WriteLine($"{graph.Label}: {graph.EstimatedRowCount} rows");
+    }
 }
 ```
 

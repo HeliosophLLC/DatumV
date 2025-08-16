@@ -22,18 +22,25 @@ internal static class CrossManifestQueryBuilder
     /// When present, the generated SQL includes column-level comments noting
     /// nullity, skew, type coercions, and other data quality findings.
     /// </param>
+    /// <param name="alwaysIncludeCandidates">
+    /// Optional set of candidates that bypass the <see cref="CrossManifestQueryOptions.MinConfidence"/>
+    /// threshold. Used for inherited hub edges whose structural validity was proven by
+    /// equivalent table detection even though their confidence score is low.
+    /// </param>
     /// <returns>The generated SQL string, or <see langword="null"/> if no candidates qualify.</returns>
     internal static string? BuildQuery(
         IReadOnlyList<JoinCandidate> candidates,
         CrossManifestQueryOptions options,
-        IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? perTableInsights = null)
+        IReadOnlyDictionary<string, IReadOnlyList<DatasetInsight>>? perTableInsights = null,
+        IReadOnlySet<JoinCandidate>? alwaysIncludeCandidates = null)
     {
-        // Filter to candidates above the confidence threshold.
+        // Filter to candidates above the confidence threshold (or structurally validated).
         List<JoinCandidate> qualifying = new();
 
         foreach (JoinCandidate candidate in candidates)
         {
-            if (candidate.Confidence >= options.MinConfidence)
+            if (candidate.Confidence >= options.MinConfidence ||
+                alwaysIncludeCandidates?.Contains(candidate) == true)
             {
                 qualifying.Add(candidate);
             }
@@ -106,16 +113,23 @@ internal static class CrossManifestQueryBuilder
     /// </summary>
     /// <param name="candidates">Scored join candidates.</param>
     /// <param name="options">Options controlling annotation generation.</param>
+    /// <param name="alwaysIncludeCandidates">
+    /// Optional set of candidates that bypass the <see cref="CrossManifestQueryOptions.MinConfidence"/>
+    /// threshold. Used for inherited hub edges whose structural validity was proven by
+    /// equivalent table detection even though their confidence score is low.
+    /// </param>
     /// <returns>Annotations for each qualifying join candidate.</returns>
     internal static IReadOnlyList<QueryAnnotation> GenerateAnnotations(
         IReadOnlyList<JoinCandidate> candidates,
-        CrossManifestQueryOptions options)
+        CrossManifestQueryOptions options,
+        IReadOnlySet<JoinCandidate>? alwaysIncludeCandidates = null)
     {
         List<QueryAnnotation> annotations = new();
 
         foreach (JoinCandidate candidate in candidates)
         {
-            if (candidate.Confidence < options.MinConfidence)
+            if (candidate.Confidence < options.MinConfidence &&
+                alwaysIncludeCandidates?.Contains(candidate) != true)
             {
                 continue;
             }

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
@@ -12,7 +13,7 @@ namespace DatumIngest.Catalog;
 /// <see cref="TableDescriptor"/> instances and creates the
 /// appropriate <see cref="ITableProvider"/> for each.
 /// </summary>
-public sealed class TableCatalog
+public sealed class TableCatalog : IDisposable
 {
     /// <summary>
     /// Well-known option key stored on sub-table descriptors during multi-table expansion.
@@ -20,11 +21,22 @@ public sealed class TableCatalog
     /// </summary>
     public const string SubTableKeyOption = "datum:table_key";
 
+    /// <summary>
+    /// Providers that require seekable file access and cannot read from a forward-only
+    /// decompression stream. Gzip-compressed sources for these providers are decompressed
+    /// to a temporary file before registration.
+    /// </summary>
+    private static readonly HashSet<string> SeekableProviders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "parquet", "hdf5", "zip", "idx", "datum",
+    };
+
     private readonly Dictionary<string, TableDescriptor> _descriptors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Func<ITableProvider>> _providerFactories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, QueryResultsManifest> _manifests = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Schema> _schemas = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _tempFiles = new();
 
     /// <summary>
     /// Cached cross-manifest analysis result. Invalidated when a new manifest is registered.
@@ -109,14 +121,23 @@ public sealed class TableCatalog
     /// </exception>
     public void Register(string name, string filePath, IReadOnlyDictionary<string, string> options)
     {
-        string provider = FileFormatDetector.DetectProvider(filePath)
+        DetectedFormat format = FileFormatDetector.DetectFormat(filePath)
             ?? throw new ArgumentException(
                 $"Cannot detect file format for '{filePath}'. " +
                 $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
                 "Use Register(TableDescriptor) with an explicit provider.",
                 nameof(filePath));
 
-        Register(new TableDescriptor(provider, name, filePath, options));
+        if (format.Compression != CompressionKind.None && SeekableProviders.Contains(format.Provider))
+        {
+            string tempPath = DecompressGzip(filePath);
+            _tempFiles.Add(tempPath);
+            Register(new TableDescriptor(format.Provider, name, tempPath, options));
+        }
+        else
+        {
+            Register(new TableDescriptor(format.Provider, name, filePath, options, format.Compression));
+        }
     }
 
     /// <summary>
@@ -621,9 +642,54 @@ public sealed class TableCatalog
                 descriptor.Provider,
                 qualifiedName,
                 descriptor.FilePath,
-                mergedOptions);
+                mergedOptions,
+                descriptor.Compression);
 
             _descriptors[qualifiedName] = subDescriptor;
         }
+    }
+
+    /// <summary>
+    /// Synchronously decompresses a gzip file to a temporary file.
+    /// </summary>
+    private static string DecompressGzip(string gzipFilePath)
+    {
+        string tempPath = Path.Combine(
+            Path.GetTempPath(),
+            $"datum_gz_{Guid.NewGuid():N}");
+
+        using FileStream source = new(
+            gzipFilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 81920);
+
+        using GZipStream gzipStream = new(source, CompressionMode.Decompress);
+
+        using FileStream target = new(
+            tempPath, FileMode.Create, FileAccess.Write, FileShare.None,
+            bufferSize: 81920);
+
+        gzipStream.CopyTo(target);
+        return tempPath;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        foreach (string tempFile in _tempFiles)
+        {
+            try
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup.
+            }
+        }
+
+        _tempFiles.Clear();
     }
 }

@@ -44,7 +44,7 @@ public sealed class CrossManifestAnalyzerTests
 
         Assert.Single(result.Tables);
         Assert.Empty(result.Candidates);
-        Assert.Empty(result.JoinGraph);
+        Assert.Empty(result.JoinGraphs);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class CrossManifestAnalyzerTests
         CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests);
 
         // If both joins are above threshold, transitive chains should exist.
-        if (result.JoinGraph.Count >= 2)
+        if (result.JoinGraphs.Count > 0 && result.JoinGraphs[0].Edges.Count >= 2)
         {
             Assert.NotNull(result.TransitiveChains);
             Assert.True(result.TransitiveChains.Count > 0);
@@ -149,9 +149,10 @@ public sealed class CrossManifestAnalyzerTests
 
         if (result.Candidates.Any(c => c.Confidence >= 0.5))
         {
-            Assert.NotNull(result.RecommendedQuery);
-            Assert.Contains("SELECT", result.RecommendedQuery);
-            Assert.Contains("JOIN", result.RecommendedQuery);
+            Assert.True(result.JoinGraphs.Count > 0);
+            Assert.NotNull(result.JoinGraphs[0].RecommendedQuery);
+            Assert.Contains("SELECT", result.JoinGraphs[0].RecommendedQuery);
+            Assert.Contains("JOIN", result.JoinGraphs[0].RecommendedQuery);
         }
     }
 
@@ -216,6 +217,96 @@ public sealed class CrossManifestAnalyzerTests
         Assert.Contains("table_a", result.Tables);
         Assert.Contains("table_b", result.Tables);
         Assert.Contains("table_c", result.Tables);
+    }
+
+    /// <summary>
+    /// Verifies that when equivalent table detection identifies a partition pair, the
+    /// alternate graph inherits hub edges from the primary graph even when the alternate
+    /// table's candidate confidence falls below <see cref="CrossManifestThresholds.GraphEdgeMinConfidence"/>.
+    /// Reproduces the Instacart scenario where <c>order_products__train</c> has low cardinality
+    /// overlap with <c>orders</c>, producing confidence just below the graph threshold.
+    /// </summary>
+    [Fact]
+    public void Analyze_AlternateGraphInheritsHubEdgesFromPrimaryGraph()
+    {
+        // Hub table: unique key (NDV/RowCount = 1.0).
+        ManifestWithName hub = MakeManifest("hub",
+            MakeIntegerFeature("key_id", estimatedDistinctCount: 1000,
+                topK:
+                [
+                    new FrequencyEntry("1", 1),
+                    new FrequencyEntry("2", 1),
+                    new FrequencyEntry("3", 1),
+                ]));
+
+        // Preferred equivalent: NDV/RowCount = 0.1 (not unique), high TopK overlap
+        // with hub → strong confidence (~0.82, above GraphEdgeMinConfidence 0.50).
+        ManifestWithName preferred = MakeManifest("preferred",
+            MakeIntegerFeature("key_id", estimatedDistinctCount: 100,
+                topK:
+                [
+                    new FrequencyEntry("1", 10),
+                    new FrequencyEntry("2", 10),
+                    new FrequencyEntry("3", 10),
+                ]));
+
+        // Alternate equivalent: NDV/RowCount = 0.035 (not unique), zero TopK overlap
+        // with hub → weak confidence (~0.48, above CandidateMinConfidence 0.45 but
+        // below GraphEdgeMinConfidence 0.50). Without hub edge inheritance this edge
+        // would be missing from the alternate graph.
+        ManifestWithName alternate = MakeManifest("alternate",
+            MakeIntegerFeature("key_id", estimatedDistinctCount: 35,
+                topK:
+                [
+                    new FrequencyEntry("100", 30),
+                    new FrequencyEntry("200", 30),
+                    new FrequencyEntry("300", 30),
+                ]));
+
+        List<ManifestWithName> manifests = [hub, preferred, alternate];
+
+        CrossManifestResult result = CrossManifestAnalyzer.Analyze(manifests);
+
+        // Equivalent table detection should recognize preferred + alternate as a partition pair.
+        Assert.NotNull(result.EquivalentTableGroups);
+        Assert.Single(result.EquivalentTableGroups);
+        Assert.Equal("preferred", result.EquivalentTableGroups[0].PreferredTable);
+
+        // Two graphs: primary (preferred → hub) and alternate (alternate → hub).
+        Assert.Equal(2, result.JoinGraphs.Count);
+
+        // Primary graph has the hub edge.
+        JoinGraph primaryGraph = result.JoinGraphs[0];
+        JoinGraphEdge primaryHubEdge = Assert.Single(primaryGraph.Edges, edge =>
+            (edge.LeftTable == "hub" && edge.RightTable == "preferred") ||
+            (edge.LeftTable == "preferred" && edge.RightTable == "hub"));
+
+        // Alternate graph should inherit the hub edge despite the candidate's
+        // confidence being below GraphEdgeMinConfidence.
+        JoinGraph alternateGraph = result.JoinGraphs[1];
+        JoinGraphEdge inheritedEdge = Assert.Single(alternateGraph.Edges, edge =>
+            (edge.LeftTable == "hub" && edge.RightTable == "alternate") ||
+            (edge.LeftTable == "alternate" && edge.RightTable == "hub"));
+
+        // The edge carries the candidate's true confidence and records the primary
+        // edge's origin so consumers can correlate back to the structural source
+        // in the differently-shaped primary graph.
+        Assert.NotNull(inheritedEdge.InheritedFrom);
+        Assert.Equal(primaryHubEdge.CandidateIndex, inheritedEdge.InheritedFrom.CandidateIndex);
+        Assert.True(inheritedEdge.InheritedFrom.Confidence >= 0.5,
+            "InheritedFrom.Confidence should reflect the primary edge which exceeded the threshold.");
+        Assert.True(inheritedEdge.Confidence < 0.5,
+            "Inherited edge should carry the candidate's real confidence, not an inflated value.");
+        Assert.Equal(result.Candidates[inheritedEdge.CandidateIndex].Confidence, inheritedEdge.Confidence);
+
+        // The recommended query and annotations should also include the inherited
+        // hub join — they must not drop it because confidence is below MinConfidence.
+        Assert.NotNull(alternateGraph.RecommendedQuery);
+        Assert.Contains("hub", alternateGraph.RecommendedQuery);
+
+        Assert.NotNull(alternateGraph.QueryAnnotations);
+        Assert.Contains(alternateGraph.QueryAnnotations, annotation =>
+            annotation.Note.Contains("hub") && annotation.Note.Contains("alternate"));
     }
 
     // ── Helpers ──

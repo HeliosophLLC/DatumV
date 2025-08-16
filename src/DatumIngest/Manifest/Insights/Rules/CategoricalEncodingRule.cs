@@ -108,7 +108,7 @@ internal sealed class CategoricalEncodingRule : IInsightRule
             0.80,
             InsightScope.Feature,
             $"Column '{feature.Name}' has {feature.EstimatedDistinctCount} distinct values (> {thresholds.OneHotMaxDistinct} threshold).",
-            "One-hot encoding this column would create {feature.EstimatedDistinctCount} sparse columns, inflating dimensionality and slowing training. Most categories will have too few examples for reliable learning.",
+            $"One-hot encoding this column would create {feature.EstimatedDistinctCount} sparse columns, inflating dimensionality and slowing training. Most categories will have too few examples for reliable learning.",
             $"Use target encoding, hashing, or embedding for '{feature.Name}'. If many categories are rare, consider grouping infrequent values.",
             Rationale: null,
             Alternatives: ["Drop the column if it does not carry predictive signal.", "Use frequency encoding."],

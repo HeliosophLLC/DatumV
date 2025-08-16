@@ -207,9 +207,11 @@ public sealed class SourceAnalyzerTests
 
         SourceAnalysisResult result = await analyzer.AnalyzeAsync(catalog, CancellationToken.None);
 
-        Assert.True(result.IndexSet.Tables.ContainsKey("data"));
-        Assert.True(result.Manifest.Tables.ContainsKey("data"));
-        Assert.True(result.Manifest.Tables["data"].RowCount > 0);
+        // GetSidecarTableName derives the key from the file path, not the registered name.
+        string tableKey = FileFormatDetector.DeriveTableName(FixturePath("simple.csv"));
+        Assert.True(result.IndexSet.Tables.ContainsKey(tableKey));
+        Assert.True(result.Manifest.Tables.ContainsKey(tableKey));
+        Assert.True(result.Manifest.Tables[tableKey].RowCount > 0);
     }
 
     /// <summary>
@@ -235,7 +237,11 @@ public sealed class SourceAnalyzerTests
 
     private static TableDescriptor CreateDescriptor(string name)
     {
-        return new TableDescriptor("test", name, $"{name}.test", new Dictionary<string, string>());
+        Dictionary<string, string> options = new()
+        {
+            [TableCatalog.SubTableKeyOption] = name,
+        };
+        return new TableDescriptor("test", name, $"{name}.test", options);
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)

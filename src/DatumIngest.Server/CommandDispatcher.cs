@@ -519,6 +519,24 @@ public sealed class CommandDispatcher
             }
         }
 
+        if (result.JoinGraphs.Count > 0)
+        {
+            output.AppendLine();
+            output.AppendLine($"  {result.JoinGraphs.Count} join graph(s):");
+
+            for (int i = 0; i < result.JoinGraphs.Count; i++)
+            {
+                JoinGraph graph = result.JoinGraphs[i];
+                string graphLabel = graph.Label ?? "primary";
+                output.AppendLine($"    Graph {i + 1} ({graphLabel}): {graph.Edges.Count} edge(s)");
+
+                if (graph.Reason is not null)
+                {
+                    output.AppendLine($"      {graph.Reason}");
+                }
+            }
+        }
+
         if (result.TransitiveChains is { Count: > 0 })
         {
             output.AppendLine();
@@ -541,11 +559,11 @@ public sealed class CommandDispatcher
             }
         }
 
-        if (result.RecommendedQuery is not null)
+        if (result.JoinGraphs.Count > 0 && result.JoinGraphs[0].RecommendedQuery is not null)
         {
             output.AppendLine();
             output.AppendLine("  Suggested JOIN query:");
-            output.AppendLine(result.RecommendedQuery);
+            output.AppendLine(result.JoinGraphs[0].RecommendedQuery);
         }
 
         return CommandResult.Success(output.ToString());
@@ -610,13 +628,29 @@ public sealed class CommandDispatcher
             filePath = pathAndOptions;
         }
 
-        provider ??= FileFormatDetector.DetectProvider(filePath)
-            ?? throw new ArgumentException(
-                $"Cannot detect provider for '{filePath}'. " +
-                $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
-                "Use explicit format: provider:name=path");
+        // Detect compression from the file extension (e.g. .gz).
+        CompressionKind compression = CompressionKind.None;
+        string outerExtension = Path.GetExtension(filePath);
+        if (outerExtension.Equals(".gz", StringComparison.OrdinalIgnoreCase))
+        {
+            compression = CompressionKind.Gzip;
+        }
 
-        return new TableDescriptor(provider, name, filePath, options);
+        if (provider is null)
+        {
+            // Strip compression extension before detecting the inner format.
+            string detectPath = compression != CompressionKind.None
+                ? filePath[..^outerExtension.Length]
+                : filePath;
+
+            provider = FileFormatDetector.DetectProvider(detectPath)
+                ?? throw new ArgumentException(
+                    $"Cannot detect provider for '{filePath}'. " +
+                    $"Supported formats: {FileFormatDetector.SupportedFormatList}. " +
+                    "Use explicit format: provider:name=path");
+        }
+
+        return new TableDescriptor(provider, name, filePath, options, compression);
     }
 
     /// <summary>

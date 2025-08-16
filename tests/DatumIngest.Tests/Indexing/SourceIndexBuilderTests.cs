@@ -816,7 +816,11 @@ public sealed class SourceIndexBuilderTests
 
     private static TableDescriptor CreateDescriptor(string name)
     {
-        return new TableDescriptor("test", name, $"{name}.test", new Dictionary<string, string>());
+        Dictionary<string, string> options = new()
+        {
+            [TableCatalog.SubTableKeyOption] = name,
+        };
+        return new TableDescriptor("test", name, $"{name}.test", options);
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
