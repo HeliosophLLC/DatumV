@@ -339,6 +339,55 @@ public sealed class JoinEvidenceScorerTests
     }
 
     [Fact]
+    public void ScoreEvidence_IndependentUuidIdentifiers_PenalisesConfidence()
+    {
+        // Two UUID columns from different entity domains: customer_id vs order_id.
+        // Both are near-unique (distinct ratio ≥ 0.95), disjoint TopK, moderate name
+        // similarity (~0.60 after _id suffix bonus). The independent-identifier penalty
+        // should suppress the score below the candidate threshold.
+        StringFeatureManifest left = MakeStringFeatureWithTopK("customer_id",
+            [new FrequencyEntry("uuid-aaa-111", 1), new FrequencyEntry("uuid-aaa-222", 1)],
+            estimatedDistinctCount: 96000);
+        StringFeatureManifest right = MakeStringFeatureWithTopK("order_id",
+            [new FrequencyEntry("uuid-bbb-333", 1), new FrequencyEntry("uuid-bbb-444", 1)],
+            estimatedDistinctCount: 99000);
+
+        ColumnMatchCandidate match = new("customer_id", "order_id", 0.605, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 100000, right, 100000, match, CrossManifestThresholds.Default);
+
+        // Combined zero-overlap-weak-name (×0.85) + independent-identifier (×0.75)
+        // penalties should push this well below CandidateMinConfidence (0.45).
+        Assert.True(evidence.CompositeConfidence < 0.45,
+            $"Expected < 0.45 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
+    public void ScoreEvidence_SameNameUuidColumns_RetainsHighConfidence()
+    {
+        // True UUID FK join: customer_id ↔ customer_id across two tables.
+        // Both sides are near-unique with zero TopK overlap (UUIDs don't collide
+        // in small samples), but exact name match protects from penalty.
+        StringFeatureManifest left = MakeStringFeatureWithTopK("customer_id",
+            [new FrequencyEntry("uuid-aaa-111", 1), new FrequencyEntry("uuid-aaa-222", 1)],
+            estimatedDistinctCount: 96000);
+        StringFeatureManifest right = MakeStringFeatureWithTopK("customer_id",
+            [new FrequencyEntry("uuid-aaa-333", 1), new FrequencyEntry("uuid-aaa-444", 1)],
+            estimatedDistinctCount: 99000);
+
+        ColumnMatchCandidate match = new("customer_id", "customer_id", 1.0, 1.0);
+
+        JoinEvidence evidence = JoinEvidenceScorer.ScoreEvidence(
+            left, 100000, right, 100000, match, CrossManifestThresholds.Default);
+
+        // Exact name match means neither zero-overlap-weak-name nor
+        // independent-identifier penalty fires. Score should stay high.
+        Assert.True(evidence.CompositeConfidence > 0.80,
+            $"Expected > 0.80 but was {evidence.CompositeConfidence:F4}");
+    }
+
+    [Fact]
     public void ScoreEvidence_ManyToManyUnrelatedColumns_PenalisesConfidence()
     {
         // reordered (2 values in 32M rows) vs order_dow (7 values in 3.4M rows).

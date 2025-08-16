@@ -60,6 +60,13 @@ internal static class JoinEvidenceScorer
     private const double ManyToManyUniqueKeyThreshold = 0.1;
 
     /// <summary>
+    /// Confidence multiplier when both sides are unique keys with zero value overlap
+    /// and weak name similarity — indicates independent identifier spaces
+    /// (e.g. different UUID domains sharing only an <c>_id</c> suffix).
+    /// </summary>
+    private const double IndependentIdentifierPenalty = 0.75;
+
+    /// <summary>
     /// Computes the full join evidence for a candidate column pair.
     /// </summary>
     /// <param name="left">Feature manifest for the left column.</param>
@@ -82,6 +89,7 @@ internal static class JoinEvidenceScorer
         double? rangeOverlap = ComputeRangeOverlap(left, right);
         double nullKeyRatio = ComputeNullKeyRatio(left, right);
         double uniqueKeyScore = ComputeUniqueKeyScore(left, leftRowCount, right, rightRowCount);
+        bool bothSidesUniqueKey = IsUniqueKey(left, leftRowCount) && IsUniqueKey(right, rightRowCount);
 
         double compositeConfidence = ComputeCompositeConfidence(
             matchCandidate.NameSimilarity,
@@ -90,6 +98,7 @@ internal static class JoinEvidenceScorer
             cardinalityRatio,
             rangeOverlap,
             uniqueKeyScore,
+            bothSidesUniqueKey,
             thresholds);
 
         return new JoinEvidence
@@ -314,6 +323,7 @@ internal static class JoinEvidenceScorer
         double cardinalityRatio,
         double? rangeOverlap,
         double uniqueKeyScore,
+        bool bothSidesUniqueKey,
         CrossManifestThresholds thresholds)
     {
         double totalWeight;
@@ -354,7 +364,8 @@ internal static class JoinEvidenceScorer
         double confidence = totalWeight > 0.0 ? weightedSum / totalWeight : 0.0;
 
         confidence = ApplyMultiplicativePenalties(
-            confidence, nameSimilarity, typeCompatibility, topKJaccard, cardinalityRatio, uniqueKeyScore);
+            confidence, nameSimilarity, typeCompatibility, topKJaccard, cardinalityRatio, uniqueKeyScore,
+            bothSidesUniqueKey);
 
         return confidence;
     }
@@ -371,7 +382,8 @@ internal static class JoinEvidenceScorer
         double typeCompatibility,
         double topKJaccard,
         double cardinalityRatio,
-        double uniqueKeyScore)
+        double uniqueKeyScore,
+        bool bothSidesUniqueKey)
     {
         // Incompatible types require a cast — penalise regardless of name match.
         if (typeCompatibility == 0.0)
@@ -391,6 +403,14 @@ internal static class JoinEvidenceScorer
         if (topKJaccard == 0.0 && nameSimilarity < StrongNameThreshold)
         {
             confidence *= ZeroOverlapWeakNamePenalty;
+        }
+
+        // Both sides are unique keys with zero value overlap and non-matching names
+        // — independent identifier spaces (e.g. different UUID domains sharing an
+        // _id suffix). Compounds with the zero-overlap-weak-name penalty above.
+        if (topKJaccard == 0.0 && bothSidesUniqueKey && nameSimilarity < StrongNameThreshold)
+        {
+            confidence *= IndependentIdentifierPenalty;
         }
 
         // Very different column names — names are the strongest structural signal.
