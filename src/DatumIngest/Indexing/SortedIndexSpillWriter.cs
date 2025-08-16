@@ -38,6 +38,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     private readonly Dictionary<string, BinaryWriter> _spillWriters;
     private readonly Dictionary<string, int> _spillRunCounts;
     private readonly Dictionary<string, long> _spillTotalEntries;
+    private readonly Dictionary<string, List<SpillRunMetadata>> _spillRunMetadata;
     private readonly HashSet<string> _droppedColumns;
     private bool _preparedForReading;
     private bool _disposed;
@@ -52,6 +53,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         _spillWriters = new(StringComparer.OrdinalIgnoreCase);
         _spillRunCounts = new(StringComparer.OrdinalIgnoreCase);
         _spillTotalEntries = new(StringComparer.OrdinalIgnoreCase);
+        _spillRunMetadata = new(StringComparer.OrdinalIgnoreCase);
         _droppedColumns = new(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -66,6 +68,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             _currentChunkEntries.TryAdd(column, new List<ValueIndexEntry>());
             _spillRunCounts.TryAdd(column, 0);
             _spillTotalEntries.TryAdd(column, 0);
+            _spillRunMetadata.TryAdd(column, new List<SpillRunMetadata>());
         }
     }
 
@@ -132,6 +135,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         _currentChunkEntries.Remove(columnName);
         _spillRunCounts.Remove(columnName);
         _spillTotalEntries.Remove(columnName);
+        _spillRunMetadata.Remove(columnName);
 
         if (_spillWriters.TryGetValue(columnName, out BinaryWriter? writer))
         {
@@ -170,6 +174,10 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             BinaryWriter writer = GetOrCreateSpillWriter(columnName);
             writer.Write(entries.Count);
 
+            // Record the data-start position (after the count prefix) so the
+            // merge phase can jump directly to each run without scanning.
+            long dataStartPosition = writer.BaseStream.Position;
+
             foreach (ValueIndexEntry entry in entries)
             {
                 IndexWriter.WriteDataValue(writer, entry.Key);
@@ -179,6 +187,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
             _spillRunCounts[columnName]++;
             _spillTotalEntries[columnName] += entries.Count;
+            _spillRunMetadata[columnName].Add(new SpillRunMetadata(dataStartPosition, entries.Count));
 
             entries.Clear();
         }
@@ -377,20 +386,15 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             yield break;
         }
 
-        RunState[] runs = new RunState[runCount];
+        List<SpillRunMetadata> runMetadata = _spillRunMetadata[columnName];
+        BufferedRunReader[] runs = new BufferedRunReader[runCount];
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
-            long runStart = fileStream.Position;
-            int entryCount = reader.ReadInt32();
-            long dataStart = fileStream.Position;
-
-            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
-            {
-                SkipEntry(reader);
-            }
-
-            runs[runIndex] = new RunState(runStart, dataStart, entryCount);
+            runs[runIndex] = new BufferedRunReader(
+                reader, fileStream,
+                runMetadata[runIndex].DataStartPosition,
+                runMetadata[runIndex].EntryCount);
         }
 
         PriorityQueue<int, DataValue> queue = new(
@@ -398,14 +402,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
-            if (runs[runIndex].RemainingCount > 0)
+            if (runs[runIndex].TryAdvance())
             {
-                fileStream.Position = runs[runIndex].DataPosition;
-                ValueIndexEntry entry = ReadEntry(reader);
-                runs[runIndex].Current = entry;
-                runs[runIndex].DataPosition = fileStream.Position;
-                runs[runIndex].RemainingCount--;
-                queue.Enqueue(runIndex, entry.Key);
+                queue.Enqueue(runIndex, runs[runIndex].Current.Key);
             }
         }
 
@@ -414,14 +413,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             int runIndex = queue.Dequeue();
             yield return runs[runIndex].Current;
 
-            if (runs[runIndex].RemainingCount > 0)
+            if (runs[runIndex].TryAdvance())
             {
-                fileStream.Position = runs[runIndex].DataPosition;
-                ValueIndexEntry nextEntry = ReadEntry(reader);
-                runs[runIndex].Current = nextEntry;
-                runs[runIndex].DataPosition = fileStream.Position;
-                runs[runIndex].RemainingCount--;
-                queue.Enqueue(runIndex, nextEntry.Key);
+                queue.Enqueue(runIndex, runs[runIndex].Current.Key);
             }
         }
     }
@@ -591,20 +585,15 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             return;
         }
 
-        RunState[] runs = new RunState[runCount];
+        List<SpillRunMetadata> runMetadata = _spillRunMetadata[columnName];
+        BufferedRunReader[] runs = new BufferedRunReader[runCount];
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
-            long runStart = fileStream.Position;
-            int entryCount = reader.ReadInt32();
-            long dataStart = fileStream.Position;
-
-            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
-            {
-                SkipEntry(reader);
-            }
-
-            runs[runIndex] = new RunState(runStart, dataStart, entryCount);
+            runs[runIndex] = new BufferedRunReader(
+                reader, fileStream,
+                runMetadata[runIndex].DataStartPosition,
+                runMetadata[runIndex].EntryCount);
         }
 
         PriorityQueue<int, DataValue> queue = new(
@@ -612,14 +601,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
-            if (runs[runIndex].RemainingCount > 0)
+            if (runs[runIndex].TryAdvance())
             {
-                fileStream.Position = runs[runIndex].DataPosition;
-                ValueIndexEntry entry = ReadEntry(reader);
-                runs[runIndex].Current = entry;
-                runs[runIndex].DataPosition = fileStream.Position;
-                runs[runIndex].RemainingCount--;
-                queue.Enqueue(runIndex, entry.Key);
+                queue.Enqueue(runIndex, runs[runIndex].Current.Key);
             }
         }
 
@@ -632,14 +616,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             output.Write(entry.ChunkIndex);
             output.Write(entry.RowOffsetInChunk);
 
-            if (runs[runIndex].RemainingCount > 0)
+            if (runs[runIndex].TryAdvance())
             {
-                fileStream.Position = runs[runIndex].DataPosition;
-                ValueIndexEntry nextEntry = ReadEntry(reader);
-                runs[runIndex].Current = nextEntry;
-                runs[runIndex].DataPosition = fileStream.Position;
-                runs[runIndex].RemainingCount--;
-                queue.Enqueue(runIndex, nextEntry.Key);
+                queue.Enqueue(runIndex, runs[runIndex].Current.Key);
             }
         }
     }
@@ -675,22 +654,16 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             return ReadSingleRun(reader);
         }
 
-        // Load run metadata: each run's remaining count and current position.
-        RunState[] runs = new RunState[runCount];
+        // Use pre-recorded run metadata to avoid scanning the spill file.
+        List<SpillRunMetadata> runMetadata = _spillRunMetadata[columnName];
+        BufferedRunReader[] runs = new BufferedRunReader[runCount];
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
-            long runStart = fileStream.Position;
-            int entryCount = reader.ReadInt32();
-            long dataStart = fileStream.Position;
-
-            // Skip past this run's data to find the next run.
-            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
-            {
-                SkipEntry(reader);
-            }
-
-            runs[runIndex] = new RunState(runStart, dataStart, entryCount);
+            runs[runIndex] = new BufferedRunReader(
+                reader, fileStream,
+                runMetadata[runIndex].DataStartPosition,
+                runMetadata[runIndex].EntryCount);
         }
 
         // K-way merge using a priority queue.
@@ -701,14 +674,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         // Seed the queue with the first entry from each run.
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
-            if (runs[runIndex].RemainingCount > 0)
+            if (runs[runIndex].TryAdvance())
             {
-                fileStream.Position = runs[runIndex].DataPosition;
-                ValueIndexEntry entry = ReadEntry(reader);
-                runs[runIndex].Current = entry;
-                runs[runIndex].DataPosition = fileStream.Position;
-                runs[runIndex].RemainingCount--;
-                queue.Enqueue(runIndex, entry.Key);
+                queue.Enqueue(runIndex, runs[runIndex].Current.Key);
             }
         }
 
@@ -719,14 +687,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             int runIndex = queue.Dequeue();
             result[outputIndex++] = runs[runIndex].Current;
 
-            if (runs[runIndex].RemainingCount > 0)
+            if (runs[runIndex].TryAdvance())
             {
-                fileStream.Position = runs[runIndex].DataPosition;
-                ValueIndexEntry nextEntry = ReadEntry(reader);
-                runs[runIndex].Current = nextEntry;
-                runs[runIndex].DataPosition = fileStream.Position;
-                runs[runIndex].RemainingCount--;
-                queue.Enqueue(runIndex, nextEntry.Key);
+                queue.Enqueue(runIndex, runs[runIndex].Current.Key);
             }
         }
 
@@ -752,14 +715,6 @@ internal sealed class SortedIndexSpillWriter : IDisposable
         int chunkIndex = reader.ReadInt32();
         long rowOffset = reader.ReadInt64();
         return new ValueIndexEntry(key, chunkIndex, rowOffset);
-    }
-
-    private static void SkipEntry(BinaryReader reader)
-    {
-        // Read and discard the DataValue + chunkIndex + rowOffset.
-        IndexReader.ReadDataValue(reader);
-        reader.ReadInt32();
-        reader.ReadInt64();
     }
 
     private BinaryWriter GetOrCreateSpillWriter(string columnName)
@@ -815,19 +770,91 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     }
 
     /// <summary>
-    /// Tracks the state of a single sorted run during k-way merge.
+    /// Records the file offset and entry count of a sorted run, captured during
+    /// <see cref="FlushChunk"/> so the merge phase can seek directly to each run
+    /// without scanning through the spill file.
     /// </summary>
-    private sealed class RunState
+    private readonly record struct SpillRunMetadata(long DataStartPosition, int EntryCount);
+
+    /// <summary>
+    /// Reads entries from a sorted run in blocks to amortize seek cost. Instead of
+    /// seeking and reading one entry per priority-queue pop (O(N) seeks for N entries),
+    /// this reader fills an internal buffer of up to <see cref="EntriesPerBlock"/>
+    /// entries per seek, reducing total seeks by that factor.
+    /// </summary>
+    private sealed class BufferedRunReader
     {
-        internal long DataPosition;
-        internal int RemainingCount;
+        /// <summary>
+        /// Number of entries to read per buffer fill. Balances memory (3,200 runs ×
+        /// 256 entries × ~28 bytes ≈ 22 MB per column) against seek reduction.
+        /// </summary>
+        private const int EntriesPerBlock = 256;
+
+        private readonly BinaryReader _reader;
+        private readonly FileStream _fileStream;
+        private readonly ValueIndexEntry[] _buffer;
+        private int _bufferCount;
+        private int _bufferIndex;
+        private long _nextReadPosition;
+        private int _remainingInRun;
+
+        /// <summary>
+        /// The most recently advanced entry. Valid after a successful <see cref="TryAdvance"/>.
+        /// </summary>
         internal ValueIndexEntry Current;
 
-        internal RunState(long runStart, long dataPosition, int entryCount)
+        internal BufferedRunReader(
+            BinaryReader reader,
+            FileStream fileStream,
+            long dataStartPosition,
+            int entryCount)
         {
-            _ = runStart;
-            DataPosition = dataPosition;
-            RemainingCount = entryCount;
+            _reader = reader;
+            _fileStream = fileStream;
+            _buffer = new ValueIndexEntry[EntriesPerBlock];
+            _nextReadPosition = dataStartPosition;
+            _remainingInRun = entryCount;
+            _bufferCount = 0;
+            _bufferIndex = 0;
+        }
+
+        /// <summary>
+        /// Advances to the next entry, refilling the buffer from disk when exhausted.
+        /// </summary>
+        /// <returns><c>true</c> if an entry is available in <see cref="Current"/>;
+        /// <c>false</c> if the run is fully consumed.</returns>
+        internal bool TryAdvance()
+        {
+            if (_bufferIndex < _bufferCount)
+            {
+                Current = _buffer[_bufferIndex++];
+                return true;
+            }
+
+            if (_remainingInRun <= 0)
+            {
+                return false;
+            }
+
+            FillBuffer();
+            Current = _buffer[_bufferIndex++];
+            return true;
+        }
+
+        private void FillBuffer()
+        {
+            _fileStream.Position = _nextReadPosition;
+            int toRead = Math.Min(EntriesPerBlock, _remainingInRun);
+
+            for (int index = 0; index < toRead; index++)
+            {
+                _buffer[index] = ReadEntry(_reader);
+            }
+
+            _nextReadPosition = _fileStream.Position;
+            _remainingInRun -= toRead;
+            _bufferCount = toRead;
+            _bufferIndex = 0;
         }
     }
 
