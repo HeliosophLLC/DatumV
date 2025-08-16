@@ -8,15 +8,53 @@ using DatumIngest.Model;
 /// to bound memory. When the cap is reached, new unseen values are pooled into
 /// an untracked bucket and entropy is flagged as approximate.
 /// </summary>
+/// <remarks>
+/// For <see cref="DataKind.Scalar"/> and <see cref="DataKind.UInt8"/> columns, frequencies
+/// are tracked using integer keys (float bit patterns or byte values) to avoid per-row
+/// string allocations on the hot path.
+/// </remarks>
 public sealed class EntropyAccumulator : IStatisticAccumulator
 {
     /// <summary>Maximum number of distinct values to track exactly.</summary>
     public const int MaxDistinctValues = 100_000;
 
-    private readonly Dictionary<string, long> _frequencies = new();
+    private readonly Dictionary<string, long>? _stringFrequencies;
+    private readonly Dictionary<int, long>? _numericFrequencies;
+    private readonly DataKind _kind;
     private long _totalCount;
     private long _untrackedCount;
     private bool _capped;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="EntropyAccumulator"/> class
+    /// using string-keyed frequency tracking.
+    /// </summary>
+    public EntropyAccumulator() : this(DataKind.String)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="EntropyAccumulator"/> class,
+    /// selecting numeric or string frequency tracking based on column kind.
+    /// </summary>
+    /// <param name="kind">
+    /// The <see cref="DataKind"/> of the column. <see cref="DataKind.Scalar"/> and
+    /// <see cref="DataKind.UInt8"/> use integer-keyed dictionaries to avoid per-row
+    /// string allocations.
+    /// </param>
+    public EntropyAccumulator(DataKind kind)
+    {
+        _kind = kind;
+
+        if (kind is DataKind.Scalar or DataKind.UInt8)
+        {
+            _numericFrequencies = new();
+        }
+        else
+        {
+            _stringFrequencies = new();
+        }
+    }
 
     /// <inheritdoc />
     public void Add(DataValue value)
@@ -26,31 +64,60 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
             return;
         }
 
-        string? key = ToKey(value);
-
-        if (key is null)
+        if (_numericFrequencies is not null)
         {
-            return;
-        }
+            int key = _kind == DataKind.UInt8
+                ? value.AsUInt8()
+                : BitConverter.SingleToInt32Bits(value.AsScalar());
 
-        _totalCount++;
+            _totalCount++;
 
-        if (_frequencies.TryGetValue(key, out long count))
-        {
-            _frequencies[key] = count + 1;
-        }
-        else if (!_capped)
-        {
-            _frequencies[key] = 1;
-
-            if (_frequencies.Count >= MaxDistinctValues)
+            if (_numericFrequencies.TryGetValue(key, out long count))
             {
-                _capped = true;
+                _numericFrequencies[key] = count + 1;
+            }
+            else if (!_capped)
+            {
+                _numericFrequencies[key] = 1;
+
+                if (_numericFrequencies.Count >= MaxDistinctValues)
+                {
+                    _capped = true;
+                }
+            }
+            else
+            {
+                _untrackedCount++;
             }
         }
         else
         {
-            _untrackedCount++;
+            string? key = ToKey(value);
+
+            if (key is null)
+            {
+                return;
+            }
+
+            _totalCount++;
+
+            if (_stringFrequencies!.TryGetValue(key, out long count))
+            {
+                _stringFrequencies[key] = count + 1;
+            }
+            else if (!_capped)
+            {
+                _stringFrequencies[key] = 1;
+
+                if (_stringFrequencies.Count >= MaxDistinctValues)
+                {
+                    _capped = true;
+                }
+            }
+            else
+            {
+                _untrackedCount++;
+            }
         }
     }
 
@@ -65,26 +132,53 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
         _totalCount += otherEntropy._totalCount;
         _untrackedCount += otherEntropy._untrackedCount;
 
-        foreach (KeyValuePair<string, long> entry in otherEntropy._frequencies)
+        if (_numericFrequencies is not null && otherEntropy._numericFrequencies is not null)
         {
-            if (_frequencies.TryGetValue(entry.Key, out long existing))
+            foreach (KeyValuePair<int, long> entry in otherEntropy._numericFrequencies)
             {
-                _frequencies[entry.Key] = existing + entry.Value;
+                if (_numericFrequencies.TryGetValue(entry.Key, out long existing))
+                {
+                    _numericFrequencies[entry.Key] = existing + entry.Value;
+                }
+                else if (_numericFrequencies.Count < MaxDistinctValues)
+                {
+                    _numericFrequencies[entry.Key] = entry.Value;
+                }
+                else
+                {
+                    _untrackedCount += entry.Value;
+                    _capped = true;
+                }
             }
-            else if (_frequencies.Count < MaxDistinctValues)
+
+            if (_numericFrequencies.Count >= MaxDistinctValues)
             {
-                _frequencies[entry.Key] = entry.Value;
-            }
-            else
-            {
-                _untrackedCount += entry.Value;
                 _capped = true;
             }
         }
-
-        if (_frequencies.Count >= MaxDistinctValues)
+        else if (_stringFrequencies is not null && otherEntropy._stringFrequencies is not null)
         {
-            _capped = true;
+            foreach (KeyValuePair<string, long> entry in otherEntropy._stringFrequencies)
+            {
+                if (_stringFrequencies.TryGetValue(entry.Key, out long existing))
+                {
+                    _stringFrequencies[entry.Key] = existing + entry.Value;
+                }
+                else if (_stringFrequencies.Count < MaxDistinctValues)
+                {
+                    _stringFrequencies[entry.Key] = entry.Value;
+                }
+                else
+                {
+                    _untrackedCount += entry.Value;
+                    _capped = true;
+                }
+            }
+
+            if (_stringFrequencies.Count >= MaxDistinctValues)
+            {
+                _capped = true;
+            }
         }
     }
 
@@ -98,12 +192,26 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
 
         double entropy = 0.0;
 
-        foreach (long frequency in _frequencies.Values)
+        if (_numericFrequencies is not null)
         {
-            if (frequency > 0)
+            foreach (long frequency in _numericFrequencies.Values)
             {
-                double p = (double)frequency / _totalCount;
-                entropy -= p * Math.Log2(p);
+                if (frequency > 0)
+                {
+                    double p = (double)frequency / _totalCount;
+                    entropy -= p * Math.Log2(p);
+                }
+            }
+        }
+        else
+        {
+            foreach (long frequency in _stringFrequencies!.Values)
+            {
+                if (frequency > 0)
+                {
+                    double p = (double)frequency / _totalCount;
+                    entropy -= p * Math.Log2(p);
+                }
             }
         }
 

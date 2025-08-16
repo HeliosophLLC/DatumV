@@ -284,7 +284,7 @@ public static class DatumIngester
         await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
-            await datumWriter.WriteRowAsync(row, cancellationToken).ConfigureAwait(false);
+            datumWriter.WriteRow(row);
             sampleCollector.Consider(row);
             rowCount++;
 

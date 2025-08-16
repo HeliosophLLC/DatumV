@@ -50,11 +50,9 @@ internal sealed class SamplePreviewCollector
     /// <param name="row">The row to consider.</param>
     public void Consider(Row row)
     {
-        object?[] converted = ConvertRow(row);
-
         if (_reservoirCount < _sampleSize)
         {
-            _reservoir[_reservoirCount] = converted;
+            _reservoir[_reservoirCount] = ConvertRow(row);
             _reservoirCount++;
         }
         else
@@ -63,7 +61,7 @@ internal sealed class SamplePreviewCollector
 
             if (j < _sampleSize)
             {
-                _reservoir[j] = converted;
+                _reservoir[j] = ConvertRow(row);
             }
         }
 

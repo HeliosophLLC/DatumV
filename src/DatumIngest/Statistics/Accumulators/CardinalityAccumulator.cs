@@ -22,9 +22,11 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
             return;
         }
 
+        // Scalar uses the raw float bit pattern as an integer string — faster than
+        // float.ToString("R") and still unique per distinct float value.
         string representation = value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar().ToString("R"),
+            DataKind.Scalar => BitConverter.SingleToInt32Bits(value.AsScalar()).ToString(),
             DataKind.UInt8 => value.AsUInt8().ToString(),
             DataKind.String => value.AsString(),
             DataKind.Date => value.AsDate().ToString("O"),

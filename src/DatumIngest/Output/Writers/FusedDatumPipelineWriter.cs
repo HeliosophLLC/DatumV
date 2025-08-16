@@ -116,8 +116,13 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc/>
-    public Task WriteRowAsync(Row row, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Writes a single row synchronously, bypassing the async state machine overhead
+    /// of <see cref="WriteRowAsync"/>. Prefer this method in tight ingestion loops
+    /// where every row is processed on the same thread.
+    /// </summary>
+    /// <param name="row">The row to write.</param>
+    public void WriteRow(Row row)
     {
         if (_schema is null)
         {
@@ -128,6 +133,12 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
         _indexBuilder?.AddRow(row);
         _statisticsCollector?.AddRow(row);
         _rowsWritten++;
+    }
+
+    /// <inheritdoc/>
+    public Task WriteRowAsync(Row row, CancellationToken cancellationToken = default)
+    {
+        WriteRow(row);
         return Task.CompletedTask;
     }
 

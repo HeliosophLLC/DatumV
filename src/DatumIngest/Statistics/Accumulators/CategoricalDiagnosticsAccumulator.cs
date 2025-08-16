@@ -11,6 +11,11 @@ using DatumIngest.Model;
 /// to bound memory. When the cap is reached, new unseen values are still counted toward
 /// the total but not tracked individually, and the result is flagged as approximate.
 /// </summary>
+/// <remarks>
+/// For <see cref="DataKind.Scalar"/> and <see cref="DataKind.UInt8"/> columns, frequencies
+/// are tracked using integer keys (float bit patterns or byte values) to avoid per-row
+/// string allocations on the hot path.
+/// </remarks>
 public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
 {
     /// <summary>
@@ -25,18 +30,45 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
     public const int MaxDistinctValues = 100_000;
 
     private readonly int _k;
-    private readonly Dictionary<string, long> _frequencies = new();
+    private readonly DataKind _kind;
+    private readonly Dictionary<string, long>? _stringFrequencies;
+    private readonly Dictionary<int, long>? _numericFrequencies;
     private long _totalCount;
     private long _untrackedCount;
     private bool _capped;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="CategoricalDiagnosticsAccumulator"/> class.
+    /// Initializes a new instance of the <see cref="CategoricalDiagnosticsAccumulator"/> class
+    /// using string-keyed frequency tracking.
     /// </summary>
     /// <param name="k">Number of top categories used to compute coverage. Should match the top-K parameter.</param>
-    public CategoricalDiagnosticsAccumulator(int k = 10)
+    public CategoricalDiagnosticsAccumulator(int k = 10) : this(k, DataKind.String)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CategoricalDiagnosticsAccumulator"/> class,
+    /// selecting numeric or string frequency tracking based on column kind.
+    /// </summary>
+    /// <param name="k">Number of top categories used to compute coverage.</param>
+    /// <param name="kind">
+    /// The <see cref="DataKind"/> of the column. <see cref="DataKind.Scalar"/> and
+    /// <see cref="DataKind.UInt8"/> use integer-keyed dictionaries to avoid per-row
+    /// string allocations.
+    /// </param>
+    public CategoricalDiagnosticsAccumulator(int k, DataKind kind)
     {
         _k = k;
+        _kind = kind;
+
+        if (kind is DataKind.Scalar or DataKind.UInt8)
+        {
+            _numericFrequencies = new();
+        }
+        else
+        {
+            _stringFrequencies = new();
+        }
     }
 
     /// <inheritdoc />
@@ -47,26 +79,53 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
             return;
         }
 
-        string key = ValueToString(value);
-
         _totalCount++;
 
-        if (_frequencies.TryGetValue(key, out long currentCount))
+        if (_numericFrequencies is not null)
         {
-            _frequencies[key] = currentCount + 1;
-        }
-        else if (!_capped)
-        {
-            _frequencies[key] = 1;
+            int key = _kind == DataKind.UInt8
+                ? value.AsUInt8()
+                : BitConverter.SingleToInt32Bits(value.AsScalar());
 
-            if (_frequencies.Count >= MaxDistinctValues)
+            if (_numericFrequencies.TryGetValue(key, out long currentCount))
             {
-                _capped = true;
+                _numericFrequencies[key] = currentCount + 1;
+            }
+            else if (!_capped)
+            {
+                _numericFrequencies[key] = 1;
+
+                if (_numericFrequencies.Count >= MaxDistinctValues)
+                {
+                    _capped = true;
+                }
+            }
+            else
+            {
+                _untrackedCount++;
             }
         }
         else
         {
-            _untrackedCount++;
+            string key = ValueToString(value);
+
+            if (_stringFrequencies!.TryGetValue(key, out long currentCount))
+            {
+                _stringFrequencies[key] = currentCount + 1;
+            }
+            else if (!_capped)
+            {
+                _stringFrequencies[key] = 1;
+
+                if (_stringFrequencies.Count >= MaxDistinctValues)
+                {
+                    _capped = true;
+                }
+            }
+            else
+            {
+                _untrackedCount++;
+            }
         }
     }
 
@@ -81,39 +140,76 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
         _totalCount += otherDiagnostics._totalCount;
         _untrackedCount += otherDiagnostics._untrackedCount;
 
-        foreach (KeyValuePair<string, long> entry in otherDiagnostics._frequencies)
+        if (_numericFrequencies is not null && otherDiagnostics._numericFrequencies is not null)
         {
-            if (_frequencies.TryGetValue(entry.Key, out long currentCount))
+            foreach (KeyValuePair<int, long> entry in otherDiagnostics._numericFrequencies)
             {
-                _frequencies[entry.Key] = currentCount + entry.Value;
+                if (_numericFrequencies.TryGetValue(entry.Key, out long currentCount))
+                {
+                    _numericFrequencies[entry.Key] = currentCount + entry.Value;
+                }
+                else if (_numericFrequencies.Count < MaxDistinctValues)
+                {
+                    _numericFrequencies[entry.Key] = entry.Value;
+                }
+                else
+                {
+                    _untrackedCount += entry.Value;
+                    _capped = true;
+                }
             }
-            else if (_frequencies.Count < MaxDistinctValues)
+
+            if (_numericFrequencies.Count >= MaxDistinctValues)
             {
-                _frequencies[entry.Key] = entry.Value;
-            }
-            else
-            {
-                _untrackedCount += entry.Value;
                 _capped = true;
             }
         }
-
-        if (_frequencies.Count >= MaxDistinctValues)
+        else if (_stringFrequencies is not null && otherDiagnostics._stringFrequencies is not null)
         {
-            _capped = true;
+            foreach (KeyValuePair<string, long> entry in otherDiagnostics._stringFrequencies)
+            {
+                if (_stringFrequencies.TryGetValue(entry.Key, out long currentCount))
+                {
+                    _stringFrequencies[entry.Key] = currentCount + entry.Value;
+                }
+                else if (_stringFrequencies.Count < MaxDistinctValues)
+                {
+                    _stringFrequencies[entry.Key] = entry.Value;
+                }
+                else
+                {
+                    _untrackedCount += entry.Value;
+                    _capped = true;
+                }
+            }
+
+            if (_stringFrequencies.Count >= MaxDistinctValues)
+            {
+                _capped = true;
+            }
         }
     }
 
     /// <inheritdoc />
     public StatisticResult GetResult()
     {
-        if (_totalCount == 0 || _frequencies.Count == 0)
+        if (_totalCount == 0)
         {
             return new StatisticResult("categorical_diagnostics", new CategoricalDiagnosticsResult(0.0, 0.0, 0, 0, false));
         }
 
         // Coverage: sum of top-K category counts / total non-null count
-        List<long> counts = [.. _frequencies.Values];
+        List<long> counts;
+
+        if (_numericFrequencies is not null)
+        {
+            counts = [.. _numericFrequencies.Values];
+        }
+        else
+        {
+            counts = [.. _stringFrequencies!.Values];
+        }
+
         counts.Sort((a, b) => b.CompareTo(a));
 
         long topKSum = 0;
@@ -127,7 +223,7 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
 
         // Rare ratio: categories with count < RareThreshold / total distinct categories
         long rareCategoryCount = 0;
-        foreach (long count in _frequencies.Values)
+        foreach (long count in counts)
         {
             if (count < RareThreshold)
             {
@@ -135,7 +231,7 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
             }
         }
 
-        long totalCategoryCount = _frequencies.Count;
+        long totalCategoryCount = counts.Count;
         double rareRatio = (double)rareCategoryCount / totalCategoryCount;
 
         return new StatisticResult(
