@@ -33,6 +33,34 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// </summary>
     internal const int AutoIndexMaxStringLength = 16;
 
+    /// <summary>
+    /// Reusable comparison for sorting <see cref="ValueIndexEntry"/> by key. Fast-paths
+    /// the common float (scalar) case to avoid the overhead of the general-purpose
+    /// <see cref="StatisticsPredicateEvaluator.CompareValues"/> dispatch.
+    /// </summary>
+    private static readonly Comparison<ValueIndexEntry> EntryKeyComparison =
+        (a, b) => CompareDataValues(a.Key, b.Key);
+
+    /// <summary>
+    /// Reusable comparer for <see cref="DataValue"/> used by priority queue merges.
+    /// </summary>
+    private static readonly Comparer<DataValue> DataValueComparer =
+        Comparer<DataValue>.Create(CompareDataValues);
+
+    /// <summary>
+    /// Compares two <see cref="DataValue"/> instances, fast-pathing the scalar (float)
+    /// case that dominates numeric index builds.
+    /// </summary>
+    private static int CompareDataValues(DataValue left, DataValue right)
+    {
+        if (left.Kind == DataKind.Scalar && right.Kind == DataKind.Scalar)
+        {
+            return left.AsScalar().CompareTo(right.AsScalar());
+        }
+
+        return StatisticsPredicateEvaluator.CompareValues(left, right);
+    }
+
     private readonly string _spillDirectory;
     private readonly Dictionary<string, List<ValueIndexEntry>> _currentChunkEntries;
     private readonly Dictionary<string, BinaryWriter> _spillWriters;
@@ -168,7 +196,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             string columnName = pair.Key;
 
             // Sort the chunk's entries by key.
-            entries.Sort((a, b) => StatisticsPredicateEvaluator.CompareValues(a.Key, b.Key));
+            entries.Sort(EntryKeyComparison);
 
             // Append to the spill file.
             BinaryWriter writer = GetOrCreateSpillWriter(columnName);
@@ -416,8 +444,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 runMetadata[runIndex].EntryCount);
         }
 
-        PriorityQueue<int, DataValue> queue = new(
-            Comparer<DataValue>.Create((a, b) => StatisticsPredicateEvaluator.CompareValues(a, b)));
+        PriorityQueue<int, DataValue> queue = new(DataValueComparer);
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
@@ -615,8 +642,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 runMetadata[runIndex].EntryCount);
         }
 
-        PriorityQueue<int, DataValue> queue = new(
-            Comparer<DataValue>.Create((a, b) => StatisticsPredicateEvaluator.CompareValues(a, b)));
+        PriorityQueue<int, DataValue> queue = new(DataValueComparer);
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
@@ -687,8 +713,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
         // K-way merge using a priority queue.
         ValueIndexEntry[] result = new ValueIndexEntry[totalEntries];
-        PriorityQueue<int, DataValue> queue = new(
-            Comparer<DataValue>.Create((a, b) => StatisticsPredicateEvaluator.CompareValues(a, b)));
+        PriorityQueue<int, DataValue> queue = new(DataValueComparer);
 
         // Seed the queue with the first entry from each run.
         for (int runIndex = 0; runIndex < runCount; runIndex++)
