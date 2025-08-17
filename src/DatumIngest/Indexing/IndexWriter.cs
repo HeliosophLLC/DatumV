@@ -1,4 +1,5 @@
 using DatumIngest.DatumFile.Compression;
+using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 
@@ -140,6 +141,12 @@ public sealed class IndexWriter
             {
                 RecordSection(sections, IndexSectionType.BTreeIndexes, tableIndexByte, writer, () =>
                     WriteBPlusTreeIndexes(writer, index.BPlusTreeIndexes));
+            }
+
+            if (index.BitmapIndexes is not null)
+            {
+                RecordSection(sections, IndexSectionType.BitmapIndexes, tableIndexByte, writer, () =>
+                    WriteBitmapIndexes(writer, index.BitmapIndexes));
             }
         }
 
@@ -380,6 +387,53 @@ public sealed class IndexWriter
             foreach (byte[] rawPage in reader.RawPages)
             {
                 writer.Write(rawPage);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes a bitmap indexes section containing all columns' per-value, per-chunk compressed bitsets.
+    /// Format: column count, then per column: name, value count, chunk count, chunk row counts,
+    /// then per value: DataValue key, then per chunk: compressed size + compressed bytes.
+    /// </summary>
+    private static void WriteBitmapIndexes(BinaryWriter writer, BitmapIndexSet bitmapIndexes)
+    {
+        IReadOnlyCollection<string> columnNames = bitmapIndexes.ColumnNames;
+        writer.Write(columnNames.Count);
+
+        foreach (string columnName in columnNames)
+        {
+            if (!bitmapIndexes.TryGetIndex(columnName, out BitmapColumnIndex? columnIndex))
+            {
+                continue;
+            }
+
+            writer.Write(columnName);
+            writer.Write(columnIndex.DistinctValues.Count);
+            writer.Write(columnIndex.ChunkCount);
+
+            // Write chunk row counts (needed for decompression target sizing on read).
+            IReadOnlyList<int> chunkRowCounts = columnIndex.ChunkRowCounts;
+
+            for (int chunkIndex = 0; chunkIndex < columnIndex.ChunkCount; chunkIndex++)
+            {
+                writer.Write(chunkRowCounts[chunkIndex]);
+            }
+
+            // Write per-value, per-chunk compressed bitmaps.
+            IReadOnlyDictionary<DataValue, byte[][]> compressedBitmaps = columnIndex.CompressedBitmaps;
+
+            foreach (KeyValuePair<DataValue, byte[][]> entry in compressedBitmaps)
+            {
+                WriteDataValue(writer, entry.Key);
+
+                byte[][] chunkBitmaps = entry.Value;
+
+                for (int chunkIndex = 0; chunkIndex < chunkBitmaps.Length; chunkIndex++)
+                {
+                    writer.Write(chunkBitmaps[chunkIndex].Length);
+                    writer.Write(chunkBitmaps[chunkIndex]);
+                }
             }
         }
     }

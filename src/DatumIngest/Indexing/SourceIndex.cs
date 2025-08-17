@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 
 namespace DatumIngest.Indexing;
@@ -45,6 +46,12 @@ public sealed class SourceIndex
     internal BPlusTreeIndexSet? BPlusTreeIndexes { get; }
 
     /// <summary>
+    /// Per-column bitmap indexes for low-cardinality columns,
+    /// or <c>null</c> if no bitmap indexes were built.
+    /// </summary>
+    internal BitmapIndexSet? BitmapIndexes { get; }
+
+    /// <summary>
     /// Creates a new source index.
     /// </summary>
     /// <param name="fingerprint">Source file fingerprint.</param>
@@ -65,7 +72,7 @@ public sealed class SourceIndex
     }
 
     /// <summary>
-    /// Creates a new source index with optional B+Tree indexes.
+    /// Creates a new source index with optional B+Tree and bitmap indexes.
     /// </summary>
     internal SourceIndex(
         SourceFingerprint fingerprint,
@@ -74,7 +81,8 @@ public sealed class SourceIndex
         BloomFilterSet? bloomFilters,
         SortedValueIndexSet? sortedIndexes,
         ZipDirectoryCache? zipDirectory,
-        BPlusTreeIndexSet? bPlusTreeIndexes)
+        BPlusTreeIndexSet? bPlusTreeIndexes,
+        BitmapIndexSet? bitmapIndexes = null)
     {
         Fingerprint = fingerprint;
         Schema = schema;
@@ -83,6 +91,7 @@ public sealed class SourceIndex
         SortedIndexes = sortedIndexes;
         ZipDirectory = zipDirectory;
         BPlusTreeIndexes = bPlusTreeIndexes;
+        BitmapIndexes = bitmapIndexes;
     }
 
     /// <summary>

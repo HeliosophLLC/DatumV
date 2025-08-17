@@ -40,6 +40,12 @@ public static class IndexConstants
     /// entries than this value use a B+Tree index instead of a sorted value index.
     /// </summary>
     public const long BPlusTreeAutoThreshold = 5_000_000;
+
+    /// <summary>
+    /// Estimated cardinality ceiling for automatic bitmap index selection. Columns with
+    /// at most this many distinct values use bitmap indexes instead of sorted or B+Tree.
+    /// </summary>
+    public const int BitmapAutoThreshold = 256;
 }
 
 /// <summary>
@@ -74,4 +80,7 @@ public enum IndexSectionType : byte
 
     /// <summary>Per-column B+Tree indexes with compressed leaf pages for disk-resident key lookup.</summary>
     BTreeIndexes = 8,
+
+    /// <summary>Per-column bitmap indexes for low-cardinality columns with per-value, per-chunk bitsets.</summary>
+    BitmapIndexes = 9,
 }

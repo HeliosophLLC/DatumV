@@ -1,4 +1,5 @@
 using DatumIngest.DatumFile.Compression;
+using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Indexing.BTree;
 using DatumIngest.Model;
 
@@ -100,7 +101,11 @@ public sealed class IndexReader
                 ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.BTreeIndexes, ReadBPlusTreeIndexes)
                 : null;
 
-            tables[tableNames[i]] = new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory, bPlusTreeIndexes);
+            BitmapIndexSet? bitmapIndexes = sectionMap.ContainsKey(IndexSectionType.BitmapIndexes)
+                ? ReadSectionAs(reader, input, sectionMap, IndexSectionType.BitmapIndexes, ReadBitmapIndexes)
+                : null;
+
+            tables[tableNames[i]] = new SourceIndex(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory, bPlusTreeIndexes, bitmapIndexes);
         }
 
         return new SourceIndexSet(fingerprint, tables);
@@ -386,6 +391,51 @@ public sealed class IndexReader
         }
 
         return new BPlusTreeIndexSet(indexes);
+    }
+
+    /// <summary>
+    /// Reads a bitmap indexes section containing per-column, per-value, per-chunk compressed bitsets.
+    /// </summary>
+    private static BitmapIndexSet ReadBitmapIndexes(BinaryReader reader)
+    {
+        int columnCount = reader.ReadInt32();
+        Dictionary<string, BitmapColumnIndex> indexes = new(columnCount, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < columnCount; i++)
+        {
+            string columnName = reader.ReadString();
+            int valueCount = reader.ReadInt32();
+            int chunkCount = reader.ReadInt32();
+
+            int[] chunkRowCounts = new int[chunkCount];
+
+            for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+            {
+                chunkRowCounts[chunkIndex] = reader.ReadInt32();
+            }
+
+            Dictionary<DataValue, byte[][]> compressedBitmaps = new(valueCount);
+
+            for (int v = 0; v < valueCount; v++)
+            {
+                DataValue value = ReadDataValue(reader);
+                byte[][] chunkBitmaps = new byte[chunkCount][];
+
+                for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+                {
+                    int compressedLength = reader.ReadInt32();
+                    chunkBitmaps[chunkIndex] = compressedLength > 0
+                        ? reader.ReadBytes(compressedLength)
+                        : Array.Empty<byte>();
+                }
+
+                compressedBitmaps[value] = chunkBitmaps;
+            }
+
+            indexes[columnName] = new BitmapColumnIndex(compressedBitmaps, chunkCount, chunkRowCounts);
+        }
+
+        return new BitmapIndexSet(indexes);
     }
 
     private static ZipDirectoryCache ReadZipDirectory(BinaryReader reader)
