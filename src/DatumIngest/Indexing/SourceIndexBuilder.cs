@@ -148,6 +148,11 @@ public sealed class SourceIndexBuilder
         int rowsInCurrentChunk = 0;
         int currentChunkIndex = 0;
 
+        string[]? resolvedColumnNames = null;
+        ChunkAccumulator?[]? ordinalAccumulators = null;
+        BloomFilter?[]? ordinalBloomFilters = null;
+        List<ValueIndexEntry>?[]? ordinalSpillEntries = null;
+
         try
         {
             await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
@@ -165,28 +170,69 @@ public sealed class SourceIndexBuilder
                     {
                         spillWriter.Initialize(effectiveIndexColumns);
                     }
+
+                    int columnCount = row.FieldCount;
+                    resolvedColumnNames = new string[columnCount];
+                    ordinalAccumulators = new ChunkAccumulator?[columnCount];
+                    ordinalBloomFilters = currentBloomFilters is not null ? new BloomFilter?[columnCount] : null;
+                    ordinalSpillEntries = spillWriter is not null ? new List<ValueIndexEntry>?[columnCount] : null;
+
+                    for (int ordinal = 0; ordinal < columnCount; ordinal++)
+                    {
+                        string name = row.ColumnNames[ordinal];
+                        resolvedColumnNames[ordinal] = name;
+                        currentAccumulators.TryGetValue(name, out ChunkAccumulator? acc);
+                        ordinalAccumulators[ordinal] = acc;
+
+                        if (ordinalBloomFilters is not null && currentBloomFilters is not null)
+                        {
+                            currentBloomFilters.TryGetValue(name, out BloomFilter? bloom);
+                            ordinalBloomFilters[ordinal] = bloom;
+                        }
+
+                        if (ordinalSpillEntries is not null && spillWriter is not null)
+                        {
+                            ordinalSpillEntries[ordinal] = spillWriter.GetEntryListOrNull(name);
+                        }
+                    }
                 }
 
-                foreach (string columnName in row.ColumnNames)
-                {
-                    DataValue value = row[columnName];
+                int fieldCount = row.FieldCount;
 
-                    if (currentAccumulators.TryGetValue(columnName, out ChunkAccumulator? accumulator))
+                for (int ordinal = 0; ordinal < fieldCount; ordinal++)
+                {
+                    DataValue value = row[ordinal];
+
+                    ChunkAccumulator? accumulator = ordinalAccumulators![ordinal];
+                    if (accumulator is not null)
                     {
                         accumulator.Add(value);
                     }
 
-                    if (currentBloomFilters is not null
-                        && currentBloomFilters.TryGetValue(columnName, out BloomFilter? bloom))
+                    if (ordinalBloomFilters is not null)
                     {
-                        bloom.Add(value);
+                        BloomFilter? bloom = ordinalBloomFilters[ordinal];
+                        if (bloom is not null)
+                        {
+                            bloom.Add(value);
+                        }
                     }
 
-                    if (spillWriter is not null && !value.IsNull && spillWriter.IsIndexed(columnName))
+                    if (ordinalSpillEntries is not null && !value.IsNull)
                     {
-                        if (!spillWriter.CheckAndDropLongString(columnName, value))
+                        List<ValueIndexEntry>? entries = ordinalSpillEntries[ordinal];
+                        if (entries is not null)
                         {
-                            spillWriter.AddEntry(columnName, new ValueIndexEntry(value, currentChunkIndex, rowsInCurrentChunk));
+                            if (value.Kind == DataKind.String
+                                && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
+                            {
+                                spillWriter!.DropColumn(resolvedColumnNames![ordinal]);
+                                ordinalSpillEntries[ordinal] = null;
+                            }
+                            else
+                            {
+                                entries.Add(new ValueIndexEntry(value, currentChunkIndex, rowsInCurrentChunk));
+                            }
                         }
                     }
                 }
@@ -210,6 +256,24 @@ public sealed class SourceIndexBuilder
                     currentChunkIndex++;
                     currentAccumulators = CreateAccumulators(schema);
                     currentBloomFilters = CreateBloomFilters(effectiveBloomColumns, _chunkSize);
+
+                    // Rebuild ordinal arrays to point at the new chunk's accumulators/blooms.
+                    int columnCount = resolvedColumnNames!.Length;
+                    ordinalAccumulators = new ChunkAccumulator?[columnCount];
+                    ordinalBloomFilters = currentBloomFilters is not null ? new BloomFilter?[columnCount] : null;
+
+                    for (int ordinal = 0; ordinal < columnCount; ordinal++)
+                    {
+                        string name = resolvedColumnNames[ordinal];
+                        currentAccumulators.TryGetValue(name, out ChunkAccumulator? acc);
+                        ordinalAccumulators[ordinal] = acc;
+
+                        if (ordinalBloomFilters is not null && currentBloomFilters is not null)
+                        {
+                            currentBloomFilters.TryGetValue(name, out BloomFilter? bloom);
+                            ordinalBloomFilters[ordinal] = bloom;
+                        }
+                    }
                 }
             }
 
@@ -708,6 +772,22 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private Dictionary<string, BloomFilter>? _currentBloomFilters;
     private readonly List<Dictionary<string, BloomFilter>>? _allChunkBloomFilters;
     private SortedIndexSpillWriter? _spillWriter;
+
+    /// <summary>Ordinal-indexed column names, resolved once from the first row's schema.</summary>
+    private string[]? _resolvedColumnNames;
+
+    /// <summary>Ordinal-indexed accumulators, rebuilt at each chunk boundary.</summary>
+    private SourceIndexBuilder_ChunkAccumulatorProxy?[]? _ordinalAccumulators;
+
+    /// <summary>Ordinal-indexed bloom filters, rebuilt at each chunk boundary.</summary>
+    private BloomFilter?[]? _ordinalBloomFilters;
+
+    /// <summary>
+    /// Ordinal-indexed spill entry lists, resolved once from the spill writer. List
+    /// references are stable across chunks. Entries are nulled out if a column is dropped.
+    /// </summary>
+    private List<ValueIndexEntry>?[]? _ordinalSpillEntries;
+
     private int _rowsInCurrentChunk;
     private long _totalRowCount;
     private long _currentChunkRowOffset;
@@ -757,28 +837,49 @@ public sealed class IncrementalIndexBuilder : IDisposable
             {
                 _spillWriter.Initialize(effectiveIndexColumns);
             }
+
+            BuildOrdinalLookups(row);
         }
 
-        foreach (string columnName in row.ColumnNames)
-        {
-            DataValue value = row[columnName];
+        int fieldCount = row.FieldCount;
+        SourceIndexBuilder_ChunkAccumulatorProxy?[] accumulators = _ordinalAccumulators!;
+        BloomFilter?[]? bloomFilters = _ordinalBloomFilters;
+        List<ValueIndexEntry>?[]? spillEntries = _ordinalSpillEntries;
 
-            if (_currentAccumulators.TryGetValue(columnName, out SourceIndexBuilder_ChunkAccumulatorProxy? accumulator))
+        for (int ordinal = 0; ordinal < fieldCount; ordinal++)
+        {
+            DataValue value = row[ordinal];
+
+            SourceIndexBuilder_ChunkAccumulatorProxy? accumulator = accumulators[ordinal];
+            if (accumulator is not null)
             {
                 accumulator.Add(value);
             }
 
-            if (_currentBloomFilters is not null
-                && _currentBloomFilters.TryGetValue(columnName, out BloomFilter? bloom))
+            if (bloomFilters is not null)
             {
-                bloom.Add(value);
+                BloomFilter? bloom = bloomFilters[ordinal];
+                if (bloom is not null)
+                {
+                    bloom.Add(value);
+                }
             }
 
-            if (_spillWriter is not null && !value.IsNull && _spillWriter.IsIndexed(columnName))
+            if (spillEntries is not null && !value.IsNull)
             {
-                if (!_spillWriter.CheckAndDropLongString(columnName, value))
+                List<ValueIndexEntry>? entries = spillEntries[ordinal];
+                if (entries is not null)
                 {
-                    _spillWriter.AddEntry(columnName, new ValueIndexEntry(value, _currentChunkIndex, _rowsInCurrentChunk));
+                    if (value.Kind == DataKind.String
+                        && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
+                    {
+                        _spillWriter!.DropColumn(_resolvedColumnNames![ordinal]);
+                        spillEntries[ordinal] = null;
+                    }
+                    else
+                    {
+                        entries.Add(new ValueIndexEntry(value, _currentChunkIndex, _rowsInCurrentChunk));
+                    }
                 }
             }
         }
@@ -878,6 +979,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         {
             InitializeAccumulatorsFromSchema();
             _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_effectiveBloomColumns, _chunkSize);
+            RebuildOrdinalAccumulatorsAndBlooms();
         }
     }
 
@@ -898,6 +1000,66 @@ public sealed class IncrementalIndexBuilder : IDisposable
         foreach (ColumnInfo column in _schema!.Columns)
         {
             _currentAccumulators[column.Name] = new SourceIndexBuilder_ChunkAccumulatorProxy();
+        }
+    }
+
+    /// <summary>
+    /// Builds ordinal-indexed lookup arrays from the first row's schema. Called once
+    /// during schema initialization. Spill entry lists are stable across chunks, so
+    /// they are resolved here and not rebuilt.
+    /// </summary>
+    private void BuildOrdinalLookups(Row row)
+    {
+        int columnCount = row.FieldCount;
+        _resolvedColumnNames = new string[columnCount];
+
+        for (int ordinal = 0; ordinal < columnCount; ordinal++)
+        {
+            _resolvedColumnNames[ordinal] = row.ColumnNames[ordinal];
+        }
+
+        if (_spillWriter is not null)
+        {
+            _ordinalSpillEntries = new List<ValueIndexEntry>?[columnCount];
+
+            for (int ordinal = 0; ordinal < columnCount; ordinal++)
+            {
+                _ordinalSpillEntries[ordinal] = _spillWriter.GetEntryListOrNull(_resolvedColumnNames[ordinal]);
+            }
+        }
+
+        RebuildOrdinalAccumulatorsAndBlooms();
+    }
+
+    /// <summary>
+    /// Rebuilds the ordinal-indexed accumulator and bloom filter arrays to point at the
+    /// current chunk's instances. Called after each chunk boundary when new accumulators
+    /// and bloom filters are created.
+    /// </summary>
+    private void RebuildOrdinalAccumulatorsAndBlooms()
+    {
+        int columnCount = _resolvedColumnNames!.Length;
+        _ordinalAccumulators = new SourceIndexBuilder_ChunkAccumulatorProxy?[columnCount];
+
+        for (int ordinal = 0; ordinal < columnCount; ordinal++)
+        {
+            _currentAccumulators.TryGetValue(_resolvedColumnNames[ordinal], out SourceIndexBuilder_ChunkAccumulatorProxy? accumulator);
+            _ordinalAccumulators[ordinal] = accumulator;
+        }
+
+        if (_currentBloomFilters is not null)
+        {
+            _ordinalBloomFilters = new BloomFilter?[columnCount];
+
+            for (int ordinal = 0; ordinal < columnCount; ordinal++)
+            {
+                _currentBloomFilters.TryGetValue(_resolvedColumnNames[ordinal], out BloomFilter? bloom);
+                _ordinalBloomFilters[ordinal] = bloom;
+            }
+        }
+        else
+        {
+            _ordinalBloomFilters = null;
         }
     }
 

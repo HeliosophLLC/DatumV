@@ -129,7 +129,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// <summary>
     /// Drops a column from indexing, discarding any accumulated entries.
     /// </summary>
-    private void DropColumn(string columnName)
+    internal void DropColumn(string columnName)
     {
         _droppedColumns.Add(columnName);
         _currentChunkEntries.Remove(columnName);
@@ -239,6 +239,25 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     internal bool IsIndexed(string columnName)
     {
         return _currentChunkEntries.ContainsKey(columnName) && !_droppedColumns.Contains(columnName);
+    }
+
+    /// <summary>
+    /// Returns the internal entry list for a column if it is currently indexed and not
+    /// dropped, or <c>null</c> otherwise. The returned list reference is stable across
+    /// chunk boundaries (<see cref="FlushChunk"/> clears the list but does not replace it),
+    /// so callers may cache it by ordinal for the lifetime of the index build.
+    /// </summary>
+    /// <param name="columnName">The column to resolve.</param>
+    /// <returns>The entry accumulation list, or <c>null</c> if the column is not indexed.</returns>
+    internal List<ValueIndexEntry>? GetEntryListOrNull(string columnName)
+    {
+        if (_droppedColumns.Contains(columnName))
+        {
+            return null;
+        }
+
+        _currentChunkEntries.TryGetValue(columnName, out List<ValueIndexEntry>? entries);
+        return entries;
     }
 
     /// <summary>
