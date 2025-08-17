@@ -49,12 +49,12 @@ public class DatePartParserTests
         DatumIngest.Model.DataValue date = DatumIngest.Model.DataValue.FromDate(new DateOnly(2024, 1, 15));
         DatumIngest.Model.DataValue aliasResult = function.Execute([
             DatumIngest.Model.DataValue.FromString(input),
-            DatumIngest.Model.DataValue.FromScalar(1),
+            DatumIngest.Model.DataValue.FromFloat32(1),
             date
         ]);
         DatumIngest.Model.DataValue canonicalResult = function.Execute([
             DatumIngest.Model.DataValue.FromString(expectedCanonical),
-            DatumIngest.Model.DataValue.FromScalar(1),
+            DatumIngest.Model.DataValue.FromFloat32(1),
             date
         ]);
         Assert.Equal(canonicalResult.AsDate(), aliasResult.AsDate());

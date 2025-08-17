@@ -21,10 +21,10 @@ public class DurationFunctionTests
         MakeDurationFunction function = new();
         DataValue result = function.Execute(
         [
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(3),
-            DataValue.FromScalar(4),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(3),
+            DataValue.FromFloat32(4),
         ]);
 
         Assert.Equal(DataKind.Duration, result.Kind);
@@ -37,10 +37,10 @@ public class DurationFunctionTests
         MakeDurationFunction function = new();
         DataValue result = function.Execute(
         [
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
         ]);
 
         Assert.Equal(TimeSpan.Zero, result.AsDuration());
@@ -52,10 +52,10 @@ public class DurationFunctionTests
         MakeDurationFunction function = new();
         DataValue result = function.Execute(
         [
-            DataValue.FromScalar(1),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
+            DataValue.FromFloat32(1),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
         ]);
 
         Assert.True(result.IsNull);
@@ -66,7 +66,7 @@ public class DurationFunctionTests
     public void MakeDuration_ValidateArguments_ReturnsDuration()
     {
         MakeDurationFunction function = new();
-        DataKind result = function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]);
+        DataKind result = function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.Duration, result);
     }
 
@@ -75,7 +75,7 @@ public class DurationFunctionTests
     {
         MakeDurationFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class DurationFunctionTests
     {
         MakeDurationFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.String, DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.String, DataKind.Float32, DataKind.Float32]));
     }
 
     // ───────────────── DurationSecondsFunction ─────────────────
@@ -95,8 +95,8 @@ public class DurationFunctionTests
         TimeSpan duration = new(0, 1, 30, 0);
         DataValue result = function.Execute([DataValue.FromDuration(duration)]);
 
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal((float)duration.TotalSeconds, result.AsScalar());
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal((float)duration.TotalSeconds, result.AsFloat32());
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public class DurationFunctionTests
     {
         DurationSecondsFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     // ───────────────── DurationMinutesFunction ─────────────────
@@ -124,7 +124,7 @@ public class DurationFunctionTests
         TimeSpan duration = TimeSpan.FromHours(2);
         DataValue result = function.Execute([DataValue.FromDuration(duration)]);
 
-        Assert.Equal(120f, result.AsScalar());
+        Assert.Equal(120f, result.AsFloat32());
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class DurationFunctionTests
         TimeSpan duration = TimeSpan.FromDays(1);
         DataValue result = function.Execute([DataValue.FromDuration(duration)]);
 
-        Assert.Equal(24f, result.AsScalar());
+        Assert.Equal(24f, result.AsFloat32());
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public class DurationFunctionTests
         TimeSpan duration = TimeSpan.FromHours(48);
         DataValue result = function.Execute([DataValue.FromDuration(duration)]);
 
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public class DurationFunctionTests
         TimeSpan duration = TimeSpan.FromHours(36);
         DataValue result = function.Execute([DataValue.FromDuration(duration)]);
 
-        Assert.Equal(1.5f, result.AsScalar());
+        Assert.Equal(1.5f, result.AsFloat32());
     }
 
     [Fact]
@@ -325,7 +325,7 @@ public class DurationFunctionTests
     {
         DateOffsetFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Date, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Date, DataKind.Float32]));
     }
 
     // ───────────────── Cast paths ─────────────────
@@ -364,10 +364,10 @@ public class DurationFunctionTests
         DataValue result = cast.Execute(
         [
             DataValue.FromDuration(TimeSpan.FromMinutes(90)),
-            DataValue.FromString("Scalar"),
+            DataValue.FromString("Float32"),
         ]);
 
-        Assert.Equal(5400f, result.AsScalar());
+        Assert.Equal(5400f, result.AsFloat32());
     }
 
     [Fact]
@@ -376,7 +376,7 @@ public class DurationFunctionTests
         CastFunction cast = new();
         DataValue result = cast.Execute(
         [
-            DataValue.FromScalar(3600f),
+            DataValue.FromFloat32(3600f),
             DataValue.FromString("duration"),
         ]);
 
@@ -400,9 +400,9 @@ public class DurationFunctionTests
     // ───────────────── Duration → Scalar widening ─────────────────
 
     [Fact]
-    public void TypeCoercion_DurationWidensToScalar()
+    public void TypeCoercion_DurationWidensToFloat64()
     {
-        Assert.True(TypeCoercion.CanWiden(DataKind.Duration, DataKind.Scalar));
+        Assert.True(TypeCoercion.CanWiden(DataKind.Duration, DataKind.Float64));
     }
 
     [Fact]
@@ -415,23 +415,23 @@ public class DurationFunctionTests
     public void TypeCoercion_DurationWidenValue_ProducesTotalSeconds()
     {
         DataValue duration = DataValue.FromDuration(TimeSpan.FromMinutes(2));
-        DataValue widened = TypeCoercion.Widen(duration, DataKind.Scalar);
+        DataValue widened = TypeCoercion.Widen(duration, DataKind.Float64);
 
-        Assert.Equal(DataKind.Scalar, widened.Kind);
-        Assert.Equal(120f, widened.AsScalar());
+        Assert.Equal(DataKind.Float64, widened.Kind);
+        Assert.Equal(120.0, widened.AsFloat64());
     }
 
     [Fact]
     public void TypeCoercion_TimeDoesNotWiden()
     {
-        Assert.False(TypeCoercion.CanWiden(DataKind.Time, DataKind.Scalar));
+        Assert.False(TypeCoercion.CanWiden(DataKind.Time, DataKind.Float32));
     }
 
     [Fact]
-    public void TypeCoercion_FindCommonKind_DurationAndScalar()
+    public void TypeCoercion_FindCommonKind_DurationAndFloat32()
     {
-        DataKind? common = TypeCoercion.FindCommonKind(DataKind.Duration, DataKind.Scalar);
-        Assert.Equal(DataKind.Scalar, common);
+        DataKind? common = TypeCoercion.FindCommonKind(DataKind.Duration, DataKind.Float32);
+        Assert.Equal(DataKind.Float64, common);
     }
 
     // ───────────────── DateOffset with Time ─────────────────

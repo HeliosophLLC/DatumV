@@ -46,13 +46,13 @@ public sealed class PerceptualHashFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _perceptualHash.ValidateArguments([]));
         Assert.Throws<ArgumentException>(() =>
-            _perceptualHash.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+            _perceptualHash.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
     public void PerceptualHash_Validate_WrongType_Throws()
     {
-        Assert.Throws<ArgumentException>(() => _perceptualHash.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _perceptualHash.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]

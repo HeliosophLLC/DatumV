@@ -990,13 +990,13 @@ public sealed class ScanOperator : IQueryOperator
     {
         return rawLiteral switch
         {
-            int intValue => DataValue.FromScalar(intValue),
-            long longValue => DataValue.FromScalar(longValue),
-            float floatValue => DataValue.FromScalar(floatValue),
-            double doubleValue => DataValue.FromScalar((float)doubleValue),
+            int intValue => DataValue.FromFloat32(intValue),
+            long longValue => DataValue.FromFloat32(longValue),
+            float floatValue => DataValue.FromFloat32(floatValue),
+            double doubleValue => DataValue.FromFloat32((float)doubleValue),
             string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromScalar(boolValue ? 1f : 0f),
-            _ => DataValue.Null(DataKind.Scalar),
+            bool boolValue => DataValue.FromFloat32(boolValue ? 1f : 0f),
+            _ => DataValue.Null(DataKind.Float32),
         };
     }
 

@@ -71,9 +71,9 @@ public class DistinctTests
     public async Task DistinctOperator_AllUnique_YieldsAll()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))));
 
         DistinctOperator distinct = new(source);
 
@@ -86,34 +86,34 @@ public class DistinctTests
     public async Task DistinctOperator_AllSame_YieldsOne()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(42f))),
-            MakeRow(("x", DataValue.FromScalar(42f))),
-            MakeRow(("x", DataValue.FromScalar(42f))));
+            MakeRow(("x", DataValue.FromFloat32(42f))),
+            MakeRow(("x", DataValue.FromFloat32(42f))),
+            MakeRow(("x", DataValue.FromFloat32(42f))));
 
         DistinctOperator distinct = new(source);
 
         List<Row> results = await CollectAsync(distinct);
 
         Assert.Single(results);
-        Assert.Equal(42f, results[0]["x"].AsScalar());
+        Assert.Equal(42f, results[0]["x"].AsFloat32());
     }
 
     [Fact]
     public async Task DistinctOperator_DuplicatesRemoved()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(2f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))));
 
         DistinctOperator distinct = new(source);
 
         List<Row> results = await CollectAsync(distinct);
 
         Assert.Equal(3, results.Count);
-        float[] values = results.Select(r => r["x"].AsScalar()).OrderBy(v => v).ToArray();
+        float[] values = results.Select(r => r["x"].AsFloat32()).OrderBy(v => v).ToArray();
         Assert.Equal([1f, 2f, 3f], values);
     }
 
@@ -121,10 +121,10 @@ public class DistinctTests
     public async Task DistinctOperator_MultiColumn_DeduplicatesOnAllColumns()
     {
         MockOperator source = new(
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(10f))),
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(20f))),
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(10f))),
-            MakeRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromScalar(10f))));
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(10f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(20f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(10f))),
+            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(10f))));
 
         DistinctOperator distinct = new(source);
 
@@ -138,9 +138,9 @@ public class DistinctTests
     public async Task DistinctOperator_NullValues_TreatedAsEqual()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))));
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))));
 
         DistinctOperator distinct = new(source);
 
@@ -174,7 +174,7 @@ public class DistinctTests
         for (int index = 0; index < 200; index++)
         {
             // Create values 0-99 twice so half are duplicates.
-            sourceRows.Add(MakeRow(("x", DataValue.FromScalar(index % 100))));
+            sourceRows.Add(MakeRow(("x", DataValue.FromFloat32(index % 100))));
         }
 
         MockOperator source = new(sourceRows.ToArray());
@@ -187,7 +187,7 @@ public class DistinctTests
         distinct.Dispose();
 
         Assert.Equal(100, results.Count);
-        HashSet<float> uniqueValues = results.Select(r => r["x"].AsScalar()).ToHashSet();
+        HashSet<float> uniqueValues = results.Select(r => r["x"].AsFloat32()).ToHashSet();
         Assert.Equal(100, uniqueValues.Count);
     }
 
@@ -200,8 +200,8 @@ public class DistinctTests
         IAggregateAccumulator accumulator = countFunction.CreateAccumulator();
         DistinctAccumulatorDecorator decorator = new(accumulator, argumentCount: 1);
 
-        DataValue[] values = [DataValue.FromScalar(1f), DataValue.FromScalar(2f),
-            DataValue.FromScalar(1f), DataValue.FromScalar(3f), DataValue.FromScalar(2f)];
+        DataValue[] values = [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f),
+            DataValue.FromFloat32(1f), DataValue.FromFloat32(3f), DataValue.FromFloat32(2f)];
 
         foreach (DataValue value in values)
         {
@@ -209,7 +209,7 @@ public class DistinctTests
         }
 
         // 3 distinct values: 1, 2, 3.
-        Assert.Equal(3f, decorator.Result.AsScalar());
+        Assert.Equal(3f, decorator.Result.AsFloat32());
     }
 
     [Fact]
@@ -219,8 +219,8 @@ public class DistinctTests
         IAggregateAccumulator accumulator = sumFunction.CreateAccumulator();
         DistinctAccumulatorDecorator decorator = new(accumulator, argumentCount: 1);
 
-        DataValue[] values = [DataValue.FromScalar(10f), DataValue.FromScalar(20f),
-            DataValue.FromScalar(10f), DataValue.FromScalar(30f)];
+        DataValue[] values = [DataValue.FromFloat32(10f), DataValue.FromFloat32(20f),
+            DataValue.FromFloat32(10f), DataValue.FromFloat32(30f)];
 
         foreach (DataValue value in values)
         {
@@ -228,7 +228,7 @@ public class DistinctTests
         }
 
         // 10 + 20 + 30 = 60 (not 70).
-        Assert.Equal(60f, decorator.Result.AsScalar());
+        Assert.Equal(60f, decorator.Result.AsFloat32());
     }
 
     [Fact]
@@ -240,10 +240,10 @@ public class DistinctTests
 
         for (int index = 0; index < 5; index++)
         {
-            decorator.Accumulate([DataValue.FromScalar(42f)]);
+            decorator.Accumulate([DataValue.FromFloat32(42f)]);
         }
 
-        Assert.Equal(1f, decorator.Result.AsScalar());
+        Assert.Equal(1f, decorator.Result.AsFloat32());
     }
 
     [Fact]
@@ -253,13 +253,13 @@ public class DistinctTests
         IAggregateAccumulator accumulator = countFunction.CreateAccumulator();
         DistinctAccumulatorDecorator decorator = new(accumulator, argumentCount: 1);
 
-        decorator.Accumulate([DataValue.Null(DataKind.Scalar)]);
-        decorator.Accumulate([DataValue.FromScalar(1f)]);
-        decorator.Accumulate([DataValue.Null(DataKind.Scalar)]);
+        decorator.Accumulate([DataValue.Null(DataKind.Float32)]);
+        decorator.Accumulate([DataValue.FromFloat32(1f)]);
+        decorator.Accumulate([DataValue.Null(DataKind.Float32)]);
 
         // The distinct decorator treats NULLs as equal (2 distinct values seen),
         // but COUNT's inner accumulator skips NULL values. Only 1f is counted.
-        Assert.Equal(1f, decorator.Result.AsScalar());
+        Assert.Equal(1f, decorator.Result.AsFloat32());
     }
 
     [Fact]
@@ -269,7 +269,7 @@ public class DistinctTests
         IAggregateAccumulator accumulator = countFunction.CreateAccumulator();
         DistinctAccumulatorDecorator decorator = new(accumulator, argumentCount: 1);
 
-        Assert.Equal(0f, decorator.Result.AsScalar());
+        Assert.Equal(0f, decorator.Result.AsFloat32());
     }
 
     // ─────────────── GroupByOperator with DISTINCT aggregates ───────────────
@@ -278,11 +278,11 @@ public class DistinctTests
     public async Task GroupBy_CountDistinct_DeduplicatesPerGroup()
     {
         MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("item", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("item", DataValue.FromScalar(2f))),
-            MakeRow(("category", DataValue.FromString("A")), ("item", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("B")), ("item", DataValue.FromScalar(10f))),
-            MakeRow(("category", DataValue.FromString("B")), ("item", DataValue.FromScalar(10f))));
+            MakeRow(("category", DataValue.FromString("A")), ("item", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("A")), ("item", DataValue.FromFloat32(2f))),
+            MakeRow(("category", DataValue.FromString("A")), ("item", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("B")), ("item", DataValue.FromFloat32(10f))),
+            MakeRow(("category", DataValue.FromString("B")), ("item", DataValue.FromFloat32(10f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -303,8 +303,8 @@ public class DistinctTests
         Row groupA = results.First(r => r["category"].AsString() == "A");
         Row groupB = results.First(r => r["category"].AsString() == "B");
 
-        Assert.Equal(2f, groupA["COUNT(DISTINCT item)"].AsScalar());
-        Assert.Equal(1f, groupB["COUNT(DISTINCT item)"].AsScalar());
+        Assert.Equal(2f, groupA["COUNT(DISTINCT item)"].AsFloat32());
+        Assert.Equal(1f, groupB["COUNT(DISTINCT item)"].AsFloat32());
     }
 
     // ─────────────── Validation ───────────────

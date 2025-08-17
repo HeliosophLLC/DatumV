@@ -32,13 +32,13 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
             throw new ArgumentException("APPROX_MEDIAN() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"APPROX_MEDIAN() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -60,7 +60,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            float value = arguments[0].AsScalar();
+            float value = arguments[0].AsFloat32();
             _totalCount++;
 
             if (_samples.Count < MaxSamples)
@@ -84,7 +84,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
             {
                 if (_samples.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
                 _samples.Sort();
@@ -94,11 +94,11 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
 
                 if (count % 2 == 1)
                 {
-                    return DataValue.FromScalar(_samples[mid]);
+                    return DataValue.FromFloat32(_samples[mid]);
                 }
 
                 float median = (_samples[mid - 1] + _samples[mid]) / 2f;
-                return DataValue.FromScalar(median);
+                return DataValue.FromFloat32(median);
             }
         }
     }

@@ -79,21 +79,21 @@ public sealed class ImageMetadataFunctionTests
     [Fact]
     public void Width_Validate_AcceptsImageOrUInt8Array()
     {
-        Assert.Equal(DataKind.Scalar, _width.ValidateArguments([DataKind.Image]));
-        Assert.Equal(DataKind.Scalar, _width.ValidateArguments([DataKind.UInt8Array]));
+        Assert.Equal(DataKind.Float32, _width.ValidateArguments([DataKind.Image]));
+        Assert.Equal(DataKind.Float32, _width.ValidateArguments([DataKind.UInt8Array]));
     }
 
     [Fact]
     public void Width_Validate_WrongArgCount_Throws()
     {
         Assert.Throws<ArgumentException>(() => _width.ValidateArguments([]));
-        Assert.Throws<ArgumentException>(() => _width.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _width.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
     public void Width_Validate_WrongType_Throws()
     {
-        Assert.Throws<ArgumentException>(() => _width.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _width.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] jpeg = MakeJpegHeader(640, 480, 3);
         DataValue result = _width.Execute([DataValue.FromImage(jpeg)]);
-        Assert.Equal(640f, result.AsScalar());
+        Assert.Equal(640f, result.AsFloat32());
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] png = MakePngHeader(1920, 1080, 2); // RGB
         DataValue result = _width.Execute([DataValue.FromImage(png)]);
-        Assert.Equal(1920f, result.AsScalar());
+        Assert.Equal(1920f, result.AsFloat32());
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] jpeg = MakeJpegHeader(640, 480, 3);
         DataValue result = _height.Execute([DataValue.FromImage(jpeg)]);
-        Assert.Equal(480f, result.AsScalar());
+        Assert.Equal(480f, result.AsFloat32());
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] png = MakePngHeader(320, 240, 2);
         DataValue result = _height.Execute([DataValue.FromImage(png)]);
-        Assert.Equal(240f, result.AsScalar());
+        Assert.Equal(240f, result.AsFloat32());
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] jpeg = MakeJpegHeader(100, 100, 3);
         DataValue result = _channels.Execute([DataValue.FromImage(jpeg)]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] jpeg = MakeJpegHeader(100, 100, 1);
         DataValue result = _channels.Execute([DataValue.FromImage(jpeg)]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] png = MakePngHeader(100, 100, 6); // RGBA
         DataValue result = _channels.Execute([DataValue.FromImage(png)]);
-        Assert.Equal(4f, result.AsScalar());
+        Assert.Equal(4f, result.AsFloat32());
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class ImageMetadataFunctionTests
     {
         byte[] jpeg = MakeJpegHeader(640, 480, 3);
         DataValue result = _pixelCount.Execute([DataValue.FromImage(jpeg)]);
-        Assert.Equal(640f * 480f, result.AsScalar());
+        Assert.Equal(640f * 480f, result.AsFloat32());
     }
 
     [Fact]

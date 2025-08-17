@@ -153,7 +153,7 @@ public sealed class SidecarManifestDiscoveryTests : IDisposable
         NumericFeatureManifest feature = new()
         {
             Name = columnName,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = rowCount,
             NullCount = 0,
             ValidCount = rowCount,

@@ -26,7 +26,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"age\": 30}"),
             DataValue.FromString("age")
         ]);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"active\": true}"),
             DataValue.FromString("active")
         ]);
-        Assert.Equal(1.0f, result.AsScalar());
+        Assert.Equal(1.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"active\": false}"),
             DataValue.FromString("active")
         ]);
-        Assert.Equal(0.0f, result.AsScalar());
+        Assert.Equal(0.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"items\": [10, 20, 30]}"),
             DataValue.FromString("items.1")
         ]);
-        Assert.Equal(20f, result.AsScalar());
+        Assert.Equal(20f, result.AsFloat32());
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class JsonFunctionTests
     {
         JsonValueFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.String]));
+            function.ValidateArguments([DataKind.Float32, DataKind.String]));
     }
 
     // ───────────────── JsonQueryFunction ─────────────────
@@ -207,7 +207,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"name\": \"Alice\"}"),
             DataValue.FromString("name")
         ]);
-        Assert.Equal(1.0f, result.AsScalar());
+        Assert.Equal(1.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"name\": \"Alice\"}"),
             DataValue.FromString("missing")
         ]);
-        Assert.Equal(0.0f, result.AsScalar());
+        Assert.Equal(0.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"a\": {\"b\": {\"c\": 1}}}"),
             DataValue.FromString("a.b.c")
         ]);
-        Assert.Equal(1.0f, result.AsScalar());
+        Assert.Equal(1.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public class JsonFunctionTests
             DataValue.Null(DataKind.JsonValue),
             DataValue.FromString("key")
         ]);
-        Assert.Equal(0.0f, result.AsScalar());
+        Assert.Equal(0.0f, result.AsFloat32());
     }
 
     // ───────────────── JsonArrayLengthFunction ─────────────────
@@ -252,7 +252,7 @@ public class JsonFunctionTests
         DataValue result = function.Execute([
             DataValue.FromJsonValue("[1, 2, 3, 4, 5]")
         ]);
-        Assert.Equal(5f, result.AsScalar());
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
@@ -263,7 +263,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"items\": [\"a\", \"b\"]}"),
             DataValue.FromString("items")
         ]);
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class JsonFunctionTests
         DataValue result = function.Execute([
             DataValue.FromJsonValue("[]")
         ]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]

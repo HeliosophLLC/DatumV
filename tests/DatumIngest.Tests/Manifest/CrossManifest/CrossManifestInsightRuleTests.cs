@@ -188,7 +188,7 @@ public sealed class CrossManifestInsightRuleTests
         List<ManifestWithName> manifests =
         [
             MakeManifestWithName("orders",
-                MakeFeature("customer_id", DataKind.Scalar)),
+                MakeFeature("customer_id", DataKind.Float32)),
             MakeManifestWithName("customers",
                 MakeFeature("customer_id", DataKind.String)),
         ];

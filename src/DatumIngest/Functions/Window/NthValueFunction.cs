@@ -25,7 +25,7 @@ public sealed class NthValueFunction : IWindowFunction
             throw new ArgumentException("NTH_VALUE() requires exactly 2 arguments: (expression, n).");
         }
 
-        if (argumentKinds[1] != DataKind.Scalar)
+        if (argumentKinds[1] != DataKind.Float32)
         {
             throw new ArgumentException("NTH_VALUE() second argument (n) must be a numeric scalar.");
         }
@@ -55,7 +55,7 @@ public sealed class NthValueFunction : IWindowFunction
 
             // Evaluate n (1-based) from the first row — it is a constant expression.
             DataValue nValue = evaluator.Evaluate(argumentExpressions[1], partitionRows[0]);
-            int n = (int)nValue.AsScalar();
+            int n = (int)nValue.AsFloat32();
 
             if (n <= 0)
             {
@@ -68,7 +68,7 @@ public sealed class NthValueFunction : IWindowFunction
 
                 if (start > end)
                 {
-                    results[i] = DataValue.Null(DataKind.Scalar);
+                    results[i] = DataValue.Null(DataKind.Float32);
                     continue;
                 }
 
@@ -104,7 +104,7 @@ public sealed class NthValueFunction : IWindowFunction
                 }
             }
 
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         private static DataValue FindNthFromLast(
@@ -133,7 +133,7 @@ public sealed class NthValueFunction : IWindowFunction
                 }
             }
 
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
     }
 }

@@ -22,7 +22,7 @@ public sealed class DenseRankFunction : IWindowFunction
             throw new ArgumentException("DENSE_RANK() accepts no arguments.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -46,7 +46,7 @@ public sealed class DenseRankFunction : IWindowFunction
             }
 
             int currentRank = 1;
-            results[0] = DataValue.FromScalar(currentRank);
+            results[0] = DataValue.FromFloat32(currentRank);
 
             for (int i = 1; i < partitionRows.Count; i++)
             {
@@ -58,7 +58,7 @@ public sealed class DenseRankFunction : IWindowFunction
                     currentRank++;
                 }
 
-                results[i] = DataValue.FromScalar(currentRank);
+                results[i] = DataValue.FromFloat32(currentRank);
             }
         }
     }

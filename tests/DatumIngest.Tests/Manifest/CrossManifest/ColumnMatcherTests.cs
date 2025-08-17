@@ -85,7 +85,7 @@ public sealed class ColumnMatcherTests
     [Fact]
     public void ComputeTypeCompatibility_ExactMatch_ReturnsOne()
     {
-        double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Scalar, DataKind.Scalar);
+        double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Float32, DataKind.Float32);
 
         Assert.Equal(1.0, compatibility);
     }
@@ -93,7 +93,7 @@ public sealed class ColumnMatcherTests
     [Fact]
     public void ComputeTypeCompatibility_ScalarAndUInt8_Returns0Point8()
     {
-        double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Scalar, DataKind.UInt8);
+        double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Float32, DataKind.UInt8);
 
         Assert.Equal(0.8, compatibility);
     }
@@ -117,7 +117,7 @@ public sealed class ColumnMatcherTests
     [Fact]
     public void ComputeTypeCompatibility_Incompatible_ReturnsZero()
     {
-        double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Scalar, DataKind.Image);
+        double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Float32, DataKind.Image);
 
         Assert.Equal(0.0, compatibility);
     }
@@ -125,8 +125,8 @@ public sealed class ColumnMatcherTests
     [Fact]
     public void ComputeTypeCompatibility_Symmetric()
     {
-        double forward = ColumnMatcher.ComputeTypeCompatibility(DataKind.UInt8, DataKind.Scalar);
-        double reverse = ColumnMatcher.ComputeTypeCompatibility(DataKind.Scalar, DataKind.UInt8);
+        double forward = ColumnMatcher.ComputeTypeCompatibility(DataKind.UInt8, DataKind.Float32);
+        double reverse = ColumnMatcher.ComputeTypeCompatibility(DataKind.Float32, DataKind.UInt8);
 
         Assert.Equal(forward, reverse);
     }
@@ -220,7 +220,7 @@ public sealed class ColumnMatcherTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000,
             NullCount = 0,
             ValidCount = 1000,

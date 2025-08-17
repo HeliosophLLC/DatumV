@@ -12,7 +12,7 @@ public sealed class PearsonAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i), DataValue.FromScalar(i * 2.0f));
+            accumulator.Add(DataValue.FromFloat32(i), DataValue.FromFloat32(i * 2.0f));
         }
 
         double result = accumulator.GetValue();
@@ -27,7 +27,7 @@ public sealed class PearsonAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i), DataValue.FromScalar(-i * 3.0f));
+            accumulator.Add(DataValue.FromFloat32(i), DataValue.FromFloat32(-i * 3.0f));
         }
 
         double result = accumulator.GetValue();
@@ -42,7 +42,7 @@ public sealed class PearsonAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.FromScalar(5.0f), DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(5.0f), DataValue.FromFloat32(i));
         }
 
         double result = accumulator.GetValue();
@@ -55,7 +55,7 @@ public sealed class PearsonAccumulatorTests
     {
         PearsonAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f));
 
         double result = accumulator.GetValue();
 
@@ -67,8 +67,8 @@ public sealed class PearsonAccumulatorTests
     {
         PearsonAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(1.0f), DataValue.Null(DataKind.Scalar));
+        accumulator.Add(DataValue.Null(DataKind.Float32), DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), DataValue.Null(DataKind.Float32));
 
         double result = accumulator.GetValue();
 
@@ -100,7 +100,7 @@ public sealed class SpearmanAccumulatorTests
 
         for (int i = 1; i <= 50; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i), DataValue.FromScalar(i * i));
+            accumulator.Add(DataValue.FromFloat32(i), DataValue.FromFloat32(i * i));
         }
 
         double result = accumulator.GetValue();
@@ -115,7 +115,7 @@ public sealed class SpearmanAccumulatorTests
 
         for (int i = 1; i <= 50; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i), DataValue.FromScalar(100 - i));
+            accumulator.Add(DataValue.FromFloat32(i), DataValue.FromFloat32(100 - i));
         }
 
         double result = accumulator.GetValue();
@@ -128,7 +128,7 @@ public sealed class SpearmanAccumulatorTests
     {
         SpearmanAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f));
 
         double result = accumulator.GetValue();
 
@@ -254,8 +254,8 @@ public sealed class AnovaAccumulatorTests
         // Two groups with same mean
         for (int i = 0; i < 500; i++)
         {
-            accumulator.Add(DataValue.FromString("A"), DataValue.FromScalar((float)(50 + random.NextDouble() * 10)));
-            accumulator.Add(DataValue.FromString("B"), DataValue.FromScalar((float)(50 + random.NextDouble() * 10)));
+            accumulator.Add(DataValue.FromString("A"), DataValue.FromFloat32((float)(50 + random.NextDouble() * 10)));
+            accumulator.Add(DataValue.FromString("B"), DataValue.FromFloat32((float)(50 + random.NextDouble() * 10)));
         }
 
         double result = accumulator.GetValue();
@@ -271,8 +271,8 @@ public sealed class AnovaAccumulatorTests
         // Two groups with very different means
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString("low"), DataValue.FromScalar(10.0f + i * 0.1f));
-            accumulator.Add(DataValue.FromString("high"), DataValue.FromScalar(1000.0f + i * 0.1f));
+            accumulator.Add(DataValue.FromString("low"), DataValue.FromFloat32(10.0f + i * 0.1f));
+            accumulator.Add(DataValue.FromString("high"), DataValue.FromFloat32(1000.0f + i * 0.1f));
         }
 
         double result = accumulator.GetValue();
@@ -287,7 +287,7 @@ public sealed class AnovaAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.FromString("only"), DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromString("only"), DataValue.FromFloat32(i));
         }
 
         double result = accumulator.GetValue();
@@ -302,8 +302,8 @@ public sealed class AnovaAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(10.0f + i * 0.1f), DataValue.FromString("low"));
-            accumulator.Add(DataValue.FromScalar(1000.0f + i * 0.1f), DataValue.FromString("high"));
+            accumulator.Add(DataValue.FromFloat32(10.0f + i * 0.1f), DataValue.FromString("low"));
+            accumulator.Add(DataValue.FromFloat32(1000.0f + i * 0.1f), DataValue.FromString("high"));
         }
 
         double result = accumulator.GetValue();
@@ -317,14 +317,14 @@ public sealed class MutualInformationAccumulatorTests
     [Fact]
     public void GetValue_IndependentNumericColumns_ReturnsNearZero()
     {
-        MutualInformationAccumulator accumulator = new(DataKind.Scalar, DataKind.Scalar);
+        MutualInformationAccumulator accumulator = new(DataKind.Float32, DataKind.Float32);
         Random random = new(42);
 
         for (int i = 0; i < 5000; i++)
         {
             accumulator.Add(
-                DataValue.FromScalar((float)random.NextDouble()),
-                DataValue.FromScalar((float)random.NextDouble()));
+                DataValue.FromFloat32((float)random.NextDouble()),
+                DataValue.FromFloat32((float)random.NextDouble()));
         }
 
         double result = accumulator.GetValue();
@@ -352,9 +352,9 @@ public sealed class MutualInformationAccumulatorTests
     [Fact]
     public void GetValue_InsufficientData_ReturnsNaN()
     {
-        MutualInformationAccumulator accumulator = new(DataKind.Scalar, DataKind.Scalar);
+        MutualInformationAccumulator accumulator = new(DataKind.Float32, DataKind.Float32);
 
-        accumulator.Add(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f));
 
         double result = accumulator.GetValue();
 
@@ -365,14 +365,14 @@ public sealed class MutualInformationAccumulatorTests
     [Fact]
     public void GetValue_MixedNumericCategorical_ComputesCorrectly()
     {
-        MutualInformationAccumulator accumulator = new(DataKind.Scalar, DataKind.String);
+        MutualInformationAccumulator accumulator = new(DataKind.Float32, DataKind.String);
 
         // Numeric value depends on category
         for (int i = 0; i < 1000; i++)
         {
             string cat = (i % 3).ToString();
             float num = (i % 3) * 100.0f + (i % 10);
-            accumulator.Add(DataValue.FromScalar(num), DataValue.FromString(cat));
+            accumulator.Add(DataValue.FromFloat32(num), DataValue.FromString(cat));
         }
 
         double result = accumulator.GetValue();
@@ -501,12 +501,12 @@ public sealed class TheilUTests
     [Fact]
     public void GetDetailedValue_NumericColumns_ComputesTheilU()
     {
-        MutualInformationAccumulator accumulator = new(DataKind.Scalar, DataKind.Scalar);
+        MutualInformationAccumulator accumulator = new(DataKind.Float32, DataKind.Float32);
 
         // Perfectly correlated numeric values
         for (int i = 0; i < 1000; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i), DataValue.FromScalar(i * 2.0f));
+            accumulator.Add(DataValue.FromFloat32(i), DataValue.FromFloat32(i * 2.0f));
         }
 
         MutualInformationResult result = accumulator.GetDetailedValue();
@@ -526,7 +526,7 @@ public sealed class MissingnessCorrelationAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.String));
+            accumulator.Add(DataValue.Null(DataKind.Float32), DataValue.Null(DataKind.String));
         }
 
         double result = accumulator.GetValue();
@@ -541,7 +541,7 @@ public sealed class MissingnessCorrelationAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i), DataValue.FromString("text"));
+            accumulator.Add(DataValue.FromFloat32(i), DataValue.FromString("text"));
         }
 
         double result = accumulator.GetValue();
@@ -559,11 +559,11 @@ public sealed class MissingnessCorrelationAccumulatorTests
         {
             if (i % 2 == 0)
             {
-                accumulator.Add(DataValue.FromScalar(i), DataValue.FromString("text"));
+                accumulator.Add(DataValue.FromFloat32(i), DataValue.FromString("text"));
             }
             else
             {
-                accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.String));
+                accumulator.Add(DataValue.Null(DataKind.Float32), DataValue.Null(DataKind.String));
             }
         }
 
@@ -582,11 +582,11 @@ public sealed class MissingnessCorrelationAccumulatorTests
         {
             if (i % 2 == 0)
             {
-                accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.FromString("text"));
+                accumulator.Add(DataValue.Null(DataKind.Float32), DataValue.FromString("text"));
             }
             else
             {
-                accumulator.Add(DataValue.FromScalar(i), DataValue.Null(DataKind.String));
+                accumulator.Add(DataValue.FromFloat32(i), DataValue.Null(DataKind.String));
             }
         }
 
@@ -604,8 +604,8 @@ public sealed class MissingnessCorrelationAccumulatorTests
         for (int i = 0; i < 5000; i++)
         {
             DataValue valueA = random.NextDouble() < 0.3
-                ? DataValue.Null(DataKind.Scalar)
-                : DataValue.FromScalar(i);
+                ? DataValue.Null(DataKind.Float32)
+                : DataValue.FromFloat32(i);
             DataValue valueB = random.NextDouble() < 0.3
                 ? DataValue.Null(DataKind.String)
                 : DataValue.FromString("text");
@@ -623,7 +623,7 @@ public sealed class MissingnessCorrelationAccumulatorTests
     {
         MissingnessCorrelationAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f), DataValue.FromString("text"));
+        accumulator.Add(DataValue.FromFloat32(1.0f), DataValue.FromString("text"));
 
         double result = accumulator.GetValue();
 
@@ -640,11 +640,11 @@ public sealed class MissingnessCorrelationAccumulatorTests
         {
             if (i % 2 == 0)
             {
-                accumulator.Add(DataValue.FromScalar(i), DataValue.FromImage(new byte[] { 0xFF }));
+                accumulator.Add(DataValue.FromFloat32(i), DataValue.FromImage(new byte[] { 0xFF }));
             }
             else
             {
-                accumulator.Add(DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.Image));
+                accumulator.Add(DataValue.Null(DataKind.Float32), DataValue.Null(DataKind.Image));
             }
         }
 

@@ -23,7 +23,7 @@ public sealed class BPlusTreeBulkLoaderTests
         BPlusTreeSectionHeader? result = BPlusTreeBulkLoader.Build(
             Array.Empty<ValueIndexEntry>(),
             "empty_column",
-            DataKind.Scalar,
+            DataKind.Float32,
             writer);
 
         Assert.Null(result);
@@ -36,13 +36,13 @@ public sealed class BPlusTreeBulkLoaderTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(42.0f), 0, 0L),
+            new(DataValue.FromFloat32(42.0f), 0, 0L),
         ];
 
-        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "single", DataKind.Scalar);
+        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "single", DataKind.Float32);
 
         Assert.Equal("single", header.ColumnName);
-        Assert.Equal(DataKind.Scalar, header.KeyKind);
+        Assert.Equal(DataKind.Float32, header.KeyKind);
         Assert.Equal(1L, header.EntryCount);
         Assert.Equal(1, header.TreeHeight);
         Assert.Equal(1u, header.PageCount);
@@ -54,12 +54,12 @@ public sealed class BPlusTreeBulkLoaderTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(42.0f), 0, 100L),
+            new(DataValue.FromFloat32(42.0f), 0, 100L),
         ];
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "col", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "col", DataKind.Float32);
 
-        IReadOnlyList<ValueIndexEntry> found = reader.FindExact(DataValue.FromScalar(42.0f));
+        IReadOnlyList<ValueIndexEntry> found = reader.FindExact(DataValue.FromFloat32(42.0f));
         Assert.Single(found);
         Assert.Equal(0, found[0].ChunkIndex);
         Assert.Equal(100L, found[0].RowOffsetInChunk);
@@ -72,14 +72,14 @@ public sealed class BPlusTreeBulkLoaderTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0L),
-            new(DataValue.FromScalar(2.0f), 0, 1L),
-            new(DataValue.FromScalar(3.0f), 0, 2L),
-            new(DataValue.FromScalar(4.0f), 1, 0L),
-            new(DataValue.FromScalar(5.0f), 1, 1L),
+            new(DataValue.FromFloat32(1.0f), 0, 0L),
+            new(DataValue.FromFloat32(2.0f), 0, 1L),
+            new(DataValue.FromFloat32(3.0f), 0, 2L),
+            new(DataValue.FromFloat32(4.0f), 1, 0L),
+            new(DataValue.FromFloat32(5.0f), 1, 1L),
         ];
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "x", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "x", DataKind.Float32);
 
         for (int index = 0; index < entries.Length; index++)
         {
@@ -99,7 +99,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 2000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "big", DataKind.Scalar);
+        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "big", DataKind.Float32);
 
         Assert.Equal(entryCount, header.EntryCount);
         Assert.True(header.PageCount > 1, "Should have more than one page.");
@@ -112,7 +112,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 2000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "big", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "big", DataKind.Float32);
 
         // Spot-check entries at various positions (first, middle, last).
         int[] sampleIndexes = [0, 1, entryCount / 4, entryCount / 2, 3 * entryCount / 4, entryCount - 2, entryCount - 1];
@@ -133,24 +133,24 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 2000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "range", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "range", DataKind.Float32);
 
-        DataValue low = DataValue.FromScalar(100.0f);
-        DataValue high = DataValue.FromScalar(200.0f);
+        DataValue low = DataValue.FromFloat32(100.0f);
+        DataValue high = DataValue.FromFloat32(200.0f);
 
         IReadOnlyList<ValueIndexEntry> rangeResult = reader.FindRange(low, high);
 
         // All returned entries should have keys in [100, 200].
         foreach (ValueIndexEntry entry in rangeResult)
         {
-            float keyValue = entry.Key.AsScalar();
+            float keyValue = entry.Key.AsFloat32();
             Assert.True(keyValue >= 100.0f && keyValue <= 200.0f,
                 $"Key {keyValue} should be in range [100, 200].");
         }
 
         // Count expected entries.
         int expectedCount = entries.Count(entry =>
-            entry.Key.AsScalar() >= 100.0f && entry.Key.AsScalar() <= 200.0f);
+            entry.Key.AsFloat32() >= 100.0f && entry.Key.AsFloat32() <= 200.0f);
         Assert.Equal(expectedCount, rangeResult.Count);
     }
 
@@ -161,19 +161,19 @@ public sealed class BPlusTreeBulkLoaderTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(5.0f), 0, 0L),
-            new(DataValue.FromScalar(5.0f), 0, 10L),
-            new(DataValue.FromScalar(5.0f), 1, 0L),
-            new(DataValue.FromScalar(10.0f), 1, 10L),
-            new(DataValue.FromScalar(10.0f), 2, 0L),
+            new(DataValue.FromFloat32(5.0f), 0, 0L),
+            new(DataValue.FromFloat32(5.0f), 0, 10L),
+            new(DataValue.FromFloat32(5.0f), 1, 0L),
+            new(DataValue.FromFloat32(10.0f), 1, 10L),
+            new(DataValue.FromFloat32(10.0f), 2, 0L),
         ];
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "dup", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "dup", DataKind.Float32);
 
-        IReadOnlyList<ValueIndexEntry> fives = reader.FindExact(DataValue.FromScalar(5.0f));
+        IReadOnlyList<ValueIndexEntry> fives = reader.FindExact(DataValue.FromFloat32(5.0f));
         Assert.Equal(3, fives.Count);
 
-        IReadOnlyList<ValueIndexEntry> tens = reader.FindExact(DataValue.FromScalar(10.0f));
+        IReadOnlyList<ValueIndexEntry> tens = reader.FindExact(DataValue.FromFloat32(10.0f));
         Assert.Equal(2, tens.Count);
     }
 
@@ -209,7 +209,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 500;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "traverse", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "traverse", DataKind.Float32);
 
         List<ValueIndexEntry> traversed = reader.TraverseForward().ToList();
         Assert.Equal(entryCount, traversed.Count);
@@ -217,7 +217,7 @@ public sealed class BPlusTreeBulkLoaderTests
         for (int index = 1; index < traversed.Count; index++)
         {
             Assert.True(
-                traversed[index].Key.AsScalar() >= traversed[index - 1].Key.AsScalar(),
+                traversed[index].Key.AsFloat32() >= traversed[index - 1].Key.AsFloat32(),
                 $"Entry {index} should be >= entry {index - 1} in forward traversal.");
         }
     }
@@ -228,7 +228,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 500;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "traverse", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "traverse", DataKind.Float32);
 
         List<ValueIndexEntry> traversed = reader.TraverseBackward().ToList();
         Assert.Equal(entryCount, traversed.Count);
@@ -236,7 +236,7 @@ public sealed class BPlusTreeBulkLoaderTests
         for (int index = 1; index < traversed.Count; index++)
         {
             Assert.True(
-                traversed[index].Key.AsScalar() <= traversed[index - 1].Key.AsScalar(),
+                traversed[index].Key.AsFloat32() <= traversed[index - 1].Key.AsFloat32(),
                 $"Entry {index} should be <= entry {index - 1} in backward traversal.");
         }
     }
@@ -274,7 +274,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 1000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        (BPlusTreeSectionHeader header, byte[][] pages) = BuildAndGetPages(entries, "chain", DataKind.Scalar);
+        (BPlusTreeSectionHeader header, byte[][] pages) = BuildAndGetPages(entries, "chain", DataKind.Float32);
 
         // Find the first leaf page (leftmost child from root).
         uint firstLeafIndex = FindFirstLeafIndex(header, pages);
@@ -289,7 +289,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 1000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        (BPlusTreeSectionHeader header, byte[][] pages) = BuildAndGetPages(entries, "chain", DataKind.Scalar);
+        (BPlusTreeSectionHeader header, byte[][] pages) = BuildAndGetPages(entries, "chain", DataKind.Float32);
 
         // Find the last leaf page (rightmost child from root).
         uint lastLeafIndex = FindLastLeafIndex(header, pages);
@@ -304,7 +304,7 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 1500;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        (BPlusTreeSectionHeader header, byte[][] pages) = BuildAndGetPages(entries, "count", DataKind.Scalar);
+        (BPlusTreeSectionHeader header, byte[][] pages) = BuildAndGetPages(entries, "count", DataKind.Float32);
 
         // Walk the leaf chain and count entries.
         long totalEntries = 0;
@@ -331,13 +331,13 @@ public sealed class BPlusTreeBulkLoaderTests
         int entryCount = 50_000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "large", DataKind.Scalar);
+        BPlusTreeSectionHeader header = BuildAndGetHeader(entries, "large", DataKind.Float32);
 
         Assert.Equal(entryCount, header.EntryCount);
         Assert.True(header.PageCount > 10, "Large tree should have many pages.");
 
         // Verify the reader can traverse all entries.
-        BPlusTreeReader reader = BuildAndCreateReader(entries, "large", DataKind.Scalar);
+        BPlusTreeReader reader = BuildAndCreateReader(entries, "large", DataKind.Float32);
         long traversedCount = reader.TraverseForward().LongCount();
         Assert.Equal(entryCount, traversedCount);
     }
@@ -402,7 +402,7 @@ public sealed class BPlusTreeBulkLoaderTests
             int chunkIndex = index / chunkSize;
             long rowOffset = index % chunkSize;
             entries[index] = new ValueIndexEntry(
-                DataValue.FromScalar((float)index), chunkIndex, rowOffset);
+                DataValue.FromFloat32((float)index), chunkIndex, rowOffset);
         }
 
         return entries;

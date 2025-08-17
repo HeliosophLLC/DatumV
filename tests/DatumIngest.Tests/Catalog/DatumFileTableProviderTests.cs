@@ -39,17 +39,17 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task OpenAsync_ReturnsAllRowsAndColumns()
     {
         string path = await WriteFixture("basic.datum", [
-            MultiRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))),
-            MultiRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob"))),
-            MultiRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("Charlie"))),
+            MultiRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+            MultiRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
+            MultiRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("Charlie"))),
         ]);
 
         List<Row> rows = await ReadAll(path);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["id"].AsScalar(), 0.0001f);
+        Assert.Equal(1f, rows[0]["id"].AsFloat32(), 0.0001f);
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal(3f, rows[2]["id"].AsScalar(), 0.0001f);
+        Assert.Equal(3f, rows[2]["id"].AsFloat32(), 0.0001f);
         Assert.Equal("Charlie", rows[2]["name"].AsString());
     }
 
@@ -57,7 +57,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task OpenAsync_EmptyFile_ReturnsNoRows()
     {
         string path = await WriteEmptyFixture("empty.datum",
-            [new ColumnInfo("x", DataKind.Scalar, false)]);
+            [new ColumnInfo("x", DataKind.Float32, false)]);
 
         List<Row> rows = await ReadAll(path);
 
@@ -68,7 +68,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task GetSchemaAsync_ReturnsCorrectColumnNames()
     {
         string path = await WriteFixture("schema.datum", [
-            MultiRow(("score", DataValue.FromScalar(0.9f)), ("label", DataValue.FromString("cat")))
+            MultiRow(("score", DataValue.FromFloat32(0.9f)), ("label", DataValue.FromString("cat")))
         ]);
 
         DatumFileTableProvider provider = new();
@@ -86,7 +86,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task OpenAsync_WithRequiredColumns_ProjectsSubset()
     {
         string path = await WriteFixture("projection.datum", [
-            MultiRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromString("x")), ("c", DataValue.FromBoolean(true))),
+            MultiRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x")), ("c", DataValue.FromBoolean(true))),
         ]);
 
         DatumFileTableProvider provider = new();
@@ -97,7 +97,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
 
         Assert.Single(rows);
         // Only projected columns are present.
-        Assert.Equal(1f, rows[0]["a"].AsScalar(), 0.0001f);
+        Assert.Equal(1f, rows[0]["a"].AsFloat32(), 0.0001f);
         Assert.True(rows[0]["c"].AsBoolean());
         Assert.False(rows[0].TryGetValue("b", out _));
     }
@@ -109,7 +109,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     {
         // Force two row groups by using row group size of 3.
         string path = Path.Combine(_tempDirectory, "twogroups.datum");
-        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("n", DataKind.Float32, false)]);
 
         using (DatumFileWriter fileWriter = new(path))
         {
@@ -117,7 +117,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             fileWriter.Initialize(DatumFileSchema.FromSchema(schema));
             for (int i = 0; i < 5; i++)
             {
-                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromFloat32((float)i)]));
             }
 
             fileWriter.Finalize();
@@ -132,7 +132,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         Assert.Equal(5, rows.Count);
         for (int i = 0; i < 5; i++)
         {
-            Assert.Equal((float)i, rows[i]["n"].AsScalar(), 0.0001f);
+            Assert.Equal((float)i, rows[i]["n"].AsFloat32(), 0.0001f);
         }
     }
 
@@ -146,7 +146,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ZoneMap_NonOverlappingGroups_PrunesCorrectGroup()
     {
         string path = Path.Combine(_tempDirectory, "zonemap.datum");
-        Schema schema = new([new ColumnInfo("score", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("score", DataKind.Float32, false)]);
 
         using (DatumFileWriter fileWriter = new(path))
         {
@@ -156,13 +156,13 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             // Row group 0: 0..9
             for (int i = 0; i < 10; i++)
             {
-                fileWriter.WriteRow(new Row(["score"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["score"], [DataValue.FromFloat32((float)i)]));
             }
 
             // Row group 1: 100..109
             for (int i = 100; i < 110; i++)
             {
-                fileWriter.WriteRow(new Row(["score"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["score"], [DataValue.FromFloat32((float)i)]));
             }
 
             fileWriter.Finalize();
@@ -181,7 +181,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
 
         // Provider should prune group 0, so all 10 returned rows come from group 1.
         Assert.Equal(10, rows.Count);
-        Assert.All(rows, row => Assert.True(row["score"].AsScalar() >= 100f));
+        Assert.All(rows, row => Assert.True(row["score"].AsFloat32() >= 100f));
 
         Assert.Equal(2, provider.TotalRowGroups);
         Assert.Equal(1, provider.PrunedRowGroups);
@@ -194,7 +194,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ZoneMap_OverlappingPredicate_PrunesNothing()
     {
         string path = Path.Combine(_tempDirectory, "zonemap_overlap.datum");
-        Schema schema = new([new ColumnInfo("score", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("score", DataKind.Float32, false)]);
 
         using (DatumFileWriter fileWriter = new(path))
         {
@@ -203,12 +203,12 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
 
             for (int i = 0; i < 5; i++)
             {
-                fileWriter.WriteRow(new Row(["score"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["score"], [DataValue.FromFloat32((float)i)]));
             }
 
             for (int i = 10; i < 15; i++)
             {
-                fileWriter.WriteRow(new Row(["score"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["score"], [DataValue.FromFloat32((float)i)]));
             }
 
             fileWriter.Finalize();
@@ -237,7 +237,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ReadRowRangeAsync_MiddleRange_ReturnsCorrectRows()
     {
         string path = Path.Combine(_tempDirectory, "seek_middle.datum");
-        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("n", DataKind.Float32, false)]);
 
         using (DatumFileWriter fileWriter = new(path))
         {
@@ -245,7 +245,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             fileWriter.Initialize(DatumFileSchema.FromSchema(schema));
             for (int i = 0; i < 10; i++)
             {
-                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromFloat32((float)i)]));
             }
 
             fileWriter.Finalize();
@@ -257,10 +257,10 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 3, count: 4);
 
         Assert.Equal(4, rows.Count);
-        Assert.Equal(3f, rows[0]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(4f, rows[1]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(5f, rows[2]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(6f, rows[3]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(3f, rows[0]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(4f, rows[1]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(5f, rows[2]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(6f, rows[3]["n"].AsFloat32(), 0.0001f);
     }
 
     /// <summary>
@@ -270,7 +270,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ReadRowRangeAsync_SpanningMultipleRowGroups_ReturnsCorrectRows()
     {
         string path = Path.Combine(_tempDirectory, "seek_span.datum");
-        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("n", DataKind.Float32, false)]);
 
         using (DatumFileWriter fileWriter = new(path))
         {
@@ -279,7 +279,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             // Row group 0: 0, 1, 2 | Row group 1: 3, 4, 5 | Row group 2: 6, 7
             for (int i = 0; i < 8; i++)
             {
-                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromFloat32((float)i)]));
             }
 
             fileWriter.Finalize();
@@ -292,10 +292,10 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 2, count: 4);
 
         Assert.Equal(4, rows.Count);
-        Assert.Equal(2f, rows[0]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(3f, rows[1]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(4f, rows[2]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(5f, rows[3]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(2f, rows[0]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(3f, rows[1]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(4f, rows[2]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(5f, rows[3]["n"].AsFloat32(), 0.0001f);
     }
 
     /// <summary>
@@ -305,9 +305,9 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ReadRowRangeAsync_WithProjection_ReturnsOnlyRequestedColumns()
     {
         string path = await WriteFixture("seek_projection.datum", [
-            MultiRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromString("x")), ("c", DataValue.FromBoolean(true))),
-            MultiRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromString("y")), ("c", DataValue.FromBoolean(false))),
-            MultiRow(("a", DataValue.FromScalar(3f)), ("b", DataValue.FromString("z")), ("c", DataValue.FromBoolean(true))),
+            MultiRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x")), ("c", DataValue.FromBoolean(true))),
+            MultiRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromString("y")), ("c", DataValue.FromBoolean(false))),
+            MultiRow(("a", DataValue.FromFloat32(3f)), ("b", DataValue.FromString("z")), ("c", DataValue.FromBoolean(true))),
         ]);
 
         DatumFileTableProvider provider = new();
@@ -317,7 +317,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         List<Row> rows = await ReadRange(provider, descriptor, required, startRow: 1, count: 2);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(2f, rows[0]["a"].AsScalar(), 0.0001f);
+        Assert.Equal(2f, rows[0]["a"].AsFloat32(), 0.0001f);
         Assert.True(rows[0].TryGetValue("c", out _));
         Assert.False(rows[0].TryGetValue("b", out _));
     }
@@ -329,9 +329,9 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ReadRowRangeAsync_BeyondEnd_ClampsToAvailable()
     {
         string path = await WriteFixture("seek_clamp.datum", [
-            MultiRow(("n", DataValue.FromScalar(0f))),
-            MultiRow(("n", DataValue.FromScalar(1f))),
-            MultiRow(("n", DataValue.FromScalar(2f))),
+            MultiRow(("n", DataValue.FromFloat32(0f))),
+            MultiRow(("n", DataValue.FromFloat32(1f))),
+            MultiRow(("n", DataValue.FromFloat32(2f))),
         ]);
 
         DatumFileTableProvider provider = new();
@@ -340,8 +340,8 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         List<Row> rows = await ReadRange(provider, descriptor, requiredColumns: null, startRow: 1, count: 100);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1f, rows[0]["n"].AsScalar(), 0.0001f);
-        Assert.Equal(2f, rows[1]["n"].AsScalar(), 0.0001f);
+        Assert.Equal(1f, rows[0]["n"].AsFloat32(), 0.0001f);
+        Assert.Equal(2f, rows[1]["n"].AsFloat32(), 0.0001f);
     }
 
     /// <summary>
@@ -351,7 +351,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ReadRowRangeAsync_StartBeyondEnd_ReturnsEmpty()
     {
         string path = await WriteFixture("seek_empty.datum", [
-            MultiRow(("n", DataValue.FromScalar(0f))),
+            MultiRow(("n", DataValue.FromFloat32(0f))),
         ]);
 
         DatumFileTableProvider provider = new();
@@ -370,7 +370,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
     public async Task ReadRowRangeAsync_AllRows_MatchesOpenAsync()
     {
         string path = Path.Combine(_tempDirectory, "seek_all.datum");
-        Schema schema = new([new ColumnInfo("n", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("n", DataKind.Float32, false)]);
 
         using (DatumFileWriter fileWriter = new(path))
         {
@@ -378,7 +378,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             fileWriter.Initialize(DatumFileSchema.FromSchema(schema));
             for (int i = 0; i < 7; i++)
             {
-                fileWriter.WriteRow(new Row(["n"], [DataValue.FromScalar((float)i)]));
+                fileWriter.WriteRow(new Row(["n"], [DataValue.FromFloat32((float)i)]));
             }
 
             fileWriter.Finalize();
@@ -393,7 +393,7 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         Assert.Equal(allRows.Count, seekRows.Count);
         for (int i = 0; i < allRows.Count; i++)
         {
-            Assert.Equal(allRows[i]["n"].AsScalar(), seekRows[i]["n"].AsScalar(), 0.0001f);
+            Assert.Equal(allRows[i]["n"].AsFloat32(), seekRows[i]["n"].AsFloat32(), 0.0001f);
         }
     }
 

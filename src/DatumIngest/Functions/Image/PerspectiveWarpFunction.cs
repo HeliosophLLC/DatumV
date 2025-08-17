@@ -88,7 +88,7 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
         if (arguments.Length is 2 or 3)
         {
             // Random perspective warp with intensity
-            float intensity = arguments[1].AsScalar();
+            float intensity = arguments[1].AsFloat32();
             formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
 
             Random random = new();
@@ -107,14 +107,14 @@ public sealed class PerspectiveWarpFunction : IScalarFunction, ICostAwareFunctio
         else
         {
             // Explicit corner coordinates (normalized 0–1)
-            float topLeftX = arguments[1].AsScalar() * width;
-            float topLeftY = arguments[2].AsScalar() * height;
-            float topRightX = arguments[3].AsScalar() * width;
-            float topRightY = arguments[4].AsScalar() * height;
-            float bottomLeftX = arguments[5].AsScalar() * width;
-            float bottomLeftY = arguments[6].AsScalar() * height;
-            float bottomRightX = arguments[7].AsScalar() * width;
-            float bottomRightY = arguments[8].AsScalar() * height;
+            float topLeftX = arguments[1].AsFloat32() * width;
+            float topLeftY = arguments[2].AsFloat32() * height;
+            float topRightX = arguments[3].AsFloat32() * width;
+            float topRightY = arguments[4].AsFloat32() * height;
+            float bottomLeftX = arguments[5].AsFloat32() * width;
+            float bottomLeftY = arguments[6].AsFloat32() * height;
+            float bottomRightX = arguments[7].AsFloat32() * width;
+            float bottomRightY = arguments[8].AsFloat32() * height;
             formatOverride = arguments.Length == 10 ? arguments[9].AsString() : null;
 
             destinationCorners =

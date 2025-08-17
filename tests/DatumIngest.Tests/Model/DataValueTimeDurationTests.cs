@@ -40,7 +40,7 @@ public class DataValueTimeDurationTests
     [Fact]
     public void AsTime_WrongKindThrows()
     {
-        DataValue scalar = DataValue.FromScalar(42f);
+        DataValue scalar = DataValue.FromFloat32(42f);
         Assert.Throws<InvalidOperationException>(() => scalar.AsTime());
     }
 

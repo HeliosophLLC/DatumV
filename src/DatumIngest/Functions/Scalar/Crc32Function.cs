@@ -29,7 +29,7 @@ public sealed class Crc32Function : IScalarFunction
             throw new ArgumentException($"crc32() argument must be String or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -39,7 +39,7 @@ public sealed class Crc32Function : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         byte[] inputBytes;
@@ -53,6 +53,6 @@ public sealed class Crc32Function : IScalarFunction
         }
 
         uint crc = Crc32.HashToUInt32(inputBytes);
-        return DataValue.FromScalar(crc);
+        return DataValue.FromFloat32(crc);
     }
 }

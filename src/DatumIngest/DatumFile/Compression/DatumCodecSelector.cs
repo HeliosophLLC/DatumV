@@ -17,7 +17,7 @@ public static class DatumCodecSelector
     {
         return kind switch
         {
-            DataKind.Scalar => DatumEncoding.FixedFloat32,
+            DataKind.Float32 => DatumEncoding.FixedFloat32,
             DataKind.UInt8 => DatumEncoding.Raw,
             DataKind.Boolean => DatumEncoding.BitPacked,
             DataKind.Date => DatumEncoding.DeltaInt32,
@@ -60,7 +60,7 @@ public static class DatumCodecSelector
     /// </summary>
     public static bool NeedsFloatShuffle(DataKind kind)
     {
-        return kind is DataKind.Scalar or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
+        return kind is DataKind.Float32 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
     }
 
     /// <summary>
@@ -69,6 +69,6 @@ public static class DatumCodecSelector
     /// </summary>
     public static bool IsFixedFloat(DataKind kind)
     {
-        return kind is DataKind.Scalar or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
+        return kind is DataKind.Float32 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
     }
 }

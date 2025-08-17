@@ -5,7 +5,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <summary>
 /// Returns the 1-based position of the first occurrence of a value within an
 /// <see cref="DataKind.Array"/>. <c>array_position(arr, value)</c> returns a
-/// <see cref="DataKind.Scalar"/> index (1-based), or null if the value is not found.
+/// <see cref="DataKind.Float32"/> index (1-based), or null if the value is not found.
 /// Uses <see cref="DataValue.Equals(DataValue)"/> for comparison.
 /// Returns null if the array itself is null.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class ArrayPositionFunction : IScalarFunction
                 $"array_position() requires an Array as the first argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -39,7 +39,7 @@ public sealed class ArrayPositionFunction : IScalarFunction
 
         if (arrayValue.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         DataValue[] elements = arrayValue.AsArray();
@@ -48,10 +48,10 @@ public sealed class ArrayPositionFunction : IScalarFunction
         {
             if (elements[i].Equals(searchValue))
             {
-                return DataValue.FromScalar(i + 1);
+                return DataValue.FromFloat32(i + 1);
             }
         }
 
-        return DataValue.Null(DataKind.Scalar);
+        return DataValue.Null(DataKind.Float32);
     }
 }

@@ -45,10 +45,10 @@ public sealed class GreatestFunction : IScalarFunction
             throw new ArgumentException("greatest() requires at least 2 arguments.");
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
                 throw new ArgumentException($"greatest() argument {i + 1} must be Scalar or UInt8.");
         }
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -60,10 +60,10 @@ public sealed class GreatestFunction : IScalarFunction
         {
             if (arguments[i].IsNull) continue;
             allNull = false;
-            float value = arguments[i].Kind is DataKind.UInt8 ? arguments[i].AsUInt8() : arguments[i].AsScalar();
+            float value = arguments[i].Kind is DataKind.UInt8 ? arguments[i].AsUInt8() : arguments[i].AsFloat32();
             if (value > max) max = value;
         }
-        return allNull ? DataValue.Null(DataKind.Scalar) : DataValue.FromScalar(max);
+        return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(max);
     }
 }
 
@@ -82,10 +82,10 @@ public sealed class LeastFunction : IScalarFunction
             throw new ArgumentException("least() requires at least 2 arguments.");
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
                 throw new ArgumentException($"least() argument {i + 1} must be Scalar or UInt8.");
         }
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -97,10 +97,10 @@ public sealed class LeastFunction : IScalarFunction
         {
             if (arguments[i].IsNull) continue;
             allNull = false;
-            float value = arguments[i].Kind is DataKind.UInt8 ? arguments[i].AsUInt8() : arguments[i].AsScalar();
+            float value = arguments[i].Kind is DataKind.UInt8 ? arguments[i].AsUInt8() : arguments[i].AsFloat32();
             if (value < min) min = value;
         }
-        return allNull ? DataValue.Null(DataKind.Scalar) : DataValue.FromScalar(min);
+        return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(min);
     }
 }
 
@@ -117,17 +117,17 @@ public sealed class IsNanFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_nan() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("is_nan() requires a Scalar or UInt8 argument.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
-        return DataValue.FromScalar(float.IsNaN(value) ? 1f : 0f);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        return DataValue.FromFloat32(float.IsNaN(value) ? 1f : 0f);
     }
 }
 
@@ -144,17 +144,17 @@ public sealed class IsFiniteFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_finite() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("is_finite() requires a Scalar or UInt8 argument.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
-        return DataValue.FromScalar(float.IsFinite(value) ? 1f : 0f);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        return DataValue.FromFloat32(float.IsFinite(value) ? 1f : 0f);
     }
 }
 
@@ -172,17 +172,17 @@ public sealed class IsEvenFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_even() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("is_even() requires a Scalar or UInt8 argument.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
-        return DataValue.FromScalar(value == MathF.Truncate(value) && value % 2 == 0 ? 1f : 0f);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        return DataValue.FromFloat32(value == MathF.Truncate(value) && value % 2 == 0 ? 1f : 0f);
     }
 }
 
@@ -200,17 +200,17 @@ public sealed class IsOddFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_odd() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("is_odd() requires a Scalar or UInt8 argument.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
-        return DataValue.FromScalar(value == MathF.Truncate(value) && value % 2 != 0 ? 1f : 0f);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        return DataValue.FromFloat32(value == MathF.Truncate(value) && value % 2 != 0 ? 1f : 0f);
     }
 }
 
@@ -252,7 +252,7 @@ public sealed class IifFunction : IScalarFunction
     {
         if (argumentKinds.Length != 3)
             throw new ArgumentException("iif() requires exactly 3 arguments (condition, then, else).");
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.Boolean))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.Boolean))
             throw new ArgumentException("iif() condition (argument 1) must be Scalar or Boolean.");
         if (argumentKinds[1] != argumentKinds[2])
             throw new ArgumentException($"iif() then/else arguments must be the same kind, got {argumentKinds[1]} and {argumentKinds[2]}.");
@@ -264,7 +264,7 @@ public sealed class IifFunction : IScalarFunction
     {
         DataValue condition = arguments[0];
         bool truthy = !condition.IsNull &&
-            (condition.Kind == DataKind.Boolean ? condition.AsBoolean() : condition.AsScalar() != 0f);
+            (condition.Kind == DataKind.Boolean ? condition.AsBoolean() : condition.AsFloat32() != 0f);
         return truthy ? arguments[1] : arguments[2];
     }
 }
@@ -283,12 +283,12 @@ public sealed class RandomFunction : IScalarFunction
     {
         if (argumentKinds.Length != 0)
             throw new ArgumentException("random() takes no arguments.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        return DataValue.FromScalar((float)Random.Shared.NextDouble());
+        return DataValue.FromFloat32((float)Random.Shared.NextDouble());
     }
 }

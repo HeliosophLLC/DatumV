@@ -18,7 +18,7 @@ public sealed class ProtoConverterTests
     [Fact]
     public void ToProto_ColumnInfo_MapsAllProperties()
     {
-        ColumnInfo column = new("temperature", DataKind.Scalar, nullable: true);
+        ColumnInfo column = new("temperature", DataKind.Float32, nullable: true);
 
         ColumnInfoMessage message = ProtoConverter.ToProto(column);
 
@@ -51,7 +51,7 @@ public sealed class ProtoConverterTests
         Schema schema = new(new[]
         {
             new ColumnInfo("name", DataKind.String, false),
-            new ColumnInfo("score", DataKind.Scalar, true),
+            new ColumnInfo("score", DataKind.Float32, true),
             new ColumnInfo("date", DataKind.Date, false),
         });
 
@@ -69,7 +69,7 @@ public sealed class ProtoConverterTests
     [Fact]
     public void ToProto_NullDataValue_SetsIsNull()
     {
-        DataValue value = DataValue.Null(DataKind.Scalar);
+        DataValue value = DataValue.Null(DataKind.Float32);
 
         DataValueMessage message = ProtoConverter.ToProto(value);
 
@@ -82,7 +82,7 @@ public sealed class ProtoConverterTests
     [Fact]
     public void ToProto_ScalarValue_SetsScalarField()
     {
-        DataValue value = DataValue.FromScalar(3.14f);
+        DataValue value = DataValue.FromFloat32(3.14f);
 
         DataValueMessage message = ProtoConverter.ToProto(value);
 
@@ -244,7 +244,7 @@ public sealed class ProtoConverterTests
     /// </summary>
     [Theory]
     [InlineData(DataKind.UInt8, DataKindValue.DataKindUint8)]
-    [InlineData(DataKind.Scalar, DataKindValue.DataKindScalar)]
+    [InlineData(DataKind.Float32, DataKindValue.DataKindScalar)]
     [InlineData(DataKind.Vector, DataKindValue.DataKindVector)]
     [InlineData(DataKind.Matrix, DataKindValue.DataKindMatrix)]
     [InlineData(DataKind.Tensor, DataKindValue.DataKindTensor)]
@@ -308,8 +308,8 @@ public sealed class ProtoConverterTests
         ResizeImageFunction resize = new();
         DataValue resizedValue = resize.Execute([
             imageValue,
-            DataValue.FromScalar(8),
-            DataValue.FromScalar(8),
+            DataValue.FromFloat32(8),
+            DataValue.FromFloat32(8),
         ]);
 
         // Serialize both — original and resized.

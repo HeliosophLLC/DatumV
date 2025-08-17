@@ -24,7 +24,7 @@ public sealed class DayFunction : IScalarFunction
             throw new ArgumentException($"day() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,13 +34,13 @@ public sealed class DayFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int day = input.Kind == DataKind.Date
             ? input.AsDate().Day
             : input.AsDateTime().Day;
 
-        return DataValue.FromScalar(day);
+        return DataValue.FromFloat32(day);
     }
 }

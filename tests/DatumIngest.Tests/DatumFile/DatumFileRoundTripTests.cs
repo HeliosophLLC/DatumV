@@ -37,27 +37,27 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
     {
         float[] expected = [1.0f, -99.5f, 0f, float.MaxValue];
         DataValue[][] columns = await WriteAndRead("scalar.datum",
-            [new ColumnInfo("v", DataKind.Scalar, false)],
-            expected.Select(v => Row("v", DataValue.FromScalar(v))));
+            [new ColumnInfo("v", DataKind.Float32, false)],
+            expected.Select(v => Row("v", DataValue.FromFloat32(v))));
 
         for (int i = 0; i < expected.Length; i++)
         {
-            Assert.Equal(expected[i], columns[0][i].AsScalar(), 0.0001f);
+            Assert.Equal(expected[i], columns[0][i].AsFloat32(), 0.0001f);
         }
     }
 
     [Fact]
     public async Task RoundTrip_Scalar_WithNulls()
     {
-        DataValue[] input = [DataValue.FromScalar(1f), DataValue.Null(DataKind.Scalar), DataValue.FromScalar(3f)];
+        DataValue[] input = [DataValue.FromFloat32(1f), DataValue.Null(DataKind.Float32), DataValue.FromFloat32(3f)];
         DataValue[][] columns = await WriteAndRead("scalar_null.datum",
-            [new ColumnInfo("v", DataKind.Scalar, nullable: true)],
+            [new ColumnInfo("v", DataKind.Float32, nullable: true)],
             input.Select(v => Row("v", v)));
 
-        Assert.Equal(1f, columns[0][0].AsScalar(), 0.0001f);
+        Assert.Equal(1f, columns[0][0].AsFloat32(), 0.0001f);
         Assert.True(columns[0][1].IsNull);
-        Assert.Equal(DataKind.Scalar, columns[0][1].Kind);
-        Assert.Equal(3f, columns[0][2].AsScalar(), 0.0001f);
+        Assert.Equal(DataKind.Float32, columns[0][1].Kind);
+        Assert.Equal(3f, columns[0][2].AsFloat32(), 0.0001f);
     }
 
     // ──────────────────── UInt8 ────────────────────
@@ -315,23 +315,23 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
     [Fact]
     public async Task RoundTrip_Array_OfScalars()
     {
-        DataValue[] element0 = [DataValue.FromScalar(1f), DataValue.FromScalar(2f)];
-        DataValue[] element1 = [DataValue.FromScalar(10f)];
+        DataValue[] element0 = [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)];
+        DataValue[] element1 = [DataValue.FromFloat32(10f)];
 
         DataValue[][] columns = await WriteAndRead("array_scalar.datum",
             [new ColumnInfo("arr", DataKind.Array, false)],
-            [Row("arr", DataValue.FromArray(DataKind.Scalar, element0)),
-             Row("arr", DataValue.FromArray(DataKind.Scalar, element1))]);
+            [Row("arr", DataValue.FromArray(DataKind.Float32, element0)),
+             Row("arr", DataValue.FromArray(DataKind.Float32, element1))]);
 
-        Assert.Equal(DataKind.Scalar, columns[0][0].ArrayElementKind);
+        Assert.Equal(DataKind.Float32, columns[0][0].ArrayElementKind);
         DataValue[] row0 = columns[0][0].AsArray();
-        Assert.Equal(1f, row0[0].AsScalar(), 0.0001f);
-        Assert.Equal(2f, row0[1].AsScalar(), 0.0001f);
+        Assert.Equal(1f, row0[0].AsFloat32(), 0.0001f);
+        Assert.Equal(2f, row0[1].AsFloat32(), 0.0001f);
 
-        Assert.Equal(DataKind.Scalar, columns[0][1].ArrayElementKind);
+        Assert.Equal(DataKind.Float32, columns[0][1].ArrayElementKind);
         DataValue[] row1 = columns[0][1].AsArray();
         Assert.Single(row1);
-        Assert.Equal(10f, row1[0].AsScalar(), 0.0001f);
+        Assert.Equal(10f, row1[0].AsFloat32(), 0.0001f);
     }
 
     // ──────────────────── Multi-column ────────────────────
@@ -340,14 +340,14 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
     public async Task RoundTrip_MultipleColumns_AllPresentAfterRead()
     {
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("name", DataKind.String, false),
             new ColumnInfo("flag", DataKind.Boolean, false),
         ]);
 
         List<Row> inputRows = [
-            MultiRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice")), ("flag", DataValue.FromBoolean(true))),
-            MultiRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob")),   ("flag", DataValue.FromBoolean(false))),
+            MultiRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice")), ("flag", DataValue.FromBoolean(true))),
+            MultiRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob")),   ("flag", DataValue.FromBoolean(false))),
         ];
 
         string path = Path.Combine(_tempDirectory, "multi.datum");
@@ -359,11 +359,11 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
 
         DataValue[][] columns = reader.ReadColumns(0, [0, 1, 2]);
 
-        Assert.Equal(1f, columns[0][0].AsScalar(), 0.0001f);
+        Assert.Equal(1f, columns[0][0].AsFloat32(), 0.0001f);
         Assert.Equal("Alice", columns[1][0].AsString());
         Assert.True(columns[2][0].AsBoolean());
 
-        Assert.Equal(2f, columns[0][1].AsScalar(), 0.0001f);
+        Assert.Equal(2f, columns[0][1].AsFloat32(), 0.0001f);
         Assert.Equal("Bob", columns[1][1].AsString());
         Assert.False(columns[2][1].AsBoolean());
     }
@@ -374,10 +374,10 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
     public async Task Open_ReadsCorrectTotalRowCount()
     {
         string path = Path.Combine(_tempDirectory, "rowcount.datum");
-        Schema schema = new([new ColumnInfo("x", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("x", DataKind.Float32, false)]);
 
         await WriteFile(path, schema,
-            Enumerable.Range(0, 10).Select(i => Row("x", DataValue.FromScalar((float)i))));
+            Enumerable.Range(0, 10).Select(i => Row("x", DataValue.FromFloat32((float)i))));
 
         using DatumFileReader reader = DatumFileReader.Open(path);
         Assert.Equal(10, reader.TotalRowCount);

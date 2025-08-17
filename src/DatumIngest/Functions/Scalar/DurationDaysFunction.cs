@@ -24,7 +24,7 @@ public sealed class DurationDaysFunction : IScalarFunction
             throw new ArgumentException($"duration_days() requires a Duration argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,9 +34,9 @@ public sealed class DurationDaysFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
-        return DataValue.FromScalar((float)input.AsDuration().TotalDays);
+        return DataValue.FromFloat32((float)input.AsDuration().TotalDays);
     }
 }

@@ -9,16 +9,16 @@ public sealed class ChunkColumnStatisticsTests
     public void ToColumnStatisticsRange_MapsAllFields()
     {
         ChunkColumnStatistics stats = new(
-            DataValue.FromScalar(1.0f),
-            DataValue.FromScalar(10.0f),
+            DataValue.FromFloat32(1.0f),
+            DataValue.FromFloat32(10.0f),
             NullCount: 3,
             RowCount: 100,
             EstimatedCardinality: 42);
 
         ColumnStatisticsRange range = stats.ToColumnStatisticsRange();
 
-        Assert.Equal(1.0f, range.Minimum!.AsScalar());
-        Assert.Equal(10.0f, range.Maximum!.AsScalar());
+        Assert.Equal(1.0f, range.Minimum!.AsFloat32());
+        Assert.Equal(10.0f, range.Maximum!.AsFloat32());
         Assert.Equal(3, range.NullCount);
         Assert.Equal(100, range.RowCount);
     }
@@ -42,11 +42,11 @@ public sealed class ChunkColumnStatisticsTests
     public void RecordEquality_Works()
     {
         ChunkColumnStatistics a = new(
-            DataValue.FromScalar(1.0f), DataValue.FromScalar(10.0f),
+            DataValue.FromFloat32(1.0f), DataValue.FromFloat32(10.0f),
             NullCount: 0, RowCount: 100, EstimatedCardinality: 50);
 
         ChunkColumnStatistics b = new(
-            DataValue.FromScalar(1.0f), DataValue.FromScalar(10.0f),
+            DataValue.FromFloat32(1.0f), DataValue.FromFloat32(10.0f),
             NullCount: 0, RowCount: 100, EstimatedCardinality: 50);
 
         // Records use value equality.

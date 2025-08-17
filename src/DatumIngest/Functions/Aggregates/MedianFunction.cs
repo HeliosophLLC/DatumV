@@ -30,12 +30,12 @@ public sealed class MedianFunction : IAggregateFunction
             throw new ArgumentException("MEDIAN() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException($"MEDIAN() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -49,7 +49,7 @@ public sealed class MedianFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            _values.Add(arguments[0].AsScalar());
+            _values.Add(arguments[0].AsFloat32());
         }
 
         public DataValue Result
@@ -58,7 +58,7 @@ public sealed class MedianFunction : IAggregateFunction
             {
                 if (_values.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
                 _values.Sort();
@@ -67,12 +67,12 @@ public sealed class MedianFunction : IAggregateFunction
 
                 if (count % 2 == 1)
                 {
-                    return DataValue.FromScalar(_values[mid]);
+                    return DataValue.FromFloat32(_values[mid]);
                 }
 
                 // Even count: average of the two middle values.
                 float median = (_values[mid - 1] + _values[mid]) / 2f;
-                return DataValue.FromScalar(median);
+                return DataValue.FromFloat32(median);
             }
         }
     }

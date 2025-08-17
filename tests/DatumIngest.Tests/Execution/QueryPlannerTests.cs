@@ -395,9 +395,9 @@ public class QueryPlannerTests
 
             Assert.Equal(3, rows.Count);
             // CSV auto-detects numeric values as Scalar.
-            Assert.Equal(1f, rows[0]["val"].AsScalar());
-            Assert.Equal(2f, rows[1]["val"].AsScalar());
-            Assert.Equal(3f, rows[2]["val"].AsScalar());
+            Assert.Equal(1f, rows[0]["val"].AsFloat32());
+            Assert.Equal(2f, rows[1]["val"].AsFloat32());
+            Assert.Equal(3f, rows[2]["val"].AsFloat32());
         }
         finally
         {

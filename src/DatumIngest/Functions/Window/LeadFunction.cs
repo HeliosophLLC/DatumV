@@ -23,7 +23,7 @@ public sealed class LeadFunction : IWindowFunction
             throw new ArgumentException("LEAD() requires 1 to 3 arguments: (expression [, offset [, default]]).");
         }
 
-        if (argumentKinds.Length >= 2 && argumentKinds[1] != DataKind.Scalar)
+        if (argumentKinds.Length >= 2 && argumentKinds[1] != DataKind.Float32)
         {
             throw new ArgumentException("LEAD() offset argument must be a numeric scalar.");
         }
@@ -51,11 +51,11 @@ public sealed class LeadFunction : IWindowFunction
             if (argumentExpressions.Count >= 2)
             {
                 DataValue offsetValue = evaluator.Evaluate(argumentExpressions[1], partitionRows[0]);
-                offset = (int)offsetValue.AsScalar();
+                offset = (int)offsetValue.AsFloat32();
             }
 
             // Determine default value (default NULL).
-            DataValue defaultValue = DataValue.Null(DataKind.Scalar);
+            DataValue defaultValue = DataValue.Null(DataKind.Float32);
             if (argumentExpressions.Count >= 3)
             {
                 defaultValue = evaluator.Evaluate(argumentExpressions[2], partitionRows[0]);

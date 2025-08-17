@@ -53,10 +53,10 @@ public sealed class CropImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        int x = (int)arguments[1].AsScalar();
-        int y = (int)arguments[2].AsScalar();
-        int cropWidth = (int)arguments[3].AsScalar();
-        int cropHeight = (int)arguments[4].AsScalar();
+        int x = (int)arguments[1].AsFloat32();
+        int y = (int)arguments[2].AsFloat32();
+        int cropWidth = (int)arguments[3].AsFloat32();
+        int cropHeight = (int)arguments[4].AsFloat32();
 
         string? formatOverride = arguments.Length == 6 ? arguments[5].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

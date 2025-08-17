@@ -34,7 +34,7 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
             throw new ArgumentException($"json_array_length() second argument must be String, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -43,7 +43,7 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         string json = input.Kind == DataKind.JsonValue ? input.AsJsonValue() : input.AsString();
@@ -63,15 +63,15 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
             }
             catch (JsonException)
             {
-                return DataValue.Null(DataKind.Scalar);
+                return DataValue.Null(DataKind.Float32);
             }
         }
 
         if (element is null || element.Value.ValueKind != JsonValueKind.Array)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
-        return DataValue.FromScalar(element.Value.GetArrayLength());
+        return DataValue.FromFloat32(element.Value.GetArrayLength());
     }
 }

@@ -72,7 +72,7 @@ public class UuidFunctionTests
     {
         Uuid7Function function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     // ───────────────── IsUuidFunction ─────────────────
@@ -114,7 +114,7 @@ public class UuidFunctionTests
     {
         IsUuidFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     // ───────────────── UuidStrFunction ─────────────────
@@ -183,7 +183,7 @@ public class UuidFunctionTests
 
         UuidVersionFunction function = new();
         DataValue result = function.Execute([uuid]);
-        Assert.Equal(4f, result.AsScalar());
+        Assert.Equal(4f, result.AsFloat32());
     }
 
     [Fact]

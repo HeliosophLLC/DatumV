@@ -53,8 +53,8 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        int targetWidth = (int)arguments[1].AsScalar();
-        int targetHeight = (int)arguments[2].AsScalar();
+        int targetWidth = (int)arguments[1].AsFloat32();
+        int targetHeight = (int)arguments[2].AsFloat32();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

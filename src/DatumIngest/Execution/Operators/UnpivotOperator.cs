@@ -152,7 +152,7 @@ public sealed class UnpivotOperator : IQueryOperator
                 else
                 {
                     // Column not present in this row — treat as NULL.
-                    cellValue = DataValue.Null(DataKind.Scalar);
+                    cellValue = DataValue.Null(DataKind.Float32);
                 }
 
                 if (cellValue.IsNull && !_includeNulls)

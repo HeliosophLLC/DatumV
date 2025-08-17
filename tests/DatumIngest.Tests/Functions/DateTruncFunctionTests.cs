@@ -179,7 +179,7 @@ public class DateTruncFunctionTests
     [Fact]
     public void ValidateArguments_RejectsNonStringPart()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Scalar, DataKind.Date]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Float32, DataKind.Date]));
     }
 
     [Fact]

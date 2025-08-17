@@ -28,15 +28,15 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] employees =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromScalar(1f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromScalar(2f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromScalar(3f))),
+            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f))),
+            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(2f))),
+            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(3f))),
         ];
 
         Row[] activeDepartments =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
-            MakeRow(("id", DataValue.FromScalar(3f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
+            MakeRow(("id", DataValue.FromFloat32(3f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("employees", employees), ("active_departments", activeDepartments));
@@ -57,14 +57,14 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] employees =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromScalar(1f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromScalar(2f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromScalar(3f))),
+            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f))),
+            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(2f))),
+            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(3f))),
         ];
 
         Row[] excludedDepartments =
         [
-            MakeRow(("id", DataValue.FromScalar(2f))),
+            MakeRow(("id", DataValue.FromFloat32(2f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("employees", employees), ("excluded_departments", excludedDepartments));
@@ -85,8 +85,8 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         Row[] empty = [];
@@ -107,8 +107,8 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         Row[] empty = [];
@@ -131,13 +131,13 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         Row[] settings =
         [
-            MakeRow(("flag", DataValue.FromScalar(1f))),
+            MakeRow(("flag", DataValue.FromFloat32(1f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("settings", settings));
@@ -156,8 +156,8 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         Row[] empty = [];
@@ -178,8 +178,8 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         Row[] empty = [];
@@ -200,13 +200,13 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         Row[] settings =
         [
-            MakeRow(("flag", DataValue.FromScalar(1f))),
+            MakeRow(("flag", DataValue.FromFloat32(1f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("settings", settings));
@@ -228,15 +228,15 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] employees =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromScalar(1f)), ("region", DataValue.FromString("west"))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromScalar(2f)), ("region", DataValue.FromString("east"))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromScalar(1f)), ("region", DataValue.FromString("east"))),
+            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("west"))),
+            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(2f)), ("region", DataValue.FromString("east"))),
+            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("east"))),
         ];
 
         Row[] activeDepartments =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("region", DataValue.FromString("west"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("region", DataValue.FromString("west"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("west"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("region", DataValue.FromString("west"))),
         ];
 
         TableCatalog catalog = CreateCatalog(("employees", employees), ("active_departments", activeDepartments));
@@ -261,15 +261,15 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] orders =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("customer_id", DataValue.FromScalar(10f))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("customer_id", DataValue.FromScalar(20f))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("customer_id", DataValue.FromScalar(30f))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("customer_id", DataValue.FromFloat32(10f))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("customer_id", DataValue.FromFloat32(20f))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("customer_id", DataValue.FromFloat32(30f))),
         ];
 
         Row[] returns =
         [
-            MakeRow(("order_id", DataValue.FromScalar(1f)), ("customer_id", DataValue.FromScalar(10f))),
-            MakeRow(("order_id", DataValue.FromScalar(3f)), ("customer_id", DataValue.FromScalar(30f))),
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("customer_id", DataValue.FromFloat32(10f))),
+            MakeRow(("order_id", DataValue.FromFloat32(3f)), ("customer_id", DataValue.FromFloat32(30f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("orders", orders), ("returns", returns));
@@ -281,7 +281,7 @@ public sealed class SemiJoinSubqueryTests
 
         // Order 2 has no matching return with customer_id=20.
         Assert.Single(results);
-        Assert.Equal(2f, results[0]["id"].AsScalar());
+        Assert.Equal(2f, results[0]["id"].AsFloat32());
     }
 
     // ─────────────── Correlated EXISTS subquery (semi-join) ───────────────
@@ -294,15 +294,15 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] customers =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("carol"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("carol"))),
         ];
 
         Row[] orders =
         [
-            MakeRow(("customer_id", DataValue.FromScalar(1f)), ("total", DataValue.FromScalar(100f))),
-            MakeRow(("customer_id", DataValue.FromScalar(3f)), ("total", DataValue.FromScalar(200f))),
+            MakeRow(("customer_id", DataValue.FromFloat32(1f)), ("total", DataValue.FromFloat32(100f))),
+            MakeRow(("customer_id", DataValue.FromFloat32(3f)), ("total", DataValue.FromFloat32(200f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("customers", customers), ("orders", orders));
@@ -324,15 +324,15 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] customers =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("carol"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("carol"))),
         ];
 
         Row[] orders =
         [
-            MakeRow(("customer_id", DataValue.FromScalar(1f)), ("total", DataValue.FromScalar(100f))),
-            MakeRow(("customer_id", DataValue.FromScalar(3f)), ("total", DataValue.FromScalar(200f))),
+            MakeRow(("customer_id", DataValue.FromFloat32(1f)), ("total", DataValue.FromFloat32(100f))),
+            MakeRow(("customer_id", DataValue.FromFloat32(3f)), ("total", DataValue.FromFloat32(200f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("customers", customers), ("orders", orders));
@@ -356,15 +356,15 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
         ];
 
         Row[] subqueryValues =
         [
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("subquery_values", subqueryValues));
@@ -387,12 +387,12 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
         ];
 
         Row[] multi =
         [
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(2f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("multi", multi));
@@ -416,14 +416,14 @@ public sealed class SemiJoinSubqueryTests
     {
         Row[] employees =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromScalar(1f)), ("active", DataValue.FromScalar(1f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromScalar(1f)), ("active", DataValue.FromScalar(0f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromScalar(2f)), ("active", DataValue.FromScalar(1f))),
+            MakeRow(("name", DataValue.FromString("alice")), ("department_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(1f))),
+            MakeRow(("name", DataValue.FromString("bob")), ("department_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(0f))),
+            MakeRow(("name", DataValue.FromString("carol")), ("department_id", DataValue.FromFloat32(2f)), ("active", DataValue.FromFloat32(1f))),
         ];
 
         Row[] departments =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("employees", employees), ("departments", departments));

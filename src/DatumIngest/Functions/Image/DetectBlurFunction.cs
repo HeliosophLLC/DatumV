@@ -37,7 +37,7 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
                 $"detect_blur() requires Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -47,7 +47,7 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
@@ -84,7 +84,7 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
 
         if (interiorCount <= 0)
         {
-            return DataValue.FromScalar(0f);
+            return DataValue.FromFloat32(0f);
         }
 
         double laplacianSum = 0.0;
@@ -108,7 +108,7 @@ public sealed class DetectBlurFunction : IScalarFunction, ICostAwareFunction
         double mean = laplacianSum / interiorCount;
         double variance = (laplacianSumSquared / interiorCount) - (mean * mean);
 
-        return DataValue.FromScalar((float)variance);
+        return DataValue.FromFloat32((float)variance);
     }
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)

@@ -44,19 +44,19 @@ public sealed class CovarianceFunction : IAggregateFunction
             throw new ArgumentException($"{Name}() requires exactly two arguments: y and x.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"{Name}() first argument (y) must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"{Name}() second argument (x) must be numeric, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -83,8 +83,8 @@ public sealed class CovarianceFunction : IAggregateFunction
         {
             if (arguments[0].IsNull || arguments[1].IsNull) return;
 
-            double y = arguments[0].AsScalar();
-            double x = arguments[1].AsScalar();
+            double y = arguments[0].AsFloat32();
+            double x = arguments[1].AsFloat32();
 
             _count++;
 
@@ -105,13 +105,13 @@ public sealed class CovarianceFunction : IAggregateFunction
                 if (_usePopulation)
                 {
                     return _count > 0
-                        ? DataValue.FromScalar((float)(_coMoment / _count))
-                        : DataValue.Null(DataKind.Scalar);
+                        ? DataValue.FromFloat32((float)(_coMoment / _count))
+                        : DataValue.Null(DataKind.Float32);
                 }
 
                 return _count > 1
-                    ? DataValue.FromScalar((float)(_coMoment / (_count - 1)))
-                    : DataValue.Null(DataKind.Scalar);
+                    ? DataValue.FromFloat32((float)(_coMoment / (_count - 1)))
+                    : DataValue.Null(DataKind.Float32);
             }
         }
     }

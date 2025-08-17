@@ -2,7 +2,8 @@ namespace DatumIngest.Model;
 
 /// <summary>
 /// Discriminator for the type of value stored in a <see cref="DataValue"/>.
-/// Members are ordered from narrowest to widest within the numeric widening chain.
+/// Values 0–15 are the original type set. Values 16+ are extended numeric types
+/// added for precise integer and double-precision support.
 /// </summary>
 public enum DataKind
 {
@@ -10,7 +11,7 @@ public enum DataKind
     UInt8 = 0,
 
     /// <summary>A single 32-bit floating-point number.</summary>
-    Scalar = 1,
+    Float32 = 1,
 
     /// <summary>A one-dimensional array of 32-bit floats (rank-1 tensor).</summary>
     Vector = 2,
@@ -56,4 +57,30 @@ public enum DataKind
     /// The element kind is stored in the shape metadata of the owning <see cref="DataValue"/>.
     /// </summary>
     Array = 15,
+
+    // ───────────────────── Extended numeric types (16+) ─────────────────────
+
+    /// <summary>A signed 8-bit integer (-128 to 127).</summary>
+    Int8 = 16,
+
+    /// <summary>A signed 16-bit integer (-32,768 to 32,767).</summary>
+    Int16 = 17,
+
+    /// <summary>An unsigned 16-bit integer (0 to 65,535).</summary>
+    UInt16 = 18,
+
+    /// <summary>A signed 32-bit integer (-2,147,483,648 to 2,147,483,647).</summary>
+    Int32 = 19,
+
+    /// <summary>An unsigned 32-bit integer (0 to 4,294,967,295).</summary>
+    UInt32 = 20,
+
+    /// <summary>A signed 64-bit integer.</summary>
+    Int64 = 21,
+
+    /// <summary>An unsigned 64-bit integer.</summary>
+    UInt64 = 22,
+
+    /// <summary>A 64-bit double-precision floating-point number.</summary>
+    Float64 = 23,
 }

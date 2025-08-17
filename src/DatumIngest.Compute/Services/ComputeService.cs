@@ -626,7 +626,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         return kind switch
         {
             "UInt8" => ParameterKindValue.ParameterKindUint8,
-            "Scalar" => ParameterKindValue.ParameterKindScalar,
+            "Float32" => ParameterKindValue.ParameterKindScalar,
             "Vector" => ParameterKindValue.ParameterKindVector,
             "Matrix" => ParameterKindValue.ParameterKindMatrix,
             "Tensor" => ParameterKindValue.ParameterKindTensor,

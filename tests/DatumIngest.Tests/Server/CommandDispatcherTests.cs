@@ -358,12 +358,12 @@ public sealed class CommandDispatcherTests : IDisposable
         // "departments" — small table (2 rows).
         catalog.RegisterProvider("departments", () => new FixedRowProvider(
             new Schema([
-                new ColumnInfo("department_id", DataKind.Scalar, false),
+                new ColumnInfo("department_id", DataKind.Float32, false),
                 new ColumnInfo("department", DataKind.String, false),
             ]),
             estimatedRowCount: 2,
             new Row(["department_id", "department"],
-                [DataValue.FromScalar(17f), DataValue.FromString("household")])));
+                [DataValue.FromFloat32(17f), DataValue.FromString("household")])));
 
         catalog.Register(new TableDescriptor(
             "departments", "departments", "departments.csv", new Dictionary<string, string>()));
@@ -371,13 +371,13 @@ public sealed class CommandDispatcherTests : IDisposable
         // "products" — large table (1000 rows estimated, only 1 actual for test simplicity).
         catalog.RegisterProvider("products", () => new FixedRowProvider(
             new Schema([
-                new ColumnInfo("product_id", DataKind.Scalar, false),
+                new ColumnInfo("product_id", DataKind.Float32, false),
                 new ColumnInfo("product_name", DataKind.String, false),
-                new ColumnInfo("department_id", DataKind.Scalar, false),
+                new ColumnInfo("department_id", DataKind.Float32, false),
             ]),
             estimatedRowCount: 1000,
             new Row(["product_id", "product_name", "department_id"],
-                [DataValue.FromScalar(105f), DataValue.FromString("Bakeware"), DataValue.FromScalar(17f)])));
+                [DataValue.FromFloat32(105f), DataValue.FromString("Bakeware"), DataValue.FromFloat32(17f)])));
 
         catalog.Register(new TableDescriptor(
             "products", "products", "products.csv", new Dictionary<string, string>()));
@@ -418,12 +418,12 @@ public sealed class CommandDispatcherTests : IDisposable
                 && !name.Contains("product", StringComparison.OrdinalIgnoreCase))
             {
                 // department_id columns should have value 17.
-                Assert.Equal(17f, value.AsScalar());
+                Assert.Equal(17f, value.AsFloat32());
             }
 
             if (name.Equals("product_id", StringComparison.OrdinalIgnoreCase))
             {
-                Assert.Equal(105f, value.AsScalar());
+                Assert.Equal(105f, value.AsFloat32());
             }
 
             if (name.Equals("department", StringComparison.OrdinalIgnoreCase))

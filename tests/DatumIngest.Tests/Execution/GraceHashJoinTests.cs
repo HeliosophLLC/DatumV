@@ -29,13 +29,13 @@ public sealed class GraceHashJoinTests
     public async Task InnerJoin_WithSpill_ProducesCorrectMatches()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.name", DataValue.FromString("Bob"))),
-            MakeRow(("l.id", DataValue.FromScalar(3f)), ("l.name", DataValue.FromString("Charlie"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))),
+            MakeRow(("l.id", DataValue.FromFloat32(3f)), ("l.name", DataValue.FromString("Charlie"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.score", DataValue.FromScalar(95f))),
-            MakeRow(("r.id", DataValue.FromScalar(3f)), ("r.score", DataValue.FromScalar(87f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
+            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -48,10 +48,10 @@ public sealed class GraceHashJoinTests
         Assert.Equal(2, rows.Count);
 
         Row alice = rows.First(row => row["l.name"].AsString() == "Alice");
-        Assert.Equal(95f, alice["r.score"].AsScalar());
+        Assert.Equal(95f, alice["r.score"].AsFloat32());
 
         Row charlie = rows.First(row => row["l.name"].AsString() == "Charlie");
-        Assert.Equal(87f, charlie["r.score"].AsScalar());
+        Assert.Equal(87f, charlie["r.score"].AsFloat32());
     }
 
     /// <summary>
@@ -61,11 +61,11 @@ public sealed class GraceHashJoinTests
     public async Task LeftJoin_WithSpill_IncludesUnmatchedLeft()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.name", DataValue.FromString("Bob"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.score", DataValue.FromScalar(95f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -78,7 +78,7 @@ public sealed class GraceHashJoinTests
         Assert.Equal(2, rows.Count);
 
         Row alice = rows.First(row => row["l.name"].AsString() == "Alice");
-        Assert.Equal(95f, alice["r.score"].AsScalar());
+        Assert.Equal(95f, alice["r.score"].AsFloat32());
 
         Row bob = rows.First(row => row["l.name"].AsString() == "Bob");
         Assert.True(bob["r.score"].IsNull);
@@ -91,11 +91,11 @@ public sealed class GraceHashJoinTests
     public async Task RightJoin_WithSpill_IncludesUnmatchedRight()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.score", DataValue.FromScalar(95f))),
-            MakeRow(("r.id", DataValue.FromScalar(2f)), ("r.score", DataValue.FromScalar(70f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
+            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.score", DataValue.FromFloat32(70f))));
 
         JoinOperator join = new(left, right, JoinType.Right,
             new BinaryExpression(
@@ -109,10 +109,10 @@ public sealed class GraceHashJoinTests
 
         Row matched = rows.First(row => !row["l.name"].IsNull);
         Assert.Equal("Alice", matched["l.name"].AsString());
-        Assert.Equal(95f, matched["r.score"].AsScalar());
+        Assert.Equal(95f, matched["r.score"].AsFloat32());
 
         Row unmatched = rows.First(row => row["l.name"].IsNull);
-        Assert.Equal(70f, unmatched["r.score"].AsScalar());
+        Assert.Equal(70f, unmatched["r.score"].AsFloat32());
     }
 
     /// <summary>
@@ -122,12 +122,12 @@ public sealed class GraceHashJoinTests
     public async Task FullOuterJoin_WithSpill_IncludesBothUnmatched()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.name", DataValue.FromString("Bob"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.score", DataValue.FromScalar(95f))),
-            MakeRow(("r.id", DataValue.FromScalar(3f)), ("r.score", DataValue.FromScalar(60f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
+            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(60f))));
 
         JoinOperator join = new(left, right, JoinType.FullOuter,
             new BinaryExpression(
@@ -141,7 +141,7 @@ public sealed class GraceHashJoinTests
 
         // Matched: Alice + 95
         Row alice = rows.First(row => !row["l.name"].IsNull && row["l.name"].AsString() == "Alice");
-        Assert.Equal(95f, alice["r.score"].AsScalar());
+        Assert.Equal(95f, alice["r.score"].AsFloat32());
 
         // Unmatched left: Bob (no right match)
         Row bob = rows.First(row => !row["l.name"].IsNull && row["l.name"].AsString() == "Bob");
@@ -149,7 +149,7 @@ public sealed class GraceHashJoinTests
 
         // Unmatched right: score 60 (no left match)
         Row orphan = rows.First(row => row["l.name"].IsNull);
-        Assert.Equal(60f, orphan["r.score"].AsScalar());
+        Assert.Equal(60f, orphan["r.score"].AsFloat32());
     }
 
     /// <summary>
@@ -159,10 +159,10 @@ public sealed class GraceHashJoinTests
     public async Task NullKeys_NeverMatch_WithSpill()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.Null(DataKind.Scalar)), ("l.name", DataValue.FromString("Ghost"))));
+            MakeRow(("l.id", DataValue.Null(DataKind.Float32)), ("l.name", DataValue.FromString("Ghost"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.Null(DataKind.Scalar)), ("r.score", DataValue.FromScalar(0f))));
+            MakeRow(("r.id", DataValue.Null(DataKind.Float32)), ("r.score", DataValue.FromFloat32(0f))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -182,12 +182,12 @@ public sealed class GraceHashJoinTests
     public async Task CompositeKey_InnerJoin_WithSpill()
     {
         MockOperator left = new(
-            MakeRow(("l.a", DataValue.FromScalar(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromScalar(10f))),
-            MakeRow(("l.a", DataValue.FromScalar(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromScalar(20f))));
+            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromFloat32(10f))),
+            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromFloat32(20f))));
 
         MockOperator right = new(
-            MakeRow(("r.a", DataValue.FromScalar(1f)), ("r.b", DataValue.FromString("x")), ("r.val", DataValue.FromScalar(100f))),
-            MakeRow(("r.a", DataValue.FromScalar(2f)), ("r.b", DataValue.FromString("x")), ("r.val", DataValue.FromScalar(200f))));
+            MakeRow(("r.a", DataValue.FromFloat32(1f)), ("r.b", DataValue.FromString("x")), ("r.val", DataValue.FromFloat32(100f))),
+            MakeRow(("r.a", DataValue.FromFloat32(2f)), ("r.b", DataValue.FromString("x")), ("r.val", DataValue.FromFloat32(200f))));
 
         // Join on l.a = r.a AND l.b = r.b
         Expression onCondition = new BinaryExpression(
@@ -206,8 +206,8 @@ public sealed class GraceHashJoinTests
         List<Row> rows = await CollectAsync(join, CreateContext(TinyBudget));
 
         Assert.Single(rows);
-        Assert.Equal(10f, rows[0]["l.val"].AsScalar());
-        Assert.Equal(100f, rows[0]["r.val"].AsScalar());
+        Assert.Equal(10f, rows[0]["l.val"].AsFloat32());
+        Assert.Equal(100f, rows[0]["r.val"].AsFloat32());
     }
 
     /// <summary>
@@ -219,13 +219,13 @@ public sealed class GraceHashJoinTests
         // Generate 100 left rows and 80 right rows with overlapping keys.
         Row[] leftRows = Enumerable.Range(0, 100)
             .Select(index => MakeRow(
-                ("l.id", DataValue.FromScalar((float)index)),
+                ("l.id", DataValue.FromFloat32((float)index)),
                 ("l.data", DataValue.FromString($"left_{index}"))))
             .ToArray();
 
         Row[] rightRows = Enumerable.Range(20, 80)
             .Select(index => MakeRow(
-                ("r.id", DataValue.FromScalar((float)index)),
+                ("r.id", DataValue.FromFloat32((float)index)),
                 ("r.data", DataValue.FromString($"right_{index}"))))
             .ToArray();
 
@@ -247,7 +247,7 @@ public sealed class GraceHashJoinTests
 
         // Verify all expected keys are present.
         HashSet<float> expectedKeys = Enumerable.Range(20, 80).Select(index => (float)index).ToHashSet();
-        HashSet<float> actualKeys = spillResults.Select(row => row["l.id"].AsScalar()).ToHashSet();
+        HashSet<float> actualKeys = spillResults.Select(row => row["l.id"].AsFloat32()).ToHashSet();
         Assert.Equal(expectedKeys, actualKeys);
     }
 
@@ -258,12 +258,12 @@ public sealed class GraceHashJoinTests
     public async Task BuildDuplicates_ProduceMultipleMatches_WithSpill()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.label", DataValue.FromString("probe"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.label", DataValue.FromString("probe"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.tag", DataValue.FromString("a"))),
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.tag", DataValue.FromString("b"))),
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.tag", DataValue.FromString("c"))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.tag", DataValue.FromString("a"))),
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.tag", DataValue.FromString("b"))),
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.tag", DataValue.FromString("c"))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -285,7 +285,7 @@ public sealed class GraceHashJoinTests
     public async Task EmptyBuildSide_InnerJoin_ProducesNoResults()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
 
         MockOperator right = new();
 
@@ -307,7 +307,7 @@ public sealed class GraceHashJoinTests
     public async Task EmptyBuildSide_LeftJoin_EmitsUnmatchedProbe()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))));
 
         MockOperator right = new();
 
@@ -331,13 +331,13 @@ public sealed class GraceHashJoinTests
     {
         Row[] leftRows = Enumerable.Range(0, 50)
             .Select(index => MakeRow(
-                ("l.id", DataValue.FromScalar((float)index)),
+                ("l.id", DataValue.FromFloat32((float)index)),
                 ("l.data", DataValue.FromString($"left_{index}"))))
             .ToArray();
 
         Row[] rightRows = Enumerable.Range(25, 25)
             .Select(index => MakeRow(
-                ("r.id", DataValue.FromScalar((float)index)),
+                ("r.id", DataValue.FromFloat32((float)index)),
                 ("r.data", DataValue.FromString($"right_{index}"))))
             .ToArray();
 
@@ -376,14 +376,14 @@ public sealed class GraceHashJoinTests
     {
         // Build side: 10 rows, all with distinct id values 0..9.
         Row[] buildRows = Enumerable.Range(0, 10)
-            .Select(i => MakeRow(("r.id", DataValue.FromScalar((float)i)), ("r.val", DataValue.FromScalar((float)i * 10))))
+            .Select(i => MakeRow(("r.id", DataValue.FromFloat32((float)i)), ("r.val", DataValue.FromFloat32((float)i * 10))))
             .ToArray();
 
         // Probe side: 1 000 rows, each matching a build row so yield is guaranteed early.
         // Track how many rows were actually consumed from the probe stream.
         int probeRowsConsumed = 0;
         Row[] probeRows = Enumerable.Range(0, 1000)
-            .Select(i => MakeRow(("l.id", DataValue.FromScalar((float)(i % 10))), ("l.seq", DataValue.FromScalar((float)i))))
+            .Select(i => MakeRow(("l.id", DataValue.FromFloat32((float)(i % 10))), ("l.seq", DataValue.FromFloat32((float)i))))
             .ToArray();
 
         CountingOperator probeOperator = new(probeRows, () => probeRowsConsumed++);
@@ -430,11 +430,11 @@ public sealed class GraceHashJoinTests
     public async Task HybridProbe_NoSpill_ProducesSameResultsAsInMemory()
     {
         Row[] leftRows = Enumerable.Range(0, 20)
-            .Select(i => MakeRow(("l.id", DataValue.FromScalar((float)i)), ("l.v", DataValue.FromString($"L{i}"))))
+            .Select(i => MakeRow(("l.id", DataValue.FromFloat32((float)i)), ("l.v", DataValue.FromString($"L{i}"))))
             .ToArray();
 
         Row[] rightRows = Enumerable.Range(10, 10)
-            .Select(i => MakeRow(("r.id", DataValue.FromScalar((float)i)), ("r.v", DataValue.FromString($"R{i}"))))
+            .Select(i => MakeRow(("r.id", DataValue.FromFloat32((float)i)), ("r.v", DataValue.FromString($"R{i}"))))
             .ToArray();
 
         Expression onCondition = new BinaryExpression(
@@ -472,16 +472,16 @@ public sealed class GraceHashJoinTests
         // Build: 100 rows, 2 scalar columns → ~136 bytes/row → ~13,600 bytes total.
         Row[] buildRows = Enumerable.Range(0, 100)
             .Select(index => MakeRow(
-                ("r.id", DataValue.FromScalar((float)index)),
-                ("r.val", DataValue.FromScalar((float)(index * 10)))))
+                ("r.id", DataValue.FromFloat32((float)index)),
+                ("r.val", DataValue.FromFloat32((float)(index * 10)))))
             .ToArray();
 
         // Probe: 500 rows, all matching some build row.
         int probeRowsConsumed = 0;
         Row[] probeRows = Enumerable.Range(0, 500)
             .Select(index => MakeRow(
-                ("l.id", DataValue.FromScalar((float)(index % 100))),
-                ("l.seq", DataValue.FromScalar((float)index))))
+                ("l.id", DataValue.FromFloat32((float)(index % 100))),
+                ("l.seq", DataValue.FromFloat32((float)index))))
             .ToArray();
 
         CountingOperator probeOperator = new(probeRows, () => probeRowsConsumed++);

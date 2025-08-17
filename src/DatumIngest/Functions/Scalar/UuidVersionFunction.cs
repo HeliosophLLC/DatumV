@@ -4,7 +4,7 @@ namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Extracts the version number from a UUID.
-/// <c>uuid_version(uuid)</c> — returns the version (4 for random, 7 for time-ordered, etc.) as a <see cref="DataKind.Scalar"/>.
+/// <c>uuid_version(uuid)</c> — returns the version (4 for random, 7 for time-ordered, etc.) as a <see cref="DataKind.Float32"/>.
 /// </summary>
 public sealed class UuidVersionFunction : IScalarFunction
 {
@@ -24,7 +24,7 @@ public sealed class UuidVersionFunction : IScalarFunction
             throw new ArgumentException("uuid_version() argument must be Uuid.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,11 +34,11 @@ public sealed class UuidVersionFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         Guid uuid = input.AsUuid();
         int version = uuid.Version;
-        return DataValue.FromScalar(version);
+        return DataValue.FromFloat32(version);
     }
 }

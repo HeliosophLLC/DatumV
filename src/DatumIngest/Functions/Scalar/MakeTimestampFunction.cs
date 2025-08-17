@@ -24,7 +24,7 @@ public sealed class MakeTimestampFunction : IScalarFunction
 
         for (int i = 0; i < 6; i++)
         {
-            if (argumentKinds[i] != DataKind.Scalar)
+            if (argumentKinds[i] != DataKind.Float32)
             {
                 throw new ArgumentException($"make_timestamp() argument {i + 1} must be Scalar, got {argumentKinds[i]}.");
             }
@@ -44,12 +44,12 @@ public sealed class MakeTimestampFunction : IScalarFunction
             }
         }
 
-        int year = (int)arguments[0].AsScalar();
-        int month = (int)arguments[1].AsScalar();
-        int day = (int)arguments[2].AsScalar();
-        int hour = (int)arguments[3].AsScalar();
-        int minute = (int)arguments[4].AsScalar();
-        int second = (int)arguments[5].AsScalar();
+        int year = (int)arguments[0].AsFloat32();
+        int month = (int)arguments[1].AsFloat32();
+        int day = (int)arguments[2].AsFloat32();
+        int hour = (int)arguments[3].AsFloat32();
+        int minute = (int)arguments[4].AsFloat32();
+        int second = (int)arguments[5].AsFloat32();
 
         return DataValue.FromDateTime(new DateTimeOffset(year, month, day, hour, minute, second, TimeSpan.Zero));
     }

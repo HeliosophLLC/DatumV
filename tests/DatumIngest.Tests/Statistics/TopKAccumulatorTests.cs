@@ -56,9 +56,9 @@ public sealed class TopKAccumulatorTests
     {
         TopKAccumulator accumulator = new(10);
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
 
         TopKResult result = (TopKResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.Entries.Count);

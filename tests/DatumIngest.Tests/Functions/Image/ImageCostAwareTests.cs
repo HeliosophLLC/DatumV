@@ -154,7 +154,7 @@ public sealed class ImageCostAwareTests
     [Fact]
     public void ComputeSupplementalCost_NoImageArgument_ReturnsZero()
     {
-        ReadOnlySpan<DataValue> arguments = [DataValue.FromScalar(42f)];
+        ReadOnlySpan<DataValue> arguments = [DataValue.FromFloat32(42f)];
 
         long cost = ImageCostHelper.ComputeSupplementalCost(arguments);
 
@@ -180,7 +180,7 @@ public sealed class ImageCostAwareTests
     [Fact]
     public void ComputeSupplementalCost_MultipleArguments_UsesFirstImage()
     {
-        DataValue scalar = DataValue.FromScalar(0.5f);
+        DataValue scalar = DataValue.FromFloat32(0.5f);
         DataValue image = MakeImageValue(1000, 200);
         // 1000 × 200 = 200,000 / 100,000 = 2
         ReadOnlySpan<DataValue> arguments = [scalar, image];

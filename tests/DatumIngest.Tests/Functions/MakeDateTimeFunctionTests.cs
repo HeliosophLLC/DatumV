@@ -22,9 +22,9 @@ public class MakeDateTimeFunctionTests
     {
         MakeDateFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.FromScalar(6),
-            DataValue.FromScalar(15)
+            DataValue.FromFloat32(2024),
+            DataValue.FromFloat32(6),
+            DataValue.FromFloat32(15)
         ]);
         Assert.Equal(DataKind.Date, result.Kind);
         Assert.Equal(new DateOnly(2024, 6, 15), result.AsDate());
@@ -35,9 +35,9 @@ public class MakeDateTimeFunctionTests
     {
         MakeDateFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(29)
+            DataValue.FromFloat32(2024),
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(29)
         ]);
         Assert.Equal(new DateOnly(2024, 2, 29), result.AsDate());
     }
@@ -47,9 +47,9 @@ public class MakeDateTimeFunctionTests
     {
         MakeDateFunction function = new();
         DataValue result = function.Execute([
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(6),
-            DataValue.FromScalar(15)
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(6),
+            DataValue.FromFloat32(15)
         ]);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Date, result.Kind);
@@ -60,9 +60,9 @@ public class MakeDateTimeFunctionTests
     {
         MakeDateFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(15)
+            DataValue.FromFloat32(2024),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(15)
         ]);
         Assert.True(result.IsNull);
     }
@@ -72,9 +72,9 @@ public class MakeDateTimeFunctionTests
     {
         MakeDateFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.FromScalar(6),
-            DataValue.Null(DataKind.Scalar)
+            DataValue.FromFloat32(2024),
+            DataValue.FromFloat32(6),
+            DataValue.Null(DataKind.Float32)
         ]);
         Assert.True(result.IsNull);
     }
@@ -83,21 +83,21 @@ public class MakeDateTimeFunctionTests
     public void MakeDate_ValidateArguments_RejectsWrongCount()
     {
         MakeDateFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
     public void MakeDate_ValidateArguments_RejectsNonScalar()
     {
         MakeDateFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
     public void MakeDate_ValidateArguments_ReturnsDateKind()
     {
         MakeDateFunction function = new();
-        DataKind result = function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]);
+        DataKind result = function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.Date, result);
     }
 
@@ -115,12 +115,12 @@ public class MakeDateTimeFunctionTests
     {
         MakeTimestampFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.FromScalar(6),
-            DataValue.FromScalar(15),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(30),
-            DataValue.FromScalar(45)
+            DataValue.FromFloat32(2024),
+            DataValue.FromFloat32(6),
+            DataValue.FromFloat32(15),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(30),
+            DataValue.FromFloat32(45)
         ]);
         Assert.Equal(DataKind.DateTime, result.Kind);
         Assert.Equal(new DateTimeOffset(2024, 6, 15, 10, 30, 45, TimeSpan.Zero), result.AsDateTime());
@@ -131,12 +131,12 @@ public class MakeDateTimeFunctionTests
     {
         MakeTimestampFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(2024),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0)
         ]);
         Assert.Equal(new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero), result.AsDateTime());
     }
@@ -146,12 +146,12 @@ public class MakeDateTimeFunctionTests
     {
         MakeTimestampFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(2024),
-            DataValue.FromScalar(6),
-            DataValue.FromScalar(15),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(30),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(2024),
+            DataValue.FromFloat32(6),
+            DataValue.FromFloat32(15),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(30),
+            DataValue.FromFloat32(0)
         ]);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.DateTime, result.Kind);
@@ -162,7 +162,7 @@ public class MakeDateTimeFunctionTests
     {
         MakeTimestampFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([
-            DataKind.Scalar, DataKind.Scalar, DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]));
+            DataKind.Float32, DataKind.Float32, DataKind.Float32, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -170,8 +170,8 @@ public class MakeDateTimeFunctionTests
     {
         MakeTimestampFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([
-            DataKind.Scalar, DataKind.Scalar, DataKind.Scalar,
-            DataKind.Scalar, DataKind.String, DataKind.Scalar]));
+            DataKind.Float32, DataKind.Float32, DataKind.Float32,
+            DataKind.Float32, DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
@@ -179,8 +179,8 @@ public class MakeDateTimeFunctionTests
     {
         MakeTimestampFunction function = new();
         DataKind result = function.ValidateArguments([
-            DataKind.Scalar, DataKind.Scalar, DataKind.Scalar,
-            DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]);
+            DataKind.Float32, DataKind.Float32, DataKind.Float32,
+            DataKind.Float32, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.DateTime, result);
     }
 }

@@ -10,7 +10,7 @@ public static class ParameterValueParser
 {
     /// <summary>
     /// Parses a string value into a <see cref="DataValue"/> using type inference.
-    /// Numbers parse as <see cref="DataKind.Scalar"/>, <c>true</c>/<c>false</c>
+    /// Numbers parse as <see cref="DataKind.Float32"/>, <c>true</c>/<c>false</c>
     /// as <see cref="DataKind.Boolean"/>, <c>null</c> as a typed null, and
     /// everything else as <see cref="DataKind.String"/>.
     /// </summary>
@@ -20,7 +20,7 @@ public static class ParameterValueParser
     {
         if (string.Equals(value, "null", StringComparison.OrdinalIgnoreCase))
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase))
@@ -36,7 +36,7 @@ public static class ParameterValueParser
         if (double.TryParse(value, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out double number))
         {
-            return DataValue.FromScalar((float)number);
+            return DataValue.FromFloat32((float)number);
         }
 
         return DataValue.FromString(value);

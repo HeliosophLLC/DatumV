@@ -1,4 +1,4 @@
-﻿using CardinalityEstimation;
+using CardinalityEstimation;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Indexing.Bitmap;
@@ -615,7 +615,7 @@ public sealed class SourceIndexBuilder
     /// </summary>
     internal static bool IsAutoIndexableKind(DataKind kind)
     {
-        return kind is DataKind.Scalar
+        return kind is DataKind.Float32
             or DataKind.UInt8
             or DataKind.Boolean
             or DataKind.Date
@@ -899,8 +899,8 @@ public sealed class SourceIndexBuilder
         {
             switch (value.Kind)
             {
-                case DataKind.Scalar:
-                    _cardinality.Add(value.AsScalar());
+                case DataKind.Float32:
+                    _cardinality.Add(value.AsFloat32());
                     break;
                 case DataKind.UInt8:
                     _cardinality.Add((int)value.AsUInt8());
@@ -925,7 +925,7 @@ public sealed class SourceIndexBuilder
 
         private static bool IsComparableKind(DataKind kind)
         {
-            return kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String
+            return kind is DataKind.Float32 or DataKind.UInt8 or DataKind.String
                 or DataKind.Date or DataKind.DateTime;
         }
 
@@ -1434,8 +1434,8 @@ internal sealed class SourceIndexBuilder_ChunkAccumulatorProxy
     {
         switch (value.Kind)
         {
-            case DataKind.Scalar:
-                _cardinality.Add(value.AsScalar());
+            case DataKind.Float32:
+                _cardinality.Add(value.AsFloat32());
                 break;
             case DataKind.UInt8:
                 _cardinality.Add((int)value.AsUInt8());
@@ -1460,7 +1460,7 @@ internal sealed class SourceIndexBuilder_ChunkAccumulatorProxy
 
     private static bool IsComparableKind(DataKind kind)
     {
-        return kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String
+        return kind is DataKind.Float32 or DataKind.UInt8 or DataKind.String
             or DataKind.Date or DataKind.DateTime;
     }
 }

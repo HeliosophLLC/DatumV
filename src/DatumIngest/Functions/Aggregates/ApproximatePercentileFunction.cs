@@ -40,19 +40,19 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
                 "APPROX_PERCENTILE() requires exactly two arguments: expression and fraction.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"APPROX_PERCENTILE() first argument must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not DataKind.Scalar)
+        if (argumentKinds[1] is not DataKind.Float32)
         {
             throw new ArgumentException(
                 $"APPROX_PERCENTILE() second argument (fraction) must be Scalar, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -75,7 +75,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
         {
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
-                _fraction = arguments[1].AsScalar();
+                _fraction = arguments[1].AsFloat32();
 
                 if (_fraction < 0f || _fraction > 1f)
                 {
@@ -88,7 +88,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
 
             if (arguments[0].IsNull) return;
 
-            float value = arguments[0].AsScalar();
+            float value = arguments[0].AsFloat32();
             _totalCount++;
 
             if (_samples.Count < MaxSamples)
@@ -112,7 +112,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
             {
                 if (_samples.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
                 _samples.Sort();
@@ -123,11 +123,11 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
 
                 if (lower == upper)
                 {
-                    return DataValue.FromScalar(_samples[lower]);
+                    return DataValue.FromFloat32(_samples[lower]);
                 }
 
                 double interpolated = _samples[lower] + (_samples[upper] - _samples[lower]) * (row - lower);
-                return DataValue.FromScalar((float)interpolated);
+                return DataValue.FromFloat32((float)interpolated);
             }
         }
     }

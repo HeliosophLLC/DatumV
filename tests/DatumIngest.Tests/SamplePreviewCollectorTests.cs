@@ -27,12 +27,12 @@ public sealed class SamplePreviewCollectorTests
     [Fact]
     public void Build_FewerRowsThanSampleSize_RetainsAllRows()
     {
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: false)]);
         SamplePreviewCollector collector = new(sampleSize: 25);
 
         for (int i = 0; i < 10; i++)
         {
-            collector.Consider(SingleValueRow(DataValue.FromScalar(i)));
+            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)));
         }
 
         SamplePreview preview = collector.Build(schema);
@@ -40,7 +40,7 @@ public sealed class SamplePreviewCollectorTests
         Assert.Equal(10, preview.Samples.Count);
         Assert.Single(preview.Features);
         Assert.Equal("value", preview.Features[0].Name);
-        Assert.Equal("scalar", preview.Features[0].Kind);
+        Assert.Equal("float32", preview.Features[0].Kind);
     }
 
     /// <summary>
@@ -49,12 +49,12 @@ public sealed class SamplePreviewCollectorTests
     [Fact]
     public void Build_MoreRowsThanSampleSize_RetainsExactlySampleSize()
     {
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: false)]);
         SamplePreviewCollector collector = new(sampleSize: 5);
 
         for (int i = 0; i < 100; i++)
         {
-            collector.Consider(SingleValueRow(DataValue.FromScalar(i)));
+            collector.Consider(SingleValueRow(DataValue.FromFloat32(i)));
         }
 
         SamplePreview preview = collector.Build(schema);
@@ -70,7 +70,7 @@ public sealed class SamplePreviewCollectorTests
     [Fact]
     public void ConvertValue_Scalar_ReturnsFloat()
     {
-        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromScalar(42.5f));
+        object? result = SamplePreviewCollector.ConvertValue(DataValue.FromFloat32(42.5f));
 
         Assert.Equal(42.5f, result);
     }
@@ -113,7 +113,7 @@ public sealed class SamplePreviewCollectorTests
     [Fact]
     public void ConvertValue_Null_ReturnsNull()
     {
-        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Scalar)));
+        Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Float32)));
         Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.String)));
         Assert.Null(SamplePreviewCollector.ConvertValue(DataValue.Null(DataKind.Image)));
     }
@@ -225,8 +225,8 @@ public sealed class SamplePreviewCollectorTests
     [Fact]
     public void ConvertValue_Array_ReturnsConvertedElements()
     {
-        DataValue[] elements = [DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f)];
-        DataValue array = DataValue.FromArray(DataKind.Scalar, elements);
+        DataValue[] elements = [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)];
+        DataValue array = DataValue.FromArray(DataKind.Float32, elements);
         object? result = SamplePreviewCollector.ConvertValue(array);
 
         object?[] converted = Assert.IsType<object?[]>(result);
@@ -245,7 +245,7 @@ public sealed class SamplePreviewCollectorTests
     {
         Schema schema = new([
             new ColumnInfo("name", DataKind.String, nullable: false),
-            new ColumnInfo("score", DataKind.Scalar, nullable: false),
+            new ColumnInfo("score", DataKind.Float32, nullable: false),
             new ColumnInfo("flag", DataKind.Boolean, nullable: true),
         ]);
 
@@ -260,7 +260,7 @@ public sealed class SamplePreviewCollectorTests
         SamplePreviewCollector collector = new(sampleSize: 25);
         collector.Consider(new Row(names, [
             DataValue.FromString("Alice"),
-            DataValue.FromScalar(95.5f),
+            DataValue.FromFloat32(95.5f),
             DataValue.FromBoolean(true),
         ], index));
 
@@ -270,7 +270,7 @@ public sealed class SamplePreviewCollectorTests
         Assert.Equal("name", preview.Features[0].Name);
         Assert.Equal("string", preview.Features[0].Kind);
         Assert.Equal("score", preview.Features[1].Name);
-        Assert.Equal("scalar", preview.Features[1].Kind);
+        Assert.Equal("float32", preview.Features[1].Kind);
         Assert.Equal("flag", preview.Features[2].Name);
         Assert.Equal("boolean", preview.Features[2].Kind);
 
@@ -290,7 +290,7 @@ public sealed class SamplePreviewCollectorTests
     {
         Schema schema = new([
             new ColumnInfo("label", DataKind.String, nullable: false),
-            new ColumnInfo("score", DataKind.Scalar, nullable: false),
+            new ColumnInfo("score", DataKind.Float32, nullable: false),
             new ColumnInfo("active", DataKind.Boolean, nullable: true),
         ]);
 
@@ -305,12 +305,12 @@ public sealed class SamplePreviewCollectorTests
         SamplePreviewCollector collector = new(sampleSize: 25);
         collector.Consider(new Row(names, [
             DataValue.FromString("test"),
-            DataValue.FromScalar(1.5f),
+            DataValue.FromFloat32(1.5f),
             DataValue.FromBoolean(true),
         ], index));
         collector.Consider(new Row(names, [
             DataValue.FromString("other"),
-            DataValue.FromScalar(2.0f),
+            DataValue.FromFloat32(2.0f),
             DataValue.Null(DataKind.Boolean),
         ], index));
 

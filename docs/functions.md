@@ -390,8 +390,8 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|  
 | `COUNT` | `COUNT(*)` or `COUNT(expr)` | Count all rows (`*`) or non-null values (`expr`). | 1 |
-| `SUM` | `SUM(expr)` | Sum of non-null `Scalar` values. Returns null if all inputs are null. | 1 |
-| `AVG` | `AVG(expr)` | Arithmetic mean of non-null `Scalar` values. Nulls excluded from denominator. | 1 |
+| `SUM` | `SUM(expr)` | Sum of non-null `Float32` values. Returns null if all inputs are null. | 1 |
+| `AVG` | `AVG(expr)` | Arithmetic mean of non-null `Float32` values. Nulls excluded from denominator. | 1 |
 | `MIN` | `MIN(expr)` | Minimum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
 | `MAX` | `MAX(expr)` | Maximum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
 | `VARIANCE` | `VARIANCE(expr)` | Sample variance (N−1 denominator). Alias for `VAR_SAMP`. | 1 |
@@ -400,7 +400,7 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `STDDEV` | `STDDEV(expr)` | Sample standard deviation (N−1). Alias for `STDDEV_SAMP`. | 1 |
 | `STDDEV_SAMP` | `STDDEV_SAMP(expr)` | Sample standard deviation (N−1). Null for fewer than 2 values. | 1 |
 | `STDDEV_POP` | `STDDEV_POP(expr)` | Population standard deviation (N denominator). | 1 |
-| `MEDIAN` | `MEDIAN(expr)` | Median (50th percentile) of non-null `Scalar` values. Averages two middle values for even counts. | 2 |
+| `MEDIAN` | `MEDIAN(expr)` | Median (50th percentile) of non-null `Float32` values. Averages two middle values for even counts. | 2 |
 | `PERCENTILE_CONT` | `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. | 2 |
 | `PERCENTILE_DISC` | `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an actually observed value. Fraction in [0, 1]. | 2 |
 | `MODE` | `MODE(expr)` | Most frequently occurring value. Ties broken by first occurrence. Works on any comparable type. | 2 |

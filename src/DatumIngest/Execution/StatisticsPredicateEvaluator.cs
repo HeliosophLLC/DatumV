@@ -357,13 +357,13 @@ public static class StatisticsPredicateEvaluator
 
         return value switch
         {
-            int intValue => DataValue.FromScalar(intValue),
-            long longValue => DataValue.FromScalar(longValue),
-            float floatValue => DataValue.FromScalar(floatValue),
-            double doubleValue => DataValue.FromScalar((float)doubleValue),
-            decimal decimalValue => DataValue.FromScalar((float)decimalValue),
+            int intValue => DataValue.FromFloat32(intValue),
+            long longValue => DataValue.FromFloat32(longValue),
+            float floatValue => DataValue.FromFloat32(floatValue),
+            double doubleValue => DataValue.FromFloat32((float)doubleValue),
+            decimal decimalValue => DataValue.FromFloat32((float)decimalValue),
             string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromScalar(boolValue ? 1f : 0f),
+            bool boolValue => DataValue.FromFloat32(boolValue ? 1f : 0f),
             _ => null,
         };
     }
@@ -400,7 +400,7 @@ public static class StatisticsPredicateEvaluator
     {
         return value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar(),
+            DataKind.Float32 => value.AsFloat32(),
             DataKind.UInt8 => value.AsUInt8(),
             _ => 0f,
         };

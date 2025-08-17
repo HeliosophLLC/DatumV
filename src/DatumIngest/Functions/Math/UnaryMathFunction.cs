@@ -22,12 +22,12 @@ public abstract class UnaryMathFunction : IScalarFunction
 
         DataKind kind = argumentKinds[0];
 
-        if (kind is not (DataKind.Scalar or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"{Name}() does not support {kind}.");
         }
 
-        return kind is DataKind.UInt8 ? DataKind.Scalar : kind;
+        return kind is DataKind.UInt8 ? DataKind.Float32 : kind;
     }
 
     /// <inheritdoc />
@@ -37,16 +37,16 @@ public abstract class UnaryMathFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Scalar : input.Kind);
+            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Float32 : input.Kind);
         }
 
         switch (input.Kind)
         {
             case DataKind.UInt8:
-                return DataValue.FromScalar(Apply(input.AsUInt8()));
+                return DataValue.FromFloat32(Apply(input.AsUInt8()));
 
-            case DataKind.Scalar:
-                return DataValue.FromScalar(Apply(input.AsScalar()));
+            case DataKind.Float32:
+                return DataValue.FromFloat32(Apply(input.AsFloat32()));
 
             case DataKind.Vector:
             {

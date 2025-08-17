@@ -15,7 +15,7 @@ public sealed class RandomVectorFunctionTests
     public void RandomVector_ReturnsCorrectLength()
     {
         RandomVectorFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(10)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(10)]);
         float[] vector = result.AsVector();
         Assert.Equal(10, vector.Length);
     }
@@ -24,7 +24,7 @@ public sealed class RandomVectorFunctionTests
     public void RandomVector_AllValuesInUnitInterval()
     {
         RandomVectorFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(100)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(100)]);
         float[] vector = result.AsVector();
         foreach (float value in vector)
         {
@@ -38,7 +38,7 @@ public sealed class RandomVectorFunctionTests
     {
         RandomVectorFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(0)]));
+            function.Execute([DataValue.FromFloat32(0)]));
     }
 
     [Fact]
@@ -46,14 +46,14 @@ public sealed class RandomVectorFunctionTests
     {
         RandomVectorFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(-5)]));
+            function.Execute([DataValue.FromFloat32(-5)]));
     }
 
     [Fact]
     public void RandomVector_ValidateArguments_ReturnsVector()
     {
         RandomVectorFunction function = new();
-        DataKind kind = function.ValidateArguments([DataKind.Scalar]);
+        DataKind kind = function.ValidateArguments([DataKind.Float32]);
         Assert.Equal(DataKind.Vector, kind);
     }
 
@@ -71,9 +71,9 @@ public sealed class RandomVectorFunctionTests
     {
         RandomNormalVectorFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(20),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(20),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(1)
         ]);
         float[] vector = result.AsVector();
         Assert.Equal(20, vector.Length);
@@ -84,9 +84,9 @@ public sealed class RandomVectorFunctionTests
     {
         RandomNormalVectorFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(10_000),
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(10_000),
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(1)
         ]);
         float[] vector = result.AsVector();
         float mean = vector.Sum() / vector.Length;
@@ -99,9 +99,9 @@ public sealed class RandomVectorFunctionTests
         RandomNormalVectorFunction function = new();
         Assert.Throws<ArgumentException>(() =>
             function.Execute([
-                DataValue.FromScalar(10),
-                DataValue.FromScalar(0),
-                DataValue.FromScalar(-1)
+                DataValue.FromFloat32(10),
+                DataValue.FromFloat32(0),
+                DataValue.FromFloat32(-1)
             ]));
     }
 
@@ -111,9 +111,9 @@ public sealed class RandomVectorFunctionTests
         RandomNormalVectorFunction function = new();
         Assert.Throws<ArgumentException>(() =>
             function.Execute([
-                DataValue.FromScalar(0),
-                DataValue.FromScalar(0),
-                DataValue.FromScalar(1)
+                DataValue.FromFloat32(0),
+                DataValue.FromFloat32(0),
+                DataValue.FromFloat32(1)
             ]));
     }
 
@@ -122,7 +122,7 @@ public sealed class RandomVectorFunctionTests
     {
         RandomNormalVectorFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     // ──────────────────── random_permutation ────────────────────
@@ -131,7 +131,7 @@ public sealed class RandomVectorFunctionTests
     public void RandomPermutation_ContainsAllIndices()
     {
         RandomPermutationFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(10)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(10)]);
         float[] vector = result.AsVector();
         Assert.Equal(10, vector.Length);
 
@@ -147,7 +147,7 @@ public sealed class RandomVectorFunctionTests
     public void RandomPermutation_LengthOne_ReturnsSingleZero()
     {
         RandomPermutationFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(1)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(1)]);
         float[] vector = result.AsVector();
         Assert.Single(vector);
         Assert.Equal(0f, vector[0]);
@@ -158,14 +158,14 @@ public sealed class RandomVectorFunctionTests
     {
         RandomPermutationFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(0)]));
+            function.Execute([DataValue.FromFloat32(0)]));
     }
 
     [Fact]
     public void RandomPermutation_ValidateArguments_ReturnsVector()
     {
         RandomPermutationFunction function = new();
-        DataKind kind = function.ValidateArguments([DataKind.Scalar]);
+        DataKind kind = function.ValidateArguments([DataKind.Float32]);
         Assert.Equal(DataKind.Vector, kind);
     }
 
@@ -176,13 +176,13 @@ public sealed class RandomVectorFunctionTests
     {
         RandomChoiceFunction function = new();
         DataValue[] source = [
-            DataValue.FromScalar(10), DataValue.FromScalar(20),
-            DataValue.FromScalar(30), DataValue.FromScalar(40),
-            DataValue.FromScalar(50)
+            DataValue.FromFloat32(10), DataValue.FromFloat32(20),
+            DataValue.FromFloat32(30), DataValue.FromFloat32(40),
+            DataValue.FromFloat32(50)
         ];
-        DataValue array = DataValue.FromArray(DataKind.Scalar, source);
+        DataValue array = DataValue.FromArray(DataKind.Float32, source);
 
-        DataValue result = function.Execute([array, DataValue.FromScalar(3)]);
+        DataValue result = function.Execute([array, DataValue.FromFloat32(3)]);
         DataValue[] chosen = result.AsArray();
         Assert.Equal(3, chosen.Length);
     }
@@ -192,17 +192,17 @@ public sealed class RandomVectorFunctionTests
     {
         RandomChoiceFunction function = new();
         DataValue[] source = [
-            DataValue.FromScalar(1), DataValue.FromScalar(2),
-            DataValue.FromScalar(3), DataValue.FromScalar(4),
-            DataValue.FromScalar(5)
+            DataValue.FromFloat32(1), DataValue.FromFloat32(2),
+            DataValue.FromFloat32(3), DataValue.FromFloat32(4),
+            DataValue.FromFloat32(5)
         ];
-        DataValue array = DataValue.FromArray(DataKind.Scalar, source);
+        DataValue array = DataValue.FromArray(DataKind.Float32, source);
 
         for (int trial = 0; trial < 50; trial++)
         {
-            DataValue result = function.Execute([array, DataValue.FromScalar(3)]);
+            DataValue result = function.Execute([array, DataValue.FromFloat32(3)]);
             DataValue[] chosen = result.AsArray();
-            HashSet<float> values = new(chosen.Select(v => v.AsScalar()));
+            HashSet<float> values = new(chosen.Select(v => v.AsFloat32()));
             Assert.Equal(3, values.Count);
         }
     }
@@ -212,14 +212,14 @@ public sealed class RandomVectorFunctionTests
     {
         RandomChoiceFunction function = new();
         DataValue[] source = [
-            DataValue.FromScalar(1), DataValue.FromScalar(2), DataValue.FromScalar(3)
+            DataValue.FromFloat32(1), DataValue.FromFloat32(2), DataValue.FromFloat32(3)
         ];
-        DataValue array = DataValue.FromArray(DataKind.Scalar, source);
+        DataValue array = DataValue.FromArray(DataKind.Float32, source);
 
-        DataValue result = function.Execute([array, DataValue.FromScalar(3)]);
+        DataValue result = function.Execute([array, DataValue.FromFloat32(3)]);
         DataValue[] chosen = result.AsArray();
         Assert.Equal(3, chosen.Length);
-        HashSet<float> values = new(chosen.Select(v => v.AsScalar()));
+        HashSet<float> values = new(chosen.Select(v => v.AsFloat32()));
         Assert.Contains(1f, values);
         Assert.Contains(2f, values);
         Assert.Contains(3f, values);
@@ -229,10 +229,10 @@ public sealed class RandomVectorFunctionTests
     public void RandomChoice_CountZero_ReturnsEmpty()
     {
         RandomChoiceFunction function = new();
-        DataValue[] source = [DataValue.FromScalar(1), DataValue.FromScalar(2)];
-        DataValue array = DataValue.FromArray(DataKind.Scalar, source);
+        DataValue[] source = [DataValue.FromFloat32(1), DataValue.FromFloat32(2)];
+        DataValue array = DataValue.FromArray(DataKind.Float32, source);
 
-        DataValue result = function.Execute([array, DataValue.FromScalar(0)]);
+        DataValue result = function.Execute([array, DataValue.FromFloat32(0)]);
         DataValue[] chosen = result.AsArray();
         Assert.Empty(chosen);
     }
@@ -241,11 +241,11 @@ public sealed class RandomVectorFunctionTests
     public void RandomChoice_CountExceedsLength_Throws()
     {
         RandomChoiceFunction function = new();
-        DataValue[] source = [DataValue.FromScalar(1), DataValue.FromScalar(2)];
-        DataValue array = DataValue.FromArray(DataKind.Scalar, source);
+        DataValue[] source = [DataValue.FromFloat32(1), DataValue.FromFloat32(2)];
+        DataValue array = DataValue.FromArray(DataKind.Float32, source);
 
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([array, DataValue.FromScalar(5)]));
+            function.Execute([array, DataValue.FromFloat32(5)]));
     }
 
     [Fact]
@@ -254,7 +254,7 @@ public sealed class RandomVectorFunctionTests
         RandomChoiceFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.Array),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(1)
         ]);
         Assert.True(result.IsNull);
     }
@@ -264,14 +264,14 @@ public sealed class RandomVectorFunctionTests
     {
         RandomChoiceFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Vector, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Vector, DataKind.Float32]));
     }
 
     [Fact]
     public void RandomChoice_ValidateArguments_ReturnsArray()
     {
         RandomChoiceFunction function = new();
-        DataKind kind = function.ValidateArguments([DataKind.Array, DataKind.Scalar]);
+        DataKind kind = function.ValidateArguments([DataKind.Array, DataKind.Float32]);
         Assert.Equal(DataKind.Array, kind);
     }
 }

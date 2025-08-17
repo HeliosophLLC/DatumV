@@ -25,7 +25,7 @@ public sealed class RpadFunction : IScalarFunction
             throw new ArgumentException($"rpad() requires a String as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Scalar)
+        if (argumentKinds[1] != DataKind.Float32)
         {
             throw new ArgumentException($"rpad() requires a Scalar as the second argument, got {argumentKinds[1]}.");
         }
@@ -56,7 +56,7 @@ public sealed class RpadFunction : IScalarFunction
         }
 
         string inputString = input.AsString();
-        int targetLength = (int)lengthValue.AsScalar();
+        int targetLength = (int)lengthValue.AsFloat32();
         string fillString = fill.AsString();
 
         if (targetLength <= 0)

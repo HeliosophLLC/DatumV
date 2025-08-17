@@ -35,7 +35,7 @@ public sealed class ImageBrightnessMeanFunction : IScalarFunction, ICostAwareFun
                 $"image_brightness_mean() requires Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -45,7 +45,7 @@ public sealed class ImageBrightnessMeanFunction : IScalarFunction, ICostAwareFun
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
@@ -76,7 +76,7 @@ public sealed class ImageBrightnessMeanFunction : IScalarFunction, ICostAwareFun
         }
 
         float mean = (float)(sum / totalPixels);
-        return DataValue.FromScalar(mean);
+        return DataValue.FromFloat32(mean);
     }
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)

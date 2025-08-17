@@ -120,7 +120,7 @@ public sealed class ExpressionEvaluator
         return result.Kind switch
         {
             DataKind.Boolean => result.AsBoolean(),
-            DataKind.Scalar => result.AsScalar() != 0f,
+            DataKind.Float32 => result.AsFloat32() != 0f,
             DataKind.UInt8 => result.AsUInt8() != 0,
             DataKind.String => !string.IsNullOrEmpty(result.AsString()),
             _ => true,
@@ -131,16 +131,16 @@ public sealed class ExpressionEvaluator
     {
         if (literal.Value is null)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         return literal.Value switch
         {
             DataValue dataValue => dataValue,
-            int intValue => DataValue.FromScalar(intValue),
-            long longValue => DataValue.FromScalar(longValue),
-            float floatValue => DataValue.FromScalar(floatValue),
-            double doubleValue => DataValue.FromScalar((float)doubleValue),
+            int intValue => DataValue.FromFloat32(intValue),
+            long longValue => DataValue.FromFloat32(longValue),
+            float floatValue => DataValue.FromFloat32(floatValue),
+            double doubleValue => DataValue.FromFloat32((float)doubleValue),
             string stringValue => DataValue.FromString(stringValue),
             bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(
@@ -192,35 +192,35 @@ public sealed class ExpressionEvaluator
         if (binary.Operator == BinaryOperator.And)
         {
             DataValue left = Evaluate(binary.Left, row);
-            if (left.IsNull || (left.Kind == DataKind.Scalar && left.AsScalar() == 0f))
+            if (left.IsNull || (left.Kind == DataKind.Float32 && left.AsFloat32() == 0f))
             {
-                return DataValue.FromScalar(0f);
+                return DataValue.FromFloat32(0f);
             }
 
             DataValue right = Evaluate(binary.Right, row);
-            if (right.IsNull || (right.Kind == DataKind.Scalar && right.AsScalar() == 0f))
+            if (right.IsNull || (right.Kind == DataKind.Float32 && right.AsFloat32() == 0f))
             {
-                return DataValue.FromScalar(0f);
+                return DataValue.FromFloat32(0f);
             }
 
-            return DataValue.FromScalar(1f);
+            return DataValue.FromFloat32(1f);
         }
 
         if (binary.Operator == BinaryOperator.Or)
         {
             DataValue left = Evaluate(binary.Left, row);
-            if (!left.IsNull && left.Kind == DataKind.Scalar && left.AsScalar() != 0f)
+            if (!left.IsNull && left.Kind == DataKind.Float32 && left.AsFloat32() != 0f)
             {
-                return DataValue.FromScalar(1f);
+                return DataValue.FromFloat32(1f);
             }
 
             DataValue right = Evaluate(binary.Right, row);
-            if (!right.IsNull && right.Kind == DataKind.Scalar && right.AsScalar() != 0f)
+            if (!right.IsNull && right.Kind == DataKind.Float32 && right.AsFloat32() != 0f)
             {
-                return DataValue.FromScalar(1f);
+                return DataValue.FromFloat32(1f);
             }
 
-            return DataValue.FromScalar(0f);
+            return DataValue.FromFloat32(0f);
         }
 
         {
@@ -230,7 +230,7 @@ public sealed class ExpressionEvaluator
             // NULL propagation: any operation with NULL yields NULL (except IS NULL checks).
             if (left.IsNull || right.IsNull)
             {
-                return DataValue.Null(DataKind.Scalar);
+                return DataValue.Null(DataKind.Float32);
             }
 
             return binary.Operator switch
@@ -266,14 +266,14 @@ public sealed class ExpressionEvaluator
 
         if (operand.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         return unary.Operator switch
         {
-            UnaryOperator.Not => DataValue.FromScalar(
-                operand.Kind == DataKind.Scalar && operand.AsScalar() == 0f ? 1f : 0f),
-            UnaryOperator.Negate => DataValue.FromScalar(-ToFloat(operand)),
+            UnaryOperator.Not => DataValue.FromFloat32(
+                operand.Kind == DataKind.Float32 && operand.AsFloat32() == 0f ? 1f : 0f),
+            UnaryOperator.Negate => DataValue.FromFloat32(-ToFloat(operand)),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
         };
@@ -389,7 +389,7 @@ public sealed class ExpressionEvaluator
 
         if (target.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         // Fast path: when all values are literals (e.g. constant-folded from an
@@ -401,15 +401,15 @@ public sealed class ExpressionEvaluator
 
             if (found)
             {
-                return DataValue.FromScalar(inExpr.Negated ? 0f : 1f);
+                return DataValue.FromFloat32(inExpr.Negated ? 0f : 1f);
             }
 
             if (hasNullCandidate)
             {
-                return DataValue.Null(DataKind.Scalar);
+                return DataValue.Null(DataKind.Float32);
             }
 
-            return DataValue.FromScalar(inExpr.Negated ? 1f : 0f);
+            return DataValue.FromFloat32(inExpr.Negated ? 1f : 0f);
         }
 
         // Slow path: values contain non-literal expressions that depend on the row.
@@ -480,7 +480,7 @@ public sealed class ExpressionEvaluator
 
             if (target.Equals(candidate))
             {
-                return DataValue.FromScalar(inExpr.Negated ? 0f : 1f);
+                return DataValue.FromFloat32(inExpr.Negated ? 0f : 1f);
             }
         }
 
@@ -489,10 +489,10 @@ public sealed class ExpressionEvaluator
         // For NOT IN, this means rows are filtered out by EvaluateAsBoolean.
         if (hasNullCandidate)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
-        return DataValue.FromScalar(inExpr.Negated ? 1f : 0f);
+        return DataValue.FromFloat32(inExpr.Negated ? 1f : 0f);
     }
 
     private DataValue EvaluateBetween(BetweenExpression between, Row row)
@@ -503,7 +503,7 @@ public sealed class ExpressionEvaluator
 
         if (target.IsNull || low.IsNull || high.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         float targetValue = ToFloat(target);
@@ -516,7 +516,7 @@ public sealed class ExpressionEvaluator
             inRange = !inRange;
         }
 
-        return DataValue.FromScalar(inRange ? 1f : 0f);
+        return DataValue.FromFloat32(inRange ? 1f : 0f);
     }
 
     private DataValue EvaluateIsNull(IsNullExpression isNull, Row row)
@@ -529,12 +529,12 @@ public sealed class ExpressionEvaluator
             result = !result;
         }
 
-        return DataValue.FromScalar(result ? 1f : 0f);
+        return DataValue.FromFloat32(result ? 1f : 0f);
     }
 
     /// <summary>
     /// Cached <see cref="DataValue"/> wrappers for CAST target type strings, keyed by
-    /// the type name (e.g. "Scalar", "UInt8"). Avoids allocating a new DataValue per row.
+    /// the type name (e.g. "Float32", "UInt8"). Avoids allocating a new DataValue per row.
     /// </summary>
     private readonly Dictionary<string, DataValue> _castTargetCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -640,7 +640,7 @@ public sealed class ExpressionEvaluator
             return Evaluate(caseExpression.ElseResult, row);
         }
 
-        return DataValue.Null(DataKind.Scalar);
+        return DataValue.Null(DataKind.Float32);
     }
 
     /// <summary>
@@ -728,16 +728,16 @@ public sealed class ExpressionEvaluator
         return expression switch
         {
             LiteralExpression { Value: string } => DataKind.String,
-            LiteralExpression { Value: int or long or float or double } => DataKind.Scalar,
+            LiteralExpression { Value: int or long or float or double } => DataKind.Float32,
             LiteralExpression { Value: bool } => DataKind.Boolean,
-            LiteralExpression { Value: null } => DataKind.Scalar,
+            LiteralExpression { Value: null } => DataKind.Float32,
             CastExpression cast => ExpressionTypeResolver.ResolveCastTargetKind(cast.TargetType),
-            BinaryExpression => DataKind.Scalar,
-            UnaryExpression => DataKind.Scalar,
-            InExpression => DataKind.Scalar,
-            BetweenExpression => DataKind.Scalar,
-            IsNullExpression => DataKind.Scalar,
-            LikeExpression => DataKind.Scalar,
+            BinaryExpression => DataKind.Float32,
+            UnaryExpression => DataKind.Float32,
+            InExpression => DataKind.Float32,
+            BetweenExpression => DataKind.Float32,
+            IsNullExpression => DataKind.Float32,
+            LikeExpression => DataKind.Float32,
             _ => null,
         };
     }
@@ -748,14 +748,14 @@ public sealed class ExpressionEvaluator
     {
         float leftValue = ToFloat(left);
         float rightValue = ToFloat(right);
-        return DataValue.FromScalar(operation(leftValue, rightValue));
+        return DataValue.FromFloat32(operation(leftValue, rightValue));
     }
 
     private static float ToFloat(DataValue value)
     {
         return value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar(),
+            DataKind.Float32 => value.AsFloat32(),
             DataKind.UInt8 => value.AsUInt8(),
             DataKind.Boolean => value.AsBoolean() ? 1f : 0f,
             DataKind.Duration => (float)value.AsDuration().TotalSeconds,
@@ -778,19 +778,19 @@ public sealed class ExpressionEvaluator
             result = !result;
         }
 
-        return DataValue.FromScalar(result ? 1f : 0f);
+        return DataValue.FromFloat32(result ? 1f : 0f);
     }
 
     private static DataValue CompareValuesLe(DataValue left, DataValue right)
     {
         int comparison = CompareDataValues(left, right);
-        return DataValue.FromScalar(comparison <= 0 ? 1f : 0f);
+        return DataValue.FromFloat32(comparison <= 0 ? 1f : 0f);
     }
 
     private static DataValue CompareValuesGe(DataValue left, DataValue right)
     {
         int comparison = CompareDataValues(left, right);
-        return DataValue.FromScalar(comparison >= 0 ? 1f : 0f);
+        return DataValue.FromFloat32(comparison >= 0 ? 1f : 0f);
     }
 
     private static int CompareDataValues(DataValue left, DataValue right)
@@ -869,7 +869,7 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
-        return DataValue.FromScalar(matches ? 1f : 0f);
+        return DataValue.FromFloat32(matches ? 1f : 0f);
     }
 
     /// <summary>
@@ -897,7 +897,7 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
-        return DataValue.FromScalar(matches ? 1f : 0f);
+        return DataValue.FromFloat32(matches ? 1f : 0f);
     }
 
     /// <summary>
@@ -923,7 +923,7 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
-        return DataValue.FromScalar(matches ? 1f : 0f);
+        return DataValue.FromFloat32(matches ? 1f : 0f);
     }
 
     /// <summary>
@@ -939,7 +939,7 @@ public sealed class ExpressionEvaluator
 
         if (input.IsNull || pattern.IsNull || escapeValue.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         if (input.Kind != DataKind.String || pattern.Kind != DataKind.String || escapeValue.Kind != DataKind.String)
@@ -999,6 +999,6 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input.AsString());
-        return DataValue.FromScalar(matches ? 1f : 0f);
+        return DataValue.FromFloat32(matches ? 1f : 0f);
     }
 }

@@ -24,7 +24,7 @@ public sealed class RankFunction : IScalarFunction
             throw new ArgumentException($"rank() does not support {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -33,15 +33,15 @@ public sealed class RankFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         return input.Kind switch
         {
-            DataKind.Vector => DataValue.FromScalar(1),
-            DataKind.Matrix => DataValue.FromScalar(2),
+            DataKind.Vector => DataValue.FromFloat32(1),
+            DataKind.Matrix => DataValue.FromFloat32(2),
             DataKind.Tensor =>
-                DataValue.FromScalar(input.AsTensor(out int[] shape) is var _ ? shape.Length : 0),
+                DataValue.FromFloat32(input.AsTensor(out int[] shape) is var _ ? shape.Length : 0),
             _ => throw new InvalidOperationException($"rank() does not support {input.Kind}.")
         };
     }
@@ -71,12 +71,12 @@ public sealed class RdimFunction : IScalarFunction
             throw new ArgumentException($"rdim() first argument must be a Vector, Matrix, or Tensor.");
         }
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException("rdim() second argument (axis) must be Scalar or UInt8.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -85,12 +85,12 @@ public sealed class RdimFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int axis = (int)(arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar());
+            : arguments[1].AsFloat32());
 
         switch (input.Kind)
         {
@@ -101,7 +101,7 @@ public sealed class RdimFunction : IScalarFunction
                     throw new InvalidOperationException(
                         $"rdim() axis {axis} is out of range for a rank-1 vector.");
                 }
-                return DataValue.FromScalar(input.AsVector().Length);
+                return DataValue.FromFloat32(input.AsVector().Length);
             }
 
             case DataKind.Matrix:
@@ -112,7 +112,7 @@ public sealed class RdimFunction : IScalarFunction
                         $"rdim() axis {axis} is out of range for a rank-2 matrix.");
                 }
                 input.AsMatrix(out int rows, out int columns);
-                return DataValue.FromScalar(axis == 0 ? rows : columns);
+                return DataValue.FromFloat32(axis == 0 ? rows : columns);
             }
 
             case DataKind.Tensor:
@@ -123,7 +123,7 @@ public sealed class RdimFunction : IScalarFunction
                     throw new InvalidOperationException(
                         $"rdim() axis {axis} is out of range for a rank-{shape.Length} tensor.");
                 }
-                return DataValue.FromScalar(shape[axis]);
+                return DataValue.FromFloat32(shape[axis]);
             }
 
             default:

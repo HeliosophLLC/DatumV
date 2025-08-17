@@ -24,7 +24,7 @@ public sealed class SecondFunction : IScalarFunction
             throw new ArgumentException($"second() requires a Date, DateTime, or Time argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class SecondFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int second = input.Kind switch
@@ -44,6 +44,6 @@ public sealed class SecondFunction : IScalarFunction
             _ => input.AsDateTime().Second,
         };
 
-        return DataValue.FromScalar(second);
+        return DataValue.FromFloat32(second);
     }
 }

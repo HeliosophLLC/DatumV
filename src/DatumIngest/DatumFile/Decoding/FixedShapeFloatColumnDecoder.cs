@@ -75,7 +75,7 @@ internal sealed class FixedShapeFloatColumnDecoder : DatumColumnDecoder
                 DataValue.FromMatrix(rowFloats, rows, columns),
             DataKind.Tensor when descriptor.FixedShape is int[] shape =>
                 DataValue.FromTensor(rowFloats, shape),
-            DataKind.Scalar => DataValue.FromScalar(rowFloats[0]),
+            DataKind.Float32 => DataValue.FromFloat32(rowFloats[0]),
             _ => throw new NotSupportedException(
                 $"FixedShapeFloatColumnDecoder does not support {descriptor.Kind}.")
         };

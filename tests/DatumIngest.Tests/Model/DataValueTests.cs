@@ -7,18 +7,18 @@ public class DataValueTests
     [Fact]
     public void ScalarValueStoresFloat()
     {
-        DataValue value = DataValue.FromScalar(3.14f);
+        DataValue value = DataValue.FromFloat32(3.14f);
 
-        Assert.Equal(DataKind.Scalar, value.Kind);
-        Assert.Equal(3.14f, value.AsScalar());
+        Assert.Equal(DataKind.Float32, value.Kind);
+        Assert.Equal(3.14f, value.AsFloat32());
     }
 
     [Fact]
     public void ScalarValueEquality()
     {
-        DataValue a = DataValue.FromScalar(1.0f);
-        DataValue b = DataValue.FromScalar(1.0f);
-        DataValue c = DataValue.FromScalar(2.0f);
+        DataValue a = DataValue.FromFloat32(1.0f);
+        DataValue b = DataValue.FromFloat32(1.0f);
+        DataValue c = DataValue.FromFloat32(2.0f);
 
         Assert.Equal(a, b);
         Assert.NotEqual(a, c);
@@ -238,8 +238,8 @@ public class DataValueTests
     [Fact]
     public void NullValuesOfSameKindAreEqual()
     {
-        DataValue a = DataValue.Null(DataKind.Scalar);
-        DataValue b = DataValue.Null(DataKind.Scalar);
+        DataValue a = DataValue.Null(DataKind.Float32);
+        DataValue b = DataValue.Null(DataKind.Float32);
 
         Assert.Equal(a, b);
     }
@@ -247,18 +247,18 @@ public class DataValueTests
     [Fact]
     public void NullValueOfDifferentKindIsNotEqual()
     {
-        DataValue a = DataValue.Null(DataKind.Scalar);
+        DataValue a = DataValue.Null(DataKind.Float32);
         DataValue b = DataValue.Null(DataKind.String);
 
         Assert.NotEqual(a, b);
     }
 
     [Fact]
-    public void AsScalarThrowsOnWrongKind()
+    public void AsFloat32ThrowsOnWrongKind()
     {
         DataValue value = DataValue.FromString("hello");
 
-        Assert.Throws<InvalidOperationException>(() => value.AsScalar());
+        Assert.Throws<InvalidOperationException>(() => value.AsFloat32());
     }
 
     [Fact]
@@ -294,8 +294,8 @@ public class DataValueTests
     [Fact]
     public void GetHashCodeIsConsistentWithEquality()
     {
-        DataValue a = DataValue.FromScalar(42.0f);
-        DataValue b = DataValue.FromScalar(42.0f);
+        DataValue a = DataValue.FromFloat32(42.0f);
+        DataValue b = DataValue.FromFloat32(42.0f);
 
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
     }
@@ -305,7 +305,7 @@ public class DataValueTests
     [Fact]
     public void ToString_Scalar_FormatsValue()
     {
-        Assert.Equal("42", DataValue.FromScalar(42f).ToString());
+        Assert.Equal("42", DataValue.FromFloat32(42f).ToString());
     }
 
     [Fact]
@@ -335,6 +335,6 @@ public class DataValueTests
     [Fact]
     public void ToString_Null_IncludesKind()
     {
-        Assert.Equal("NULL(Scalar)", DataValue.Null(DataKind.Scalar).ToString());
+        Assert.Equal("NULL(Float32)", DataValue.Null(DataKind.Float32).ToString());
     }
 }

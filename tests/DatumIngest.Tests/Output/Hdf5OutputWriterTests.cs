@@ -29,13 +29,13 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
     public async Task FinalizeAsync_ScalarColumn_WritesFloatDataset()
     {
         string path = Path.Combine(_tempDir, "scalar.h5");
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, false)]);
 
         await using Hdf5OutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(1.5f))));
-        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(2.5f))));
-        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(3.5f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromFloat32(1.5f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromFloat32(2.5f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromFloat32(3.5f))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(3, summary.RowsWritten);
@@ -90,17 +90,17 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
     {
         string path = Path.Combine(_tempDir, "multi.h5");
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("name", DataKind.String, false)
         ]);
 
         await using Hdf5OutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(1.0f)),
+            ("id", DataValue.FromFloat32(1.0f)),
             ("name", DataValue.FromString("Alice"))));
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(2.0f)),
+            ("id", DataValue.FromFloat32(2.0f)),
             ("name", DataValue.FromString("Bob"))));
         OutputSummary summary = await writer.FinalizeAsync();
 
@@ -117,7 +117,7 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
     public async Task FinalizeAsync_EmptyDataset_WritesEmptyFile()
     {
         string path = Path.Combine(_tempDir, "empty.h5");
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
 
         await using Hdf5OutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
@@ -164,12 +164,12 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
     public async Task FinalizeAsync_Stream_ScalarColumn_WritesFloatDataset()
     {
         using MemoryStream stream = new();
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, false)]);
 
         await using Hdf5OutputWriter writer = new(stream);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(1.5f))));
-        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(2.5f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromFloat32(1.5f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromFloat32(2.5f))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(2, summary.RowsWritten);
@@ -187,17 +187,17 @@ public sealed class Hdf5OutputWriterTests : IAsyncLifetime
     {
         using MemoryStream stream = new();
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("name", DataKind.String, false)
         ]);
 
         await using Hdf5OutputWriter writer = new(stream);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(1.0f)),
+            ("id", DataValue.FromFloat32(1.0f)),
             ("name", DataValue.FromString("Alice"))));
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(2.0f)),
+            ("id", DataValue.FromFloat32(2.0f)),
             ("name", DataValue.FromString("Bob"))));
         OutputSummary summary = await writer.FinalizeAsync();
 

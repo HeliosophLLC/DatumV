@@ -22,7 +22,7 @@ public sealed class LanguageServiceTests
                     Columns =
                     [
                         new TableColumnEntry { Name = "sku", Kind = "String", Nullable = false },
-                        new TableColumnEntry { Name = "price", Kind = "Scalar", Nullable = false },
+                        new TableColumnEntry { Name = "price", Kind = "Float32", Nullable = false },
                     ],
                 },
             ],
@@ -31,8 +31,8 @@ public sealed class LanguageServiceTests
                 new FunctionSignature
                 {
                     Name = "round",
-                    Parameters = [new ParameterSignature { Name = "value", Kind = "Scalar" }],
-                    ReturnType = "Scalar",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
                     Description = "Rounds to nearest integer.",
                 },
             ],

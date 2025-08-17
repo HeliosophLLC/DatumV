@@ -19,12 +19,12 @@ public sealed class SumFunction : IAggregateFunction
             throw new ArgumentException("SUM() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException($"SUM() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -39,12 +39,12 @@ public sealed class SumFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            _sum += arguments[0].AsScalar();
+            _sum += arguments[0].AsFloat32();
             _hasValue = true;
         }
 
         public DataValue Result => _hasValue
-            ? DataValue.FromScalar((float)_sum)
-            : DataValue.Null(DataKind.Scalar);
+            ? DataValue.FromFloat32((float)_sum)
+            : DataValue.Null(DataKind.Float32);
     }
 }

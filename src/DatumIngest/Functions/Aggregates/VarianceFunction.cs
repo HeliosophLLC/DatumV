@@ -42,12 +42,12 @@ public sealed class VarianceFunction : IAggregateFunction
             throw new ArgumentException($"{Name}() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException($"{Name}() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -73,7 +73,7 @@ public sealed class VarianceFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            double value = arguments[0].AsScalar();
+            double value = arguments[0].AsFloat32();
             _count++;
             double delta = value - _mean;
             _mean += delta / _count;
@@ -88,14 +88,14 @@ public sealed class VarianceFunction : IAggregateFunction
                 if (_usePopulation)
                 {
                     return _count > 0
-                        ? DataValue.FromScalar((float)(_m2 / _count))
-                        : DataValue.Null(DataKind.Scalar);
+                        ? DataValue.FromFloat32((float)(_m2 / _count))
+                        : DataValue.Null(DataKind.Float32);
                 }
 
                 // Sample variance requires at least 2 values (N-1 denominator).
                 return _count > 1
-                    ? DataValue.FromScalar((float)(_m2 / (_count - 1)))
-                    : DataValue.Null(DataKind.Scalar);
+                    ? DataValue.FromFloat32((float)(_m2 / (_count - 1)))
+                    : DataValue.Null(DataKind.Float32);
             }
         }
     }

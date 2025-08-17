@@ -35,12 +35,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             strategy,
             basePath);
 
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
 
         for (int i = 0; i < 350; i++)
         {
-            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(i))));
         }
 
         OutputSummary summary = await writer.FinalizeAsync();
@@ -66,12 +66,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             strategy,
             basePath);
 
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
 
         for (int i = 0; i < 100; i++)
         {
-            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromScalar(i))));
+            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromFloat32(i))));
         }
 
         OutputSummary summary = await writer.FinalizeAsync();
@@ -91,12 +91,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             strategy,
             basePath);
 
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
 
         for (int i = 0; i < 10; i++)
         {
-            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromScalar(i))));
+            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromFloat32(i))));
         }
 
         OutputSummary summary = await writer.FinalizeAsync();
@@ -143,12 +143,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             strategy,
             basePath);
 
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
 
         for (int i = 1; i <= 7; i++)
         {
-            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromScalar(i))));
+            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromFloat32(i))));
         }
 
         OutputSummary summary = await writer.FinalizeAsync();
@@ -177,7 +177,7 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             strategy,
             basePath);
 
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
         OutputSummary summary = await writer.FinalizeAsync();
 
@@ -236,12 +236,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             checkpointManager,
             fingerprints);
 
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
 
         for (int i = 0; i < 12; i++)
         {
-            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(i))));
         }
 
         OutputSummary summary = await writer.FinalizeAsync();
@@ -273,12 +273,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
                 checkpointManager,
                 fingerprints);
 
-            Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+            Schema schema = new([new ColumnInfo("id", DataKind.Float32, false)]);
             await writer.InitializeAsync(schema);
 
             for (int i = 0; i < 10; i++)
             {
-                await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+                await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(i))));
             }
 
             await writer.FinalizeAsync();
@@ -294,12 +294,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
                 fingerprints,
                 startShardIndex: 2);
 
-            Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+            Schema schema = new([new ColumnInfo("id", DataKind.Float32, false)]);
             await writer.InitializeAsync(schema);
 
             for (int i = 10; i < 15; i++)
             {
-                await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+                await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(i))));
             }
 
             await writer.FinalizeAsync();
@@ -326,12 +326,12 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
             checkpointManager,
             fingerprints);
 
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, false)]);
         await writer.InitializeAsync(schema);
 
         for (int i = 0; i < 12; i++)
         {
-            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(i))));
+            await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(i))));
         }
 
         await writer.FinalizeAsync();

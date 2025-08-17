@@ -19,12 +19,12 @@ public sealed class AvgFunction : IAggregateFunction
             throw new ArgumentException("AVG() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException($"AVG() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -39,12 +39,12 @@ public sealed class AvgFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            _sum += arguments[0].AsScalar();
+            _sum += arguments[0].AsFloat32();
             _count++;
         }
 
         public DataValue Result => _count > 0
-            ? DataValue.FromScalar((float)(_sum / _count))
-            : DataValue.Null(DataKind.Scalar);
+            ? DataValue.FromFloat32((float)(_sum / _count))
+            : DataValue.Null(DataKind.Float32);
     }
 }

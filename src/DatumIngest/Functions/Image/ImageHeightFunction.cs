@@ -24,7 +24,7 @@ public sealed class ImageHeightFunction : IScalarFunction
             throw new ArgumentException($"height() requires Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class ImageHeightFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
@@ -42,9 +42,9 @@ public sealed class ImageHeightFunction : IScalarFunction
 
         if (dimensions is null)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
-        return DataValue.FromScalar(dimensions.Height);
+        return DataValue.FromFloat32(dimensions.Height);
     }
 }

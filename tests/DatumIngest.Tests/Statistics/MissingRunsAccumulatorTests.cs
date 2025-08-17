@@ -20,9 +20,9 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.RunCount);
@@ -33,9 +33,9 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.RunCount);
@@ -46,11 +46,11 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.RunCount);
@@ -61,10 +61,10 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.RunCount);
@@ -75,9 +75,9 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.RunCount);
@@ -104,13 +104,13 @@ public sealed class MissingRunsAccumulatorTests
         MissingRunsAccumulator accumulator = new();
 
         // Run 1: leading null
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
         // Run 2: middle null
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
         // Run 3: trailing null
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.RunCount);
@@ -121,14 +121,14 @@ public sealed class MissingRunsAccumulatorTests
     {
         // Chunk 1: [1, null, null]  → 1 run, ends with null
         MissingRunsAccumulator first = new();
-        first.Add(DataValue.FromScalar(1.0f));
-        first.Add(DataValue.Null(DataKind.Scalar));
-        first.Add(DataValue.Null(DataKind.Scalar));
+        first.Add(DataValue.FromFloat32(1.0f));
+        first.Add(DataValue.Null(DataKind.Float32));
+        first.Add(DataValue.Null(DataKind.Float32));
 
         // Chunk 2: [null, 2]  → 1 run, starts with null
         MissingRunsAccumulator second = new();
-        second.Add(DataValue.Null(DataKind.Scalar));
-        second.Add(DataValue.FromScalar(2.0f));
+        second.Add(DataValue.Null(DataKind.Float32));
+        second.Add(DataValue.FromFloat32(2.0f));
 
         first.Merge(second);
 
@@ -142,13 +142,13 @@ public sealed class MissingRunsAccumulatorTests
     {
         // Chunk 1: [null, 1]  → 1 run, ends with non-null
         MissingRunsAccumulator first = new();
-        first.Add(DataValue.Null(DataKind.Scalar));
-        first.Add(DataValue.FromScalar(1.0f));
+        first.Add(DataValue.Null(DataKind.Float32));
+        first.Add(DataValue.FromFloat32(1.0f));
 
         // Chunk 2: [2, null]  → 1 run, starts with non-null
         MissingRunsAccumulator second = new();
-        second.Add(DataValue.FromScalar(2.0f));
-        second.Add(DataValue.Null(DataKind.Scalar));
+        second.Add(DataValue.FromFloat32(2.0f));
+        second.Add(DataValue.Null(DataKind.Float32));
 
         first.Merge(second);
 
@@ -161,9 +161,9 @@ public sealed class MissingRunsAccumulatorTests
     public void Merge_EmptySecond_PreservesFirst()
     {
         MissingRunsAccumulator first = new();
-        first.Add(DataValue.Null(DataKind.Scalar));
-        first.Add(DataValue.FromScalar(1.0f));
-        first.Add(DataValue.Null(DataKind.Scalar));
+        first.Add(DataValue.Null(DataKind.Float32));
+        first.Add(DataValue.FromFloat32(1.0f));
+        first.Add(DataValue.Null(DataKind.Float32));
 
         MissingRunsAccumulator second = new();
 
@@ -179,9 +179,9 @@ public sealed class MissingRunsAccumulatorTests
         MissingRunsAccumulator first = new();
 
         MissingRunsAccumulator second = new();
-        second.Add(DataValue.Null(DataKind.Scalar));
-        second.Add(DataValue.FromScalar(1.0f));
-        second.Add(DataValue.Null(DataKind.Scalar));
+        second.Add(DataValue.Null(DataKind.Float32));
+        second.Add(DataValue.FromFloat32(1.0f));
+        second.Add(DataValue.Null(DataKind.Float32));
 
         first.Merge(second);
 
@@ -193,12 +193,12 @@ public sealed class MissingRunsAccumulatorTests
     public void Merge_AllNullBothChunks_CoalescesToOneRun()
     {
         MissingRunsAccumulator first = new();
-        first.Add(DataValue.Null(DataKind.Scalar));
-        first.Add(DataValue.Null(DataKind.Scalar));
+        first.Add(DataValue.Null(DataKind.Float32));
+        first.Add(DataValue.Null(DataKind.Float32));
 
         MissingRunsAccumulator second = new();
-        second.Add(DataValue.Null(DataKind.Scalar));
-        second.Add(DataValue.Null(DataKind.Scalar));
+        second.Add(DataValue.Null(DataKind.Float32));
+        second.Add(DataValue.Null(DataKind.Float32));
 
         first.Merge(second);
 

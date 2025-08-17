@@ -22,7 +22,7 @@ public sealed class BytesFunction : IScalarFunction
 
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] != DataKind.Scalar)
+            if (argumentKinds[i] != DataKind.Float32)
             {
                 throw new ArgumentException($"bytes() requires all arguments to be Scalar, but argument {i} is {argumentKinds[i]}.");
             }
@@ -43,7 +43,7 @@ public sealed class BytesFunction : IScalarFunction
             }
             else
             {
-                result[i] = (byte)arguments[i].AsScalar();
+                result[i] = (byte)arguments[i].AsFloat32();
             }
         }
 

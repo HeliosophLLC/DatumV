@@ -299,7 +299,7 @@ Returns all available functions with parameter metadata.
 |-------|------|-------------|
 | `name` | `string` | The SQL function name. |
 | `parameters` | `repeated ParameterInfoMessage` | Ordered parameter list. |
-| `return_type` | `string` | Return type name (e.g. `"Scalar"`), empty if context-dependent. |
+| `return_type` | `string` | Return type name (e.g. `"Float32"`), empty if context-dependent. |
 | `is_table_valued` | `bool` | Whether this is a table-valued function (used in `FROM`/`JOIN`). |
 | `query_unit_cost` | `int32` | Base query-unit cost per invocation. Image functions may incur additional resolution-dependent cost (see [Functions Reference](functions.md)). |
 
@@ -317,7 +317,7 @@ Returns all available functions with parameter metadata.
 |-------|---------|
 | `PARAMETER_KIND_ANY` (0) | Accepts any type (polymorphic parameter). |
 | `PARAMETER_KIND_UINT8` (1) | `UInt8` |
-| `PARAMETER_KIND_SCALAR` (2) | `Scalar` |
+| `PARAMETER_KIND_SCALAR` (2) | `Float32` |
 | `PARAMETER_KIND_VECTOR` (3) | `Vector` |
 | `PARAMETER_KIND_MATRIX` (4) | `Matrix` |
 | `PARAMETER_KIND_TENSOR` (5) | `Tensor` |
@@ -411,7 +411,7 @@ The `DataValueMessage` uses a `oneof` discriminated union to carry typed values:
 | DataKind | Proto field | Wire type | Notes |
 |----------|-------------|-----------|-------|
 | `UInt8` | `uint8_value` | `uint32` | Single byte (0–255) |
-| `Scalar` | `scalar_value` | `float` | 32-bit float |
+| `Float32` | `scalar_value` | `float` | 32-bit float |
 | `String` | `string_value` | `string` | UTF-8 text |
 | `Date` | `date_value` | `string` | ISO 8601 date (`2024-06-15`) |
 | `DateTime` | `date_time_value` | `string` | ISO 8601 round-trip (`O` format) |

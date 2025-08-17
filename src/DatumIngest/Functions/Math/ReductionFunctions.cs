@@ -19,17 +19,17 @@ public sealed class VecSumFunction : IScalarFunction
             throw new ArgumentException("vec_sum() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_sum() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
         float sum = 0f;
         for (int i = 0; i < data.Length; i++) sum += data[i];
-        return DataValue.FromScalar(sum);
+        return DataValue.FromFloat32(sum);
     }
 }
 
@@ -49,18 +49,18 @@ public sealed class VecMeanFunction : IScalarFunction
             throw new ArgumentException("vec_mean() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_mean() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float sum = 0f;
         for (int i = 0; i < data.Length; i++) sum += data[i];
-        return DataValue.FromScalar(sum / data.Length);
+        return DataValue.FromFloat32(sum / data.Length);
     }
 }
 
@@ -80,18 +80,18 @@ public sealed class VecMinFunction : IScalarFunction
             throw new ArgumentException("vec_min() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_min() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float min = data[0];
         for (int i = 1; i < data.Length; i++) if (data[i] < min) min = data[i];
-        return DataValue.FromScalar(min);
+        return DataValue.FromFloat32(min);
     }
 }
 
@@ -111,18 +111,18 @@ public sealed class VecMaxFunction : IScalarFunction
             throw new ArgumentException("vec_max() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_max() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float max = data[0];
         for (int i = 1; i < data.Length; i++) if (data[i] > max) max = data[i];
-        return DataValue.FromScalar(max);
+        return DataValue.FromFloat32(max);
     }
 }
 
@@ -142,16 +142,16 @@ public sealed class VecStdFunction : IScalarFunction
             throw new ArgumentException("vec_std() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_std() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
-        return DataValue.FromScalar(MathF.Sqrt(ComputeVariance(data)));
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        return DataValue.FromFloat32(MathF.Sqrt(ComputeVariance(data)));
     }
 }
 
@@ -171,16 +171,16 @@ public sealed class VecVarFunction : IScalarFunction
             throw new ArgumentException("vec_var() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_var() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
-        return DataValue.FromScalar(ComputeVariance(data));
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        return DataValue.FromFloat32(ComputeVariance(data));
     }
 }
 
@@ -200,15 +200,15 @@ public sealed class VecMedianFunction : IScalarFunction
             throw new ArgumentException("vec_median() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_median() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float[] sorted = new float[data.Length];
         Array.Copy(data, sorted, data.Length);
         Array.Sort(sorted);
@@ -216,7 +216,7 @@ public sealed class VecMedianFunction : IScalarFunction
         float median = sorted.Length % 2 == 0
             ? (sorted[mid - 1] + sorted[mid]) / 2f
             : sorted[mid];
-        return DataValue.FromScalar(median);
+        return DataValue.FromFloat32(median);
     }
 }
 
@@ -236,21 +236,21 @@ public sealed class VecArgminFunction : IScalarFunction
             throw new ArgumentException("vec_argmin() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_argmin() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         int minIndex = 0;
         for (int i = 1; i < data.Length; i++)
         {
             if (data[i] < data[minIndex]) minIndex = i;
         }
-        return DataValue.FromScalar(minIndex);
+        return DataValue.FromFloat32(minIndex);
     }
 }
 
@@ -270,21 +270,21 @@ public sealed class VecArgmaxFunction : IScalarFunction
             throw new ArgumentException("vec_argmax() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_argmax() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(float.NaN);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         int maxIndex = 0;
         for (int i = 1; i < data.Length; i++)
         {
             if (data[i] > data[maxIndex]) maxIndex = i;
         }
-        return DataValue.FromScalar(maxIndex);
+        return DataValue.FromFloat32(maxIndex);
     }
 }
 
@@ -307,21 +307,21 @@ public sealed class VecNormFunction : IScalarFunction
             throw new ArgumentException("vec_norm() requires 1 or 2 arguments.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_norm() does not support {argumentKinds[0]}.");
-        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("vec_norm() second argument (p) must be Scalar or UInt8.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
 
         float p = 2f;
         if (arguments.Length == 2 && !arguments[1].IsNull)
         {
-            p = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar();
+            p = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32();
         }
 
         if (float.IsPositiveInfinity(p))
@@ -332,7 +332,7 @@ public sealed class VecNormFunction : IScalarFunction
                 float abs = MathF.Abs(data[i]);
                 if (abs > max) max = abs;
             }
-            return DataValue.FromScalar(max);
+            return DataValue.FromFloat32(max);
         }
 
         float sum = 0f;
@@ -340,7 +340,7 @@ public sealed class VecNormFunction : IScalarFunction
         {
             sum += MathF.Pow(MathF.Abs(data[i]), p);
         }
-        return DataValue.FromScalar(MathF.Pow(sum, 1f / p));
+        return DataValue.FromFloat32(MathF.Pow(sum, 1f / p));
     }
 }
 
@@ -360,20 +360,20 @@ public sealed class VecCountNonzeroFunction : IScalarFunction
             throw new ArgumentException("vec_count_nonzero() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_count_nonzero() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
         int count = 0;
         for (int i = 0; i < data.Length; i++)
         {
             if (data[i] != 0f) count++;
         }
-        return DataValue.FromScalar(count);
+        return DataValue.FromFloat32(count);
     }
 }
 
@@ -393,19 +393,19 @@ public sealed class VecAnyFunction : IScalarFunction
             throw new ArgumentException("vec_any() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_any() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
         for (int i = 0; i < data.Length; i++)
         {
-            if (data[i] != 0f) return DataValue.FromScalar(1f);
+            if (data[i] != 0f) return DataValue.FromFloat32(1f);
         }
-        return DataValue.FromScalar(0f);
+        return DataValue.FromFloat32(0f);
     }
 }
 
@@ -425,19 +425,19 @@ public sealed class VecAllFunction : IScalarFunction
             throw new ArgumentException("vec_all() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_all() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
         for (int i = 0; i < data.Length; i++)
         {
-            if (data[i] == 0f) return DataValue.FromScalar(0f);
+            if (data[i] == 0f) return DataValue.FromFloat32(0f);
         }
-        return DataValue.FromScalar(1f);
+        return DataValue.FromFloat32(1f);
     }
 }
 
@@ -457,18 +457,18 @@ public sealed class VecProductFunction : IScalarFunction
             throw new ArgumentException("vec_product() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_product() does not support {argumentKinds[0]}.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
-        if (data.Length == 0) return DataValue.FromScalar(1f);
+        if (data.Length == 0) return DataValue.FromFloat32(1f);
         float product = 1f;
         for (int i = 0; i < data.Length; i++) product *= data[i];
-        return DataValue.FromScalar(product);
+        return DataValue.FromFloat32(product);
     }
 }
 

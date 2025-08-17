@@ -61,8 +61,8 @@ internal static class ProtoConverter
                 message.Uint8Value = value.AsUInt8();
                 break;
 
-            case DataKind.Scalar:
-                message.ScalarValue = value.AsScalar();
+            case DataKind.Float32:
+                message.ScalarValue = value.AsFloat32();
                 break;
 
             case DataKind.String:
@@ -143,7 +143,7 @@ internal static class ProtoConverter
         return kind switch
         {
             DataKind.UInt8 => DataKindValue.DataKindUint8,
-            DataKind.Scalar => DataKindValue.DataKindScalar,
+            DataKind.Float32 => DataKindValue.DataKindScalar,
             DataKind.Vector => DataKindValue.DataKindVector,
             DataKind.Matrix => DataKindValue.DataKindMatrix,
             DataKind.Tensor => DataKindValue.DataKindTensor,
@@ -172,13 +172,13 @@ internal static class ProtoConverter
     {
         if (message.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         return message.ValueCase switch
         {
             DataValueMessage.ValueOneofCase.Uint8Value => DataValue.FromUInt8((byte)message.Uint8Value),
-            DataValueMessage.ValueOneofCase.ScalarValue => DataValue.FromScalar(message.ScalarValue),
+            DataValueMessage.ValueOneofCase.ScalarValue => DataValue.FromFloat32(message.ScalarValue),
             DataValueMessage.ValueOneofCase.StringValue => DataValue.FromString(message.StringValue),
             DataValueMessage.ValueOneofCase.BooleanValue => DataValue.FromBoolean(message.BooleanValue),
             DataValueMessage.ValueOneofCase.DateValue => DataValue.FromDate(DateOnly.Parse(message.DateValue)),
@@ -187,7 +187,7 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.DurationValue => DataValue.FromDuration(TimeSpan.FromSeconds(message.DurationValue)),
             DataValueMessage.ValueOneofCase.UuidValue => DataValue.FromUuid(Guid.Parse(message.UuidValue)),
             DataValueMessage.ValueOneofCase.JsonValue => DataValue.FromJsonValue(message.JsonValue),
-            _ => DataValue.Null(DataKind.Scalar),
+            _ => DataValue.Null(DataKind.Float32),
         };
     }
 }

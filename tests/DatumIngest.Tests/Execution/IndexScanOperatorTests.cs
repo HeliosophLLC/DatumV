@@ -34,11 +34,11 @@ public sealed class IndexScanOperatorTests
         // Build sorted index on "value" column.
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(10f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(20f), ChunkIndex: 0, RowOffsetInChunk: 3),
-            new(DataValue.FromScalar(30f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(40f), ChunkIndex: 0, RowOffsetInChunk: 2),
-            new(DataValue.FromScalar(50f), ChunkIndex: 0, RowOffsetInChunk: 4),
+            new(DataValue.FromFloat32(10f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(20f), ChunkIndex: 0, RowOffsetInChunk: 3),
+            new(DataValue.FromFloat32(30f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(40f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(50f), ChunkIndex: 0, RowOffsetInChunk: 4),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -56,11 +56,11 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(indexScan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
-        Assert.Equal(10f, results[0]["value"].AsScalar());
-        Assert.Equal(20f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
-        Assert.Equal(40f, results[3]["value"].AsScalar());
-        Assert.Equal(50f, results[4]["value"].AsScalar());
+        Assert.Equal(10f, results[0]["value"].AsFloat32());
+        Assert.Equal(20f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
+        Assert.Equal(40f, results[3]["value"].AsFloat32());
+        Assert.Equal(50f, results[4]["value"].AsFloat32());
     }
 
     [Fact]
@@ -71,11 +71,11 @@ public sealed class IndexScanOperatorTests
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(10f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(20f), ChunkIndex: 0, RowOffsetInChunk: 3),
-            new(DataValue.FromScalar(30f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(40f), ChunkIndex: 0, RowOffsetInChunk: 2),
-            new(DataValue.FromScalar(50f), ChunkIndex: 0, RowOffsetInChunk: 4),
+            new(DataValue.FromFloat32(10f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(20f), ChunkIndex: 0, RowOffsetInChunk: 3),
+            new(DataValue.FromFloat32(30f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(40f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(50f), ChunkIndex: 0, RowOffsetInChunk: 4),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -93,11 +93,11 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(indexScan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
-        Assert.Equal(50f, results[0]["value"].AsScalar());
-        Assert.Equal(40f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
-        Assert.Equal(20f, results[3]["value"].AsScalar());
-        Assert.Equal(10f, results[4]["value"].AsScalar());
+        Assert.Equal(50f, results[0]["value"].AsFloat32());
+        Assert.Equal(40f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
+        Assert.Equal(20f, results[3]["value"].AsFloat32());
+        Assert.Equal(10f, results[4]["value"].AsFloat32());
     }
 
     [Fact]
@@ -110,12 +110,12 @@ public sealed class IndexScanOperatorTests
         // Sorted index: 10(chunk0,row2), 20(chunk1,row2), 30(chunk0,row1), 40(chunk1,row1), 50(chunk0,row0), 60(chunk1,row0)
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(10f), ChunkIndex: 0, RowOffsetInChunk: 2),
-            new(DataValue.FromScalar(20f), ChunkIndex: 1, RowOffsetInChunk: 2),
-            new(DataValue.FromScalar(30f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(40f), ChunkIndex: 1, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(50f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(60f), ChunkIndex: 1, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(10f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(20f), ChunkIndex: 1, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(30f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(40f), ChunkIndex: 1, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(50f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(60f), ChunkIndex: 1, RowOffsetInChunk: 0),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -137,12 +137,12 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(indexScan.ExecuteAsync(context));
 
         Assert.Equal(6, results.Count);
-        Assert.Equal(10f, results[0]["value"].AsScalar());
-        Assert.Equal(20f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
-        Assert.Equal(40f, results[3]["value"].AsScalar());
-        Assert.Equal(50f, results[4]["value"].AsScalar());
-        Assert.Equal(60f, results[5]["value"].AsScalar());
+        Assert.Equal(10f, results[0]["value"].AsFloat32());
+        Assert.Equal(20f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
+        Assert.Equal(40f, results[3]["value"].AsFloat32());
+        Assert.Equal(50f, results[4]["value"].AsFloat32());
+        Assert.Equal(60f, results[5]["value"].AsFloat32());
     }
 
     // ───────────────────── Planner integration tests ─────────────────────
@@ -192,7 +192,7 @@ public sealed class IndexScanOperatorTests
         // Register an index without sorted indexes.
         SourceIndex sourceIndex = new(
             new SourceFingerprint(100, DummyHash),
-            new IndexSchema(new Schema([new ColumnInfo("value", DataKind.Scalar, false)]), 3),
+            new IndexSchema(new Schema([new ColumnInfo("value", DataKind.Float32, false)]), 3),
             [CreateChunk(0, 3)]);
         catalog.RegisterIndex("data", sourceIndex);
 
@@ -273,11 +273,11 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
-        Assert.Equal(10f, results[0]["value"].AsScalar());
-        Assert.Equal(20f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
-        Assert.Equal(40f, results[3]["value"].AsScalar());
-        Assert.Equal(50f, results[4]["value"].AsScalar());
+        Assert.Equal(10f, results[0]["value"].AsFloat32());
+        Assert.Equal(20f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
+        Assert.Equal(40f, results[3]["value"].AsFloat32());
+        Assert.Equal(50f, results[4]["value"].AsFloat32());
     }
 
     [Fact]
@@ -310,11 +310,11 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
-        Assert.Equal(50f, results[0]["value"].AsScalar());
-        Assert.Equal(40f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
-        Assert.Equal(20f, results[3]["value"].AsScalar());
-        Assert.Equal(10f, results[4]["value"].AsScalar());
+        Assert.Equal(50f, results[0]["value"].AsFloat32());
+        Assert.Equal(40f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
+        Assert.Equal(20f, results[3]["value"].AsFloat32());
+        Assert.Equal(10f, results[4]["value"].AsFloat32());
     }
 
     [Fact]
@@ -348,9 +348,9 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(10f, results[0]["value"].AsScalar());
-        Assert.Equal(20f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
+        Assert.Equal(10f, results[0]["value"].AsFloat32());
+        Assert.Equal(20f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
     }
 
     // ───────────────────── WHERE index seek tests ─────────────────────
@@ -387,7 +387,7 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Single(results);
-        Assert.Equal(5f, results[0]["value"].AsScalar());
+        Assert.Equal(5f, results[0]["value"].AsFloat32());
     }
 
     [Fact]
@@ -396,11 +396,11 @@ public sealed class IndexScanOperatorTests
         // Duplicate values: [1, 2, 3, 2, 1]. WHERE value = 2 yields 2 rows.
         Row[] rows =
         [
-            new(["index", "value"], [DataValue.FromScalar(0f), DataValue.FromScalar(1f)]),
-            new(["index", "value"], [DataValue.FromScalar(1f), DataValue.FromScalar(2f)]),
-            new(["index", "value"], [DataValue.FromScalar(2f), DataValue.FromScalar(3f)]),
-            new(["index", "value"], [DataValue.FromScalar(3f), DataValue.FromScalar(2f)]),
-            new(["index", "value"], [DataValue.FromScalar(4f), DataValue.FromScalar(1f)]),
+            new(["index", "value"], [DataValue.FromFloat32(0f), DataValue.FromFloat32(1f)]),
+            new(["index", "value"], [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]),
+            new(["index", "value"], [DataValue.FromFloat32(2f), DataValue.FromFloat32(3f)]),
+            new(["index", "value"], [DataValue.FromFloat32(3f), DataValue.FromFloat32(2f)]),
+            new(["index", "value"], [DataValue.FromFloat32(4f), DataValue.FromFloat32(1f)]),
         ];
         SeekableInMemoryProvider provider = new(rows);
 
@@ -428,7 +428,7 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(2, results.Count);
-        Assert.All(results, r => Assert.Equal(2f, r["value"].AsScalar()));
+        Assert.All(results, r => Assert.Equal(2f, r["value"].AsFloat32()));
     }
 
     [Fact]
@@ -469,10 +469,10 @@ public sealed class IndexScanOperatorTests
         // WHERE value = 2 AND index > 1 → index seek on value, filter on index.
         Row[] rows =
         [
-            new(["index", "value"], [DataValue.FromScalar(0f), DataValue.FromScalar(2f)]),
-            new(["index", "value"], [DataValue.FromScalar(1f), DataValue.FromScalar(2f)]),
-            new(["index", "value"], [DataValue.FromScalar(2f), DataValue.FromScalar(2f)]),
-            new(["index", "value"], [DataValue.FromScalar(3f), DataValue.FromScalar(3f)]),
+            new(["index", "value"], [DataValue.FromFloat32(0f), DataValue.FromFloat32(2f)]),
+            new(["index", "value"], [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]),
+            new(["index", "value"], [DataValue.FromFloat32(2f), DataValue.FromFloat32(2f)]),
+            new(["index", "value"], [DataValue.FromFloat32(3f), DataValue.FromFloat32(3f)]),
         ];
         SeekableInMemoryProvider provider = new(rows);
 
@@ -508,7 +508,7 @@ public sealed class IndexScanOperatorTests
 
         // value=2 matches rows at index 0,1,2. index>1 further filters to index 2 only.
         Assert.Single(results);
-        Assert.Equal(2f, results[0]["index"].AsScalar());
+        Assert.Equal(2f, results[0]["index"].AsFloat32());
     }
 
     [Fact]
@@ -585,7 +585,7 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Single(results);
-        Assert.Equal(5f, results[0]["value"].AsScalar());
+        Assert.Equal(5f, results[0]["value"].AsFloat32());
         Assert.Equal(1, scan.ExactSeekRowsFetched);
     }
 
@@ -798,7 +798,7 @@ public sealed class IndexScanOperatorTests
         Assert.Equal(5, scan.ExactSeekRowsFetched);
         Assert.All(results, r =>
         {
-            float value = r["value"].AsScalar();
+            float value = r["value"].AsFloat32();
             Assert.InRange(value, 3f, 7f);
         });
     }
@@ -833,7 +833,7 @@ public sealed class IndexScanOperatorTests
         Assert.Equal(3, results.Count);
         Assert.Equal(3, scan.ExactSeekRowsFetched);
         float[] expected = [2f, 5f, 8f];
-        Assert.Equal(expected, results.Select(r => r["value"].AsScalar()).OrderBy(v => v).ToArray());
+        Assert.Equal(expected, results.Select(r => r["value"].AsFloat32()).OrderBy(v => v).ToArray());
     }
 
     [Fact]
@@ -905,7 +905,7 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["value"].AsScalar());
+        Assert.Equal(3f, results[0]["value"].AsFloat32());
         Assert.Equal(1, scan.PrunedIndexChunks);
     }
 
@@ -940,7 +940,7 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Single(results);
-        Assert.Equal(5f, results[0]["value"].AsScalar());
+        Assert.Equal(5f, results[0]["value"].AsFloat32());
         Assert.Equal(1, scan.ExactSeekRowsFetched);
     }
 
@@ -1003,11 +1003,11 @@ public sealed class IndexScanOperatorTests
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
-        Assert.Equal(10f, results[0]["value"].AsScalar());
-        Assert.Equal(20f, results[1]["value"].AsScalar());
-        Assert.Equal(30f, results[2]["value"].AsScalar());
-        Assert.Equal(40f, results[3]["value"].AsScalar());
-        Assert.Equal(50f, results[4]["value"].AsScalar());
+        Assert.Equal(10f, results[0]["value"].AsFloat32());
+        Assert.Equal(20f, results[1]["value"].AsFloat32());
+        Assert.Equal(30f, results[2]["value"].AsFloat32());
+        Assert.Equal(40f, results[3]["value"].AsFloat32());
+        Assert.Equal(50f, results[4]["value"].AsFloat32());
     }
 
     // ───────────────────── B+Tree helpers ─────────────────────
@@ -1027,7 +1027,7 @@ public sealed class IndexScanOperatorTests
         // Sort entries by key for the bulk loader.
         Array.Sort(entries, (a, b) => StatisticsPredicateEvaluator.CompareValues(a.Key, b.Key));
 
-        BPlusTreeIndexSet bTreeSet = BuildBPlusTreeIndexSet(columnName, DataKind.Scalar, entries);
+        BPlusTreeIndexSet bTreeSet = BuildBPlusTreeIndexSet(columnName, DataKind.Float32, entries);
 
         IndexChunk chunk = new(0, rows.Length, -1, -1,
             new Dictionary<string, ChunkColumnStatistics>());
@@ -1036,8 +1036,8 @@ public sealed class IndexScanOperatorTests
             new SourceFingerprint(100, DummyHash),
             new IndexSchema(
                 new Schema([
-                    new ColumnInfo("index", DataKind.Scalar, false),
-                    new ColumnInfo("value", DataKind.Scalar, false),
+                    new ColumnInfo("index", DataKind.Float32, false),
+                    new ColumnInfo("value", DataKind.Float32, false),
                 ]),
                 rows.Length),
             [chunk],
@@ -1075,10 +1075,10 @@ public sealed class IndexScanOperatorTests
         ValueIndexEntry[] sorted = entries.ToArray();
         Array.Sort(sorted, (a, b) => StatisticsPredicateEvaluator.CompareValues(a.Key, b.Key));
 
-        BPlusTreeIndexSet bTreeSet = BuildBPlusTreeIndexSet(columnName, DataKind.Scalar, sorted);
+        BPlusTreeIndexSet bTreeSet = BuildBPlusTreeIndexSet(columnName, DataKind.Float32, sorted);
 
         ColumnInfo[] columns = allRows[0].ColumnNames
-            .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+            .Select(name => new ColumnInfo(name, DataKind.Float32, false))
             .ToArray();
 
         return new SourceIndex(
@@ -1149,7 +1149,7 @@ public sealed class IndexScanOperatorTests
         {
             rows[i] = new Row(
                 ["index", "value"],
-                [DataValue.FromScalar(i), DataValue.FromScalar(values[i])]);
+                [DataValue.FromFloat32(i), DataValue.FromFloat32(values[i])]);
         }
 
         return rows;
@@ -1179,8 +1179,8 @@ public sealed class IndexScanOperatorTests
             new SourceFingerprint(100, DummyHash),
             new IndexSchema(
                 new Schema([
-                    new ColumnInfo("index", DataKind.Scalar, false),
-                    new ColumnInfo("value", DataKind.Scalar, false),
+                    new ColumnInfo("index", DataKind.Float32, false),
+                    new ColumnInfo("value", DataKind.Float32, false),
                 ]),
                 rows.Length),
             [chunk],
@@ -1208,7 +1208,7 @@ public sealed class IndexScanOperatorTests
             new Dictionary<string, ChunkColumnStatistics>());
 
         ColumnInfo[] columns = rows[0].ColumnNames
-            .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+            .Select(name => new ColumnInfo(name, DataKind.Float32, false))
             .ToArray();
 
         return new SourceIndex(
@@ -1249,7 +1249,7 @@ public sealed class IndexScanOperatorTests
         SortedValueIndexSet sortedSet = new(indexes);
 
         ColumnInfo[] columns = allRows[0].ColumnNames
-            .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+            .Select(name => new ColumnInfo(name, DataKind.Float32, false))
             .ToArray();
 
         return new SourceIndex(
@@ -1286,7 +1286,7 @@ public sealed class IndexScanOperatorTests
             TableDescriptor descriptor, CancellationToken cancellationToken)
         {
             ColumnInfo[] columns = _rows[0].ColumnNames
-                .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+                .Select(name => new ColumnInfo(name, DataKind.Float32, false))
                 .ToArray();
             return Task.FromResult(new Schema(columns));
         }

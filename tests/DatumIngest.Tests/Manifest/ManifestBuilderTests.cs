@@ -11,12 +11,12 @@ public sealed class ManifestBuilderTests
     public void Build_NumericColumn_ProducesNumericFeatureManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(3.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(2.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(3.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
 
@@ -25,7 +25,7 @@ public sealed class ManifestBuilderTests
 
         NumericFeatureManifest feature = Assert.IsType<NumericFeatureManifest>(manifest.Features[0]);
         Assert.Equal("value", feature.Name);
-        Assert.Equal(DataKind.Scalar, feature.Kind);
+        Assert.Equal(DataKind.Float32, feature.Kind);
         Assert.Equal(3, feature.Count);
         Assert.Equal(0, feature.NullCount);
         Assert.Equal(3, feature.ValidCount);
@@ -172,14 +172,14 @@ public sealed class ManifestBuilderTests
 
         Row row = new(
             ["id", "name", "score"],
-            [DataValue.FromScalar(1.0f), DataValue.FromString("test"), DataValue.FromUInt8(200)]);
+            [DataValue.FromFloat32(1.0f), DataValue.FromString("test"), DataValue.FromUInt8(200)]);
 
         collector.AddRow(row);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
         {
-            ["id"] = DataKind.Scalar,
+            ["id"] = DataKind.Float32,
             ["name"] = DataKind.String,
             ["score"] = DataKind.UInt8
         };
@@ -196,11 +196,11 @@ public sealed class ManifestBuilderTests
     public void Build_NullValues_TrackedInNullCount()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
-        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Float32)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
 
@@ -240,10 +240,10 @@ public sealed class ManifestBuilderTests
     public void Build_GeneratedAtUtc_IsSet()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("x", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("x", DataValue.FromFloat32(1.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 1);
 
@@ -255,13 +255,13 @@ public sealed class ManifestBuilderTests
     public void Build_NullRatio_ComputedCorrectly()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
-        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(3.0f)));
-        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Float32)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(3.0f)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Float32)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 4);
 
@@ -275,11 +275,11 @@ public sealed class ManifestBuilderTests
         StatisticsCollector collector = new();
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         // No columns in stats when no rows added — build with empty stats but rowCount 0
         // Add at least one row so the column exists, then build with rowCount = 0
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
         stats = collector.GetStatistics();
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
@@ -292,11 +292,11 @@ public sealed class ManifestBuilderTests
     public void Build_NullRatio_NoNulls_IsZero()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(2.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
 
@@ -309,17 +309,17 @@ public sealed class ManifestBuilderTests
     {
         StatisticsCollector collector = new();
         // Run 1: [null, null]
-        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
-        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Float32)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Float32)));
         // non-null
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
         // Run 2: [null]
-        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("value", DataValue.Null(DataKind.Float32)));
         // non-null
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(2.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 5);
 
@@ -331,11 +331,11 @@ public sealed class ManifestBuilderTests
     public void Build_MissingRuns_NoNulls_IsZero()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(2.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(2.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
 
@@ -347,12 +347,12 @@ public sealed class ManifestBuilderTests
     public void Build_ConstantColumn_IsConstantTrue()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("price", DataValue.FromScalar(0.0f)));
-        collector.AddRow(MakeRow("price", DataValue.FromScalar(0.0f)));
-        collector.AddRow(MakeRow("price", DataValue.FromScalar(0.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromFloat32(0.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromFloat32(0.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromFloat32(0.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
 
@@ -365,12 +365,12 @@ public sealed class ManifestBuilderTests
     public void Build_VaryingColumn_IsConstantFalse()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("price", DataValue.FromScalar(1.0f)));
-        collector.AddRow(MakeRow("price", DataValue.FromScalar(2.0f)));
-        collector.AddRow(MakeRow("price", DataValue.FromScalar(3.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromFloat32(1.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromFloat32(2.0f)));
+        collector.AddRow(MakeRow("price", DataValue.FromFloat32(3.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
 
@@ -382,11 +382,11 @@ public sealed class ManifestBuilderTests
     public void Build_AllNullColumn_IsConstantTrue()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("price", DataValue.Null(DataKind.Scalar)));
-        collector.AddRow(MakeRow("price", DataValue.Null(DataKind.Scalar)));
+        collector.AddRow(MakeRow("price", DataValue.Null(DataKind.Float32)));
+        collector.AddRow(MakeRow("price", DataValue.Null(DataKind.Float32)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["price"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
 
@@ -445,10 +445,10 @@ public sealed class ManifestBuilderTests
     public void Build_DominantValueRatio_ZeroRows_IsNull()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
 
@@ -504,10 +504,10 @@ public sealed class ManifestBuilderTests
     public void Build_ZeroRows_IsNearConstantFalse()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("value", DataValue.FromScalar(1.0f)));
+        collector.AddRow(MakeRow("value", DataValue.FromFloat32(1.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 0);
 

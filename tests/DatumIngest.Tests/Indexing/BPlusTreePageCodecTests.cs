@@ -17,7 +17,7 @@ public sealed class BPlusTreePageCodecTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(42.0f), 0, 100L),
+            new(DataValue.FromFloat32(42.0f), 0, 100L),
         ];
 
         byte[] encoded = BPlusTreePageCodec.EncodeLeafPage(
@@ -40,11 +40,11 @@ public sealed class BPlusTreePageCodecTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0L),
-            new(DataValue.FromScalar(2.0f), 0, 10L),
-            new(DataValue.FromScalar(3.0f), 1, 0L),
-            new(DataValue.FromScalar(4.0f), 1, 10L),
-            new(DataValue.FromScalar(5.0f), 2, 0L),
+            new(DataValue.FromFloat32(1.0f), 0, 0L),
+            new(DataValue.FromFloat32(2.0f), 0, 10L),
+            new(DataValue.FromFloat32(3.0f), 1, 0L),
+            new(DataValue.FromFloat32(4.0f), 1, 10L),
+            new(DataValue.FromFloat32(5.0f), 2, 0L),
         ];
 
         byte[] encoded = BPlusTreePageCodec.EncodeLeafPage(entries, 0, 2);
@@ -133,9 +133,9 @@ public sealed class BPlusTreePageCodecTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(7.0f), 0, 0L),
-            new(DataValue.FromScalar(7.0f), 0, 10L),
-            new(DataValue.FromScalar(7.0f), 1, 0L),
+            new(DataValue.FromFloat32(7.0f), 0, 0L),
+            new(DataValue.FromFloat32(7.0f), 0, 10L),
+            new(DataValue.FromFloat32(7.0f), 1, 0L),
         ];
 
         byte[] encoded = BPlusTreePageCodec.EncodeLeafPage(
@@ -155,7 +155,7 @@ public sealed class BPlusTreePageCodecTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0L),
+            new(DataValue.FromFloat32(1.0f), 0, 0L),
         ];
 
         byte[] encoded = BPlusTreePageCodec.EncodeLeafPage(
@@ -168,7 +168,7 @@ public sealed class BPlusTreePageCodecTests
     public void LeafPage_WrongPageType_Throws()
     {
         // Encode an internal page and try to decode it as a leaf.
-        DataValue[] keys = [DataValue.FromScalar(5.0f)];
+        DataValue[] keys = [DataValue.FromFloat32(5.0f)];
         uint[] children = [0, 1];
 
         byte[] internalPage = BPlusTreePageCodec.EncodeInternalPage(keys, children);
@@ -182,7 +182,7 @@ public sealed class BPlusTreePageCodecTests
     [Fact]
     public void InternalPage_SingleKey_RoundTrips()
     {
-        DataValue[] keys = [DataValue.FromScalar(50.0f)];
+        DataValue[] keys = [DataValue.FromFloat32(50.0f)];
         uint[] children = [0, 1];
 
         byte[] encoded = BPlusTreePageCodec.EncodeInternalPage(keys, children);
@@ -192,7 +192,7 @@ public sealed class BPlusTreePageCodecTests
         Assert.Equal(1, decoded.KeyCount);
         Assert.Equal(2, decoded.ChildCount);
 
-        Assert.Equal(DataValue.FromScalar(50.0f), decoded.GetKey(0));
+        Assert.Equal(DataValue.FromFloat32(50.0f), decoded.GetKey(0));
         Assert.Equal(0u, decoded.GetChildPageIndex(0));
         Assert.Equal(1u, decoded.GetChildPageIndex(1));
     }
@@ -202,9 +202,9 @@ public sealed class BPlusTreePageCodecTests
     {
         DataValue[] keys =
         [
-            DataValue.FromScalar(10.0f),
-            DataValue.FromScalar(20.0f),
-            DataValue.FromScalar(30.0f),
+            DataValue.FromFloat32(10.0f),
+            DataValue.FromFloat32(20.0f),
+            DataValue.FromFloat32(30.0f),
         ];
         uint[] children = [0, 1, 2, 3];
 
@@ -249,7 +249,7 @@ public sealed class BPlusTreePageCodecTests
     [Fact]
     public void InternalPage_PageSizeAlways8KiB()
     {
-        DataValue[] keys = [DataValue.FromScalar(1.0f)];
+        DataValue[] keys = [DataValue.FromFloat32(1.0f)];
         uint[] children = [0, 1];
 
         byte[] encoded = BPlusTreePageCodec.EncodeInternalPage(keys, children);
@@ -260,7 +260,7 @@ public sealed class BPlusTreePageCodecTests
     [Fact]
     public void InternalPage_WrongPageType_Throws()
     {
-        ValueIndexEntry[] entries = [new(DataValue.FromScalar(1.0f), 0, 0L)];
+        ValueIndexEntry[] entries = [new(DataValue.FromFloat32(1.0f), 0, 0L)];
 
         byte[] leafPage = BPlusTreePageCodec.EncodeLeafPage(
             entries, BPlusTreeConstants.NoLinkedPage, BPlusTreeConstants.NoLinkedPage);
@@ -274,7 +274,7 @@ public sealed class BPlusTreePageCodecTests
     [Fact]
     public void ReadPageType_Leaf_ReturnsLeaf()
     {
-        ValueIndexEntry[] entries = [new(DataValue.FromScalar(1.0f), 0, 0L)];
+        ValueIndexEntry[] entries = [new(DataValue.FromFloat32(1.0f), 0, 0L)];
         byte[] encoded = BPlusTreePageCodec.EncodeLeafPage(
             entries, BPlusTreeConstants.NoLinkedPage, BPlusTreeConstants.NoLinkedPage);
 
@@ -284,7 +284,7 @@ public sealed class BPlusTreePageCodecTests
     [Fact]
     public void ReadPageType_Internal_ReturnsInternal()
     {
-        DataValue[] keys = [DataValue.FromScalar(1.0f)];
+        DataValue[] keys = [DataValue.FromFloat32(1.0f)];
         uint[] children = [0, 1];
         byte[] encoded = BPlusTreePageCodec.EncodeInternalPage(keys, children);
 

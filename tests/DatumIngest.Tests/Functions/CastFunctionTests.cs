@@ -19,16 +19,16 @@ public class CastFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromUInt8(42),
-            DataValue.FromString("Scalar")
+            DataValue.FromString("Float32")
         ]);
-        Assert.Equal(42f, result.AsScalar());
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
     public void Cast_ScalarToUInt8()
     {
         DataValue result = _function.Execute([
-            DataValue.FromScalar(200),
+            DataValue.FromFloat32(200),
             DataValue.FromString("UInt8")
         ]);
         Assert.Equal((byte)200, result.AsUInt8());
@@ -38,7 +38,7 @@ public class CastFunctionTests
     public void Cast_ScalarToUInt8_Clamps()
     {
         DataValue result = _function.Execute([
-            DataValue.FromScalar(300),
+            DataValue.FromFloat32(300),
             DataValue.FromString("UInt8")
         ]);
         Assert.Equal((byte)255, result.AsUInt8());
@@ -49,16 +49,16 @@ public class CastFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("3.14"),
-            DataValue.FromString("Scalar")
+            DataValue.FromString("Float32")
         ]);
-        Assert.Equal(3.14f, result.AsScalar(), 0.001f);
+        Assert.Equal(3.14f, result.AsFloat32(), 0.001f);
     }
 
     [Fact]
     public void Cast_ScalarToString()
     {
         DataValue result = _function.Execute([
-            DataValue.FromScalar(42),
+            DataValue.FromFloat32(42),
             DataValue.FromString("String")
         ]);
         Assert.Equal("42", result.AsString());
@@ -130,12 +130,12 @@ public class CastFunctionTests
     [Fact]
     public void Cast_SameKind_ReturnsSameValue()
     {
-        DataValue original = DataValue.FromScalar(42);
+        DataValue original = DataValue.FromFloat32(42);
         DataValue result = _function.Execute([
             original,
-            DataValue.FromString("Scalar")
+            DataValue.FromString("Float32")
         ]);
-        Assert.Equal(42f, result.AsScalar());
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
@@ -143,17 +143,17 @@ public class CastFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromString("Scalar")
+            DataValue.FromString("Float32")
         ]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
     public void Cast_UnknownKindName_Throws()
     {
         Assert.Throws<ArgumentException>(() => _function.Execute([
-            DataValue.FromScalar(42),
+            DataValue.FromFloat32(42),
             DataValue.FromString("Unknown")
         ]));
     }
@@ -172,9 +172,9 @@ public class CastFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromUInt8(10),
-            DataValue.FromString("scalar")
+            DataValue.FromString("float32")
         ]);
-        Assert.Equal(10f, result.AsScalar());
+        Assert.Equal(10f, result.AsFloat32());
     }
 
     [Fact]
@@ -183,9 +183,9 @@ public class CastFunctionTests
         // 2000-01-01 is 10957 days after 1970-01-01.
         DataValue result = _function.Execute([
             DataValue.FromDate(new DateOnly(2000, 1, 1)),
-            DataValue.FromString("Scalar")
+            DataValue.FromString("Float32")
         ]);
-        Assert.Equal(10957f, result.AsScalar());
+        Assert.Equal(10957f, result.AsFloat32());
     }
 
     [Fact]
@@ -194,8 +194,8 @@ public class CastFunctionTests
         // 2000-01-01T00:00:00Z is 946684800 seconds after Unix epoch.
         DataValue result = _function.Execute([
             DataValue.FromDateTime(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero)),
-            DataValue.FromString("Scalar")
+            DataValue.FromString("Float32")
         ]);
-        Assert.Equal(946684800f, result.AsScalar());
+        Assert.Equal(946684800f, result.AsFloat32());
     }
 }

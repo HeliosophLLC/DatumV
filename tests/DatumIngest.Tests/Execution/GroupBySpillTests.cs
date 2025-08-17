@@ -57,16 +57,16 @@ public sealed class GroupBySpillTests
     public async Task SingleKey_WithSpill_CountAndSum()
     {
         MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(2f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(3f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(4f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(5f))),
-            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromScalar(6f))),
-            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromScalar(7f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(8f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(9f))),
-            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromScalar(10f))));
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(2f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(3f))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(4f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(5f))),
+            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromFloat32(6f))),
+            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromFloat32(7f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(8f))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(9f))),
+            MakeRow(("category", DataValue.FromString("C")), ("value", DataValue.FromFloat32(10f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -88,14 +88,14 @@ public sealed class GroupBySpillTests
         Row groupB = results.First(row => row["category"].AsString() == "B");
         Row groupC = results.First(row => row["category"].AsString() == "C");
 
-        Assert.Equal(4f, groupA["COUNT(*)"].AsScalar());
-        Assert.Equal(17f, groupA["SUM(value)"].AsScalar());
+        Assert.Equal(4f, groupA["COUNT(*)"].AsFloat32());
+        Assert.Equal(17f, groupA["SUM(value)"].AsFloat32());
 
-        Assert.Equal(3f, groupB["COUNT(*)"].AsScalar());
-        Assert.Equal(15f, groupB["SUM(value)"].AsScalar());
+        Assert.Equal(3f, groupB["COUNT(*)"].AsFloat32());
+        Assert.Equal(15f, groupB["SUM(value)"].AsFloat32());
 
-        Assert.Equal(3f, groupC["COUNT(*)"].AsScalar());
-        Assert.Equal(23f, groupC["SUM(value)"].AsScalar());
+        Assert.Equal(3f, groupC["COUNT(*)"].AsFloat32());
+        Assert.Equal(23f, groupC["SUM(value)"].AsFloat32());
     }
 
     /// <summary>
@@ -112,7 +112,7 @@ public sealed class GroupBySpillTests
             {
                 sourceRows.Add(MakeRow(
                     ("key", DataValue.FromString($"G{groupIndex}")),
-                    ("val", DataValue.FromScalar((float)rowIndex))));
+                    ("val", DataValue.FromFloat32((float)rowIndex))));
             }
         }
 
@@ -149,14 +149,14 @@ public sealed class GroupBySpillTests
         // Verify every group matches.
         Dictionary<string, (float Count, float Sum)> expected = unboundedResults.ToDictionary(
             row => row["key"].AsString(),
-            row => (row["COUNT(*)"].AsScalar(), row["SUM(val)"].AsScalar()));
+            row => (row["COUNT(*)"].AsFloat32(), row["SUM(val)"].AsFloat32()));
 
         foreach (Row row in spillResults)
         {
             string key = row["key"].AsString();
             Assert.True(expected.ContainsKey(key), $"Unexpected group key: {key}");
-            Assert.Equal(expected[key].Count, row["COUNT(*)"].AsScalar());
-            Assert.Equal(expected[key].Sum, row["SUM(val)"].AsScalar());
+            Assert.Equal(expected[key].Count, row["COUNT(*)"].AsFloat32());
+            Assert.Equal(expected[key].Sum, row["SUM(val)"].AsFloat32());
         }
     }
 
@@ -169,14 +169,14 @@ public sealed class GroupBySpillTests
     public async Task CompositeKey_WithSpill_ProducesCorrectResults()
     {
         MockOperator source = new(
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(100f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromScalar(200f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(300f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(50f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromScalar(75f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromScalar(150f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(25f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(500f))));
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(100f))),
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(200f))),
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(300f))),
+            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(50f))),
+            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(75f))),
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(150f))),
+            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(25f))),
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(500f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -196,23 +196,23 @@ public sealed class GroupBySpillTests
 
         Row groupXActive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "active");
-        Assert.Equal(3f, groupXActive["COUNT(*)"].AsScalar());
-        Assert.Equal(900f, groupXActive["SUM(amount)"].AsScalar());
+        Assert.Equal(3f, groupXActive["COUNT(*)"].AsFloat32());
+        Assert.Equal(900f, groupXActive["SUM(amount)"].AsFloat32());
 
         Row groupXInactive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "inactive");
-        Assert.Equal(2f, groupXInactive["COUNT(*)"].AsScalar());
-        Assert.Equal(350f, groupXInactive["SUM(amount)"].AsScalar());
+        Assert.Equal(2f, groupXInactive["COUNT(*)"].AsFloat32());
+        Assert.Equal(350f, groupXInactive["SUM(amount)"].AsFloat32());
 
         Row groupYActive = results.First(row =>
             row["dept"].AsString() == "Y" && row["status"].AsString() == "active");
-        Assert.Equal(2f, groupYActive["COUNT(*)"].AsScalar());
-        Assert.Equal(75f, groupYActive["SUM(amount)"].AsScalar());
+        Assert.Equal(2f, groupYActive["COUNT(*)"].AsFloat32());
+        Assert.Equal(75f, groupYActive["SUM(amount)"].AsFloat32());
 
         Row groupYInactive = results.First(row =>
             row["dept"].AsString() == "Y" && row["status"].AsString() == "inactive");
-        Assert.Equal(1f, groupYInactive["COUNT(*)"].AsScalar());
-        Assert.Equal(75f, groupYInactive["SUM(amount)"].AsScalar());
+        Assert.Equal(1f, groupYInactive["COUNT(*)"].AsFloat32());
+        Assert.Equal(75f, groupYInactive["SUM(amount)"].AsFloat32());
     }
 
     // ─────────────── Global aggregation is never spilled ───────────────
@@ -225,9 +225,9 @@ public sealed class GroupBySpillTests
     public async Task GlobalAggregation_WithBudget_StillWorks()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -244,8 +244,8 @@ public sealed class GroupBySpillTests
         List<Row> results = await CollectAsync(groupBy, CreateContext(TinyBudget));
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["COUNT(*)"].AsScalar());
-        Assert.Equal(6f, results[0]["SUM(x)"].AsScalar());
+        Assert.Equal(3f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(6f, results[0]["SUM(x)"].AsFloat32());
     }
 
     // ─────────────── No budget = in-memory (no spill) ───────────────
@@ -258,9 +258,9 @@ public sealed class GroupBySpillTests
     public async Task NoBudget_InMemory_ProducesCorrectResults()
     {
         MockOperator source = new(
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromScalar(10f))),
-            MakeRow(("key", DataValue.FromString("B")), ("val", DataValue.FromScalar(20f))),
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromScalar(30f))));
+            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(10f))),
+            MakeRow(("key", DataValue.FromString("B")), ("val", DataValue.FromFloat32(20f))),
+            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(30f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -278,10 +278,10 @@ public sealed class GroupBySpillTests
         Assert.Equal(2, results.Count);
 
         Row groupA = results.First(row => row["key"].AsString() == "A");
-        Assert.Equal(40f, groupA["SUM(val)"].AsScalar());
+        Assert.Equal(40f, groupA["SUM(val)"].AsFloat32());
 
         Row groupB = results.First(row => row["key"].AsString() == "B");
-        Assert.Equal(20f, groupB["SUM(val)"].AsScalar());
+        Assert.Equal(20f, groupB["SUM(val)"].AsFloat32());
     }
 
     // ─────────────── MIN / MAX with spill ───────────────
@@ -293,14 +293,14 @@ public sealed class GroupBySpillTests
     public async Task MinMax_WithSpill()
     {
         MockOperator source = new(
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromScalar(5f))),
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromScalar(15f))),
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromScalar(10f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromScalar(100f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromScalar(50f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromScalar(75f))),
-            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromScalar(1f))),
-            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromScalar(200f))));
+            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(5f))),
+            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(15f))),
+            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(10f))),
+            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(100f))),
+            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(50f))),
+            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(75f))),
+            MakeRow(("grp", DataValue.FromString("G1")), ("v", DataValue.FromFloat32(1f))),
+            MakeRow(("grp", DataValue.FromString("G2")), ("v", DataValue.FromFloat32(200f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -322,12 +322,12 @@ public sealed class GroupBySpillTests
         Assert.Equal(2, results.Count);
 
         Row g1 = results.First(row => row["grp"].AsString() == "G1");
-        Assert.Equal(1f, g1["MIN(v)"].AsScalar());
-        Assert.Equal(15f, g1["MAX(v)"].AsScalar());
+        Assert.Equal(1f, g1["MIN(v)"].AsFloat32());
+        Assert.Equal(15f, g1["MAX(v)"].AsFloat32());
 
         Row g2 = results.First(row => row["grp"].AsString() == "G2");
-        Assert.Equal(50f, g2["MIN(v)"].AsScalar());
-        Assert.Equal(200f, g2["MAX(v)"].AsScalar());
+        Assert.Equal(50f, g2["MIN(v)"].AsFloat32());
+        Assert.Equal(200f, g2["MAX(v)"].AsFloat32());
     }
 
     // ─────────────── Dispose cleanup ───────────────
@@ -339,9 +339,9 @@ public sealed class GroupBySpillTests
     public async Task Dispose_CleansUpSpillDirectory()
     {
         MockOperator source = new(
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromScalar(1f))),
-            MakeRow(("key", DataValue.FromString("B")), ("val", DataValue.FromScalar(2f))),
-            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromScalar(3f))));
+            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(1f))),
+            MakeRow(("key", DataValue.FromString("B")), ("val", DataValue.FromFloat32(2f))),
+            MakeRow(("key", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,

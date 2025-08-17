@@ -21,7 +21,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("minute"),
-            DataValue.FromScalar(15),
+            DataValue.FromFloat32(15),
             DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 14, 37, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(new DateTimeOffset(2024, 6, 15, 14, 30, 0, TimeSpan.Zero), result.AsDateTime());
@@ -32,7 +32,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("hour"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 14, 37, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(new DateTimeOffset(2024, 6, 15, 14, 0, 0, TimeSpan.Zero), result.AsDateTime());
@@ -43,7 +43,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(7),
+            DataValue.FromFloat32(7),
             DataValue.FromDate(new DateOnly(2024, 1, 10))
         ]);
         // Default origin: 2000-01-01. Days since origin = 8775. 8775 / 7 = 1253 buckets.
@@ -56,7 +56,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("month"),
-            DataValue.FromScalar(3),
+            DataValue.FromFloat32(3),
             DataValue.FromDate(new DateOnly(2024, 5, 15))
         ]);
         // Months from 2000-01: 292 months. 292 / 3 = 97 * 3 = 291 months = Apr 2024.
@@ -68,7 +68,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("quarter"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromDate(new DateOnly(2024, 8, 15))
         ]);
         // Quarter = 3 months. Months from origin: 295. 295 / 3 = 98 * 3 = 294 months = Jul 2024.
@@ -80,7 +80,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("year"),
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromDate(new DateOnly(2023, 6, 15))
         ]);
         // Year = 12 months per year, 5-year = 60 months. Months from 2000-01: 281. 281 / 60 = 4 * 60 = 240 months = 2020.
@@ -92,7 +92,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(7),
+            DataValue.FromFloat32(7),
             DataValue.FromDate(new DateOnly(2024, 1, 10)),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
@@ -105,7 +105,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("minute"),
-            DataValue.FromScalar(15),
+            DataValue.FromFloat32(15),
             DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 14, 30, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(new DateTimeOffset(2024, 6, 15, 14, 30, 0, TimeSpan.Zero), result.AsDateTime());
@@ -116,7 +116,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.Null(DataKind.Date)
         ]);
         Assert.True(result.IsNull);
@@ -128,7 +128,7 @@ public class DateBucketFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(0),
+            DataValue.FromFloat32(0),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]));
     }
@@ -138,7 +138,7 @@ public class DateBucketFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(-1),
+            DataValue.FromFloat32(-1),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]));
     }
@@ -148,7 +148,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("month"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromDate(new DateOnly(2024, 6, 15))
         ]);
         Assert.Equal(DataKind.Date, result.Kind);
@@ -159,7 +159,7 @@ public class DateBucketFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("minute"),
-            DataValue.FromScalar(15),
+            DataValue.FromFloat32(15),
             DataValue.FromDateTime(new DateTimeOffset(2024, 6, 15, 14, 37, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(DataKind.DateTime, result.Kind);
@@ -168,27 +168,27 @@ public class DateBucketFunctionTests
     [Fact]
     public void ValidateArguments_AcceptsThreeArguments()
     {
-        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.Date]);
+        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Date]);
         Assert.Equal(DataKind.Date, result);
     }
 
     [Fact]
     public void ValidateArguments_AcceptsFourArguments()
     {
-        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.DateTime, DataKind.DateTime]);
+        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.DateTime, DataKind.DateTime]);
         Assert.Equal(DataKind.DateTime, result);
     }
 
     [Fact]
     public void ValidateArguments_RejectsTooFewArguments()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
     public void ValidateArguments_RejectsTooManyArguments()
     {
         Assert.Throws<ArgumentException>(() => _function.ValidateArguments(
-            [DataKind.String, DataKind.Scalar, DataKind.Date, DataKind.Date, DataKind.Date]));
+            [DataKind.String, DataKind.Float32, DataKind.Date, DataKind.Date, DataKind.Date]));
     }
 }

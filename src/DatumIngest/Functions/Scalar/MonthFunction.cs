@@ -24,7 +24,7 @@ public sealed class MonthFunction : IScalarFunction
             throw new ArgumentException($"month() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,13 +34,13 @@ public sealed class MonthFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int month = input.Kind == DataKind.Date
             ? input.AsDate().Month
             : input.AsDateTime().Month;
 
-        return DataValue.FromScalar(month);
+        return DataValue.FromFloat32(month);
     }
 }

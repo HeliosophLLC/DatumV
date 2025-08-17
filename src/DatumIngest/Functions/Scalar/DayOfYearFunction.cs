@@ -23,7 +23,7 @@ public sealed class DayOfYearFunction : IScalarFunction
             throw new ArgumentException($"dayofyear() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -33,13 +33,13 @@ public sealed class DayOfYearFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int dayOfYear = input.Kind == DataKind.Date
             ? input.AsDate().DayOfYear
             : input.AsDateTime().DayOfYear;
 
-        return DataValue.FromScalar(dayOfYear);
+        return DataValue.FromFloat32(dayOfYear);
     }
 }

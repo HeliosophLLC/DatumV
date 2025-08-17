@@ -25,6 +25,6 @@ public sealed class SamplePreview
 /// </summary>
 /// <param name="Name">The column name.</param>
 /// <param name="Kind">
-/// The lowercased <see cref="Model.DataKind"/> name (e.g. <c>"scalar"</c>, <c>"image"</c>, <c>"vector"</c>).
+/// The lowercased <see cref="Model.DataKind"/> name (e.g. <c>"float32"</c>, <c>"image"</c>, <c>"vector"</c>).
 /// </param>
 public sealed record SampleFeature(string Name, string Kind);

@@ -24,7 +24,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 1)),
             DataValue.FromDate(new DateOnly(2024, 1, 31))
         ]);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 31)),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
-        Assert.Equal(-30f, result.AsScalar());
+        Assert.Equal(-30f, result.AsFloat32());
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 31)),
             DataValue.FromDate(new DateOnly(2024, 2, 1))
         ]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2020, 6, 15)),
             DataValue.FromDate(new DateOnly(2024, 3, 10))
         ]);
-        Assert.Equal(4f, result.AsScalar());
+        Assert.Equal(4f, result.AsFloat32());
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 1)),
             DataValue.FromDate(new DateOnly(2024, 10, 1))
         ]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class DateDiffFunctionTests
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 0, 0, TimeSpan.Zero)),
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 14, 30, 0, TimeSpan.Zero))
         ]);
-        Assert.Equal(4f, result.AsScalar());
+        Assert.Equal(4f, result.AsFloat32());
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class DateDiffFunctionTests
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 0, 0, TimeSpan.Zero)),
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 45, 30, TimeSpan.Zero))
         ]);
-        Assert.Equal(45f, result.AsScalar());
+        Assert.Equal(45f, result.AsFloat32());
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class DateDiffFunctionTests
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 0, 0, TimeSpan.Zero)),
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 0, 30, TimeSpan.Zero))
         ]);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 1)),
             DataValue.FromDate(new DateOnly(2024, 1, 22))
         ]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 6, 15)),
             DataValue.FromDate(new DateOnly(2024, 6, 15))
         ]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public class DateDiffFunctionTests
             DataValue.FromDate(new DateOnly(2024, 1, 1)),
             DataValue.FromDate(new DateOnly(2024, 1, 11))
         ]);
-        Assert.Equal(10f, result.AsScalar());
+        Assert.Equal(10f, result.AsFloat32());
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public class DateDiffFunctionTests
     [Fact]
     public void ValidateArguments_RejectsNonStringPart()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Scalar, DataKind.Date, DataKind.Date]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Float32, DataKind.Date, DataKind.Date]));
     }
 
     [Fact]
@@ -182,6 +182,6 @@ public class DateDiffFunctionTests
     [Fact]
     public void ValidateArguments_RejectsNonTemporalEnd()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String, DataKind.Date, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String, DataKind.Date, DataKind.Float32]));
     }
 }

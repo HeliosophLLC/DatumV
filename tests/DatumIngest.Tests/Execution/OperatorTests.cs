@@ -99,9 +99,9 @@ public class OperatorTests
     public async Task Filter_PassesMatchingRows()
     {
         MockOperator source = new(
-            MakeRow(("age", DataValue.FromScalar(25f))),
-            MakeRow(("age", DataValue.FromScalar(15f))),
-            MakeRow(("age", DataValue.FromScalar(30f))));
+            MakeRow(("age", DataValue.FromFloat32(25f))),
+            MakeRow(("age", DataValue.FromFloat32(15f))),
+            MakeRow(("age", DataValue.FromFloat32(30f))));
 
         FilterOperator filter = new(source,
             new BinaryExpression(
@@ -112,16 +112,16 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(filter);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(25f, rows[0]["age"].AsScalar());
-        Assert.Equal(30f, rows[1]["age"].AsScalar());
+        Assert.Equal(25f, rows[0]["age"].AsFloat32());
+        Assert.Equal(30f, rows[1]["age"].AsFloat32());
     }
 
     [Fact]
     public async Task Filter_RemovesAllRows()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))));
 
         FilterOperator filter = new(source,
             new BinaryExpression(
@@ -137,9 +137,9 @@ public class OperatorTests
     public async Task Filter_WithAnd()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(5f)), ("y", DataValue.FromScalar(10f))),
-            MakeRow(("x", DataValue.FromScalar(15f)), ("y", DataValue.FromScalar(10f))),
-            MakeRow(("x", DataValue.FromScalar(5f)), ("y", DataValue.FromScalar(20f))));
+            MakeRow(("x", DataValue.FromFloat32(5f)), ("y", DataValue.FromFloat32(10f))),
+            MakeRow(("x", DataValue.FromFloat32(15f)), ("y", DataValue.FromFloat32(10f))),
+            MakeRow(("x", DataValue.FromFloat32(5f)), ("y", DataValue.FromFloat32(20f))));
 
         FilterOperator filter = new(source,
             new BinaryExpression(
@@ -155,7 +155,7 @@ public class OperatorTests
 
         List<Row> rows = await CollectAsync(filter);
         Assert.Single(rows);
-        Assert.Equal(5f, rows[0]["x"].AsScalar());
+        Assert.Equal(5f, rows[0]["x"].AsFloat32());
     }
 
     // ─────────────── ProjectOperator tests ───────────────
@@ -164,14 +164,14 @@ public class OperatorTests
     public async Task Project_SelectStar()
     {
         MockOperator source = new(
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromString("x"))));
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x"))));
 
         ProjectOperator project = new(source, [new SelectAllColumns()]);
 
         List<Row> rows = await CollectAsync(project);
         Assert.Single(rows);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal(1f, rows[0]["a"].AsScalar());
+        Assert.Equal(1f, rows[0]["a"].AsFloat32());
         Assert.Equal("x", rows[0]["b"].AsString());
     }
 
@@ -179,7 +179,7 @@ public class OperatorTests
     public async Task Project_NamedColumns()
     {
         MockOperator source = new(
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(2f))));
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))));
 
         ProjectOperator project = new(source,
         [
@@ -195,15 +195,15 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(project);
         Assert.Single(rows);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal(1f, rows[0]["a"].AsScalar());
-        Assert.Equal(3f, rows[0]["sum"].AsScalar());
+        Assert.Equal(1f, rows[0]["a"].AsFloat32());
+        Assert.Equal(3f, rows[0]["sum"].AsFloat32());
     }
 
     [Fact]
     public async Task Project_WithAlias()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(42f))));
+            MakeRow(("x", DataValue.FromFloat32(42f))));
 
         ProjectOperator project = new(source,
         [
@@ -211,7 +211,7 @@ public class OperatorTests
         ]);
 
         List<Row> rows = await CollectAsync(project);
-        Assert.Equal(42f, rows[0]["answer"].AsScalar());
+        Assert.Equal(42f, rows[0]["answer"].AsFloat32());
     }
 
     [Fact]
@@ -228,7 +228,7 @@ public class OperatorTests
         ]);
 
         List<Row> rows = await CollectAsync(project);
-        Assert.Equal(5f, rows[0]["name_len"].AsScalar());
+        Assert.Equal(5f, rows[0]["name_len"].AsFloat32());
     }
 
     [Fact]
@@ -271,7 +271,7 @@ public class OperatorTests
     public async Task Project_UnaliasedExpression_NamedExpression()
     {
         MockOperator source = new(
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(2f))));
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))));
 
         ProjectOperator project = new(source,
         [
@@ -292,13 +292,13 @@ public class OperatorTests
     public async Task InnerJoin_MatchingRows()
     {
         MockOperator left = new(
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("Charlie"))));
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("Charlie"))));
 
         MockOperator right = new(
-            MakeRow(("id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(95f))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("score", DataValue.FromScalar(87f))));
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(95f))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("score", DataValue.FromFloat32(87f))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -319,12 +319,12 @@ public class OperatorTests
     public async Task InnerJoin_HashJoin_QualifiedKeys()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.name", DataValue.FromString("Bob"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.score", DataValue.FromScalar(95f))),
-            MakeRow(("r.id", DataValue.FromScalar(3f)), ("r.score", DataValue.FromScalar(87f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))),
+            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.score", DataValue.FromFloat32(87f))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -336,18 +336,18 @@ public class OperatorTests
 
         Assert.Single(rows);
         Assert.Equal("Alice", rows[0]["l.name"].AsString());
-        Assert.Equal(95f, rows[0]["r.score"].AsScalar());
+        Assert.Equal(95f, rows[0]["r.score"].AsFloat32());
     }
 
     [Fact]
     public async Task LeftJoin_IncludesUnmatchedLeft()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.name", DataValue.FromString("Bob"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.score", DataValue.FromScalar(95f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.score", DataValue.FromFloat32(95f))));
 
         JoinOperator join = new(left, right, JoinType.Left,
             new BinaryExpression(
@@ -360,7 +360,7 @@ public class OperatorTests
         Assert.Equal(2, rows.Count);
         // First row: matched
         Assert.Equal("Alice", rows[0]["l.name"].AsString());
-        Assert.Equal(95f, rows[0]["r.score"].AsScalar());
+        Assert.Equal(95f, rows[0]["r.score"].AsFloat32());
         // Second row: unmatched (right side is null)
         Assert.Equal("Bob", rows[1]["l.name"].AsString());
         Assert.True(rows[1]["r.score"].IsNull);
@@ -370,8 +370,8 @@ public class OperatorTests
     public async Task CrossJoin_CartesianProduct()
     {
         MockOperator left = new(
-            MakeRow(("a", DataValue.FromScalar(1f))),
-            MakeRow(("a", DataValue.FromScalar(2f))));
+            MakeRow(("a", DataValue.FromFloat32(1f))),
+            MakeRow(("a", DataValue.FromFloat32(2f))));
 
         MockOperator right = new(
             MakeRow(("b", DataValue.FromString("x"))),
@@ -388,27 +388,27 @@ public class OperatorTests
     public async Task CrossJoin_PreservesColumnValues()
     {
         MockOperator left = new(
-            MakeRow(("a", DataValue.FromScalar(10f))));
+            MakeRow(("a", DataValue.FromFloat32(10f))));
 
         MockOperator right = new(
-            MakeRow(("b", DataValue.FromScalar(20f))));
+            MakeRow(("b", DataValue.FromFloat32(20f))));
 
         JoinOperator join = new(left, right, JoinType.Cross, onCondition: null);
 
         List<Row> rows = await CollectAsync(join);
         Assert.Single(rows);
-        Assert.Equal(10f, rows[0]["a"].AsScalar());
-        Assert.Equal(20f, rows[0]["b"].AsScalar());
+        Assert.Equal(10f, rows[0]["a"].AsFloat32());
+        Assert.Equal(20f, rows[0]["b"].AsFloat32());
     }
 
     [Fact]
     public async Task NullKeys_NeverMatch()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.Null(DataKind.Scalar)), ("l.name", DataValue.FromString("Ghost"))));
+            MakeRow(("l.id", DataValue.Null(DataKind.Float32)), ("l.name", DataValue.FromString("Ghost"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.Null(DataKind.Scalar)), ("r.score", DataValue.FromScalar(0f))));
+            MakeRow(("r.id", DataValue.Null(DataKind.Float32)), ("r.score", DataValue.FromFloat32(0f))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -426,9 +426,9 @@ public class OperatorTests
     public async Task OrderBy_Ascending()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -436,18 +436,18 @@ public class OperatorTests
         ]);
 
         List<Row> rows = await CollectAsync(orderBy);
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
-        Assert.Equal(3f, rows[2]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
+        Assert.Equal(3f, rows[2]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_Descending()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -455,18 +455,18 @@ public class OperatorTests
         ]);
 
         List<Row> rows = await CollectAsync(orderBy);
-        Assert.Equal(3f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
-        Assert.Equal(1f, rows[2]["val"].AsScalar());
+        Assert.Equal(3f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
+        Assert.Equal(1f, rows[2]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_MultiKey()
     {
         MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromScalar(2f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromScalar(3f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromScalar(1f))));
+            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromFloat32(2f))),
+            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))),
+            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(1f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -476,9 +476,9 @@ public class OperatorTests
 
         List<Row> rows = await CollectAsync(orderBy);
         Assert.Equal("A", rows[0]["group"].AsString());
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
         Assert.Equal("A", rows[1]["group"].AsString());
-        Assert.Equal(3f, rows[1]["val"].AsScalar());
+        Assert.Equal(3f, rows[1]["val"].AsFloat32());
         Assert.Equal("B", rows[2]["group"].AsString());
     }
 
@@ -486,9 +486,9 @@ public class OperatorTests
     public async Task OrderBy_NullsLast()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -496,8 +496,8 @@ public class OperatorTests
         ]);
 
         List<Row> rows = await CollectAsync(orderBy);
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
         Assert.True(rows[2]["val"].IsNull);
     }
 
@@ -507,43 +507,43 @@ public class OperatorTests
     public async Task Limit_TakesSpecifiedCount()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(5f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))));
 
         LimitOperator limit = new(source, 3);
         List<Row> rows = await CollectAsync(limit);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["x"].AsScalar());
-        Assert.Equal(3f, rows[2]["x"].AsScalar());
+        Assert.Equal(1f, rows[0]["x"].AsFloat32());
+        Assert.Equal(3f, rows[2]["x"].AsFloat32());
     }
 
     [Fact]
     public async Task Limit_WithOffset()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(5f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))));
 
         LimitOperator limit = new(source, 2, offset: 2);
         List<Row> rows = await CollectAsync(limit);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(3f, rows[0]["x"].AsScalar());
-        Assert.Equal(4f, rows[1]["x"].AsScalar());
+        Assert.Equal(3f, rows[0]["x"].AsFloat32());
+        Assert.Equal(4f, rows[1]["x"].AsFloat32());
     }
 
     [Fact]
     public async Task Limit_FewerRowsThanLimit()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))));
 
         LimitOperator limit = new(source, 10);
         List<Row> rows = await CollectAsync(limit);
@@ -555,7 +555,7 @@ public class OperatorTests
     public async Task Limit_ZeroReturnsNothing()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))));
 
         LimitOperator limit = new(source, 0);
         List<Row> rows = await CollectAsync(limit);
@@ -569,11 +569,11 @@ public class OperatorTests
     public async Task OrderByThenLimit_TopN()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(5f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(2f))),
-            MakeRow(("val", DataValue.FromScalar(4f))));
+            MakeRow(("val", DataValue.FromFloat32(5f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))),
+            MakeRow(("val", DataValue.FromFloat32(4f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -584,20 +584,20 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(limit);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
-        Assert.Equal(3f, rows[2]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
+        Assert.Equal(3f, rows[2]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_BoundedTopN_OnlyKeepsNRows()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(5f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(2f))),
-            MakeRow(("val", DataValue.FromScalar(4f))));
+            MakeRow(("val", DataValue.FromFloat32(5f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))),
+            MakeRow(("val", DataValue.FromFloat32(4f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -607,20 +607,20 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(orderBy);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
-        Assert.Equal(3f, rows[2]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
+        Assert.Equal(3f, rows[2]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_BoundedTopN_Descending()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(5f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(2f))),
-            MakeRow(("val", DataValue.FromScalar(4f))));
+            MakeRow(("val", DataValue.FromFloat32(5f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))),
+            MakeRow(("val", DataValue.FromFloat32(4f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -630,8 +630,8 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(orderBy);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(5f, rows[0]["val"].AsScalar());
-        Assert.Equal(4f, rows[1]["val"].AsScalar());
+        Assert.Equal(5f, rows[0]["val"].AsFloat32());
+        Assert.Equal(4f, rows[1]["val"].AsFloat32());
     }
 
     [Fact]
@@ -639,11 +639,11 @@ public class OperatorTests
     {
         // topNRows = limit + offset = 2 + 1 = 3, then LimitOperator skips 1.
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(5f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(2f))),
-            MakeRow(("val", DataValue.FromScalar(4f))));
+            MakeRow(("val", DataValue.FromFloat32(5f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))),
+            MakeRow(("val", DataValue.FromFloat32(4f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -654,18 +654,18 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(limit);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(2f, rows[0]["val"].AsScalar());
-        Assert.Equal(3f, rows[1]["val"].AsScalar());
+        Assert.Equal(2f, rows[0]["val"].AsFloat32());
+        Assert.Equal(3f, rows[1]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_BoundedTopN_MultiKey()
     {
         MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromScalar(2f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromScalar(3f))),
-            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromScalar(1f))),
-            MakeRow(("group", DataValue.FromString("C")), ("val", DataValue.FromScalar(0f))));
+            MakeRow(("group", DataValue.FromString("B")), ("val", DataValue.FromFloat32(2f))),
+            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(3f))),
+            MakeRow(("group", DataValue.FromString("A")), ("val", DataValue.FromFloat32(1f))),
+            MakeRow(("group", DataValue.FromString("C")), ("val", DataValue.FromFloat32(0f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -677,17 +677,17 @@ public class OperatorTests
 
         Assert.Equal(2, rows.Count);
         Assert.Equal("A", rows[0]["group"].AsString());
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
         Assert.Equal("A", rows[1]["group"].AsString());
-        Assert.Equal(3f, rows[1]["val"].AsScalar());
+        Assert.Equal(3f, rows[1]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_BoundedTopN_FewerRowsThanN()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(2f))),
-            MakeRow(("val", DataValue.FromScalar(1f))));
+            MakeRow(("val", DataValue.FromFloat32(2f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -697,18 +697,18 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(orderBy);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
     }
 
     [Fact]
     public async Task OrderBy_BoundedTopN_NullsLast()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -718,8 +718,8 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(orderBy);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1f, rows[0]["val"].AsScalar());
-        Assert.Equal(2f, rows[1]["val"].AsScalar());
+        Assert.Equal(1f, rows[0]["val"].AsFloat32());
+        Assert.Equal(2f, rows[1]["val"].AsFloat32());
     }
 
     // ─────────────── OrderByOperator governor enforcement ───────────────
@@ -733,9 +733,9 @@ public class OperatorTests
     public async Task OrderBy_BudgetExceeded_ThrowsDuringMaterialization()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -765,9 +765,9 @@ public class OperatorTests
     public async Task OrderBy_BoundedTopN_BudgetExceeded_ThrowsDuringMaterialization()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(3f))),
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.FromFloat32(3f))),
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -796,8 +796,8 @@ public class OperatorTests
     public async Task OrderBy_CancellationToken_ThrowsDuringMaterialization()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         OrderByOperator orderBy = new(source,
         [
@@ -822,7 +822,7 @@ public class OperatorTests
     public async Task Alias_PrefixesColumnNames()
     {
         MockOperator source = new(
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("test"))));
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("test"))));
 
         AliasOperator alias = new(source, "t");
         List<Row> rows = await CollectAsync(alias);
@@ -832,10 +832,10 @@ public class OperatorTests
         Assert.Equal(2, rows[0].FieldCount);
         // ColumnNames are qualified only.
         Assert.Equal(["t.id", "t.name"], rows[0].ColumnNames);
-        Assert.Equal(1f, rows[0]["t.id"].AsScalar());
+        Assert.Equal(1f, rows[0]["t.id"].AsFloat32());
         Assert.Equal("test", rows[0]["t.name"].AsString());
         // Also accessible without prefix via the lookup index.
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
     }
 
     /// <summary>
@@ -850,9 +850,9 @@ public class OperatorTests
         // while keeping unqualified names in the lookup index.
         // JoinOperator concatenates both sides: l.id, l.name, r.id, r.score.
         MockOperator left = new(
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))));
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))));
         MockOperator right = new(
-            MakeRow(("id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(95f))));
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(95f))));
 
         AliasOperator aliasLeft = new(left, "l");
         AliasOperator aliasRight = new(right, "r");
@@ -874,9 +874,9 @@ public class OperatorTests
         Assert.Equal(expectedColumns.Length, rows[0].FieldCount);
         Assert.Equal(expectedColumns, rows[0].ColumnNames);
 
-        Assert.Equal(1f, rows[0]["l.id"].AsScalar());
+        Assert.Equal(1f, rows[0]["l.id"].AsFloat32());
         Assert.Equal("Alice", rows[0]["l.name"].AsString());
-        Assert.Equal(95f, rows[0]["r.score"].AsScalar());
+        Assert.Equal(95f, rows[0]["r.score"].AsFloat32());
     }
 
     /// <summary>
@@ -887,7 +887,7 @@ public class OperatorTests
     public async Task Project_SelectStar_NoAliases_EmitsAllColumns()
     {
         MockOperator source = new(
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))));
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))));
 
         ProjectOperator project = new(source, [new SelectAllColumns()]);
 
@@ -906,13 +906,13 @@ public class OperatorTests
         // Simulates GET_FILENAME(z.file_name) = i.file_name
         // Left side has full paths, right side has just filenames.
         MockOperator left = new(
-            MakeRow(("l.file_name", DataValue.FromString("images/cat.jpg")), ("l.data", DataValue.FromScalar(1f))),
-            MakeRow(("l.file_name", DataValue.FromString("images/dog.png")), ("l.data", DataValue.FromScalar(2f))),
-            MakeRow(("l.file_name", DataValue.FromString("images/bird.jpg")), ("l.data", DataValue.FromScalar(3f))));
+            MakeRow(("l.file_name", DataValue.FromString("images/cat.jpg")), ("l.data", DataValue.FromFloat32(1f))),
+            MakeRow(("l.file_name", DataValue.FromString("images/dog.png")), ("l.data", DataValue.FromFloat32(2f))),
+            MakeRow(("l.file_name", DataValue.FromString("images/bird.jpg")), ("l.data", DataValue.FromFloat32(3f))));
 
         MockOperator right = new(
-            MakeRow(("r.file_name", DataValue.FromString("cat.jpg")), ("r.score", DataValue.FromScalar(95f))),
-            MakeRow(("r.file_name", DataValue.FromString("bird.jpg")), ("r.score", DataValue.FromScalar(80f))));
+            MakeRow(("r.file_name", DataValue.FromString("cat.jpg")), ("r.score", DataValue.FromFloat32(95f))),
+            MakeRow(("r.file_name", DataValue.FromString("bird.jpg")), ("r.score", DataValue.FromFloat32(80f))));
 
         // ON GET_FILENAME(l.file_name) = r.file_name
         JoinOperator join = new(left, right, JoinType.Inner,
@@ -924,21 +924,21 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(join);
 
         Assert.Equal(2, rows.Count);
-        Assert.Contains(rows, r => r["l.data"].AsScalar() == 1f && r["r.score"].AsScalar() == 95f);
-        Assert.Contains(rows, r => r["l.data"].AsScalar() == 3f && r["r.score"].AsScalar() == 80f);
+        Assert.Contains(rows, r => r["l.data"].AsFloat32() == 1f && r["r.score"].AsFloat32() == 95f);
+        Assert.Contains(rows, r => r["l.data"].AsFloat32() == 3f && r["r.score"].AsFloat32() == 80f);
     }
 
     [Fact]
     public async Task HashJoin_CompoundKeys_MatchesOnBothKeys()
     {
         MockOperator left = new(
-            MakeRow(("l.a", DataValue.FromScalar(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromScalar(10f))),
-            MakeRow(("l.a", DataValue.FromScalar(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromScalar(20f))),
-            MakeRow(("l.a", DataValue.FromScalar(2f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromScalar(30f))));
+            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromFloat32(10f))),
+            MakeRow(("l.a", DataValue.FromFloat32(1f)), ("l.b", DataValue.FromString("y")), ("l.val", DataValue.FromFloat32(20f))),
+            MakeRow(("l.a", DataValue.FromFloat32(2f)), ("l.b", DataValue.FromString("x")), ("l.val", DataValue.FromFloat32(30f))));
 
         MockOperator right = new(
-            MakeRow(("r.a", DataValue.FromScalar(1f)), ("r.b", DataValue.FromString("x")), ("r.info", DataValue.FromString("match1"))),
-            MakeRow(("r.a", DataValue.FromScalar(2f)), ("r.b", DataValue.FromString("y")), ("r.info", DataValue.FromString("no_match"))));
+            MakeRow(("r.a", DataValue.FromFloat32(1f)), ("r.b", DataValue.FromString("x")), ("r.info", DataValue.FromString("match1"))),
+            MakeRow(("r.a", DataValue.FromFloat32(2f)), ("r.b", DataValue.FromString("y")), ("r.info", DataValue.FromString("no_match"))));
 
         // ON l.a = r.a AND l.b = r.b
         JoinOperator join = new(left, right, JoinType.Inner,
@@ -956,7 +956,7 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(join);
 
         Assert.Single(rows);
-        Assert.Equal(10f, rows[0]["l.val"].AsScalar());
+        Assert.Equal(10f, rows[0]["l.val"].AsFloat32());
         Assert.Equal("match1", rows[0]["r.info"].AsString());
     }
 
@@ -964,12 +964,12 @@ public class OperatorTests
     public async Task HashJoin_ResidualFilter_AppliedAfterHashMatch()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.val", DataValue.FromScalar(100f))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.val", DataValue.FromScalar(200f))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.val", DataValue.FromFloat32(100f))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.val", DataValue.FromFloat32(200f))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.threshold", DataValue.FromScalar(150f))),
-            MakeRow(("r.id", DataValue.FromScalar(2f)), ("r.threshold", DataValue.FromScalar(150f))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.threshold", DataValue.FromFloat32(150f))),
+            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.threshold", DataValue.FromFloat32(150f))));
 
         // ON l.id = r.id AND l.val > r.threshold
         // The equality is extracted as hash key; the > becomes residual.
@@ -989,7 +989,7 @@ public class OperatorTests
 
         // Only l.id=2 (val=200) passes the residual l.val > r.threshold (150).
         Assert.Single(rows);
-        Assert.Equal(2f, rows[0]["l.id"].AsScalar());
+        Assert.Equal(2f, rows[0]["l.id"].AsFloat32());
     }
 
     [Fact]
@@ -1017,12 +1017,12 @@ public class OperatorTests
     public async Task HashJoin_DuplicateKeys_ProducesAllCombinations()
     {
         MockOperator left = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.tag", DataValue.FromString("A"))),
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.tag", DataValue.FromString("B"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.tag", DataValue.FromString("A"))),
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.tag", DataValue.FromString("B"))));
 
         MockOperator right = new(
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.info", DataValue.FromString("X"))),
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.info", DataValue.FromString("Y"))));
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.info", DataValue.FromString("X"))),
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.info", DataValue.FromString("Y"))));
 
         JoinOperator join = new(left, right, JoinType.Inner,
             new BinaryExpression(
@@ -1040,8 +1040,8 @@ public class OperatorTests
     public async Task LeftJoin_ExpressionKey_IncludesUnmatchedRows()
     {
         MockOperator left = new(
-            MakeRow(("l.path", DataValue.FromString("a/file1.txt")), ("l.size", DataValue.FromScalar(100f))),
-            MakeRow(("l.path", DataValue.FromString("b/file2.txt")), ("l.size", DataValue.FromScalar(200f))));
+            MakeRow(("l.path", DataValue.FromString("a/file1.txt")), ("l.size", DataValue.FromFloat32(100f))),
+            MakeRow(("l.path", DataValue.FromString("b/file2.txt")), ("l.size", DataValue.FromFloat32(200f))));
 
         MockOperator right = new(
             MakeRow(("r.name", DataValue.FromString("file1.txt")), ("r.label", DataValue.FromString("doc"))));
@@ -1068,13 +1068,13 @@ public class OperatorTests
     public async Task Subquery_PassesThroughRows()
     {
         MockOperator inner = new(
-            MakeRow(("x", DataValue.FromScalar(42f))));
+            MakeRow(("x", DataValue.FromFloat32(42f))));
 
         SubqueryOperator subquery = new(inner, "sub");
         List<Row> rows = await CollectAsync(subquery);
 
         Assert.Single(rows);
-        Assert.Equal(42f, rows[0]["x"].AsScalar());
+        Assert.Equal(42f, rows[0]["x"].AsFloat32());
     }
 
     // ─────────────── LateMaterializationOperator tests ───────────────
@@ -1086,8 +1086,8 @@ public class OperatorTests
     public async Task LateMaterialization_EnrichesRowsWithDeferredColumns()
     {
         MockOperator source = new(
-            MakeRow(("file_name", DataValue.FromString("a.txt")), ("size", DataValue.FromScalar(10f))),
-            MakeRow(("file_name", DataValue.FromString("b.txt")), ("size", DataValue.FromScalar(20f))));
+            MakeRow(("file_name", DataValue.FromString("a.txt")), ("size", DataValue.FromFloat32(10f))),
+            MakeRow(("file_name", DataValue.FromString("b.txt")), ("size", DataValue.FromFloat32(20f))));
 
         TableDescriptor descriptor = new("mock", "files", "dummy.zip",
             new Dictionary<string, string>());
@@ -1116,7 +1116,7 @@ public class OperatorTests
         Assert.Equal(new byte[] { 1, 2, 3 }, rows[0]["file_bytes"].AsUInt8Array());
         Assert.Equal(new byte[] { 4, 5 }, rows[1]["file_bytes"].AsUInt8Array());
         // Original columns preserved.
-        Assert.Equal(10f, rows[0]["size"].AsScalar());
+        Assert.Equal(10f, rows[0]["size"].AsFloat32());
     }
 
     /// <summary>
@@ -1194,7 +1194,7 @@ public class OperatorTests
     public async Task LateMaterialization_UnmatchedKeys_FillsNull()
     {
         MockOperator source = new(
-            MakeRow(("file_name", DataValue.FromString("missing.txt")), ("x", DataValue.FromScalar(1f))));
+            MakeRow(("file_name", DataValue.FromString("missing.txt")), ("x", DataValue.FromFloat32(1f))));
 
         TableDescriptor descriptor = new("mock", "files", "dummy.zip",
             new Dictionary<string, string>());
@@ -1216,7 +1216,7 @@ public class OperatorTests
 
         Assert.Single(rows);
         Assert.True(rows[0]["file_bytes"].IsNull);
-        Assert.Equal(1f, rows[0]["x"].AsScalar());
+        Assert.Equal(1f, rows[0]["x"].AsFloat32());
     }
 
     /// <summary>

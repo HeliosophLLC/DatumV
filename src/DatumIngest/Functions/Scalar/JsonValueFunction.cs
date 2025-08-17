@@ -59,9 +59,9 @@ public sealed class JsonValueFunction : IScalarFunction
         return element.Value.ValueKind switch
         {
             JsonValueKind.String => DataValue.FromString(element.Value.GetString()!),
-            JsonValueKind.Number => DataValue.FromScalar(element.Value.GetSingle()),
-            JsonValueKind.True => DataValue.FromScalar(1.0f),
-            JsonValueKind.False => DataValue.FromScalar(0.0f),
+            JsonValueKind.Number => DataValue.FromFloat32(element.Value.GetSingle()),
+            JsonValueKind.True => DataValue.FromFloat32(1.0f),
+            JsonValueKind.False => DataValue.FromFloat32(0.0f),
             JsonValueKind.Null => DataValue.Null(DataKind.String),
             // Arrays and objects are not scalar — return null for json_value.
             _ => DataValue.Null(DataKind.String),

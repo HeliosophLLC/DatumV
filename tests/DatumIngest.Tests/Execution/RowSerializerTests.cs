@@ -12,7 +12,7 @@ public class RowSerializerTests
     [Fact]
     public void RoundTrip_Scalar()
     {
-        AssertSingleValueRoundTrip(DataValue.FromScalar(3.14f));
+        AssertSingleValueRoundTrip(DataValue.FromFloat32(3.14f));
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class RowSerializerTests
     }
 
     [Theory]
-    [InlineData(DataKind.Scalar)]
+    [InlineData(DataKind.Float32)]
     [InlineData(DataKind.UInt8)]
     [InlineData(DataKind.String)]
     [InlineData(DataKind.Vector)]
@@ -132,15 +132,15 @@ public class RowSerializerTests
     {
         Row original = new(
             ["id", "name", "score"],
-            [DataValue.FromScalar(1f), DataValue.Null(DataKind.String), DataValue.FromScalar(99.5f)]);
+            [DataValue.FromFloat32(1f), DataValue.Null(DataKind.String), DataValue.FromFloat32(99.5f)]);
 
         Row restored = WriteAndReadSingleRow(original);
 
         Assert.Equal(3, restored.FieldCount);
-        Assert.Equal(1f, restored["id"].AsScalar());
+        Assert.Equal(1f, restored["id"].AsFloat32());
         Assert.True(restored["name"].IsNull);
         Assert.Equal(DataKind.String, restored["name"].Kind);
-        Assert.Equal(99.5f, restored["score"].AsScalar());
+        Assert.Equal(99.5f, restored["score"].AsFloat32());
     }
 
     [Fact]
@@ -148,9 +148,9 @@ public class RowSerializerTests
     {
         Row[] originals =
         [
-            new(["a", "b"], [DataValue.FromScalar(1f), DataValue.FromString("x")]),
-            new(["a", "b"], [DataValue.FromScalar(2f), DataValue.FromString("y")]),
-            new(["a", "b"], [DataValue.FromScalar(3f), DataValue.FromString("z")]),
+            new(["a", "b"], [DataValue.FromFloat32(1f), DataValue.FromString("x")]),
+            new(["a", "b"], [DataValue.FromFloat32(2f), DataValue.FromString("y")]),
+            new(["a", "b"], [DataValue.FromFloat32(3f), DataValue.FromString("z")]),
         ];
 
         using MemoryStream stream = new();
@@ -187,7 +187,7 @@ public class RowSerializerTests
     {
         Row original = new(
             ["MyColumn", "OtherColumn"],
-            [DataValue.FromScalar(1f), DataValue.FromScalar(2f)]);
+            [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]);
 
         using MemoryStream stream = new();
 
@@ -204,8 +204,8 @@ public class RowSerializerTests
         RowSerializer.ReadSchema(reader, out string[] names, out Dictionary<string, int> nameIndex);
         Row restored = RowSerializer.ReadRow(reader, names, nameIndex);
 
-        Assert.Equal(1f, restored["mycolumn"].AsScalar());
-        Assert.Equal(2f, restored["OTHERCOLUMN"].AsScalar());
+        Assert.Equal(1f, restored["mycolumn"].AsFloat32());
+        Assert.Equal(2f, restored["OTHERCOLUMN"].AsFloat32());
     }
 
     [Fact]
@@ -213,12 +213,12 @@ public class RowSerializerTests
     {
         Row original = new(
             [
-                "scalar", "uint8", "string", "vector", "matrix", "tensor",
+                "float32", "uint8", "string", "vector", "matrix", "tensor",
                 "uint8array", "image", "date", "datetime", "json", "uuid",
                 "boolean", "time", "duration"
             ],
             [
-                DataValue.FromScalar(42f),
+                DataValue.FromFloat32(42f),
                 DataValue.FromUInt8(7),
                 DataValue.FromString("test"),
                 DataValue.FromVector([1f, 2f]),

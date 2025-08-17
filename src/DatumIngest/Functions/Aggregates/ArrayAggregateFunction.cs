@@ -69,7 +69,7 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
             {
                 if (_elements.Count == 0)
                 {
-                    return DataValue.NullArray(_elementKind ?? DataKind.Scalar);
+                    return DataValue.NullArray(_elementKind ?? DataKind.Float32);
                 }
 
                 return DataValue.FromArray(_elementKind!.Value, [.. _elements]);

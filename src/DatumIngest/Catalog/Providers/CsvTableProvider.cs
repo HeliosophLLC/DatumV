@@ -111,7 +111,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
 
         // Infer column types from data rows.
         DataKind[] kinds = new DataKind[headers.Length];
-        Array.Fill(kinds, DataKind.Scalar);
+        Array.Fill(kinds, DataKind.Float32);
         bool[] hasData = new bool[headers.Length];
 
         foreach (string[] fields in dataRows)
@@ -125,7 +125,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 }
 
                 hasData[columnIndex] = true;
-                if (kinds[columnIndex] == DataKind.Scalar &&
+                if (kinds[columnIndex] == DataKind.Float32 &&
                     !float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
                 {
                     kinds[columnIndex] = DataKind.String;
@@ -571,9 +571,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
 
         return kind switch
         {
-            DataKind.Scalar when float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
-                => DataValue.FromScalar(number),
-            DataKind.Scalar => DataValue.Null(DataKind.Scalar),
+            DataKind.Float32 when float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
+                => DataValue.FromFloat32(number),
+            DataKind.Float32 => DataValue.Null(DataKind.Float32),
             DataKind.Date when DateOnly.TryParse(field, CultureInfo.InvariantCulture, out DateOnly date)
                 => DataValue.FromDate(date),
             DataKind.Date when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
@@ -603,11 +603,11 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             return DataValue.Null(kind);
         }
 
-        if (kind == DataKind.Scalar)
+        if (kind == DataKind.Float32)
         {
             return float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
-                ? DataValue.FromScalar(number)
-                : DataValue.Null(DataKind.Scalar);
+                ? DataValue.FromFloat32(number)
+                : DataValue.Null(DataKind.Float32);
         }
 
         return ParseField(field.ToString(), kind);

@@ -68,7 +68,7 @@ public sealed class PearsonAccumulator
     {
         return value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar(),
+            DataKind.Float32 => value.AsFloat32(),
             DataKind.UInt8 => value.AsUInt8(),
             _ => double.NaN
         };

@@ -77,7 +77,7 @@ public abstract class FeatureManifest
 }
 
 /// <summary>
-/// Feature manifest for numeric columns (<see cref="DataKind.Scalar"/>, <see cref="DataKind.UInt8"/>).
+/// Feature manifest for numeric columns (<see cref="DataKind.Float32"/>, <see cref="DataKind.UInt8"/>).
 /// Includes descriptive statistics and histogram.
 /// </summary>
 public sealed class NumericFeatureManifest : FeatureManifest

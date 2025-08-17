@@ -92,7 +92,7 @@ public sealed class ManifestSerializerTests
         QueryResultsManifest manifest = BuildNumericManifest();
         string json = ManifestSerializer.Serialize("test", manifest);
 
-        Assert.Contains("\"kind\": \"Scalar\"", json);
+        Assert.Contains("\"kind\": \"Float32\"", json);
     }
 
     [Fact]
@@ -111,13 +111,13 @@ public sealed class ManifestSerializerTests
         StatisticsCollector collector = new();
         Row row = new(
             ["id", "name"],
-            [DataValue.FromScalar(1.0f), DataValue.FromString("test")]);
+            [DataValue.FromFloat32(1.0f), DataValue.FromString("test")]);
         collector.AddRow(row);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
         {
-            ["id"] = DataKind.Scalar,
+            ["id"] = DataKind.Float32,
             ["name"] = DataKind.String
         };
 
@@ -159,12 +159,12 @@ public sealed class ManifestSerializerTests
     private static QueryResultsManifest BuildNumericManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["value"], [DataValue.FromScalar(1.0f)]));
-        collector.AddRow(new Row(["value"], [DataValue.FromScalar(2.0f)]));
-        collector.AddRow(new Row(["value"], [DataValue.FromScalar(3.0f)]));
+        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(1.0f)]));
+        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(2.0f)]));
+        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(3.0f)]));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         return ManifestBuilder.Build(stats, kinds, 3);
     }
@@ -229,11 +229,11 @@ public sealed class ManifestSerializerTests
     public void Serialize_NullRatio_PresentInJson()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["x"], [DataValue.FromScalar(1.0f)]));
-        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Scalar)]));
+        collector.AddRow(new Row(["x"], [DataValue.FromFloat32(1.0f)]));
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 2);
         string json = ManifestSerializer.Serialize("test", manifest);
@@ -245,12 +245,12 @@ public sealed class ManifestSerializerTests
     public void Serialize_MissingRuns_PresentInJson()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Scalar)]));
-        collector.AddRow(new Row(["x"], [DataValue.FromScalar(1.0f)]));
-        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Scalar)]));
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]));
+        collector.AddRow(new Row(["x"], [DataValue.FromFloat32(1.0f)]));
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
         string json = ManifestSerializer.Serialize("test", manifest);

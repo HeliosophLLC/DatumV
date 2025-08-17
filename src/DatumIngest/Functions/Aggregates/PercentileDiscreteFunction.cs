@@ -33,19 +33,19 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
             throw new ArgumentException("PERCENTILE_DISC() requires exactly two arguments: expression and fraction.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"PERCENTILE_DISC() first argument must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not DataKind.Scalar)
+        if (argumentKinds[1] is not DataKind.Float32)
         {
             throw new ArgumentException(
                 $"PERCENTILE_DISC() second argument (fraction) must be Scalar, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -66,7 +66,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
         {
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
-                _fraction = arguments[1].AsScalar();
+                _fraction = arguments[1].AsFloat32();
 
                 if (_fraction < 0f || _fraction > 1f)
                 {
@@ -79,7 +79,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
 
             if (arguments[0].IsNull) return;
 
-            _values.Add(arguments[0].AsScalar());
+            _values.Add(arguments[0].AsFloat32());
         }
 
         public DataValue Result
@@ -88,7 +88,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
             {
                 if (_values.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
                 _values.Sort();
@@ -97,7 +97,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
                 int index = (int)System.Math.Ceiling(_fraction * _values.Count) - 1;
                 index = System.Math.Clamp(index, 0, _values.Count - 1);
 
-                return DataValue.FromScalar(_values[index]);
+                return DataValue.FromFloat32(_values[index]);
             }
         }
     }

@@ -118,14 +118,14 @@ public sealed class LabelEncodeFunction : IScalarFunction
             if (argumentKinds[i] != DataKind.String)
                 throw new ArgumentException($"label_encode() argument {i + 1} must be String.");
         }
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull)
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
 
         string value = arguments[0].AsString();
         int domainSize = arguments.Length - 1;
@@ -133,10 +133,10 @@ public sealed class LabelEncodeFunction : IScalarFunction
         for (int i = 0; i < domainSize; i++)
         {
             if (string.Equals(value, arguments[i + 1].AsString(), StringComparison.Ordinal))
-                return DataValue.FromScalar(i);
+                return DataValue.FromFloat32(i);
         }
 
-        return DataValue.FromScalar(-1f);
+        return DataValue.FromFloat32(-1f);
     }
 }
 
@@ -160,14 +160,14 @@ public sealed class LabelEncodeUnknownFunction : IScalarFunction
             if (argumentKinds[i] != DataKind.String)
                 throw new ArgumentException($"label_encode_unk() argument {i + 1} must be String.");
         }
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull)
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
 
         string value = arguments[0].AsString();
         int domainSize = arguments.Length - 1;
@@ -175,10 +175,10 @@ public sealed class LabelEncodeUnknownFunction : IScalarFunction
         for (int i = 0; i < domainSize; i++)
         {
             if (string.Equals(value, arguments[i + 1].AsString(), StringComparison.Ordinal))
-                return DataValue.FromScalar(i);
+                return DataValue.FromFloat32(i);
         }
 
-        return DataValue.FromScalar(domainSize);
+        return DataValue.FromFloat32(domainSize);
     }
 }
 
@@ -203,7 +203,7 @@ public sealed class HashEncodeFunction : IScalarFunction
             throw new ArgumentException("hash_encode() requires exactly 2 arguments (value, num_buckets).");
         if (argumentKinds[0] != DataKind.String)
             throw new ArgumentException("hash_encode() first argument must be String.");
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("hash_encode() second argument (num_buckets) must be Scalar or UInt8.");
         return DataKind.Vector;
     }
@@ -216,7 +216,7 @@ public sealed class HashEncodeFunction : IScalarFunction
 
         int numBuckets = (int)(arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar());
+            : arguments[1].AsFloat32());
 
         if (numBuckets <= 0)
             throw new ArgumentException("hash_encode() num_buckets must be a positive integer.");

@@ -41,7 +41,7 @@ public class QueryMeteringTests
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromScalar(1.5f)]);
+        Row row = new(["x"], [DataValue.FromFloat32(1.5f)]);
 
         // Three calls to `abs` (QU cost 1 each) → total 3 QU.
         for (int i = 0; i < 3; i++)
@@ -61,13 +61,13 @@ public class QueryMeteringTests
     public void NoMeter_FunctionStillExecutes()
     {
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault());
-        Row row = new(["x"], [DataValue.FromScalar(4f)]);
+        Row row = new(["x"], [DataValue.FromFloat32(4f)]);
 
         DataValue result = evaluator.Evaluate(
             new FunctionCallExpression("sqrt", [new ColumnReference("x")]),
             row);
 
-        Assert.Equal(2f, result.AsScalar(), 0.001f);
+        Assert.Equal(2f, result.AsFloat32(), 0.001f);
     }
 
     /// <summary>
@@ -78,7 +78,7 @@ public class QueryMeteringTests
     {
         QueryMeter meter = new(budget: 2);
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromScalar(-5f)]);
+        Row row = new(["x"], [DataValue.FromFloat32(-5f)]);
 
         // Three calls to `abs` (QU cost 1 each) → 3 QU, budget is 2.
         for (int i = 0; i < 3; i++)
@@ -101,7 +101,7 @@ public class QueryMeteringTests
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromScalar(3.7f)]);
+        Row row = new(["x"], [DataValue.FromFloat32(3.7f)]);
 
         // CAST(x AS String) — "cast" is a Tier 1 function (QU 1).
         evaluator.Evaluate(
@@ -119,7 +119,7 @@ public class QueryMeteringTests
     {
         QueryMeter meter = new();
         ExpressionEvaluator evaluator = new(FunctionRegistry.CreateDefault(), meter);
-        Row row = new(["x"], [DataValue.FromScalar(42f)]);
+        Row row = new(["x"], [DataValue.FromFloat32(42f)]);
 
         evaluator.Evaluate(new LiteralExpression(1), row);
         evaluator.Evaluate(new ColumnReference("x"), row);
@@ -142,9 +142,9 @@ public class QueryMeteringTests
             meter);
 
         MockOperator source = new(
-            new Row(["x"], [DataValue.FromScalar(1f)]),
-            new Row(["x"], [DataValue.FromScalar(2f)]),
-            new Row(["x"], [DataValue.FromScalar(3f)]));
+            new Row(["x"], [DataValue.FromFloat32(1f)]),
+            new Row(["x"], [DataValue.FromFloat32(2f)]),
+            new Row(["x"], [DataValue.FromFloat32(3f)]));
 
         // SELECT SUM(x) — global aggregation (no GROUP BY).
         GroupByOperator groupBy = new(
@@ -182,10 +182,10 @@ public class QueryMeteringTests
             meter);
 
         MockOperator source = new(
-            new Row(["x"], [DataValue.FromScalar(4f)]),
-            new Row(["x"], [DataValue.FromScalar(1f)]),
-            new Row(["x"], [DataValue.FromScalar(3f)]),
-            new Row(["x"], [DataValue.FromScalar(2f)]));
+            new Row(["x"], [DataValue.FromFloat32(4f)]),
+            new Row(["x"], [DataValue.FromFloat32(1f)]),
+            new Row(["x"], [DataValue.FromFloat32(3f)]),
+            new Row(["x"], [DataValue.FromFloat32(2f)]));
 
         // SELECT MEDIAN(x) — QU cost 2 per accumulation.
         GroupByOperator groupBy = new(
@@ -223,9 +223,9 @@ public class QueryMeteringTests
             meter);
 
         MockOperator source = new(
-            new Row(["x"], [DataValue.FromScalar(1f)]),
-            new Row(["x"], [DataValue.FromScalar(2f)]),
-            new Row(["x"], [DataValue.FromScalar(3f)]));
+            new Row(["x"], [DataValue.FromFloat32(1f)]),
+            new Row(["x"], [DataValue.FromFloat32(2f)]),
+            new Row(["x"], [DataValue.FromFloat32(3f)]));
 
         IWindowFunction rowNumber = FunctionRegistry.CreateDefault().TryGetWindow("ROW_NUMBER")!;
         WindowOperator window = new(

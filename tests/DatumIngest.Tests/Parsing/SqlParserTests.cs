@@ -824,10 +824,10 @@ public class SqlParserTests
     [Fact]
     public void CastExpression()
     {
-        SelectStatement result = Parse("SELECT CAST(x AS Scalar) FROM t");
+        SelectStatement result = Parse("SELECT CAST(x AS Float32) FROM t");
 
         CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
-        Assert.Equal("Scalar", cast.TargetType);
+        Assert.Equal("Float32", cast.TargetType);
     }
 
     // ───────────────────── Complex queries ─────────────────────

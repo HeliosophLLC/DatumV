@@ -102,7 +102,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
 
             if (includeIndex)
             {
-                values[valueIndex++] = DataValue.FromScalar(row);
+                values[valueIndex++] = DataValue.FromFloat32(row);
             }
 
             if (includeData)
@@ -205,7 +205,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
 
             if (includeIndex)
             {
-                values[valueIndex++] = DataValue.FromScalar(startRow + i);
+                values[valueIndex++] = DataValue.FromFloat32(startRow + i);
             }
 
             if (includeData)
@@ -253,7 +253,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
         List<int> sortedIndices = new();
         foreach (DataValue key in keyValues)
         {
-            int index = (int)key.AsScalar();
+            int index = (int)key.AsFloat32();
             if (index >= 0 && index < header.ItemCount)
             {
                 sortedIndices.Add(index);
@@ -273,7 +273,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             stream.Seek(offset, SeekOrigin.Begin);
 
             DataValue[] values = new DataValue[names.Length];
-            values[0] = DataValue.FromScalar(rowIndex);
+            values[0] = DataValue.FromFloat32(rowIndex);
 
             if (includeData)
             {
@@ -423,7 +423,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
 
         return new Schema(new ColumnInfo[]
         {
-            new("index", DataKind.Scalar, nullable: false),
+            new("index", DataKind.Float32, nullable: false),
             new(dataColumnName, dataKind, nullable: false),
         });
     }
@@ -461,7 +461,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
 
         return header.ItemDimensionCount switch
         {
-            0 => DataKind.Scalar,
+            0 => DataKind.Float32,
             1 => DataKind.Vector,
             2 => DataKind.Matrix,
             _ => DataKind.Tensor,
@@ -488,7 +488,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
 
         return header.ItemDimensionCount switch
         {
-            0 => DataValue.FromScalar(ReadScalarElement(header.TypeCode, itemBuffer)),
+            0 => DataValue.FromFloat32(ReadScalarElement(header.TypeCode, itemBuffer)),
             1 => DataValue.FromVector(ReadFloatArray(header, itemBuffer)),
             2 => DataValue.FromMatrix(
                 ReadFloatArray(header, itemBuffer),

@@ -30,7 +30,7 @@ public sealed class IsDateFunction : IScalarFunction
             throw new ArgumentException($"is_date() requires a String, Date, or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -40,19 +40,19 @@ public sealed class IsDateFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         // Already a Date or DateTime — trivially true.
         if (input.Kind is DataKind.Date or DataKind.DateTime)
         {
-            return DataValue.FromScalar(1f);
+            return DataValue.FromFloat32(1f);
         }
 
         string text = input.AsString();
         bool canParse = DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
             DateTimeStyles.RoundtripKind, out _);
 
-        return DataValue.FromScalar(canParse ? 1f : 0f);
+        return DataValue.FromFloat32(canParse ? 1f : 0f);
     }
 }

@@ -56,7 +56,7 @@ public class SoftmaxFunctionTests
     [Fact]
     public void Softmax_Validate_NonVector_Throws()
     {
-        Assert.Throws<ArgumentException>(() => new SoftmaxFunction().ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => new SoftmaxFunction().ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]

@@ -51,9 +51,9 @@ public sealed class JsonlTableProviderTests
         JsonlTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor("simple.jsonl"), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.FindColumn("id")!.Kind);
+        Assert.Equal(DataKind.Float32, schema.FindColumn("id")!.Kind);
         Assert.Equal(DataKind.String, schema.FindColumn("name")!.Kind);
-        Assert.Equal(DataKind.Scalar, schema.FindColumn("score")!.Kind);
+        Assert.Equal(DataKind.Float32, schema.FindColumn("score")!.Kind);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class JsonlTableProviderTests
         JsonlTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor("nested_values.jsonl"), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.FindColumn("id")!.Kind);
+        Assert.Equal(DataKind.Float32, schema.FindColumn("id")!.Kind);
         Assert.Equal(DataKind.JsonValue, schema.FindColumn("tags")!.Kind);
         Assert.Equal(DataKind.JsonValue, schema.FindColumn("meta")!.Kind);
     }
@@ -112,8 +112,8 @@ public sealed class JsonlTableProviderTests
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor("simple.jsonl"), null, CancellationToken.None));
 
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
-        Assert.Equal(95.5f, rows[0]["score"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
+        Assert.Equal(95.5f, rows[0]["score"].AsFloat32());
     }
 
     [Fact]
@@ -143,14 +143,14 @@ public sealed class JsonlTableProviderTests
         Assert.Equal(3, rows.Count);
 
         // Row 0 has id and name, but no score
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
         Assert.Equal("Alice", rows[0]["name"].AsString());
         Assert.True(rows[0]["score"].IsNull);
 
         // Row 1 has id and score, but no name
-        Assert.Equal(2f, rows[1]["id"].AsScalar());
+        Assert.Equal(2f, rows[1]["id"].AsFloat32());
         Assert.True(rows[1]["name"].IsNull);
-        Assert.Equal(88.0f, rows[1]["score"].AsScalar());
+        Assert.Equal(88.0f, rows[1]["score"].AsFloat32());
     }
 
     [Fact]

@@ -25,14 +25,14 @@ public sealed class OrderBySpillTests
     {
         Row[] sourceRows =
         [
-            MakeRow(("x", DataValue.FromScalar(5f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(8f))),
-            MakeRow(("x", DataValue.FromScalar(6f))),
-            MakeRow(("x", DataValue.FromScalar(7f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(8f))),
+            MakeRow(("x", DataValue.FromFloat32(6f))),
+            MakeRow(("x", DataValue.FromFloat32(7f))),
         ];
 
         MockOperator source = new(sourceRows);
@@ -46,7 +46,7 @@ public sealed class OrderBySpillTests
 
         for (int index = 0; index < result.Count; index++)
         {
-            Assert.Equal((float)(index + 1), result[index]["x"].AsScalar());
+            Assert.Equal((float)(index + 1), result[index]["x"].AsFloat32());
         }
     }
 
@@ -58,10 +58,10 @@ public sealed class OrderBySpillTests
     {
         Row[] sourceRows =
         [
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         MockOperator source = new(sourceRows);
@@ -72,10 +72,10 @@ public sealed class OrderBySpillTests
         List<Row> result = await CollectAsync(orderBy, CreateContext(TinyBudget));
 
         Assert.Equal(4, result.Count);
-        Assert.Equal(4f, result[0]["x"].AsScalar());
-        Assert.Equal(3f, result[1]["x"].AsScalar());
-        Assert.Equal(2f, result[2]["x"].AsScalar());
-        Assert.Equal(1f, result[3]["x"].AsScalar());
+        Assert.Equal(4f, result[0]["x"].AsFloat32());
+        Assert.Equal(3f, result[1]["x"].AsFloat32());
+        Assert.Equal(2f, result[2]["x"].AsFloat32());
+        Assert.Equal(1f, result[3]["x"].AsFloat32());
     }
 
     /// <summary>
@@ -86,12 +86,12 @@ public sealed class OrderBySpillTests
     {
         Row[] sourceRows =
         [
-            MakeRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromScalar(2f))),
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(3f))),
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(1f))),
-            MakeRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromScalar(1f))),
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(2f))),
-            MakeRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromScalar(3f))),
+            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(2f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(3f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(1f))),
+            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(1f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))),
+            MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromFloat32(3f))),
         ];
 
         MockOperator source = new(sourceRows);
@@ -105,14 +105,14 @@ public sealed class OrderBySpillTests
         List<Row> result = await CollectAsync(orderBy, CreateContext(TinyBudget));
 
         Assert.Equal(6, result.Count);
-        Assert.Equal(1f, result[0]["a"].AsScalar());
-        Assert.Equal(1f, result[0]["b"].AsScalar());
-        Assert.Equal(1f, result[1]["a"].AsScalar());
-        Assert.Equal(2f, result[1]["b"].AsScalar());
-        Assert.Equal(1f, result[2]["a"].AsScalar());
-        Assert.Equal(3f, result[2]["b"].AsScalar());
-        Assert.Equal(2f, result[3]["a"].AsScalar());
-        Assert.Equal(1f, result[3]["b"].AsScalar());
+        Assert.Equal(1f, result[0]["a"].AsFloat32());
+        Assert.Equal(1f, result[0]["b"].AsFloat32());
+        Assert.Equal(1f, result[1]["a"].AsFloat32());
+        Assert.Equal(2f, result[1]["b"].AsFloat32());
+        Assert.Equal(1f, result[2]["a"].AsFloat32());
+        Assert.Equal(3f, result[2]["b"].AsFloat32());
+        Assert.Equal(2f, result[3]["a"].AsFloat32());
+        Assert.Equal(1f, result[3]["b"].AsFloat32());
     }
 
     /// <summary>
@@ -151,11 +151,11 @@ public sealed class OrderBySpillTests
     {
         Row[] sourceRows =
         [
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
         ];
 
         MockOperator source = new(sourceRows);
@@ -166,9 +166,9 @@ public sealed class OrderBySpillTests
         List<Row> result = await CollectAsync(orderBy, CreateContext(TinyBudget));
 
         Assert.Equal(5, result.Count);
-        Assert.Equal(1f, result[0]["x"].AsScalar());
-        Assert.Equal(2f, result[1]["x"].AsScalar());
-        Assert.Equal(3f, result[2]["x"].AsScalar());
+        Assert.Equal(1f, result[0]["x"].AsFloat32());
+        Assert.Equal(2f, result[1]["x"].AsFloat32());
+        Assert.Equal(3f, result[2]["x"].AsFloat32());
         Assert.True(result[3]["x"].IsNull);
         Assert.True(result[4]["x"].IsNull);
     }
@@ -182,9 +182,9 @@ public sealed class OrderBySpillTests
     {
         Row[] sourceRows =
         [
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         MockOperator source = new(sourceRows);
@@ -195,9 +195,9 @@ public sealed class OrderBySpillTests
         List<Row> result = await CollectAsync(orderBy, CreateContext(memoryBudgetBytes: null));
 
         Assert.Equal(3, result.Count);
-        Assert.Equal(1f, result[0]["x"].AsScalar());
-        Assert.Equal(2f, result[1]["x"].AsScalar());
-        Assert.Equal(3f, result[2]["x"].AsScalar());
+        Assert.Equal(1f, result[0]["x"].AsFloat32());
+        Assert.Equal(2f, result[1]["x"].AsFloat32());
+        Assert.Equal(3f, result[2]["x"].AsFloat32());
     }
 
     /// <summary>
@@ -209,11 +209,11 @@ public sealed class OrderBySpillTests
     {
         Row[] sourceRows =
         [
-            MakeRow(("x", DataValue.FromScalar(5f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
         ];
 
         MockOperator source = new(sourceRows);
@@ -225,9 +225,9 @@ public sealed class OrderBySpillTests
         List<Row> result = await CollectAsync(orderBy, CreateContext(TinyBudget));
 
         Assert.Equal(3, result.Count);
-        Assert.Equal(1f, result[0]["x"].AsScalar());
-        Assert.Equal(2f, result[1]["x"].AsScalar());
-        Assert.Equal(3f, result[2]["x"].AsScalar());
+        Assert.Equal(1f, result[0]["x"].AsFloat32());
+        Assert.Equal(2f, result[1]["x"].AsFloat32());
+        Assert.Equal(3f, result[2]["x"].AsFloat32());
     }
 
     /// <summary>
@@ -257,7 +257,7 @@ public sealed class OrderBySpillTests
 
         for (int index = 0; index < rowCount; index++)
         {
-            sourceRows[index] = MakeRow(("x", DataValue.FromScalar((float)(rowCount - index))));
+            sourceRows[index] = MakeRow(("x", DataValue.FromFloat32((float)(rowCount - index))));
         }
 
         MockOperator source1 = new(sourceRows);
@@ -279,8 +279,8 @@ public sealed class OrderBySpillTests
         for (int index = 0; index < memoryResult.Count; index++)
         {
             Assert.Equal(
-                memoryResult[index]["x"].AsScalar(),
-                spillResult[index]["x"].AsScalar());
+                memoryResult[index]["x"].AsFloat32(),
+                spillResult[index]["x"].AsFloat32());
         }
     }
 

@@ -19,8 +19,8 @@ public class StatisticsPredicateEvaluatorTests
         return new Dictionary<string, ColumnStatisticsRange>(StringComparer.OrdinalIgnoreCase)
         {
             [column] = new ColumnStatisticsRange(
-                DataValue.FromScalar(min),
-                DataValue.FromScalar(max),
+                DataValue.FromFloat32(min),
+                DataValue.FromFloat32(max),
                 nullCount,
                 rowCount)
         };

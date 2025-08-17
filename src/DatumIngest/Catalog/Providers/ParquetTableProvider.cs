@@ -284,7 +284,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
 
         return kind switch
         {
-            DataKind.Scalar => ConvertToScalar(value),
+            DataKind.Float32 => ConvertToScalar(value),
             DataKind.String => DataValue.FromString(value.ToString() ?? string.Empty),
             DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(value)),
             DataKind.DateTime => DataValue.FromDateTime(ConvertToDateTimeOffset(value)),
@@ -427,7 +427,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             underlyingType == typeof(short) ||
             underlyingType == typeof(decimal))
         {
-            return DataKind.Scalar;
+            return DataKind.Float32;
         }
 
         if (underlyingType == typeof(byte))
@@ -482,7 +482,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
 
         return kind switch
         {
-            DataKind.Scalar => ConvertToScalar(element),
+            DataKind.Float32 => ConvertToScalar(element),
             DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(element)),
             DataKind.String => DataValue.FromString(element.ToString() ?? string.Empty),
             DataKind.UInt8Array => DataValue.FromUInt8Array((byte[])element),
@@ -525,6 +525,6 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             _ => Convert.ToSingle(value)
         };
 
-        return DataValue.FromScalar(floatValue);
+        return DataValue.FromFloat32(floatValue);
     }
 }

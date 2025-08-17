@@ -1487,7 +1487,7 @@ public class ExplainTests
         NumericFeatureManifest feature = new()
         {
             Name = columnName,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = rowCount,
             NullCount = nullRatio.HasValue ? (long)(rowCount * nullRatio.Value) : 0,
             ValidCount = rowCount - (nullRatio.HasValue ? (long)(rowCount * nullRatio.Value) : 0),
@@ -1629,7 +1629,7 @@ public class ExplainTests
         NumericFeatureManifest statusFeature = new()
         {
             Name = "status",
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 10_000,
             NullCount = 0,
             ValidCount = 10_000,
@@ -1645,7 +1645,7 @@ public class ExplainTests
         NumericFeatureManifest categoryFeature = new()
         {
             Name = "category",
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 10_000,
             NullCount = 0,
             ValidCount = 10_000,
@@ -1753,7 +1753,7 @@ public class ExplainTests
         NumericFeatureManifest statusFeature = new()
         {
             Name = "status",
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1_000,
             NullCount = 0,
             ValidCount = 1_000,
@@ -1837,7 +1837,7 @@ public class ExplainTests
 
         SourceIndex index = new(
             new SourceFingerprint(100, new byte[32]),
-            new IndexSchema(new Schema([new ColumnInfo("product_id", DataKind.Scalar, false)]), 10_000),
+            new IndexSchema(new Schema([new ColumnInfo("product_id", DataKind.Float32, false)]), 10_000),
             []);
         scan.SetSourceIndex(new SourceIndex(
             index.Fingerprint, index.Schema, index.Chunks, bloomFilters));
@@ -1865,7 +1865,7 @@ public class ExplainTests
 
         SourceIndex index = new(
             new SourceFingerprint(100, new byte[32]),
-            new IndexSchema(new Schema([new ColumnInfo("timestamp", DataKind.Scalar, false)]), 5_000),
+            new IndexSchema(new Schema([new ColumnInfo("timestamp", DataKind.Float32, false)]), 5_000),
             [],
             bloomFilters: null,
             sortedIndexes: sortedIndexes);

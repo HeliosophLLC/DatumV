@@ -6,100 +6,100 @@ namespace DatumIngest.Tests.Functions.Math;
 public class TrigFunctionTests
 {
     [Fact]
-    public void Sin_Zero() => Assert.Equal(0f, new SinFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+    public void Sin_Zero() => Assert.Equal(0f, new SinFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
 
     [Fact]
     public void Sin_PiOverTwo()
     {
-        Assert.Equal(1f, new SinFunction().Execute([DataValue.FromScalar(MathF.PI / 2)]).AsScalar(), 1e-5f);
+        Assert.Equal(1f, new SinFunction().Execute([DataValue.FromFloat32(MathF.PI / 2)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
-    public void Cos_Zero() => Assert.Equal(1f, new CosFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+    public void Cos_Zero() => Assert.Equal(1f, new CosFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
 
     [Fact]
     public void Cos_Pi()
     {
-        Assert.Equal(-1f, new CosFunction().Execute([DataValue.FromScalar(MathF.PI)]).AsScalar(), 1e-5f);
+        Assert.Equal(-1f, new CosFunction().Execute([DataValue.FromFloat32(MathF.PI)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
-    public void Tan_Zero() => Assert.Equal(0f, new TanFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+    public void Tan_Zero() => Assert.Equal(0f, new TanFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
 
     [Fact]
     public void Asin_One()
     {
-        Assert.Equal(MathF.PI / 2, new AsinFunction().Execute([DataValue.FromScalar(1)]).AsScalar(), 1e-5f);
+        Assert.Equal(MathF.PI / 2, new AsinFunction().Execute([DataValue.FromFloat32(1)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Acos_One()
     {
-        Assert.Equal(0f, new AcosFunction().Execute([DataValue.FromScalar(1)]).AsScalar(), 1e-5f);
+        Assert.Equal(0f, new AcosFunction().Execute([DataValue.FromFloat32(1)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Atan_Zero()
     {
-        Assert.Equal(0f, new AtanFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+        Assert.Equal(0f, new AtanFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Atan2_OneOne()
     {
         Atan2Function function = new();
-        float result = function.Execute([DataValue.FromScalar(1), DataValue.FromScalar(1)]).AsScalar();
+        float result = function.Execute([DataValue.FromFloat32(1), DataValue.FromFloat32(1)]).AsFloat32();
         Assert.Equal(MathF.PI / 4, result, 1e-5f);
     }
 
     [Fact]
-    public void Sinh_Zero() => Assert.Equal(0f, new SinhFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+    public void Sinh_Zero() => Assert.Equal(0f, new SinhFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
 
     [Fact]
-    public void Cosh_Zero() => Assert.Equal(1f, new CoshFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+    public void Cosh_Zero() => Assert.Equal(1f, new CoshFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
 
     [Fact]
-    public void Tanh_Zero() => Assert.Equal(0f, new TanhFunction().Execute([DataValue.FromScalar(0)]).AsScalar(), 1e-5f);
+    public void Tanh_Zero() => Assert.Equal(0f, new TanhFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32(), 1e-5f);
 
     [Fact]
     public void Tanh_LargePositive()
     {
-        float result = new TanhFunction().Execute([DataValue.FromScalar(100)]).AsScalar();
+        float result = new TanhFunction().Execute([DataValue.FromFloat32(100)]).AsFloat32();
         Assert.Equal(1f, result, 1e-3f);
     }
 
     [Fact]
     public void Degrees_PiIs180()
     {
-        Assert.Equal(180f, new DegreesFunction().Execute([DataValue.FromScalar(MathF.PI)]).AsScalar(), 1e-3f);
+        Assert.Equal(180f, new DegreesFunction().Execute([DataValue.FromFloat32(MathF.PI)]).AsFloat32(), 1e-3f);
     }
 
     [Fact]
     public void Radians_180IsPi()
     {
-        Assert.Equal(MathF.PI, new RadiansFunction().Execute([DataValue.FromScalar(180)]).AsScalar(), 1e-5f);
+        Assert.Equal(MathF.PI, new RadiansFunction().Execute([DataValue.FromFloat32(180)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Pi_ReturnsConstant()
     {
         PiFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([]));
-        Assert.Equal(MathF.PI, function.Execute([]).AsScalar(), 1e-5f);
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([]));
+        Assert.Equal(MathF.PI, function.Execute([]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Euler_ReturnsConstant()
     {
         EulerFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([]));
-        Assert.Equal(MathF.E, function.Execute([]).AsScalar(), 1e-5f);
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([]));
+        Assert.Equal(MathF.E, function.Execute([]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Pi_WithArgs_Throws()
     {
-        Assert.Throws<ArgumentException>(() => new PiFunction().ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => new PiFunction().ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
@@ -116,6 +116,6 @@ public class TrigFunctionTests
     [Fact]
     public void Sin_Null_ReturnsNull()
     {
-        Assert.True(new SinFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+        Assert.True(new SinFunction().Execute([DataValue.Null(DataKind.Float32)]).IsNull);
     }
 }

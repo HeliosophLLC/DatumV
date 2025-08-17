@@ -59,8 +59,8 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        int targetWidth = (int)arguments[1].AsScalar();
-        int targetHeight = (int)arguments[2].AsScalar();
+        int targetWidth = (int)arguments[1].AsFloat32();
+        int targetHeight = (int)arguments[2].AsFloat32();
         string gravity = arguments[3].AsString().ToUpperInvariant();
 
         string? formatOverride = arguments.Length == 5 ? arguments[4].AsString() : null;

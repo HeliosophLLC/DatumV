@@ -11,7 +11,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <remarks>
 /// Implements <see cref="IElementKindAwareFunction"/> so that the return type
 /// reflects the array's element kind at plan time. When the element kind is unknown
-/// at plan time, falls back to <see cref="DataKind.Scalar"/>.
+/// at plan time, falls back to <see cref="DataKind.Float32"/>.
 /// Supported element kinds: Scalar, UInt8, String, Date, DateTime, Time, Duration.
 /// </remarks>
 public sealed class ArrayMinFunction : IElementKindAwareFunction
@@ -23,7 +23,7 @@ public sealed class ArrayMinFunction : IElementKindAwareFunction
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         ValidateArgumentCount(argumentKinds);
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class ArrayMinFunction : IElementKindAwareFunction
         ValidateArgumentCount(argumentKinds);
         return arrayElementKinds.Length > 0 && arrayElementKinds[0] is DataKind elementKind
             ? elementKind
-            : DataKind.Scalar;
+            : DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -43,7 +43,7 @@ public sealed class ArrayMinFunction : IElementKindAwareFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         DataKind elementKind = input.ArrayElementKind;

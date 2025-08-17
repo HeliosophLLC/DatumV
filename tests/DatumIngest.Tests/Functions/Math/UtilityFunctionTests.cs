@@ -10,26 +10,26 @@ public class UtilityFunctionTests
     {
         CoalesceFunction function = new();
         DataValue result = function.Execute([
-            DataValue.Null(DataKind.Scalar),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(42)
+            DataValue.Null(DataKind.Float32),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(42)
         ]);
-        Assert.Equal(42f, result.AsScalar());
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
     public void Coalesce_FirstIsNotNull()
     {
         CoalesceFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(1), DataValue.FromScalar(2)]);
-        Assert.Equal(1f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(1), DataValue.FromFloat32(2)]);
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
     public void Coalesce_AllNull_ReturnsNull()
     {
         CoalesceFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32), DataValue.Null(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -38,11 +38,11 @@ public class UtilityFunctionTests
     {
         GreatestFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(3),
-            DataValue.FromScalar(7),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(3),
+            DataValue.FromFloat32(7),
+            DataValue.FromFloat32(1)
         ]);
-        Assert.Equal(7f, result.AsScalar());
+        Assert.Equal(7f, result.AsFloat32());
     }
 
     [Fact]
@@ -50,18 +50,18 @@ public class UtilityFunctionTests
     {
         GreatestFunction function = new();
         DataValue result = function.Execute([
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(3)
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(3)
         ]);
-        Assert.Equal(5f, result.AsScalar());
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
     public void Greatest_AllNull_ReturnsNull()
     {
         GreatestFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.Scalar), DataValue.Null(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32), DataValue.Null(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -70,46 +70,46 @@ public class UtilityFunctionTests
     {
         LeastFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(3),
-            DataValue.FromScalar(7),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(3),
+            DataValue.FromFloat32(7),
+            DataValue.FromFloat32(1)
         ]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
     public void IsNan_WithNaN()
     {
         IsNanFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(float.NaN)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(float.NaN)]).AsFloat32());
     }
 
     [Fact]
     public void IsNan_WithFinite()
     {
         IsNanFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(5)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(5)]).AsFloat32());
     }
 
     [Fact]
     public void IsFinite_WithFinite()
     {
         IsFiniteFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(5)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(5)]).AsFloat32());
     }
 
     [Fact]
     public void IsFinite_WithInfinity()
     {
         IsFiniteFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(float.PositiveInfinity)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(float.PositiveInfinity)]).AsFloat32());
     }
 
     [Fact]
     public void IsFinite_WithNaN()
     {
         IsFiniteFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(float.NaN)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(float.NaN)]).AsFloat32());
     }
 
     // ───────────────── IsEvenFunction ─────────────────
@@ -118,48 +118,48 @@ public class UtilityFunctionTests
     public void IsEven_EvenInteger_ReturnsOne()
     {
         IsEvenFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(4)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(4)]).AsFloat32());
     }
 
     [Fact]
     public void IsEven_OddInteger_ReturnsZero()
     {
         IsEvenFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(3)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(3)]).AsFloat32());
     }
 
     [Fact]
     public void IsEven_Zero_ReturnsOne()
     {
         IsEvenFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(0)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(0)]).AsFloat32());
     }
 
     [Fact]
     public void IsEven_NegativeEven_ReturnsOne()
     {
         IsEvenFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(-6)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(-6)]).AsFloat32());
     }
 
     [Fact]
     public void IsEven_NonInteger_ReturnsZero()
     {
         IsEvenFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(2.5f)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(2.5f)]).AsFloat32());
     }
 
     [Fact]
     public void IsEven_Null_ReturnsNull()
     {
-        Assert.True(new IsEvenFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+        Assert.True(new IsEvenFunction().Execute([DataValue.Null(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
     public void IsEven_UInt8_Even()
     {
         IsEvenFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromUInt8(10)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromUInt8(10)]).AsFloat32());
     }
 
     // ───────────────── IsOddFunction ─────────────────
@@ -168,98 +168,98 @@ public class UtilityFunctionTests
     public void IsOdd_OddInteger_ReturnsOne()
     {
         IsOddFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(3)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(3)]).AsFloat32());
     }
 
     [Fact]
     public void IsOdd_EvenInteger_ReturnsZero()
     {
         IsOddFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(4)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(4)]).AsFloat32());
     }
 
     [Fact]
     public void IsOdd_Zero_ReturnsZero()
     {
         IsOddFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(0)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(0)]).AsFloat32());
     }
 
     [Fact]
     public void IsOdd_NegativeOdd_ReturnsOne()
     {
         IsOddFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromScalar(-7)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromFloat32(-7)]).AsFloat32());
     }
 
     [Fact]
     public void IsOdd_NonInteger_ReturnsZero()
     {
         IsOddFunction function = new();
-        Assert.Equal(0f, function.Execute([DataValue.FromScalar(3.5f)]).AsScalar());
+        Assert.Equal(0f, function.Execute([DataValue.FromFloat32(3.5f)]).AsFloat32());
     }
 
     [Fact]
     public void IsOdd_Null_ReturnsNull()
     {
-        Assert.True(new IsOddFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+        Assert.True(new IsOddFunction().Execute([DataValue.Null(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
     public void IsOdd_UInt8_Odd()
     {
         IsOddFunction function = new();
-        Assert.Equal(1f, function.Execute([DataValue.FromUInt8(7)]).AsScalar());
+        Assert.Equal(1f, function.Execute([DataValue.FromUInt8(7)]).AsFloat32());
     }
 
     [Fact]
     public void IfNull_ValueNotNull_ReturnsValue()
     {
         IfNullFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(5), DataValue.FromScalar(10)]);
-        Assert.Equal(5f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(5), DataValue.FromFloat32(10)]);
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
     public void IfNull_ValueNull_ReturnsDefault()
     {
         IfNullFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.Scalar), DataValue.FromScalar(10)]);
-        Assert.Equal(10f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32), DataValue.FromFloat32(10)]);
+        Assert.Equal(10f, result.AsFloat32());
     }
 
     [Fact]
     public void Random_ReturnsBetweenZeroAndOne()
     {
         RandomFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([]));
-        float result = function.Execute([]).AsScalar();
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([]));
+        float result = function.Execute([]).AsFloat32();
         Assert.True(result >= 0f && result < 1f);
     }
 
     [Fact]
     public void Random_WithArgs_Throws()
     {
-        Assert.Throws<ArgumentException>(() => new RandomFunction().ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => new RandomFunction().ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void IsNan_Null_ReturnsNull()
     {
-        Assert.True(new IsNanFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+        Assert.True(new IsNanFunction().Execute([DataValue.Null(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
     public void Greatest_Validate_LessThan2_Throws()
     {
-        Assert.Throws<ArgumentException>(() => new GreatestFunction().ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => new GreatestFunction().ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void Greatest_Validate_NonScalar_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new GreatestFunction().ValidateArguments([DataKind.Scalar, DataKind.Vector]));
+            new GreatestFunction().ValidateArguments([DataKind.Float32, DataKind.Vector]));
     }
 
     [Fact]
@@ -267,11 +267,11 @@ public class UtilityFunctionTests
     {
         LeastFunction function = new();
         DataValue result = function.Execute([
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(3)
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(3)
         ]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     // ── iif ────────────────────────────────────────────────
@@ -281,7 +281,7 @@ public class UtilityFunctionTests
     {
         IifFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromString("yes"),
             DataValue.FromString("no")
         ]);
@@ -293,7 +293,7 @@ public class UtilityFunctionTests
     {
         IifFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(0),
+            DataValue.FromFloat32(0),
             DataValue.FromString("yes"),
             DataValue.FromString("no")
         ]);
@@ -306,10 +306,10 @@ public class UtilityFunctionTests
         IifFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromBoolean(true),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(20)
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(20)
         ]);
-        Assert.Equal(10f, result.AsScalar());
+        Assert.Equal(10f, result.AsFloat32());
     }
 
     [Fact]
@@ -318,10 +318,10 @@ public class UtilityFunctionTests
         IifFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromBoolean(false),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(20)
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(20)
         ]);
-        Assert.Equal(20f, result.AsScalar());
+        Assert.Equal(20f, result.AsFloat32());
     }
 
     [Fact]
@@ -329,7 +329,7 @@ public class UtilityFunctionTests
     {
         IifFunction function = new();
         DataValue result = function.Execute([
-            DataValue.Null(DataKind.Scalar),
+            DataValue.Null(DataKind.Float32),
             DataValue.FromString("yes"),
             DataValue.FromString("no")
         ]);
@@ -341,38 +341,38 @@ public class UtilityFunctionTests
     {
         IifFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(-5),
-            DataValue.FromScalar(100),
-            DataValue.FromScalar(200)
+            DataValue.FromFloat32(-5),
+            DataValue.FromFloat32(100),
+            DataValue.FromFloat32(200)
         ]);
-        Assert.Equal(100f, result.AsScalar());
+        Assert.Equal(100f, result.AsFloat32());
     }
 
     [Fact]
     public void Iif_Validate_WrongArgCount_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new IifFunction().ValidateArguments([DataKind.Scalar, DataKind.String]));
+            new IifFunction().ValidateArguments([DataKind.Float32, DataKind.String]));
     }
 
     [Fact]
     public void Iif_Validate_NonScalarCondition_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new IifFunction().ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.Scalar]));
+            new IifFunction().ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
     public void Iif_Validate_MismatchedThenElse_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new IifFunction().ValidateArguments([DataKind.Scalar, DataKind.String, DataKind.Scalar]));
+            new IifFunction().ValidateArguments([DataKind.Float32, DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
     public void Iif_Validate_ReturnsSecondArgKind()
     {
-        DataKind result = new IifFunction().ValidateArguments([DataKind.Scalar, DataKind.Vector, DataKind.Vector]);
+        DataKind result = new IifFunction().ValidateArguments([DataKind.Float32, DataKind.Vector, DataKind.Vector]);
         Assert.Equal(DataKind.Vector, result);
     }
 }

@@ -96,14 +96,14 @@ public class DateFormattingFunctionTests
     public void Strftime_ValidateArguments_RejectsNonTemporalFirst()
     {
         StrftimeFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar, DataKind.String]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32, DataKind.String]));
     }
 
     [Fact]
     public void Strftime_ValidateArguments_RejectsNonStringFormat()
     {
         StrftimeFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Date, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Date, DataKind.Float32]));
     }
 
     // ───────────────────── is_date() ─────────────────────
@@ -120,7 +120,7 @@ public class DateFormattingFunctionTests
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("2024-01-15")]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class DateFormattingFunctionTests
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("2024-01-15T10:30:00Z")]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class DateFormattingFunctionTests
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("not a date")]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class DateFormattingFunctionTests
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("")]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public class DateFormattingFunctionTests
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2024, 1, 15))]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public class DateFormattingFunctionTests
         DataValue result = function.Execute([
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 15, 10, 30, 0, TimeSpan.Zero))
         ]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class DateFormattingFunctionTests
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public class DateFormattingFunctionTests
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("2024-06-15T10:30:00+05:30")]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -194,15 +194,15 @@ public class DateFormattingFunctionTests
     public void IsDate_ValidateArguments_RejectsScalar()
     {
         IsDateFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void IsDate_ValidateArguments_AcceptsAllValidKinds()
     {
         IsDateFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.String]));
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Date]));
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.DateTime]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.String]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Date]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.DateTime]));
     }
 }

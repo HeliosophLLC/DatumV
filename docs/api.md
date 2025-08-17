@@ -15,7 +15,7 @@ ColumnInteractionCollector interactionCollector = new();
 
 IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
-Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Scalar, ["name"] = DataKind.String };
+Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Float32, ["name"] = DataKind.String };
 
 QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, rowCount, interactions);
 string json = ManifestSerializer.Serialize("data", manifest);
@@ -229,7 +229,7 @@ SelectStatement statement = SqlParser.Parse(
 // Build the parameter dictionary
 Dictionary<string, DataValue> parameters = new()
 {
-    ["threshold"] = DataValue.FromScalar(0.5f),
+    ["threshold"] = DataValue.FromFloat32(0.5f),
     ["cat"] = DataValue.FromString("electronics"),
 };
 
@@ -339,7 +339,7 @@ Schema schema = await catalog.GetSchemaAsync("tableName", cancellationToken);
 foreach (ColumnInfo column in schema.Columns)
 {
     // column.Name     → "score"
-    // column.Kind     → DataKind.Scalar
+    // column.Kind     → DataKind.Float32
     // column.Nullable → true
 }
 ```
@@ -355,7 +355,7 @@ public class MyTableFunction : ISchemaAwareTableFunction
 
     public Schema GetOutputSchema(ReadOnlySpan<DataKind> argumentKinds)
     {
-        return new Schema([new ColumnInfo("result", DataKind.Scalar, nullable: false)]);
+        return new Schema([new ColumnInfo("result", DataKind.Float32, nullable: false)]);
     }
 
     public async IAsyncEnumerable<Row> ExecuteAsync(

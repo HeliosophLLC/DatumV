@@ -79,7 +79,7 @@ internal sealed class TableFormatter
                 widths[i] = MaxColumnWidth;
             }
 
-            rightAlign[i] = schema.Columns[i].Kind is DataKind.Scalar or DataKind.UInt8;
+            rightAlign[i] = schema.Columns[i].Kind is DataKind.Float32 or DataKind.UInt8;
         }
 
         // Write header.
@@ -152,7 +152,7 @@ internal sealed class TableFormatter
     {
         return value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar().ToString("G"),
+            DataKind.Float32 => value.AsFloat32().ToString("G"),
             DataKind.UInt8 => value.AsUInt8().ToString(),
             DataKind.String => value.AsString(),
             DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),

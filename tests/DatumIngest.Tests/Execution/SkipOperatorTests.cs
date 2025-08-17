@@ -15,43 +15,43 @@ public sealed class SkipOperatorTests
     public async Task Skip0_YieldsAllRows()
     {
         MockOperator source = new(
-            MakeRow(("id", DataValue.FromScalar(1))),
-            MakeRow(("id", DataValue.FromScalar(2))),
-            MakeRow(("id", DataValue.FromScalar(3))));
+            MakeRow(("id", DataValue.FromFloat32(1))),
+            MakeRow(("id", DataValue.FromFloat32(2))),
+            MakeRow(("id", DataValue.FromFloat32(3))));
 
         SkipOperator skip = new(source, 0);
         List<Row> result = await CollectAsync(skip);
 
         Assert.Equal(3, result.Count);
-        Assert.Equal(1f, result[0]["id"].AsScalar());
-        Assert.Equal(2f, result[1]["id"].AsScalar());
-        Assert.Equal(3f, result[2]["id"].AsScalar());
+        Assert.Equal(1f, result[0]["id"].AsFloat32());
+        Assert.Equal(2f, result[1]["id"].AsFloat32());
+        Assert.Equal(3f, result[2]["id"].AsFloat32());
     }
 
     [Fact]
     public async Task SkipN_YieldsRemainingRows()
     {
         MockOperator source = new(
-            MakeRow(("id", DataValue.FromScalar(1))),
-            MakeRow(("id", DataValue.FromScalar(2))),
-            MakeRow(("id", DataValue.FromScalar(3))),
-            MakeRow(("id", DataValue.FromScalar(4))),
-            MakeRow(("id", DataValue.FromScalar(5))));
+            MakeRow(("id", DataValue.FromFloat32(1))),
+            MakeRow(("id", DataValue.FromFloat32(2))),
+            MakeRow(("id", DataValue.FromFloat32(3))),
+            MakeRow(("id", DataValue.FromFloat32(4))),
+            MakeRow(("id", DataValue.FromFloat32(5))));
 
         SkipOperator skip = new(source, 3);
         List<Row> result = await CollectAsync(skip);
 
         Assert.Equal(2, result.Count);
-        Assert.Equal(4f, result[0]["id"].AsScalar());
-        Assert.Equal(5f, result[1]["id"].AsScalar());
+        Assert.Equal(4f, result[0]["id"].AsFloat32());
+        Assert.Equal(5f, result[1]["id"].AsFloat32());
     }
 
     [Fact]
     public async Task SkipMoreThanAvailable_YieldsNothing()
     {
         MockOperator source = new(
-            MakeRow(("id", DataValue.FromScalar(1))),
-            MakeRow(("id", DataValue.FromScalar(2))));
+            MakeRow(("id", DataValue.FromFloat32(1))),
+            MakeRow(("id", DataValue.FromFloat32(2))));
 
         SkipOperator skip = new(source, 100);
         List<Row> result = await CollectAsync(skip);
@@ -63,9 +63,9 @@ public sealed class SkipOperatorTests
     public async Task SkipExactCount_YieldsNothing()
     {
         MockOperator source = new(
-            MakeRow(("id", DataValue.FromScalar(1))),
-            MakeRow(("id", DataValue.FromScalar(2))),
-            MakeRow(("id", DataValue.FromScalar(3))));
+            MakeRow(("id", DataValue.FromFloat32(1))),
+            MakeRow(("id", DataValue.FromFloat32(2))),
+            MakeRow(("id", DataValue.FromFloat32(3))));
 
         SkipOperator skip = new(source, 3);
         List<Row> result = await CollectAsync(skip);

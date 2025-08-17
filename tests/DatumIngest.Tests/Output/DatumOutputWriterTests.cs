@@ -36,7 +36,7 @@ public sealed class DatumOutputWriterTests : IAsyncLifetime
     public async Task FinalizeAsync_EmptyDataset_CreatesNonEmptyFile()
     {
         string path = Path.Combine(_tempDirectory, "empty.datum");
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, false)]);
 
         await using DatumOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
@@ -52,14 +52,14 @@ public sealed class DatumOutputWriterTests : IAsyncLifetime
     {
         string path = Path.Combine(_tempDirectory, "scalar_string.datum");
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("label", DataKind.String, false)
         ]);
 
         await using DatumOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(1f)), ("label", DataValue.FromString("alpha"))));
-        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(2f)), ("label", DataValue.FromString("beta"))));
+        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(1f)), ("label", DataValue.FromString("alpha"))));
+        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(2f)), ("label", DataValue.FromString("beta"))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(2, summary.RowsWritten);
@@ -73,17 +73,17 @@ public sealed class DatumOutputWriterTests : IAsyncLifetime
         string path = Path.Combine(_tempDirectory, "nulls.datum");
         Schema schema = new([
             new ColumnInfo("name", DataKind.String, nullable: true),
-            new ColumnInfo("score", DataKind.Scalar, nullable: true)
+            new ColumnInfo("score", DataKind.Float32, nullable: true)
         ]);
 
         await using DatumOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
             ("name", DataValue.Null(DataKind.String)),
-            ("score", DataValue.FromScalar(99f))));
+            ("score", DataValue.FromFloat32(99f))));
         await writer.WriteRowAsync(CreateRow(
             ("name", DataValue.FromString("Alice")),
-            ("score", DataValue.Null(DataKind.Scalar))));
+            ("score", DataValue.Null(DataKind.Float32))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(2, summary.RowsWritten);
@@ -95,12 +95,12 @@ public sealed class DatumOutputWriterTests : IAsyncLifetime
     [Fact]
     public async Task StreamConstructor_WritesToProvidedStream()
     {
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, false)]);
 
         using MemoryStream stream = new();
         await using DatumOutputWriter writer = new(stream);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromScalar(3.14f))));
+        await writer.WriteRowAsync(CreateRow(("value", DataValue.FromFloat32(3.14f))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(1, summary.RowsWritten);
@@ -118,7 +118,7 @@ public sealed class DatumOutputWriterTests : IAsyncLifetime
         await using DatumOutputWriter writer = new(path);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => writer.WriteRowAsync(CreateRow(("x", DataValue.FromScalar(1f)))));
+            () => writer.WriteRowAsync(CreateRow(("x", DataValue.FromFloat32(1f)))));
     }
 
     [Fact]

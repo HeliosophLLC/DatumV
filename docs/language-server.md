@@ -74,14 +74,14 @@ This introspects all registered data sources and produces a JSON file containing
   "functions": [
     {
       "name": "abs",
-      "parameters": [{ "name": "value", "kind": "Scalar" }],
-      "returnType": "Scalar",
+      "parameters": [{ "name": "value", "kind": "Float32" }],
+      "returnType": "Float32",
       "description": "Element-wise absolute value: abs(x) = |x|."
     },
     {
       "name": "unnest",
       "parameters": [{ "name": "array_column", "kind": "Vector" }],
-      "returnType": "Scalar",
+      "returnType": "Float32",
       "description": "Expands a vector column into individual rows.",
       "isTableValued": true
     }

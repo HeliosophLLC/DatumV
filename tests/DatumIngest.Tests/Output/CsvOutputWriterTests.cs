@@ -29,13 +29,13 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, "simple.csv");
         Schema schema = new([
             new ColumnInfo("name", DataKind.String, false),
-            new ColumnInfo("age", DataKind.Scalar, false)
+            new ColumnInfo("age", DataKind.Float32, false)
         ]);
 
         await using CsvOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Alice")), ("age", DataValue.FromScalar(30.0f))));
-        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Bob")), ("age", DataValue.FromScalar(25.0f))));
+        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Alice")), ("age", DataValue.FromFloat32(30.0f))));
+        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Bob")), ("age", DataValue.FromFloat32(25.0f))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(2, summary.RowsWritten);
@@ -83,14 +83,14 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, "nulls.csv");
         Schema schema = new([
             new ColumnInfo("name", DataKind.String, true),
-            new ColumnInfo("value", DataKind.Scalar, true)
+            new ColumnInfo("value", DataKind.Float32, true)
         ]);
 
         await using CsvOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
             ("name", DataValue.Null(DataKind.String)),
-            ("value", DataValue.FromScalar(1.0f))));
+            ("value", DataValue.FromFloat32(1.0f))));
         await writer.FinalizeAsync();
 
         string content = await File.ReadAllTextAsync(path);
@@ -104,14 +104,14 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
     {
         string path = Path.Combine(_tempDir, "roundtrip.csv");
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("name", DataKind.String, false)
         ]);
 
         await using CsvOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("Alice"))));
-        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("Bob"))));
+        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(1.0f)), ("name", DataValue.FromString("Alice"))));
+        await writer.WriteRowAsync(CreateRow(("id", DataValue.FromFloat32(2.0f)), ("name", DataValue.FromString("Bob"))));
         await writer.FinalizeAsync();
 
         // Read back with CsvTableProvider
@@ -125,9 +125,9 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         }
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1.0f, rows[0]["id"].AsScalar());
+        Assert.Equal(1.0f, rows[0]["id"].AsFloat32());
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal(2.0f, rows[1]["id"].AsScalar());
+        Assert.Equal(2.0f, rows[1]["id"].AsFloat32());
         Assert.Equal("Bob", rows[1]["name"].AsString());
     }
 
@@ -137,7 +137,7 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         string path = Path.Combine(_tempDir, "empty.csv");
         Schema schema = new([
             new ColumnInfo("col1", DataKind.String, false),
-            new ColumnInfo("col2", DataKind.Scalar, false)
+            new ColumnInfo("col2", DataKind.Float32, false)
         ]);
 
         await using CsvOutputWriter writer = new(path);
@@ -171,13 +171,13 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         using MemoryStream stream = new();
         Schema schema = new([
             new ColumnInfo("name", DataKind.String, false),
-            new ColumnInfo("age", DataKind.Scalar, false)
+            new ColumnInfo("age", DataKind.Float32, false)
         ]);
 
         await using CsvOutputWriter writer = new(stream);
         await writer.InitializeAsync(schema);
-        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Alice")), ("age", DataValue.FromScalar(30.0f))));
-        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Bob")), ("age", DataValue.FromScalar(25.0f))));
+        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Alice")), ("age", DataValue.FromFloat32(30.0f))));
+        await writer.WriteRowAsync(CreateRow(("name", DataValue.FromString("Bob")), ("age", DataValue.FromFloat32(25.0f))));
         OutputSummary summary = await writer.FinalizeAsync();
 
         Assert.Equal(2, summary.RowsWritten);
@@ -195,12 +195,12 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
     public async Task WriteRowAsync_Stream_DoesNotDisposeCallerStream()
     {
         MemoryStream stream = new();
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
 
         await using (CsvOutputWriter writer = new(stream))
         {
             await writer.InitializeAsync(schema);
-            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromScalar(1.0f))));
+            await writer.WriteRowAsync(CreateRow(("val", DataValue.FromFloat32(1.0f))));
             await writer.FinalizeAsync();
         }
 

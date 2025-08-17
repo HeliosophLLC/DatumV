@@ -46,7 +46,7 @@ public sealed class AnovaAccumulator
         string? group = CramerVAccumulator.ToCategorical(catValue);
         double number = numValue.Kind switch
         {
-            DataKind.Scalar => numValue.AsScalar(),
+            DataKind.Float32 => numValue.AsFloat32(),
             DataKind.UInt8 => numValue.AsUInt8(),
             _ => double.NaN
         };

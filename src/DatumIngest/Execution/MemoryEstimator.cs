@@ -146,7 +146,7 @@ internal sealed class MemoryEstimator
 
             bytes += value.Kind switch
             {
-                DataKind.Scalar => 4,
+                DataKind.Float32 => 4,
                 DataKind.UInt8 => 1,
                 DataKind.Boolean => 1,
                 DataKind.Date => 4,

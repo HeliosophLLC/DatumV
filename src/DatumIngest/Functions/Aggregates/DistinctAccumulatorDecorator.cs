@@ -53,7 +53,7 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator
             // Single-argument path: deduplicate on the argument value directly.
             // COUNT(DISTINCT col) with no arguments (COUNT(*)) should never reach here
             // because COUNT(DISTINCT *) is rejected during validation.
-            DataValue key = arguments.Length > 0 ? arguments[0] : DataValue.Null(DataKind.Scalar);
+            DataValue key = arguments.Length > 0 ? arguments[0] : DataValue.Null(DataKind.Float32);
             isNew = _singleArgumentSet.Add(key);
         }
         else

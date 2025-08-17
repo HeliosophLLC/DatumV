@@ -70,7 +70,7 @@ public sealed class ReshapeFunction : IScalarFunction
         int expectedLength = 1;
         for (int index = 0; index < dimensionCount; index++)
         {
-            int dimension = (int)arguments[index + 1].AsScalar();
+            int dimension = (int)arguments[index + 1].AsFloat32();
             newShape[index] = dimension;
             expectedLength *= dimension;
         }

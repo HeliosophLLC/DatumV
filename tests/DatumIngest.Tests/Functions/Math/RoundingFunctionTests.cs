@@ -8,51 +8,51 @@ public class RoundingFunctionTests
     [Fact]
     public void Ceil_RoundsUp()
     {
-        Assert.Equal(4f, new CeilFunction().Execute([DataValue.FromScalar(3.2f)]).AsScalar());
+        Assert.Equal(4f, new CeilFunction().Execute([DataValue.FromFloat32(3.2f)]).AsFloat32());
     }
 
     [Fact]
     public void Ceil_Negative()
     {
-        Assert.Equal(-3f, new CeilFunction().Execute([DataValue.FromScalar(-3.7f)]).AsScalar());
+        Assert.Equal(-3f, new CeilFunction().Execute([DataValue.FromFloat32(-3.7f)]).AsFloat32());
     }
 
     [Fact]
     public void Floor_RoundsDown()
     {
-        Assert.Equal(3f, new FloorFunction().Execute([DataValue.FromScalar(3.8f)]).AsScalar());
+        Assert.Equal(3f, new FloorFunction().Execute([DataValue.FromFloat32(3.8f)]).AsFloat32());
     }
 
     [Fact]
     public void Floor_Negative()
     {
-        Assert.Equal(-4f, new FloorFunction().Execute([DataValue.FromScalar(-3.2f)]).AsScalar());
+        Assert.Equal(-4f, new FloorFunction().Execute([DataValue.FromFloat32(-3.2f)]).AsFloat32());
     }
 
     [Fact]
     public void Truncate_Positive()
     {
-        Assert.Equal(3f, new TruncateFunction().Execute([DataValue.FromScalar(3.9f)]).AsScalar());
+        Assert.Equal(3f, new TruncateFunction().Execute([DataValue.FromFloat32(3.9f)]).AsFloat32());
     }
 
     [Fact]
     public void Truncate_Negative()
     {
-        Assert.Equal(-3f, new TruncateFunction().Execute([DataValue.FromScalar(-3.9f)]).AsScalar());
+        Assert.Equal(-3f, new TruncateFunction().Execute([DataValue.FromFloat32(-3.9f)]).AsFloat32());
     }
 
     [Fact]
     public void Round_NoDecimals()
     {
         RoundFunction function = new();
-        Assert.Equal(4f, function.Execute([DataValue.FromScalar(3.7f)]).AsScalar());
+        Assert.Equal(4f, function.Execute([DataValue.FromFloat32(3.7f)]).AsFloat32());
     }
 
     [Fact]
     public void Round_TwoDecimals()
     {
         RoundFunction function = new();
-        Assert.Equal(3.14f, function.Execute([DataValue.FromScalar(3.1415f), DataValue.FromScalar(2)]).AsScalar(), 1e-5f);
+        Assert.Equal(3.14f, function.Execute([DataValue.FromFloat32(3.1415f), DataValue.FromFloat32(2)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
@@ -67,14 +67,14 @@ public class RoundingFunctionTests
     public void Quantize_HalfStep()
     {
         QuantizeFunction function = new();
-        Assert.Equal(3.5f, function.Execute([DataValue.FromScalar(3.7f), DataValue.FromScalar(0.5f)]).AsScalar());
+        Assert.Equal(3.5f, function.Execute([DataValue.FromFloat32(3.7f), DataValue.FromFloat32(0.5f)]).AsFloat32());
     }
 
     [Fact]
     public void Quantize_IntegerStep()
     {
         QuantizeFunction function = new();
-        Assert.Equal(10f, function.Execute([DataValue.FromScalar(12f), DataValue.FromScalar(5f)]).AsScalar());
+        Assert.Equal(10f, function.Execute([DataValue.FromFloat32(12f), DataValue.FromFloat32(5f)]).AsFloat32());
     }
 
     [Fact]
@@ -82,10 +82,10 @@ public class RoundingFunctionTests
     {
         BucketizeFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(15),
+            DataValue.FromFloat32(15),
             DataValue.FromVector([10f, 20f, 30f])
         ]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -93,10 +93,10 @@ public class RoundingFunctionTests
     {
         BucketizeFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromVector([10f, 20f, 30f])
         ]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -104,10 +104,10 @@ public class RoundingFunctionTests
     {
         BucketizeFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(50),
+            DataValue.FromFloat32(50),
             DataValue.FromVector([10f, 20f, 30f])
         ]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -115,18 +115,18 @@ public class RoundingFunctionTests
     {
         ClipFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(150),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(100)
+            DataValue.FromFloat32(150),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(100)
         ]);
-        Assert.Equal(100f, result.AsScalar());
+        Assert.Equal(100f, result.AsFloat32());
     }
 
     [Fact]
     public void Round_Null_ReturnsNull()
     {
         RoundFunction function = new();
-        Assert.True(function.Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+        Assert.True(function.Execute([DataValue.Null(DataKind.Float32)]).IsNull);
     }
 
     [Fact]

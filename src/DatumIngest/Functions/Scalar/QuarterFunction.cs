@@ -24,7 +24,7 @@ public sealed class QuarterFunction : IScalarFunction
             throw new ArgumentException($"quarter() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class QuarterFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int month = input.Kind == DataKind.Date
@@ -42,6 +42,6 @@ public sealed class QuarterFunction : IScalarFunction
             : input.AsDateTime().Month;
 
         int quarter = (month - 1) / 3 + 1;
-        return DataValue.FromScalar(quarter);
+        return DataValue.FromFloat32(quarter);
     }
 }

@@ -16,27 +16,27 @@ public sealed class RandomFunctionTests
     public void HashSplit_Deterministic_SameKeyAndSeed_ReturnsSameValue()
     {
         HashSplitFunction function = new();
-        DataValue result1 = function.Execute([DataValue.FromString("row-42"), DataValue.FromScalar(7)]);
-        DataValue result2 = function.Execute([DataValue.FromString("row-42"), DataValue.FromScalar(7)]);
-        Assert.Equal(result1.AsScalar(), result2.AsScalar());
+        DataValue result1 = function.Execute([DataValue.FromString("row-42"), DataValue.FromFloat32(7)]);
+        DataValue result2 = function.Execute([DataValue.FromString("row-42"), DataValue.FromFloat32(7)]);
+        Assert.Equal(result1.AsFloat32(), result2.AsFloat32());
     }
 
     [Fact]
     public void HashSplit_DifferentKeys_ProduceDifferentValues()
     {
         HashSplitFunction function = new();
-        DataValue result1 = function.Execute([DataValue.FromString("row-1"), DataValue.FromScalar(0)]);
-        DataValue result2 = function.Execute([DataValue.FromString("row-2"), DataValue.FromScalar(0)]);
-        Assert.NotEqual(result1.AsScalar(), result2.AsScalar());
+        DataValue result1 = function.Execute([DataValue.FromString("row-1"), DataValue.FromFloat32(0)]);
+        DataValue result2 = function.Execute([DataValue.FromString("row-2"), DataValue.FromFloat32(0)]);
+        Assert.NotEqual(result1.AsFloat32(), result2.AsFloat32());
     }
 
     [Fact]
     public void HashSplit_DifferentSeeds_ProduceDifferentValues()
     {
         HashSplitFunction function = new();
-        DataValue result1 = function.Execute([DataValue.FromString("same-key"), DataValue.FromScalar(1)]);
-        DataValue result2 = function.Execute([DataValue.FromString("same-key"), DataValue.FromScalar(2)]);
-        Assert.NotEqual(result1.AsScalar(), result2.AsScalar());
+        DataValue result1 = function.Execute([DataValue.FromString("same-key"), DataValue.FromFloat32(1)]);
+        DataValue result2 = function.Execute([DataValue.FromString("same-key"), DataValue.FromFloat32(2)]);
+        Assert.NotEqual(result1.AsFloat32(), result2.AsFloat32());
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public sealed class RandomFunctionTests
         HashSplitFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(i), DataValue.FromScalar(0)]);
-            float value = result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(i), DataValue.FromFloat32(0)]);
+            float value = result.AsFloat32();
             Assert.InRange(value, 0f, 1f);
             Assert.True(value < 1f, "hash_split() must return values strictly less than 1.");
         }
@@ -56,7 +56,7 @@ public sealed class RandomFunctionTests
     public void HashSplit_NullKey_ReturnsNull()
     {
         HashSplitFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.String), DataValue.FromScalar(0)]);
+        DataValue result = function.Execute([DataValue.Null(DataKind.String), DataValue.FromFloat32(0)]);
         Assert.True(result.IsNull);
     }
 
@@ -66,15 +66,15 @@ public sealed class RandomFunctionTests
         HashSplitFunction function = new();
 
         // String key
-        DataValue stringResult = function.Execute([DataValue.FromString("key"), DataValue.FromScalar(0)]);
+        DataValue stringResult = function.Execute([DataValue.FromString("key"), DataValue.FromFloat32(0)]);
         Assert.False(stringResult.IsNull);
 
         // Scalar key
-        DataValue scalarResult = function.Execute([DataValue.FromScalar(42), DataValue.FromScalar(0)]);
+        DataValue scalarResult = function.Execute([DataValue.FromFloat32(42), DataValue.FromFloat32(0)]);
         Assert.False(scalarResult.IsNull);
 
         // UUID key
-        DataValue uuidResult = function.Execute([DataValue.FromUuid(Guid.NewGuid()), DataValue.FromScalar(0)]);
+        DataValue uuidResult = function.Execute([DataValue.FromUuid(Guid.NewGuid()), DataValue.FromFloat32(0)]);
         Assert.False(uuidResult.IsNull);
     }
 
@@ -83,7 +83,7 @@ public sealed class RandomFunctionTests
     {
         HashSplitFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String]));
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -97,11 +97,11 @@ public sealed class RandomFunctionTests
     public void HashSplit_ValidateArguments_AcceptsAnyKeyKind()
     {
         HashSplitFunction function = new();
-        DataKind result = function.ValidateArguments([DataKind.String, DataKind.Scalar]);
-        Assert.Equal(DataKind.Scalar, result);
+        DataKind result = function.ValidateArguments([DataKind.String, DataKind.Float32]);
+        Assert.Equal(DataKind.Float32, result);
 
         result = function.ValidateArguments([DataKind.Uuid, DataKind.UInt8]);
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ──────────────────── random_int ────────────────────
@@ -112,8 +112,8 @@ public sealed class RandomFunctionTests
         RandomIntFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(1), DataValue.FromScalar(10)]);
-            float value = result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(1), DataValue.FromFloat32(10)]);
+            float value = result.AsFloat32();
             Assert.True(value >= 1 && value <= 10, $"Expected [1, 10], got {value}.");
             Assert.Equal(MathF.Truncate(value), value);
         }
@@ -123,8 +123,8 @@ public sealed class RandomFunctionTests
     public void RandomInt_MinEqualsMax_ReturnsThatValue()
     {
         RandomIntFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(5), DataValue.FromScalar(5)]);
-        Assert.Equal(5f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(5), DataValue.FromFloat32(5)]);
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
@@ -132,21 +132,21 @@ public sealed class RandomFunctionTests
     {
         RandomIntFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(10), DataValue.FromScalar(1)]));
+            function.Execute([DataValue.FromFloat32(10), DataValue.FromFloat32(1)]));
     }
 
     [Fact]
     public void RandomInt_ValidateArguments_WrongArity()
     {
         RandomIntFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void RandomInt_ValidateArguments_WrongType()
     {
         RandomIntFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     // ──────────────────── random_range ────────────────────
@@ -157,8 +157,8 @@ public sealed class RandomFunctionTests
         RandomRangeFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(-5), DataValue.FromScalar(5)]);
-            float value = result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(-5), DataValue.FromFloat32(5)]);
+            float value = result.AsFloat32();
             Assert.InRange(value, -5f, 5f);
         }
     }
@@ -168,14 +168,14 @@ public sealed class RandomFunctionTests
     {
         RandomRangeFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(5), DataValue.FromScalar(5)]));
+            function.Execute([DataValue.FromFloat32(5), DataValue.FromFloat32(5)]));
     }
 
     [Fact]
     public void RandomRange_ValidateArguments_WrongArity()
     {
         RandomRangeFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     // ──────────────────── random_normal ────────────────────
@@ -188,8 +188,8 @@ public sealed class RandomFunctionTests
         int count = 10_000;
         for (int i = 0; i < count; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(100), DataValue.FromScalar(1)]);
-            sum += result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(100), DataValue.FromFloat32(1)]);
+            sum += result.AsFloat32();
         }
 
         float mean = sum / count;
@@ -201,22 +201,22 @@ public sealed class RandomFunctionTests
     {
         RandomNormalFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(0), DataValue.FromScalar(-1)]));
+            function.Execute([DataValue.FromFloat32(0), DataValue.FromFloat32(-1)]));
     }
 
     [Fact]
     public void RandomNormal_ZeroStddev_ReturnsMean()
     {
         RandomNormalFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(42), DataValue.FromScalar(0)]);
-        Assert.Equal(42f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(42), DataValue.FromFloat32(0)]);
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
     public void RandomNormal_ValidateArguments_WrongArity()
     {
         RandomNormalFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     // ──────────────────── random_boolean ────────────────────
@@ -227,7 +227,7 @@ public sealed class RandomFunctionTests
         RandomBooleanFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(0)]);
+            DataValue result = function.Execute([DataValue.FromFloat32(0)]);
             Assert.False(result.AsBoolean());
         }
     }
@@ -238,7 +238,7 @@ public sealed class RandomFunctionTests
         RandomBooleanFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(1)]);
+            DataValue result = function.Execute([DataValue.FromFloat32(1)]);
             Assert.True(result.AsBoolean());
         }
     }
@@ -247,15 +247,15 @@ public sealed class RandomFunctionTests
     public void RandomBoolean_InvalidProbability_Throws()
     {
         RandomBooleanFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.Execute([DataValue.FromScalar(-0.1f)]));
-        Assert.Throws<ArgumentException>(() => function.Execute([DataValue.FromScalar(1.1f)]));
+        Assert.Throws<ArgumentException>(() => function.Execute([DataValue.FromFloat32(-0.1f)]));
+        Assert.Throws<ArgumentException>(() => function.Execute([DataValue.FromFloat32(1.1f)]));
     }
 
     [Fact]
     public void RandomBoolean_ReturnsBoolean()
     {
         RandomBooleanFunction function = new();
-        DataKind kind = function.ValidateArguments([DataKind.Scalar]);
+        DataKind kind = function.ValidateArguments([DataKind.Float32]);
         Assert.Equal(DataKind.Boolean, kind);
     }
 }

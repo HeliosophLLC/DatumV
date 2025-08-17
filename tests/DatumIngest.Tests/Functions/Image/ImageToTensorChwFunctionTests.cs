@@ -48,7 +48,7 @@ public sealed class ImageToTensorChwFunctionTests
     [Fact]
     public void Validate_WrongType_Throws()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]

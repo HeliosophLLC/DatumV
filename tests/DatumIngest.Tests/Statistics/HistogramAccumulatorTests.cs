@@ -11,7 +11,7 @@ public sealed class HistogramAccumulatorTests
     {
         HistogramAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
         Assert.Single(result.Counts);
@@ -25,7 +25,7 @@ public sealed class HistogramAccumulatorTests
 
         for (int i = 0; i <= 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
@@ -74,7 +74,7 @@ public sealed class HistogramAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(42.0f));
+            accumulator.Add(DataValue.FromFloat32(42.0f));
         }
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
@@ -87,8 +87,8 @@ public sealed class HistogramAccumulatorTests
     {
         HistogramAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
         Assert.Equal(1, accumulator.TotalCount);
@@ -119,12 +119,12 @@ public sealed class HistogramAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            first.Add(DataValue.FromScalar(i));
+            first.Add(DataValue.FromFloat32(i));
         }
 
         for (int i = 50; i < 100; i++)
         {
-            second.Add(DataValue.FromScalar(i));
+            second.Add(DataValue.FromFloat32(i));
         }
 
         first.Merge(second);
@@ -145,7 +145,7 @@ public sealed class HistogramAccumulatorTests
         {
             for (int i = 0; i < 10; i++)
             {
-                accumulator.Add(DataValue.FromScalar(age));
+                accumulator.Add(DataValue.FromFloat32(age));
             }
         }
 
@@ -175,7 +175,7 @@ public sealed class HistogramAccumulatorTests
         {
             for (int i = 0; i < 100; i++)
             {
-                accumulator.Add(DataValue.FromScalar(value));
+                accumulator.Add(DataValue.FromFloat32(value));
             }
         }
 
@@ -201,11 +201,11 @@ public sealed class HistogramAccumulatorTests
         HistogramAccumulator accumulator = new(binCount: 10);
 
         // Non-integer values — should use equal-width continuous binning.
-        accumulator.Add(DataValue.FromScalar(0.1f));
-        accumulator.Add(DataValue.FromScalar(0.5f));
-        accumulator.Add(DataValue.FromScalar(1.7f));
-        accumulator.Add(DataValue.FromScalar(3.14f));
-        accumulator.Add(DataValue.FromScalar(9.99f));
+        accumulator.Add(DataValue.FromFloat32(0.1f));
+        accumulator.Add(DataValue.FromFloat32(0.5f));
+        accumulator.Add(DataValue.FromFloat32(1.7f));
+        accumulator.Add(DataValue.FromFloat32(3.14f));
+        accumulator.Add(DataValue.FromFloat32(9.99f));
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
 
@@ -223,11 +223,11 @@ public sealed class HistogramAccumulatorTests
         HistogramAccumulator accumulator = new(binCount: 10);
 
         // Mix of integer and fractional — should detect as continuous.
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(3.5f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(3.5f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
 

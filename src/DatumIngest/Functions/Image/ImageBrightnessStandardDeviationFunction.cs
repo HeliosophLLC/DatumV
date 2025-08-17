@@ -35,7 +35,7 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
                 $"image_brightness_std() requires Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -45,7 +45,7 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
@@ -90,7 +90,7 @@ public sealed class ImageBrightnessStandardDeviationFunction : IScalarFunction, 
 
             double variance = sumSquaredDifferences / totalPixels;
             float standardDeviation = (float)System.Math.Sqrt(variance);
-            return DataValue.FromScalar(standardDeviation);
+            return DataValue.FromFloat32(standardDeviation);
         }
     }
 

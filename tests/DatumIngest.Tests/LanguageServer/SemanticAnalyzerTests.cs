@@ -27,7 +27,7 @@ public sealed class SemanticAnalyzerTests
         List<TableColumnEntry> columnEntries = new();
         foreach (string column in columns)
         {
-            columnEntries.Add(new TableColumnEntry { Name = column, Kind = "Scalar", Nullable = false });
+            columnEntries.Add(new TableColumnEntry { Name = column, Kind = "Float32", Nullable = false });
         }
 
         return new TableSchemaEntry { Name = name, Columns = columnEntries };

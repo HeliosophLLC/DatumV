@@ -23,12 +23,12 @@ public sealed class NtileFunction : IWindowFunction
             throw new ArgumentException("NTILE() requires exactly one argument (the number of buckets).");
         }
 
-        if (argumentKinds[0] != DataKind.Scalar)
+        if (argumentKinds[0] != DataKind.Float32)
         {
             throw new ArgumentException("NTILE() argument must be a numeric scalar.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -53,7 +53,7 @@ public sealed class NtileFunction : IWindowFunction
 
             // Evaluate the bucket count from the first row (constant expression).
             DataValue bucketValue = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
-            int bucketCount = (int)bucketValue.AsScalar();
+            int bucketCount = (int)bucketValue.AsFloat32();
 
             if (bucketCount <= 0)
             {
@@ -73,7 +73,7 @@ public sealed class NtileFunction : IWindowFunction
 
                 for (int j = 0; j < bucketSize && rowIndex < rowCount; j++)
                 {
-                    results[rowIndex] = DataValue.FromScalar(bucket);
+                    results[rowIndex] = DataValue.FromFloat32(bucket);
                     rowIndex++;
                 }
             }

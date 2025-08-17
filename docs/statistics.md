@@ -180,7 +180,7 @@ All feature types share: `name`, `kind`, `count`, `nullCount`, `validCount`, `es
     {
       "type": "numeric",
       "name": "image_id",
-      "kind": "Scalar",
+      "kind": "Float32",
       "count": 5000,
       "nullCount": 0,
       "validCount": 5000,

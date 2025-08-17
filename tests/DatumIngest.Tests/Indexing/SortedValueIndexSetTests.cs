@@ -11,7 +11,7 @@ public sealed class SortedValueIndexSetTests
     [Fact]
     public void TryGetIndex_ExistingColumn_ReturnsTrue()
     {
-        ValueIndexEntry[] entries = [new(DataValue.FromScalar(1.0f), 0, 0)];
+        ValueIndexEntry[] entries = [new(DataValue.FromFloat32(1.0f), 0, 0)];
         Dictionary<string, SortedValueIndex> indexes = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new SortedValueIndex(entries)

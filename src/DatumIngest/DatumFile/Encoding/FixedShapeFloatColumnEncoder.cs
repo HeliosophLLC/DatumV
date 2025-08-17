@@ -108,7 +108,7 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
     {
         return value.Kind switch
         {
-            DataKind.Scalar => new float[] { value.AsScalar() },
+            DataKind.Float32 => new float[] { value.AsFloat32() },
             DataKind.Vector => value.AsVector(),
             DataKind.Matrix => value.AsMatrix(out _, out _),
             DataKind.Tensor => value.AsTensor(out _),
@@ -123,6 +123,6 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
             return new DatumZoneMap(nullCount, null, null);
         }
 
-        return new DatumZoneMap(nullCount, DataValue.FromScalar(minimum), DataValue.FromScalar(maximum));
+        return new DatumZoneMap(nullCount, DataValue.FromFloat32(minimum), DataValue.FromFloat32(maximum));
     }
 }

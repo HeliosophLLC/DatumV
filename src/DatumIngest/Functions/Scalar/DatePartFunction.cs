@@ -35,7 +35,7 @@ public sealed class DatePartFunction : IScalarFunction
             throw new ArgumentException($"date_part() second argument must be Date or DateTime, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -46,7 +46,7 @@ public sealed class DatePartFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         string partName = partValue.AsString();
@@ -73,6 +73,6 @@ public sealed class DatePartFunction : IScalarFunction
                 $"Unknown date part '{partName}'. Supported: year, month, day, day_of_week, hour, minute, second, day_of_year, week_of_year, quarter, is_weekend."),
         };
 
-        return DataValue.FromScalar(result);
+        return DataValue.FromFloat32(result);
     }
 }

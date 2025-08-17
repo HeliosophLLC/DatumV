@@ -193,7 +193,7 @@ public sealed class QuerySchemaResolverTests
         Assert.Equal("person_name", schema.Columns[0].ColumnName);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
         Assert.Equal("total", schema.Columns[1].ColumnName);
-        Assert.Equal(DataKind.Scalar, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[1].Kind);
     }
 
     // ───────────────────── Function source ─────────────────────
@@ -217,7 +217,7 @@ public sealed class QuerySchemaResolverTests
 
         Assert.Single(schema.Columns);
         Assert.Equal("Value", schema.Columns[0].ColumnName);
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
         Assert.Equal("r", schema.Columns[0].SourceTableOrAlias);
     }
 
@@ -275,7 +275,7 @@ public sealed class QuerySchemaResolverTests
 
         ResolvedColumn? column = schema.FindColumn("age");
         Assert.NotNull(column);
-        Assert.Equal(DataKind.Scalar, column.Kind);
+        Assert.Equal(DataKind.Float32, column.Kind);
     }
 
     [Fact]

@@ -119,7 +119,7 @@ public sealed class Hdf5OutputWriter : IOutputWriter
 
         return column.Kind switch
         {
-            DataKind.Scalar => BuildScalarDataset(column.Name, rowCount),
+            DataKind.Float32 => BuildScalarDataset(column.Name, rowCount),
             DataKind.UInt8 => BuildUInt8Dataset(column.Name, rowCount),
             DataKind.String or DataKind.JsonValue => BuildStringDataset(column),
             DataKind.Vector => BuildVectorDataset(column.Name, rowCount),
@@ -142,7 +142,7 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         for (int i = 0; i < rowCount; i++)
         {
             DataValue value = _rows[i][columnName];
-            data[i] = value.IsNull ? float.NaN : value.AsScalar();
+            data[i] = value.IsNull ? float.NaN : value.AsFloat32();
         }
 
         return data;

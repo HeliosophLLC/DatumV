@@ -4,7 +4,10 @@ namespace DatumIngest.Model;
 
 /// <summary>
 /// Implements the implicit numeric widening rules for the query engine type system.
-/// The widening graph follows: UInt8 → Scalar → Vector → Tensor, and Matrix → Tensor.
+/// The widening graph follows the cross-sign convergent chain:
+/// Boolean → UInt8 → Int16 → Int32 → Int64 → Float64 → Vector → Tensor,
+/// with signed/unsigned merge points: Int8 → Int16, UInt16 → Int32, UInt32 → Int64,
+/// UInt64 → Float64, Float32 → Float64, Duration → Float64, Matrix → Tensor.
 /// </summary>
 public static class TypeCoercion
 {
@@ -63,14 +66,26 @@ public static class TypeCoercion
     {
         if (kindA == kindB) return kindA;
 
-        // Iterate enum values in numeric order (narrowest first) and return the
-        // first kind that both inputs can reach through widening.
-        foreach (DataKind candidate in Enum.GetValues<DataKind>())
+        // Collect all kinds reachable from A (including A itself).
+        HashSet<DataKind> reachableFromA = [];
+        DataKind? current = kindA;
+        while (current is not null)
         {
-            if (CanWiden(kindA, candidate) && CanWiden(kindB, candidate))
+            reachableFromA.Add(current.Value);
+            current = GetWideningTarget(current.Value);
+        }
+
+        // Walk from B and return the first kind also reachable from A.
+        // This yields the narrowest type both can widen to.
+        current = kindB;
+        while (current is not null)
+        {
+            if (reachableFromA.Contains(current.Value))
             {
-                return candidate;
+                return current.Value;
             }
+
+            current = GetWideningTarget(current.Value);
         }
 
         return null;
@@ -84,10 +99,18 @@ public static class TypeCoercion
     {
         return kind switch
         {
-            DataKind.Boolean => DataKind.Scalar,
-            DataKind.UInt8 => DataKind.Scalar,
-            DataKind.Duration => DataKind.Scalar,
-            DataKind.Scalar => DataKind.Vector,
+            DataKind.Boolean => DataKind.UInt8,
+            DataKind.UInt8 => DataKind.Int16,
+            DataKind.Int8 => DataKind.Int16,
+            DataKind.Int16 => DataKind.Int32,
+            DataKind.UInt16 => DataKind.Int32,
+            DataKind.Int32 => DataKind.Int64,
+            DataKind.UInt32 => DataKind.Int64,
+            DataKind.Int64 => DataKind.Float64,
+            DataKind.UInt64 => DataKind.Float64,
+            DataKind.Float32 => DataKind.Float64,
+            DataKind.Duration => DataKind.Float64,
+            DataKind.Float64 => DataKind.Vector,
             DataKind.Vector => DataKind.Tensor,
             DataKind.Matrix => DataKind.Tensor,
             _ => null,
@@ -101,10 +124,18 @@ public static class TypeCoercion
     {
         return value.Kind switch
         {
-            DataKind.Boolean => DataValue.FromScalar(value.AsBoolean() ? 1f : 0f),
-            DataKind.UInt8 => DataValue.FromScalar(value.AsUInt8()),
-            DataKind.Duration => DataValue.FromScalar((float)value.AsDuration().TotalSeconds),
-            DataKind.Scalar => DataValue.FromVector([value.AsScalar()]),
+            DataKind.Boolean => DataValue.FromUInt8(value.AsBoolean() ? (byte)1 : (byte)0),
+            DataKind.UInt8 => DataValue.FromInt16(value.AsUInt8()),
+            DataKind.Int8 => DataValue.FromInt16(value.AsInt8()),
+            DataKind.Int16 => DataValue.FromInt32(value.AsInt16()),
+            DataKind.UInt16 => DataValue.FromInt32(value.AsUInt16()),
+            DataKind.Int32 => DataValue.FromInt64(value.AsInt32()),
+            DataKind.UInt32 => DataValue.FromInt64(value.AsUInt32()),
+            DataKind.Int64 => DataValue.FromFloat64(value.AsInt64()),
+            DataKind.UInt64 => DataValue.FromFloat64(value.AsUInt64()),
+            DataKind.Float32 => DataValue.FromFloat64(value.AsFloat32()),
+            DataKind.Duration => DataValue.FromFloat64(value.AsDuration().TotalSeconds),
+            DataKind.Float64 => DataValue.FromVector([(float)value.AsFloat64()]),
             DataKind.Vector => value.ToTensor(),
             DataKind.Matrix => value.ToTensor(),
             _ => throw new InvalidOperationException($"No widening step exists for {value.Kind}."),
@@ -146,7 +177,10 @@ public static class TypeCoercion
     internal static bool CanCoerceStringTo(DataKind targetKind)
     {
         return targetKind is
-            DataKind.Scalar or DataKind.UInt8 or DataKind.Boolean or
+            DataKind.Float32 or DataKind.Float64 or
+            DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16 or
+            DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64 or
+            DataKind.Boolean or
             DataKind.Date or DataKind.DateTime or DataKind.Time or
             DataKind.Duration or DataKind.Uuid or DataKind.JsonValue;
     }
@@ -158,11 +192,35 @@ public static class TypeCoercion
     {
         return targetKind switch
         {
-            DataKind.Scalar when float.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands,
-                CultureInfo.InvariantCulture, out float scalar) => DataValue.FromScalar(scalar),
+            DataKind.Float32 when float.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture, out float scalar) => DataValue.FromFloat32(scalar),
+
+            DataKind.Float64 when double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture, out double float64) => DataValue.FromFloat64(float64),
 
             DataKind.UInt8 when byte.TryParse(text, NumberStyles.Integer,
                 CultureInfo.InvariantCulture, out byte byteValue) => DataValue.FromUInt8(byteValue),
+
+            DataKind.Int8 when sbyte.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out sbyte int8Value) => DataValue.FromInt8(int8Value),
+
+            DataKind.Int16 when short.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out short int16Value) => DataValue.FromInt16(int16Value),
+
+            DataKind.UInt16 when ushort.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out ushort uint16Value) => DataValue.FromUInt16(uint16Value),
+
+            DataKind.Int32 when int.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out int int32Value) => DataValue.FromInt32(int32Value),
+
+            DataKind.UInt32 when uint.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out uint uint32Value) => DataValue.FromUInt32(uint32Value),
+
+            DataKind.Int64 when long.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out long int64Value) => DataValue.FromInt64(int64Value),
+
+            DataKind.UInt64 when ulong.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out ulong uint64Value) => DataValue.FromUInt64(uint64Value),
 
             DataKind.Boolean => TryParseBoolean(text),
 

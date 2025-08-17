@@ -51,17 +51,17 @@ public sealed class RoundFunction : IScalarFunction
         }
 
         DataKind kind = argumentKinds[0];
-        if (kind is not (DataKind.Scalar or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"round() does not support {kind}.");
         }
 
-        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException("round() second argument must be Scalar or UInt8.");
         }
 
-        return kind is DataKind.UInt8 ? DataKind.Scalar : kind;
+        return kind is DataKind.UInt8 ? DataKind.Float32 : kind;
     }
 
     /// <inheritdoc />
@@ -70,13 +70,13 @@ public sealed class RoundFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Scalar : input.Kind);
+            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Float32 : input.Kind);
         }
 
         int decimals = 0;
         if (arguments.Length == 2 && !arguments[1].IsNull)
         {
-            decimals = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar());
+            decimals = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32());
         }
 
         float Round(float v) => MathF.Round(v, decimals, MidpointRounding.AwayFromZero);
@@ -84,9 +84,9 @@ public sealed class RoundFunction : IScalarFunction
         switch (input.Kind)
         {
             case DataKind.UInt8:
-                return DataValue.FromScalar(Round(input.AsUInt8()));
-            case DataKind.Scalar:
-                return DataValue.FromScalar(Round(input.AsScalar()));
+                return DataValue.FromFloat32(Round(input.AsUInt8()));
+            case DataKind.Float32:
+                return DataValue.FromFloat32(Round(input.AsFloat32()));
             case DataKind.Vector:
             {
                 float[] source = input.AsVector();
@@ -145,7 +145,7 @@ public sealed class BucketizeFunction : IScalarFunction
             throw new ArgumentException("bucketize() requires exactly 2 arguments.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException("bucketize() first argument must be Scalar or UInt8.");
         }
@@ -155,7 +155,7 @@ public sealed class BucketizeFunction : IScalarFunction
             throw new ArgumentException("bucketize() second argument must be a Vector of boundaries.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -166,10 +166,10 @@ public sealed class BucketizeFunction : IScalarFunction
 
         if (input.IsNull || boundaries.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
-        float value = input.Kind is DataKind.UInt8 ? input.AsUInt8() : input.AsScalar();
+        float value = input.Kind is DataKind.UInt8 ? input.AsUInt8() : input.AsFloat32();
         float[] bounds = boundaries.AsVector();
 
         int bucket = 0;
@@ -185,7 +185,7 @@ public sealed class BucketizeFunction : IScalarFunction
             }
         }
 
-        return DataValue.FromScalar(bucket);
+        return DataValue.FromFloat32(bucket);
     }
 }
 

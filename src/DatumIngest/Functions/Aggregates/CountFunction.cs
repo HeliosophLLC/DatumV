@@ -21,7 +21,7 @@ public sealed class CountFunction : IAggregateFunction
             throw new ArgumentException("COUNT() accepts zero or one argument.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -45,6 +45,6 @@ public sealed class CountFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result => DataValue.FromScalar(_count);
+        public DataValue Result => DataValue.FromFloat32(_count);
     }
 }

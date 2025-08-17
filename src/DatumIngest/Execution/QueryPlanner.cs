@@ -358,7 +358,7 @@ public sealed class QueryPlanner
             source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
         }
 
-        // 2b. Inject source transforms (e.g. ScalarSubqueryOperator for correlated subqueries)
+        // 2b. Inject source transforms (e.g. Float32SubqueryOperator for correlated subqueries)
         // after joins and predicate pushdown, before the remaining WHERE filter.
         if (sourceTransform is not null)
         {
@@ -2374,16 +2374,16 @@ public sealed class QueryPlanner
 
         if (literal.Value is null)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         return literal.Value switch
         {
             DataValue dataValue => dataValue,
-            int intValue => DataValue.FromScalar(intValue),
-            long longValue => DataValue.FromScalar(longValue),
-            float floatValue => DataValue.FromScalar(floatValue),
-            double doubleValue => DataValue.FromScalar((float)doubleValue),
+            int intValue => DataValue.FromFloat32(intValue),
+            long longValue => DataValue.FromFloat32(longValue),
+            float floatValue => DataValue.FromFloat32(floatValue),
+            double doubleValue => DataValue.FromFloat32((float)doubleValue),
             string stringValue => DataValue.FromString(stringValue),
             bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(

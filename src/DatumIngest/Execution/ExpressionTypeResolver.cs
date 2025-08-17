@@ -30,10 +30,10 @@ public static class ExpressionTypeResolver
             BinaryExpression binary => ResolveBinary(binary, sourceSchema, functions),
             UnaryExpression unary => ResolveUnary(unary, sourceSchema, functions),
             FunctionCallExpression function => ResolveFunction(function, sourceSchema, functions),
-            InExpression => DataKind.Scalar,
-            BetweenExpression => DataKind.Scalar,
-            IsNullExpression => DataKind.Scalar,
-            LikeExpression => DataKind.Scalar,
+            InExpression => DataKind.Float32,
+            BetweenExpression => DataKind.Float32,
+            IsNullExpression => DataKind.Float32,
+            LikeExpression => DataKind.Float32,
             CastExpression cast => ResolveCast(cast),
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
@@ -46,12 +46,12 @@ public static class ExpressionTypeResolver
     {
         if (literal.Value is null)
         {
-            return DataKind.Scalar;
+            return DataKind.Float32;
         }
 
         return literal.Value switch
         {
-            int or long or float or double => DataKind.Scalar,
+            int or long or float or double => DataKind.Float32,
             string => DataKind.String,
             bool => DataKind.Boolean,
             _ => null,
@@ -136,7 +136,7 @@ public static class ExpressionTypeResolver
         // Comparison and logical operators always produce Scalar (boolean result).
         if (IsComparisonOrLogical(binary.Operator))
         {
-            return DataKind.Scalar;
+            return DataKind.Float32;
         }
 
         // Arithmetic operators: find common kind of both operands.
@@ -155,7 +155,7 @@ public static class ExpressionTypeResolver
             return DataKind.Duration;
         }
 
-        return TypeCoercion.FindCommonKind(leftKind.Value, rightKind.Value) ?? DataKind.Scalar;
+        return TypeCoercion.FindCommonKind(leftKind.Value, rightKind.Value) ?? DataKind.Float32;
     }
 
     private static DataKind? ResolveUnary(UnaryExpression unary, Schema sourceSchema, FunctionRegistry functions)
@@ -163,10 +163,10 @@ public static class ExpressionTypeResolver
         return unary.Operator switch
         {
             // NOT always produces a boolean (Scalar).
-            UnaryOperator.Not => DataKind.Scalar,
+            UnaryOperator.Not => DataKind.Float32,
 
             // Negate preserves the operand kind.
-            UnaryOperator.Negate => ResolveType(unary.Operand, sourceSchema, functions) ?? DataKind.Scalar,
+            UnaryOperator.Negate => ResolveType(unary.Operand, sourceSchema, functions) ?? DataKind.Float32,
             _ => null,
         };
     }

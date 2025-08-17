@@ -27,10 +27,10 @@ public sealed class HashSplitFunction : IScalarFunction
         if (argumentKinds.Length != 2)
             throw new ArgumentException("hash_split() requires exactly 2 arguments (key, seed).");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"hash_split() seed (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -38,11 +38,11 @@ public sealed class HashSplitFunction : IScalarFunction
     {
         DataValue key = arguments[0];
         if (key.IsNull)
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
 
         long seed = (long)(arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar());
+            : arguments[1].AsFloat32());
 
         string keyString = key.ToString()!;
         byte[] keyBytes = Encoding.UTF8.GetBytes(keyString);
@@ -50,7 +50,7 @@ public sealed class HashSplitFunction : IScalarFunction
 
         // Map upper 53 bits to [0, 1) with double-precision granularity.
         double value = (hash >>> 11) * (1.0 / (1UL << 53));
-        return DataValue.FromScalar((float)value);
+        return DataValue.FromFloat32((float)value);
     }
 }
 
@@ -69,13 +69,13 @@ public sealed class RandomIntFunction : IScalarFunction
         if (argumentKinds.Length != 2)
             throw new ArgumentException("random_int() requires exactly 2 arguments (min, max).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_int() min (argument 1) must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_int() max (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -83,16 +83,16 @@ public sealed class RandomIntFunction : IScalarFunction
     {
         int min = (int)(arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar());
+            : arguments[0].AsFloat32());
 
         int max = (int)(arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar());
+            : arguments[1].AsFloat32());
 
         if (min > max)
             throw new ArgumentException($"random_int() min ({min}) must be <= max ({max}).");
 
-        return DataValue.FromScalar(Random.Shared.Next(min, max + 1));
+        return DataValue.FromFloat32(Random.Shared.Next(min, max + 1));
     }
 }
 
@@ -111,13 +111,13 @@ public sealed class RandomRangeFunction : IScalarFunction
         if (argumentKinds.Length != 2)
             throw new ArgumentException("random_range() requires exactly 2 arguments (min, max).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_range() min (argument 1) must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_range() max (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -125,17 +125,17 @@ public sealed class RandomRangeFunction : IScalarFunction
     {
         float min = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         float max = arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar();
+            : arguments[1].AsFloat32();
 
         if (min >= max)
             throw new ArgumentException($"random_range() min ({min}) must be < max ({max}).");
 
         double value = Random.Shared.NextDouble() * (max - min) + min;
-        return DataValue.FromScalar((float)value);
+        return DataValue.FromFloat32((float)value);
     }
 }
 
@@ -154,13 +154,13 @@ public sealed class RandomNormalFunction : IScalarFunction
         if (argumentKinds.Length != 2)
             throw new ArgumentException("random_normal() requires exactly 2 arguments (mean, stddev).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_normal() mean (argument 1) must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_normal() stddev (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -168,17 +168,17 @@ public sealed class RandomNormalFunction : IScalarFunction
     {
         float mean = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         float stddev = arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar();
+            : arguments[1].AsFloat32();
 
         if (stddev < 0)
             throw new ArgumentException($"random_normal() stddev must be non-negative, got {stddev}.");
 
         float sample = SampleStandardNormal();
-        return DataValue.FromScalar(mean + stddev * sample);
+        return DataValue.FromFloat32(mean + stddev * sample);
     }
 
     /// <summary>
@@ -208,7 +208,7 @@ public sealed class RandomBooleanFunction : IScalarFunction
         if (argumentKinds.Length != 1)
             throw new ArgumentException("random_boolean() requires exactly 1 argument (probability).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_boolean() probability must be Scalar or UInt8, got {argumentKinds[0]}.");
 
         return DataKind.Boolean;
@@ -219,7 +219,7 @@ public sealed class RandomBooleanFunction : IScalarFunction
     {
         float probability = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         if (probability < 0f || probability > 1f)
             throw new ArgumentException($"random_boolean() probability must be in [0, 1], got {probability}.");

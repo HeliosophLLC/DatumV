@@ -39,7 +39,7 @@ public sealed class TableColumnEntry
     /// <summary>The column name as it appears in query expressions.</summary>
     public required string Name { get; init; }
 
-    /// <summary>The data kind name (e.g. "Scalar", "String", "Vector").</summary>
+    /// <summary>The data kind name (e.g. "Float32", "String", "Vector").</summary>
     public required string Kind { get; init; }
 
     /// <summary>Whether this column may contain null values.</summary>
@@ -57,7 +57,7 @@ public sealed class FunctionSignature
     /// <summary>The ordered parameter list for this signature.</summary>
     public required IReadOnlyList<ParameterSignature> Parameters { get; init; }
 
-    /// <summary>The return type name (e.g. "Scalar", "String"), or null if context-dependent.</summary>
+    /// <summary>The return type name (e.g. "Float32", "String"), or null if context-dependent.</summary>
     public string? ReturnType { get; init; }
 
     /// <summary>A human-readable description of what the function does.</summary>

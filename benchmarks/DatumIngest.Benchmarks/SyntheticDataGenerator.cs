@@ -79,11 +79,11 @@ public static class SyntheticDataGenerator
         {
             DataValue[] values =
             [
-                DataValue.FromScalar(i),
+                DataValue.FromFloat32(i),
                 DataValue.FromString($"item_{i:D6}"),
-                DataValue.FromScalar((float)(random.NextDouble() * 1000.0)),
+                DataValue.FromFloat32((float)(random.NextDouble() * 1000.0)),
                 DataValue.FromString(categories[random.Next(categories.Length)]),
-                DataValue.FromScalar((float)(random.NextDouble() * 100.0))
+                DataValue.FromFloat32((float)(random.NextDouble() * 100.0))
             ];
             rows[i] = new Row(columnNames, values);
         }
@@ -105,9 +105,9 @@ public static class SyntheticDataGenerator
         {
             DataValue[] values =
             [
-                DataValue.FromScalar(i),
+                DataValue.FromFloat32(i),
                 DataValue.FromString($"desc_{i:D6}"),
-                DataValue.FromScalar((float)(random.NextDouble() * 50.0))
+                DataValue.FromFloat32((float)(random.NextDouble() * 50.0))
             ];
             rows[i] = new Row(columnNames, values);
         }

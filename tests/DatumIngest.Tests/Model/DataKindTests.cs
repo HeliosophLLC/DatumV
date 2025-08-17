@@ -10,7 +10,7 @@ public class DataKindTests
         // Every DataKind value must exist as a distinct enum member
         DataKind[] expectedKinds =
         [
-            DataKind.Scalar,
+            DataKind.Float32,
             DataKind.Vector,
             DataKind.Matrix,
             DataKind.Tensor,
@@ -29,7 +29,7 @@ public class DataKindTests
     }
 
     [Theory]
-    [InlineData(DataKind.Scalar)]
+    [InlineData(DataKind.Float32)]
     [InlineData(DataKind.Vector)]
     [InlineData(DataKind.Matrix)]
     [InlineData(DataKind.Tensor)]
@@ -40,9 +40,9 @@ public class DataKindTests
     }
 
     [Fact]
-    public void TotalEnumMemberCountIsSixteen()
+    public void TotalEnumMemberCountIsTwentyFour()
     {
         DataKind[] allValues = Enum.GetValues<DataKind>();
-        Assert.Equal(16, allValues.Length);
+        Assert.Equal(24, allValues.Length);
     }
 }

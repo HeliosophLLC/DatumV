@@ -24,16 +24,16 @@ public class ExpressionEvaluatorTests
     public void Literal_Integer()
     {
         DataValue result = _evaluator.Evaluate(new LiteralExpression(42), MakeRow());
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(42f, result.AsScalar());
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
     public void Literal_Float()
     {
         DataValue result = _evaluator.Evaluate(new LiteralExpression(3.14), MakeRow());
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(3.14f, result.AsScalar(), 0.001f);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(3.14f, result.AsFloat32(), 0.001f);
     }
 
     [Fact]
@@ -63,17 +63,17 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void ColumnReference_ByName()
     {
-        Row row = MakeRow(("age", DataValue.FromScalar(25f)));
+        Row row = MakeRow(("age", DataValue.FromFloat32(25f)));
         DataValue result = _evaluator.Evaluate(new ColumnReference("age"), row);
-        Assert.Equal(25f, result.AsScalar());
+        Assert.Equal(25f, result.AsFloat32());
     }
 
     [Fact]
     public void ColumnReference_Qualified()
     {
-        Row row = MakeRow(("t.age", DataValue.FromScalar(30f)));
+        Row row = MakeRow(("t.age", DataValue.FromFloat32(30f)));
         DataValue result = _evaluator.Evaluate(new ColumnReference("t", "age"), row);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Add,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(15f, result.AsScalar());
+        Assert.Equal(15f, result.AsFloat32());
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Subtract,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(7f, result.AsScalar());
+        Assert.Equal(7f, result.AsFloat32());
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Multiply,
                 new LiteralExpression(6)),
             MakeRow());
-        Assert.Equal(24f, result.AsScalar());
+        Assert.Equal(24f, result.AsFloat32());
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Divide,
                 new LiteralExpression(4)),
             MakeRow());
-        Assert.Equal(5f, result.AsScalar());
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
@@ -143,7 +143,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Divide,
                 new LiteralExpression(0)),
             MakeRow());
-        Assert.True(float.IsNaN(result.AsScalar()));
+        Assert.True(float.IsNaN(result.AsFloat32()));
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Modulo,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Modulo,
                 new LiteralExpression(0)),
             MakeRow());
-        Assert.True(float.IsNaN(result.AsScalar()));
+        Assert.True(float.IsNaN(result.AsFloat32()));
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Power,
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(1024f, result.AsScalar());
+        Assert.Equal(1024f, result.AsFloat32());
     }
 
     // ─────────────── Comparisons ───────────────
@@ -193,7 +193,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Equal,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Equal,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.NotEqual,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.LessThan,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.GreaterThan,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.LessThanOrEqual,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.GreaterThanOrEqual,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -277,7 +277,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Equal,
                 new LiteralExpression("abc")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.LessThan,
                 new LiteralExpression("def")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     // ─────────────── Logical operators ───────────────
@@ -303,7 +303,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.And,
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.And,
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -327,7 +327,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Or,
                 new LiteralExpression(0)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -339,7 +339,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Or,
                 new LiteralExpression(0)),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -348,7 +348,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Not, new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Not, new LiteralExpression(0)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -366,7 +366,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Negate, new LiteralExpression(42)),
             MakeRow());
-        Assert.Equal(-42f, result.AsScalar());
+        Assert.Equal(-42f, result.AsFloat32());
     }
 
     // ─────────────── NULL propagation ───────────────
@@ -402,7 +402,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(3),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)]),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -413,7 +413,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(4),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)]),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -425,7 +425,7 @@ public class ExpressionEvaluatorTests
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)],
                 Negated: true),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -458,7 +458,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(3),
                 [new LiteralExpression(null), new LiteralExpression(3)]),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -468,13 +468,13 @@ public class ExpressionEvaluatorTests
             new ColumnReference("value"),
             [new LiteralExpression(10), new LiteralExpression(20), new LiteralExpression(30)]);
 
-        Row row1 = MakeRow(("value", DataValue.FromScalar(20)));
-        Row row2 = MakeRow(("value", DataValue.FromScalar(99)));
-        Row row3 = MakeRow(("value", DataValue.FromScalar(10)));
+        Row row1 = MakeRow(("value", DataValue.FromFloat32(20)));
+        Row row2 = MakeRow(("value", DataValue.FromFloat32(99)));
+        Row row3 = MakeRow(("value", DataValue.FromFloat32(10)));
 
-        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row1).AsScalar());
-        Assert.Equal(0f, _evaluator.Evaluate(inExpr, row2).AsScalar());
-        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row3).AsScalar());
+        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row1).AsFloat32());
+        Assert.Equal(0f, _evaluator.Evaluate(inExpr, row2).AsFloat32());
+        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row3).AsFloat32());
     }
 
     [Fact]
@@ -489,7 +489,7 @@ public class ExpressionEvaluatorTests
         InExpression inExpr = new(new LiteralExpression(999), values);
 
         DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -504,7 +504,7 @@ public class ExpressionEvaluatorTests
         InExpression inExpr = new(new LiteralExpression(9999), values, Negated: true);
 
         DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     // ─────────────── BETWEEN expression ───────────────
@@ -518,7 +518,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -530,7 +530,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -542,7 +542,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -555,7 +555,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(10),
                 Negated: true),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     // ─────────────── IS NULL ───────────────
@@ -563,31 +563,31 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void IsNull_True()
     {
-        Row row = MakeRow(("x", DataValue.Null(DataKind.Scalar)));
+        Row row = MakeRow(("x", DataValue.Null(DataKind.Float32)));
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x")),
             row);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
     public void IsNull_False()
     {
-        Row row = MakeRow(("x", DataValue.FromScalar(42f)));
+        Row row = MakeRow(("x", DataValue.FromFloat32(42f)));
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x")),
             row);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
     public void IsNotNull_True()
     {
-        Row row = MakeRow(("x", DataValue.FromScalar(42f)));
+        Row row = MakeRow(("x", DataValue.FromFloat32(42f)));
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x"), Negated: true),
             row);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     // ─────────────── LIKE ───────────────
@@ -601,7 +601,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("hello%")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -613,7 +613,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("%world")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -625,7 +625,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -637,7 +637,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -649,7 +649,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("hello")),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -661,7 +661,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("Hello")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     // ─────────────── ILIKE ───────────────
@@ -675,7 +675,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.ILike,
                 new LiteralExpression("hello%")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -687,7 +687,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.ILike,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -699,7 +699,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.ILike,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     // ─────────────── REGEXP ───────────────
@@ -713,7 +713,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("\\d+")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -725,7 +725,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("^\\d{3}-\\d{4}$")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -737,7 +737,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("^\\d+$")),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -749,7 +749,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("hello")),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -761,7 +761,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("(?i)hello")),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -788,7 +788,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -801,7 +801,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -814,7 +814,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("!"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -827,7 +827,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -840,7 +840,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: true),
             MakeRow());
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -878,7 +878,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new FunctionCallExpression("len", [new ColumnReference("name")]),
             row);
-        Assert.Equal(5f, result.AsScalar());
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
@@ -897,10 +897,10 @@ public class ExpressionEvaluatorTests
     {
         Row row = MakeRow(("x", DataValue.FromUInt8(200)));
         DataValue result = _evaluator.Evaluate(
-            new CastExpression(new ColumnReference("x"), "Scalar"),
+            new CastExpression(new ColumnReference("x"), "Float32"),
             row);
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(200f, result.AsScalar());
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(200f, result.AsFloat32());
     }
 
     // ─────────────── EvaluateAsBoolean ───────────────
@@ -941,8 +941,8 @@ public class ExpressionEvaluatorTests
     public void ArithmeticOnColumns()
     {
         Row row = MakeRow(
-            ("price", DataValue.FromScalar(10f)),
-            ("quantity", DataValue.FromScalar(3f)));
+            ("price", DataValue.FromFloat32(10f)),
+            ("quantity", DataValue.FromFloat32(3f)));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -950,7 +950,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Multiply,
                 new ColumnReference("quantity")),
             row);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     /// <summary>
@@ -984,8 +984,8 @@ public class ExpressionEvaluatorTests
     public void ComparisonOnColumns()
     {
         Row row = MakeRow(
-            ("age", DataValue.FromScalar(25f)),
-            ("threshold", DataValue.FromScalar(18f)));
+            ("age", DataValue.FromFloat32(25f)),
+            ("threshold", DataValue.FromFloat32(18f)));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -993,7 +993,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.GreaterThanOrEqual,
                 new ColumnReference("threshold")),
             row);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     // ─────────────── Duration arithmetic ───────────────
@@ -1058,7 +1058,7 @@ public class ExpressionEvaluatorTests
         // Duration * Scalar is not a Duration operation — widens both to float.
         Row row = MakeRow(
             ("d", DataValue.FromDuration(TimeSpan.FromHours(1))),
-            ("n", DataValue.FromScalar(2)));
+            ("n", DataValue.FromFloat32(2)));
 
         DataValue result = _evaluator.Evaluate(
             new BinaryExpression(
@@ -1067,8 +1067,8 @@ public class ExpressionEvaluatorTests
                 new ColumnReference("n")),
             row);
 
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(7200f, result.AsScalar());
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(7200f, result.AsFloat32());
     }
 
     // ─────────────── CASE expression ───────────────
@@ -1115,7 +1115,7 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Case_Simple_MatchesOperand()
     {
-        Row row = MakeRow(("status", DataValue.FromScalar(2)));
+        Row row = MakeRow(("status", DataValue.FromFloat32(2)));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 new ColumnReference("status"),
@@ -1131,7 +1131,7 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Case_Simple_NoMatch_FallsToElse()
     {
-        Row row = MakeRow(("status", DataValue.FromScalar(99)));
+        Row row = MakeRow(("status", DataValue.FromFloat32(99)));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 new ColumnReference("status"),
@@ -1144,7 +1144,7 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Case_Simple_NullOperand_ReturnsNull()
     {
-        Row row = MakeRow(("status", DataValue.Null(DataKind.Scalar)));
+        Row row = MakeRow(("status", DataValue.Null(DataKind.Float32)));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 new ColumnReference("status"),
@@ -1157,7 +1157,7 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Case_Searched_WithColumnCondition()
     {
-        Row row = MakeRow(("x", DataValue.FromScalar(5)));
+        Row row = MakeRow(("x", DataValue.FromFloat32(5)));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
@@ -1207,8 +1207,8 @@ public class ExpressionEvaluatorTests
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression("42"))],
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(42f, result.AsScalar());
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
@@ -1221,8 +1221,8 @@ public class ExpressionEvaluatorTests
                 [new WhenClause(new LiteralExpression(false), new LiteralExpression("0"))],
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -1236,28 +1236,28 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1)),
             MakeRow());
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
-    public void Case_MixedBooleanAndScalar_CoercesBooleanToScalar()
+    public void Case_MixedBooleanAndFloat32_CoercesBooleanToFloat64()
     {
-        // CASE WHEN true THEN false ELSE 1 END → false is widened to 0f
+        // CASE WHEN true THEN false ELSE 1 END → common kind is Float64
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression(false))],
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(DataKind.Float64, result.Kind);
+        Assert.Equal(0.0, result.AsFloat64());
     }
 
     [Fact]
     public void Case_NullResult_AdoptsResolvedKind()
     {
         // CASE WHEN false THEN '0' END → no match, no ELSE → null with Scalar kind
-        Row row = MakeRow(("x", DataValue.FromScalar(5)));
+        Row row = MakeRow(("x", DataValue.FromFloat32(5)));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
@@ -1268,7 +1268,7 @@ public class ExpressionEvaluatorTests
                 null),
             row);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]

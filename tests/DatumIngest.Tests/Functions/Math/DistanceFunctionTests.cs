@@ -12,7 +12,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([1f, 2f, 3f]),
             DataValue.FromVector([1f, 2f, 3f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(1f, result, 1e-5f);
     }
 
@@ -23,7 +23,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([1f, 0f]),
             DataValue.FromVector([0f, 1f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(0f, result, 1e-5f);
     }
 
@@ -34,7 +34,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([1f, 0f]),
             DataValue.FromVector([-1f, 0f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(-1f, result, 1e-5f);
     }
 
@@ -45,7 +45,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([0f, 0f]),
             DataValue.FromVector([3f, 4f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(5f, result, 1e-5f);
     }
 
@@ -56,7 +56,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([1f, 2f, 3f]),
             DataValue.FromVector([1f, 2f, 3f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(0f, result, 1e-5f);
     }
 
@@ -67,7 +67,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([0f, 0f]),
             DataValue.FromVector([3f, 4f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(7f, result, 1e-5f);
     }
 
@@ -78,7 +78,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([1f, 2f, 3f]),
             DataValue.FromVector([4f, 5f, 6f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(32f, result, 1e-5f); // 1*4 + 2*5 + 3*6 = 32
     }
 
@@ -89,7 +89,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromVector([1f, 0f]),
             DataValue.FromVector([0f, 1f])
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(0f, result, 1e-5f);
     }
 
@@ -100,7 +100,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromString("hello"),
             DataValue.FromString("hello")
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(0f, result);
     }
 
@@ -111,7 +111,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromString("hello"),
             DataValue.FromString("hallo")
-        ]).AsScalar();
+        ]).AsFloat32();
         Assert.Equal(1f, result);
     }
 
@@ -122,7 +122,7 @@ public class DistanceFunctionTests
         float result = function.Execute([
             DataValue.FromString("hi"),
             DataValue.FromString("hello")
-        ]).AsScalar();
+        ]).AsFloat32();
         // 3 length diff + 1 char diff ('i' vs 'e')
         Assert.Equal(4f, result);
     }
@@ -138,14 +138,14 @@ public class DistanceFunctionTests
     public void CosineSimilarity_Validate_Scalar_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new CosineSimilarityFunction().ValidateArguments([DataKind.Scalar, DataKind.Vector]));
+            new CosineSimilarityFunction().ValidateArguments([DataKind.Float32, DataKind.Vector]));
     }
 
     [Fact]
     public void HammingDistance_Validate_NonString_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new HammingDistanceFunction().ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            new HammingDistanceFunction().ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]

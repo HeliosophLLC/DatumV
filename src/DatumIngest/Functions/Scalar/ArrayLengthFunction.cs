@@ -4,7 +4,7 @@ namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
 /// Returns the number of elements in an <see cref="DataKind.Array"/>.
-/// <c>array_length(arr)</c> returns a <see cref="DataKind.Scalar"/> count.
+/// <c>array_length(arr)</c> returns a <see cref="DataKind.Float32"/> count.
 /// Returns null if the input is null.
 /// </summary>
 public sealed class ArrayLengthFunction : IScalarFunction
@@ -26,7 +26,7 @@ public sealed class ArrayLengthFunction : IScalarFunction
                 $"array_length() requires an Array argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -35,9 +35,9 @@ public sealed class ArrayLengthFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
-        return DataValue.FromScalar(input.AsArray().Length);
+        return DataValue.FromFloat32(input.AsArray().Length);
     }
 }

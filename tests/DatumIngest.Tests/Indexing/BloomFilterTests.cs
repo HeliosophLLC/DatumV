@@ -37,7 +37,7 @@ public sealed class BloomFilterTests
         List<DataValue> inserted = new();
         for (int index = 0; index < 500; index++)
         {
-            DataValue value = DataValue.FromScalar((float)index);
+            DataValue value = DataValue.FromFloat32((float)index);
             filter.Add(value);
             inserted.Add(value);
         }
@@ -45,7 +45,7 @@ public sealed class BloomFilterTests
         // Every inserted value must be found — no false negatives allowed.
         foreach (DataValue value in inserted)
         {
-            Assert.True(filter.MayContain(value), $"False negative for {value.AsScalar()}");
+            Assert.True(filter.MayContain(value), $"False negative for {value.AsFloat32()}");
         }
     }
 
@@ -58,7 +58,7 @@ public sealed class BloomFilterTests
 
         for (int index = 0; index < elementCount; index++)
         {
-            filter.Add(DataValue.FromScalar((float)index));
+            filter.Add(DataValue.FromFloat32((float)index));
         }
 
         // Test against values that were NOT inserted.
@@ -67,7 +67,7 @@ public sealed class BloomFilterTests
 
         for (int index = elementCount; index < elementCount + testCount; index++)
         {
-            if (filter.MayContain(DataValue.FromScalar((float)index)))
+            if (filter.MayContain(DataValue.FromFloat32((float)index)))
             {
                 falsePositives++;
             }
@@ -104,7 +104,7 @@ public sealed class BloomFilterTests
     }
 
     [Theory]
-    [InlineData(DataKind.Scalar)]
+    [InlineData(DataKind.Float32)]
     [InlineData(DataKind.UInt8)]
     [InlineData(DataKind.String)]
     [InlineData(DataKind.Date)]
@@ -115,7 +115,7 @@ public sealed class BloomFilterTests
 
         DataValue value = kind switch
         {
-            DataKind.Scalar => DataValue.FromScalar(42.0f),
+            DataKind.Float32 => DataValue.FromFloat32(42.0f),
             DataKind.UInt8 => DataValue.FromUInt8(42),
             DataKind.String => DataValue.FromString("test"),
             DataKind.Date => DataValue.FromDate(new DateOnly(2024, 6, 15)),

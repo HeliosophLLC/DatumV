@@ -38,7 +38,7 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
                 $"compression_artifact_score() requires Image or UInt8Array, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -48,7 +48,7 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
@@ -64,7 +64,7 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
         if (width < BlockSize * 2 || height < BlockSize * 2)
         {
-            return DataValue.FromScalar(0f);
+            return DataValue.FromFloat32(0f);
         }
 
         nint pixelPointer = rgba.GetPixels();
@@ -144,7 +144,7 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
 
         if (boundaryCount == 0 || interiorCount == 0)
         {
-            return DataValue.FromScalar(0f);
+            return DataValue.FromFloat32(0f);
         }
 
         double averageBoundaryGradient = boundaryGradientSum / boundaryCount;
@@ -158,7 +158,7 @@ public sealed class CompressionArtifactScoreFunction : IScalarFunction, ICostAwa
                 0.0, 1.0)
             : 0f;
 
-        return DataValue.FromScalar(score);
+        return DataValue.FromFloat32(score);
     }
 
     private static SKBitmap ConvertToRgba8888(SKBitmap source)

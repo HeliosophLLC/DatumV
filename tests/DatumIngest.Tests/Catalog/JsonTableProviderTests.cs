@@ -46,9 +46,9 @@ public sealed class JsonTableProviderTests
         JsonTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor("array.json"), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.FindColumn("id")!.Kind);
+        Assert.Equal(DataKind.Float32, schema.FindColumn("id")!.Kind);
         Assert.Equal(DataKind.String, schema.FindColumn("name")!.Kind);
-        Assert.Equal(DataKind.Scalar, schema.FindColumn("score")!.Kind);
+        Assert.Equal(DataKind.Float32, schema.FindColumn("score")!.Kind);
     }
 
     [Fact]
@@ -68,9 +68,9 @@ public sealed class JsonTableProviderTests
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor("array.json"), null, CancellationToken.None));
 
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal(95.5f, rows[0]["score"].AsScalar());
+        Assert.Equal(95.5f, rows[0]["score"].AsFloat32());
     }
 
     // ───────────────────── JSON_PATH navigation ─────────────────────
@@ -99,7 +99,7 @@ public sealed class JsonTableProviderTests
                 CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
         Assert.Equal("alpha", rows[0]["value"].AsString());
     }
 

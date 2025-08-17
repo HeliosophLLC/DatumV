@@ -51,6 +51,10 @@ public sealed class CastFunction : IScalarFunction
             {
                 targetKind = DataKind.Duration;
             }
+            else if (string.Equals(targetKindName, "scalar", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Float32;
+            }
             else
             {
                 throw new ArgumentException($"Unknown target kind '{targetKindName}'.");
@@ -71,18 +75,18 @@ public sealed class CastFunction : IScalarFunction
         return (input.Kind, targetKind) switch
         {
             // UInt8 -> Scalar
-            (DataKind.UInt8, DataKind.Scalar) => DataValue.FromScalar(input.AsUInt8()),
+            (DataKind.UInt8, DataKind.Float32) => DataValue.FromFloat32(input.AsUInt8()),
 
             // Scalar -> UInt8 (truncate)
-            (DataKind.Scalar, DataKind.UInt8) => DataValue.FromUInt8((byte)System.Math.Clamp(input.AsScalar(), 0, 255)),
+            (DataKind.Float32, DataKind.UInt8) => DataValue.FromUInt8((byte)System.Math.Clamp(input.AsFloat32(), 0, 255)),
 
             // String -> Scalar
-            (DataKind.String, DataKind.Scalar) => DataValue.FromScalar(
+            (DataKind.String, DataKind.Float32) => DataValue.FromFloat32(
                 float.Parse(input.AsString(), CultureInfo.InvariantCulture)),
 
             // Scalar -> String
-            (DataKind.Scalar, DataKind.String) => DataValue.FromString(
-                input.AsScalar().ToString(CultureInfo.InvariantCulture)),
+            (DataKind.Float32, DataKind.String) => DataValue.FromString(
+                input.AsFloat32().ToString(CultureInfo.InvariantCulture)),
 
             // UInt8 -> String
             (DataKind.UInt8, DataKind.String) => DataValue.FromString(
@@ -117,11 +121,11 @@ public sealed class CastFunction : IScalarFunction
                 input.AsDateTime().ToString("O", CultureInfo.InvariantCulture)),
 
             // Date -> Scalar (epoch days since 1970-01-01)
-            (DataKind.Date, DataKind.Scalar) => DataValue.FromScalar(
+            (DataKind.Date, DataKind.Float32) => DataValue.FromFloat32(
                 input.AsDate().DayNumber - DateOnly.FromDateTime(DateTimeOffset.UnixEpoch.DateTime).DayNumber),
 
             // DateTime -> Scalar (epoch seconds since 1970-01-01T00:00:00Z)
-            (DataKind.DateTime, DataKind.Scalar) => DataValue.FromScalar(
+            (DataKind.DateTime, DataKind.Float32) => DataValue.FromFloat32(
                 (float)(input.AsDateTime().ToUniversalTime() - DateTimeOffset.UnixEpoch).TotalSeconds),
 
             // String -> JsonValue
@@ -152,12 +156,12 @@ public sealed class CastFunction : IScalarFunction
                 input.AsBoolean() ? "true" : "false"),
 
             // Boolean -> Scalar (true=1, false=0)
-            (DataKind.Boolean, DataKind.Scalar) => DataValue.FromScalar(
+            (DataKind.Boolean, DataKind.Float32) => DataValue.FromFloat32(
                 input.AsBoolean() ? 1f : 0f),
 
             // Scalar -> Boolean (nonzero=true)
-            (DataKind.Scalar, DataKind.Boolean) => DataValue.FromBoolean(
-                input.AsScalar() != 0f),
+            (DataKind.Float32, DataKind.Boolean) => DataValue.FromBoolean(
+                input.AsFloat32() != 0f),
 
             // Boolean -> UInt8 (true=1, false=0)
             (DataKind.Boolean, DataKind.UInt8) => DataValue.FromUInt8(
@@ -180,12 +184,12 @@ public sealed class CastFunction : IScalarFunction
                 TimeOnly.FromTimeSpan(input.AsDateTime().TimeOfDay)),
 
             // Time -> Scalar (seconds since midnight)
-            (DataKind.Time, DataKind.Scalar) => DataValue.FromScalar(
+            (DataKind.Time, DataKind.Float32) => DataValue.FromFloat32(
                 (float)(input.AsTime().Hour * 3600 + input.AsTime().Minute * 60 + input.AsTime().Second + input.AsTime().Millisecond / 1000.0)),
 
             // Scalar -> Time (seconds since midnight)
-            (DataKind.Scalar, DataKind.Time) => DataValue.FromTime(
-                TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(input.AsScalar()))),
+            (DataKind.Float32, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(input.AsFloat32()))),
 
             // String -> Duration
             (DataKind.String, DataKind.Duration) => DataValue.FromDuration(
@@ -196,12 +200,12 @@ public sealed class CastFunction : IScalarFunction
                 input.AsDuration().ToString("c")),
 
             // Duration -> Scalar (total seconds)
-            (DataKind.Duration, DataKind.Scalar) => DataValue.FromScalar(
+            (DataKind.Duration, DataKind.Float32) => DataValue.FromFloat32(
                 (float)input.AsDuration().TotalSeconds),
 
             // Scalar -> Duration (seconds)
-            (DataKind.Scalar, DataKind.Duration) => DataValue.FromDuration(
-                TimeSpan.FromSeconds(input.AsScalar())),
+            (DataKind.Float32, DataKind.Duration) => DataValue.FromDuration(
+                TimeSpan.FromSeconds(input.AsFloat32())),
 
             _ => throw new InvalidOperationException(
                 $"cast() does not support conversion from {input.Kind} to {targetKind}."),

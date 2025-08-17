@@ -111,7 +111,7 @@ public class CategoricalEncodingFunctionTests
     public void OneHot_Validate_NonString_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new OneHotFunction().ValidateArguments([DataKind.String, DataKind.Scalar]));
+            new OneHotFunction().ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
@@ -190,7 +190,7 @@ public class CategoricalEncodingFunctionTests
             DataValue.FromString("dog"),
             DataValue.FromString("bird")
         ]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public class CategoricalEncodingFunctionTests
             DataValue.FromString("dog"),
             DataValue.FromString("bird")
         ]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public class CategoricalEncodingFunctionTests
             DataValue.FromString("dog"),
             DataValue.FromString("bird")
         ]);
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class CategoricalEncodingFunctionTests
             DataValue.FromString("dog"),
             DataValue.FromString("bird")
         ]);
-        Assert.Equal(-1f, result.AsScalar());
+        Assert.Equal(-1f, result.AsFloat32());
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public class CategoricalEncodingFunctionTests
     public void LabelEncode_Validate_ReturnsScalar()
     {
         DataKind result = new LabelEncodeFunction().ValidateArguments([DataKind.String, DataKind.String]);
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ── label_encode_unk ────────────────────────────────────
@@ -263,7 +263,7 @@ public class CategoricalEncodingFunctionTests
             DataValue.FromString("dog"),
             DataValue.FromString("bird")
         ]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public class CategoricalEncodingFunctionTests
             DataValue.FromString("dog"),
             DataValue.FromString("bird")
         ]);
-        Assert.Equal(3f, result.AsScalar()); // K = 3
+        Assert.Equal(3f, result.AsFloat32()); // K = 3
     }
 
     [Fact]
@@ -306,7 +306,7 @@ public class CategoricalEncodingFunctionTests
         HashEncodeFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello"),
-            DataValue.FromScalar(64)
+            DataValue.FromFloat32(64)
         ]);
         float[] vector = result.AsVector();
         Assert.Equal(64, vector.Length);
@@ -318,7 +318,7 @@ public class CategoricalEncodingFunctionTests
         HashEncodeFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello"),
-            DataValue.FromScalar(128)
+            DataValue.FromFloat32(128)
         ]);
         float[] vector = result.AsVector();
         Assert.Equal(1f, vector.Sum());
@@ -331,7 +331,7 @@ public class CategoricalEncodingFunctionTests
         HashEncodeFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromScalar(32)
+            DataValue.FromFloat32(32)
         ]);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Vector, result.Kind);
@@ -341,8 +341,8 @@ public class CategoricalEncodingFunctionTests
     public void HashEncode_Deterministic()
     {
         HashEncodeFunction function = new();
-        DataValue result1 = function.Execute([DataValue.FromString("test"), DataValue.FromScalar(256)]);
-        DataValue result2 = function.Execute([DataValue.FromString("test"), DataValue.FromScalar(256)]);
+        DataValue result1 = function.Execute([DataValue.FromString("test"), DataValue.FromFloat32(256)]);
+        DataValue result2 = function.Execute([DataValue.FromString("test"), DataValue.FromFloat32(256)]);
         Assert.Equal(result1.AsVector(), result2.AsVector());
     }
 
@@ -350,8 +350,8 @@ public class CategoricalEncodingFunctionTests
     public void HashEncode_DifferentValues_MayDifferentBuckets()
     {
         HashEncodeFunction function = new();
-        float[] vectorA = function.Execute([DataValue.FromString("cat"), DataValue.FromScalar(1024)]).AsVector();
-        float[] vectorB = function.Execute([DataValue.FromString("dog"), DataValue.FromScalar(1024)]).AsVector();
+        float[] vectorA = function.Execute([DataValue.FromString("cat"), DataValue.FromFloat32(1024)]).AsVector();
+        float[] vectorB = function.Execute([DataValue.FromString("dog"), DataValue.FromFloat32(1024)]).AsVector();
 
         int indexA = Array.IndexOf(vectorA, 1f);
         int indexB = Array.IndexOf(vectorB, 1f);
@@ -383,7 +383,7 @@ public class CategoricalEncodingFunctionTests
     public void HashEncode_Validate_NonStringFirstArg_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            new HashEncodeFunction().ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            new HashEncodeFunction().ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -396,7 +396,7 @@ public class CategoricalEncodingFunctionTests
     [Fact]
     public void HashEncode_Validate_ReturnsVector()
     {
-        DataKind result = new HashEncodeFunction().ValidateArguments([DataKind.String, DataKind.Scalar]);
+        DataKind result = new HashEncodeFunction().ValidateArguments([DataKind.String, DataKind.Float32]);
         Assert.Equal(DataKind.Vector, result);
     }
 }

@@ -20,9 +20,9 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([vector]);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(10f, rows[0]["value"].AsScalar());
-        Assert.Equal(20f, rows[1]["value"].AsScalar());
-        Assert.Equal(30f, rows[2]["value"].AsScalar());
+        Assert.Equal(10f, rows[0]["value"].AsFloat32());
+        Assert.Equal(20f, rows[1]["value"].AsFloat32());
+        Assert.Equal(30f, rows[2]["value"].AsFloat32());
     }
 
     [Fact]
@@ -57,9 +57,9 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([json]);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1f, rows[0]["item1"].AsScalar());
+        Assert.Equal(1f, rows[0]["item1"].AsFloat32());
         Assert.Equal("a", rows[0]["item2"].AsString());
-        Assert.Equal(2f, rows[1]["item1"].AsScalar());
+        Assert.Equal(2f, rows[1]["item1"].AsFloat32());
         Assert.Equal("b", rows[1]["item2"].AsString());
     }
 
@@ -103,7 +103,7 @@ public class UnnestFunctionTests
     [Fact]
     public async Task Unnest_UnsupportedKind_Throws()
     {
-        DataValue scalar = DataValue.FromScalar(42);
+        DataValue scalar = DataValue.FromFloat32(42);
         await Assert.ThrowsAsync<ArgumentException>(async () => await CollectRows([scalar]));
     }
 
@@ -114,9 +114,9 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([json]);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1.5f, rows[0]["value"].AsScalar(), 0.001f);
-        Assert.Equal(2.5f, rows[1]["value"].AsScalar(), 0.001f);
-        Assert.Equal(3.5f, rows[2]["value"].AsScalar(), 0.001f);
+        Assert.Equal(1.5f, rows[0]["value"].AsFloat32(), 0.001f);
+        Assert.Equal(2.5f, rows[1]["value"].AsFloat32(), 0.001f);
+        Assert.Equal(3.5f, rows[2]["value"].AsFloat32(), 0.001f);
     }
 
     [Fact]
@@ -126,8 +126,8 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([json]);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1.0f, rows[0]["value"].AsScalar());
-        Assert.Equal(0.0f, rows[1]["value"].AsScalar());
+        Assert.Equal(1.0f, rows[0]["value"].AsFloat32());
+        Assert.Equal(0.0f, rows[1]["value"].AsFloat32());
     }
 
     [Fact]

@@ -38,7 +38,7 @@ public class NowFunctionTests
     [Fact]
     public void Now_ValidateArguments_RejectsArguments()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]

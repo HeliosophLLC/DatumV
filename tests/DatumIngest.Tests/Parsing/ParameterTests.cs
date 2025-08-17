@@ -170,7 +170,7 @@ public sealed class ParameterTests
         SelectStatement statement = Parse("SELECT * FROM t WHERE x > $threshold");
         Dictionary<string, DataValue> parameters = new()
         {
-            ["threshold"] = DataValue.FromScalar(0.5f)
+            ["threshold"] = DataValue.FromFloat32(0.5f)
         };
 
         SelectStatement bound = ParameterBinder.Bind(statement, parameters);
@@ -202,7 +202,7 @@ public sealed class ParameterTests
         SelectStatement statement = Parse("SELECT * FROM t WHERE x > $val");
         Dictionary<string, DataValue> parameters = new()
         {
-            ["val"] = DataValue.Null(DataKind.Scalar)
+            ["val"] = DataValue.Null(DataKind.Float32)
         };
 
         SelectStatement bound = ParameterBinder.Bind(statement, parameters);
@@ -245,8 +245,8 @@ public sealed class ParameterTests
         SelectStatement statement = Parse("SELECT * FROM t WHERE x > $threshold");
         Dictionary<string, DataValue> parameters = new()
         {
-            ["threshold"] = DataValue.FromScalar(0.5f),
-            ["extra"] = DataValue.FromScalar(1.0f)
+            ["threshold"] = DataValue.FromFloat32(0.5f),
+            ["extra"] = DataValue.FromFloat32(1.0f)
         };
 
         ArgumentException exception = Assert.Throws<ArgumentException>(
@@ -260,7 +260,7 @@ public sealed class ParameterTests
         SelectStatement statement = Parse("SELECT * FROM t WHERE x > $val AND y < $val");
         Dictionary<string, DataValue> parameters = new()
         {
-            ["val"] = DataValue.FromScalar(5.0f)
+            ["val"] = DataValue.FromFloat32(5.0f)
         };
 
         SelectStatement bound = ParameterBinder.Bind(statement, parameters);
@@ -290,7 +290,7 @@ public sealed class ParameterTests
             "SELECT CASE WHEN x > $threshold THEN $label ELSE 'default' END FROM t");
         Dictionary<string, DataValue> parameters = new()
         {
-            ["threshold"] = DataValue.FromScalar(0.5f),
+            ["threshold"] = DataValue.FromFloat32(0.5f),
             ["label"] = DataValue.FromString("high")
         };
 
@@ -339,8 +339,8 @@ public sealed class ParameterTests
     public void ValueParser_ParsesNumbers(string input, float expected)
     {
         DataValue result = ParameterValueParser.Parse(input);
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(expected, result.AsScalar(), precision: 2);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(expected, result.AsFloat32(), precision: 2);
     }
 
     [Theory]

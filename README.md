@@ -326,7 +326,7 @@ Parsing scales linearly with query complexity. Tokenization is ~3–5× faster t
 | JSON 1K rows | 1,667.0 μs | 32.6 μs | 59.6 μs | 499.84 KB |
 | JSON 10K rows | 11,591.0 μs | 67.4 μs | 59.8 μs | 4,522.20 KB |
 
-All providers share a pre-built column name index across rows, eliminating per-row Dictionary allocations at the source. `DataValue.FromScalar` caches the two most common float values (0 and 1), avoiding heap allocation and boxing for those constants. The CSV parser reuses a thread-local field buffer across rows, eliminating a `List<string>` allocation per line. Projection pushdown on CSV saves ~18% of allocated memory by skipping unreferenced columns.
+All providers share a pre-built column name index across rows, eliminating per-row Dictionary allocations at the source. `DataValue.FromFloat32` caches the two most common float values (0 and 1), avoiding heap allocation and boxing for those constants. The CSV parser reuses a thread-local field buffer across rows, eliminating a `List<string>` allocation per line. Projection pushdown on CSV saves ~18% of allocated memory by skipping unreferenced columns.
 
 #### Execution
 

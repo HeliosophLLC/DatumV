@@ -5,19 +5,19 @@ namespace DatumIngest.Tests.Model;
 public class TypeCoercionTests
 {
     [Fact]
-    public void UInt8WidensToScalar()
+    public void UInt8WidensToInt16()
     {
         DataValue uint8 = DataValue.FromUInt8(200);
-        DataValue scalar = TypeCoercion.Widen(uint8, DataKind.Scalar);
+        DataValue int16 = TypeCoercion.Widen(uint8, DataKind.Int16);
 
-        Assert.Equal(DataKind.Scalar, scalar.Kind);
-        Assert.Equal(200.0f, scalar.AsScalar());
+        Assert.Equal(DataKind.Int16, int16.Kind);
+        Assert.Equal((short)200, int16.AsInt16());
     }
 
     [Fact]
     public void ScalarWidensToVectorOfLengthOne()
     {
-        DataValue scalar = DataValue.FromScalar(5.0f);
+        DataValue scalar = DataValue.FromFloat32(5.0f);
         DataValue vector = TypeCoercion.Widen(scalar, DataKind.Vector);
 
         Assert.Equal(DataKind.Vector, vector.Kind);
@@ -53,8 +53,10 @@ public class TypeCoercionTests
     [Fact]
     public void CanWiden_ReturnsTrueForValidWidening()
     {
-        Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Scalar));
-        Assert.True(TypeCoercion.CanWiden(DataKind.Scalar, DataKind.Vector));
+        Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Int16));
+        Assert.True(TypeCoercion.CanWiden(DataKind.UInt8, DataKind.Float64));
+        Assert.True(TypeCoercion.CanWiden(DataKind.Float32, DataKind.Float64));
+        Assert.True(TypeCoercion.CanWiden(DataKind.Float64, DataKind.Vector));
         Assert.True(TypeCoercion.CanWiden(DataKind.Vector, DataKind.Tensor));
         Assert.True(TypeCoercion.CanWiden(DataKind.Matrix, DataKind.Tensor));
     }
@@ -62,16 +64,16 @@ public class TypeCoercionTests
     [Fact]
     public void CanWiden_ReturnsFalseForInvalidWidening()
     {
-        Assert.False(TypeCoercion.CanWiden(DataKind.String, DataKind.Scalar));
-        Assert.False(TypeCoercion.CanWiden(DataKind.Scalar, DataKind.UInt8));
+        Assert.False(TypeCoercion.CanWiden(DataKind.String, DataKind.Float32));
+        Assert.False(TypeCoercion.CanWiden(DataKind.Float32, DataKind.UInt8));
         Assert.False(TypeCoercion.CanWiden(DataKind.Tensor, DataKind.Vector));
-        Assert.False(TypeCoercion.CanWiden(DataKind.Image, DataKind.Scalar));
+        Assert.False(TypeCoercion.CanWiden(DataKind.Image, DataKind.Float32));
     }
 
     [Fact]
     public void CanWiden_SameKindReturnsTrue()
     {
-        Assert.True(TypeCoercion.CanWiden(DataKind.Scalar, DataKind.Scalar));
+        Assert.True(TypeCoercion.CanWiden(DataKind.Float32, DataKind.Float32));
         Assert.True(TypeCoercion.CanWiden(DataKind.String, DataKind.String));
     }
 
@@ -80,31 +82,35 @@ public class TypeCoercionTests
     {
         DataValue str = DataValue.FromString("hello");
 
-        Assert.Throws<InvalidOperationException>(() => TypeCoercion.Widen(str, DataKind.Scalar));
+        Assert.Throws<InvalidOperationException>(() => TypeCoercion.Widen(str, DataKind.Float32));
     }
 
     [Fact]
     public void Widen_NullRemainsNull()
     {
         DataValue nullValue = DataValue.Null(DataKind.UInt8);
-        DataValue result = TypeCoercion.Widen(nullValue, DataKind.Scalar);
+        DataValue result = TypeCoercion.Widen(nullValue, DataKind.Float32);
 
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
     public void FindCommonKind_ReturnsWiderType()
     {
-        Assert.Equal(DataKind.Scalar, TypeCoercion.FindCommonKind(DataKind.UInt8, DataKind.Scalar));
-        Assert.Equal(DataKind.Scalar, TypeCoercion.FindCommonKind(DataKind.Scalar, DataKind.UInt8));
+        Assert.Equal(DataKind.Int16, TypeCoercion.FindCommonKind(DataKind.UInt8, DataKind.Int8));
+        Assert.Equal(DataKind.Float64, TypeCoercion.FindCommonKind(DataKind.UInt8, DataKind.Float32));
+        Assert.Equal(DataKind.Float64, TypeCoercion.FindCommonKind(DataKind.Float32, DataKind.UInt8));
+        Assert.Equal(DataKind.Float64, TypeCoercion.FindCommonKind(DataKind.Int32, DataKind.Float32));
+        Assert.Equal(DataKind.Int32, TypeCoercion.FindCommonKind(DataKind.Int32, DataKind.UInt16));
+        Assert.Equal(DataKind.Int64, TypeCoercion.FindCommonKind(DataKind.Int64, DataKind.UInt32));
         Assert.Equal(DataKind.Tensor, TypeCoercion.FindCommonKind(DataKind.Vector, DataKind.Matrix));
     }
 
     [Fact]
     public void FindCommonKind_ReturnsNullForIncompatibleTypes()
     {
-        DataKind? result = TypeCoercion.FindCommonKind(DataKind.String, DataKind.Scalar);
+        DataKind? result = TypeCoercion.FindCommonKind(DataKind.String, DataKind.Float32);
 
         Assert.Null(result);
     }
@@ -116,13 +122,13 @@ public class TypeCoercionTests
     }
 
     [Fact]
-    public void UInt8ToScalarChainToVector()
+    public void UInt8ToFloat64ChainToVector()
     {
         DataValue uint8 = DataValue.FromUInt8(128);
 
-        // UInt8 -> Scalar -> Vector should succeed through chaining
-        DataValue scalar = TypeCoercion.Widen(uint8, DataKind.Scalar);
-        DataValue vector = TypeCoercion.Widen(scalar, DataKind.Vector);
+        // UInt8 → Int16 → Int32 → Int64 → Float64 → Vector
+        DataValue float64 = TypeCoercion.Widen(uint8, DataKind.Float64);
+        DataValue vector = TypeCoercion.Widen(float64, DataKind.Vector);
 
         Assert.Equal(DataKind.Vector, vector.Kind);
         Assert.Equal([128.0f], vector.AsVector());
@@ -133,45 +139,45 @@ public class TypeCoercionTests
     [Fact]
     public void CoerceValue_SameKind_ReturnsSameValue()
     {
-        DataValue value = DataValue.FromScalar(42f);
-        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
-        Assert.Equal(42f, result.AsScalar());
+        DataValue value = DataValue.FromFloat32(42f);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Float32);
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
     public void CoerceValue_Null_ReturnsTypedNull()
     {
         DataValue value = DataValue.Null(DataKind.String);
-        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Float32);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
-    public void CoerceValue_WideningChain_BooleanToScalar()
+    public void CoerceValue_WideningChain_BooleanToFloat64()
     {
         DataValue value = DataValue.FromBoolean(true);
-        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(1f, result.AsScalar());
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Float64);
+        Assert.Equal(DataKind.Float64, result.Kind);
+        Assert.Equal(1.0, result.AsFloat64());
     }
 
     [Fact]
     public void CoerceValue_StringToScalar_ParsesNumber()
     {
         DataValue value = DataValue.FromString("3.14");
-        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
-        Assert.Equal(DataKind.Scalar, result.Kind);
-        Assert.Equal(3.14f, result.AsScalar(), 0.001f);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Float32);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(3.14f, result.AsFloat32(), 0.001f);
     }
 
     [Fact]
     public void CoerceValue_StringToScalar_UnparseableReturnsNull()
     {
         DataValue value = DataValue.FromString("abc");
-        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Scalar);
+        DataValue result = TypeCoercion.CoerceValue(value, DataKind.Float32);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -202,7 +208,7 @@ public class TypeCoercionTests
     [Fact]
     public void CoerceValue_IncompatibleKinds_ReturnsNull()
     {
-        DataValue value = DataValue.FromScalar(42f);
+        DataValue value = DataValue.FromFloat32(42f);
         DataValue result = TypeCoercion.CoerceValue(value, DataKind.Date);
         Assert.True(result.IsNull);
         Assert.Equal(DataKind.Date, result.Kind);
@@ -211,7 +217,7 @@ public class TypeCoercionTests
     // ─────────────── CanCoerceStringTo ───────────────
 
     [Theory]
-    [InlineData(DataKind.Scalar, true)]
+    [InlineData(DataKind.Float32, true)]
     [InlineData(DataKind.Boolean, true)]
     [InlineData(DataKind.Date, true)]
     [InlineData(DataKind.Vector, false)]

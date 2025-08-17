@@ -13,7 +13,7 @@ public sealed class SchemaSerializerTests
     public void RoundTrip_SingleTable_PreservesSchema()
     {
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
         ]);
 
@@ -29,7 +29,7 @@ public sealed class SchemaSerializerTests
         Schema roundTripped = deserialized.Tables["data"];
         Assert.Equal(2, roundTripped.Columns.Count);
         Assert.Equal("id", roundTripped.Columns[0].Name);
-        Assert.Equal(DataKind.Scalar, roundTripped.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, roundTripped.Columns[0].Kind);
         Assert.False(roundTripped.Columns[0].Nullable);
         Assert.Equal("name", roundTripped.Columns[1].Name);
         Assert.Equal(DataKind.String, roundTripped.Columns[1].Kind);
@@ -41,7 +41,7 @@ public sealed class SchemaSerializerTests
     {
         Dictionary<string, Schema> tables = new()
         {
-            ["images"] = new Schema([new ColumnInfo("pixel", DataKind.Scalar, nullable: false)]),
+            ["images"] = new Schema([new ColumnInfo("pixel", DataKind.Float32, nullable: false)]),
             ["labels"] = new Schema([new ColumnInfo("label", DataKind.String, nullable: false)]),
         };
 
@@ -61,7 +61,7 @@ public sealed class SchemaSerializerTests
     [Fact]
     public void Serialize_SingleTableOverload_ProducesValidJson()
     {
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: false)]);
 
         string json = SchemaSerializer.Serialize("test", schema);
         SourceSchema? deserialized = SchemaSerializer.Deserialize(json);
@@ -98,7 +98,7 @@ public sealed class SchemaSerializerTests
 
         try
         {
-            Schema schema = new([new ColumnInfo("x", DataKind.Scalar, nullable: false)]);
+            Schema schema = new([new ColumnInfo("x", DataKind.Float32, nullable: false)]);
             SourceSchema original = SourceSchema.Create("data", schema);
 
             await SchemaSerializer.WriteToFileAsync(original, tempPath);
@@ -149,7 +149,7 @@ public sealed class SchemaSerializerTests
     [Fact]
     public void SourceSchema_Create_WrapsInSingleEntryDictionary()
     {
-        Schema schema = new([new ColumnInfo("a", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("a", DataKind.Float32, nullable: false)]);
 
         SourceSchema result = SourceSchema.Create("myTable", schema);
 
@@ -162,7 +162,7 @@ public sealed class SchemaSerializerTests
     public void RoundTrip_PreservesAllDataKinds()
     {
         Schema schema = new([
-            new ColumnInfo("scalar", DataKind.Scalar, nullable: false),
+            new ColumnInfo("float32", DataKind.Float32, nullable: false),
             new ColumnInfo("text", DataKind.String, nullable: false),
             new ColumnInfo("blob", DataKind.UInt8Array, nullable: false),
         ]);
@@ -173,7 +173,7 @@ public sealed class SchemaSerializerTests
 
         Assert.NotNull(deserialized);
         Schema roundTripped = deserialized.Tables["data"];
-        Assert.Equal(DataKind.Scalar, roundTripped.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, roundTripped.Columns[0].Kind);
         Assert.Equal(DataKind.String, roundTripped.Columns[1].Kind);
         Assert.Equal(DataKind.UInt8Array, roundTripped.Columns[2].Kind);
     }

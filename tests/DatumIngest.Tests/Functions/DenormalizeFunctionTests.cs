@@ -16,24 +16,24 @@ public class DenormalizeFunctionTests
     [Fact]
     public void Validate_WrongArgCount_Throws()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void Validate_UnsupportedKind_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            _function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+            _function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
     public void Execute_Scalar_MultipliesByFactor()
     {
         DataValue result = _function.Execute([
-            DataValue.FromScalar(0.5f),
-            DataValue.FromScalar(255)
+            DataValue.FromFloat32(0.5f),
+            DataValue.FromFloat32(255)
         ]);
-        Assert.Equal(127.5f, result.AsScalar(), 0.0001f);
+        Assert.Equal(127.5f, result.AsFloat32(), 0.0001f);
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class DenormalizeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromVector([0, 0.5f, 1]),
-            DataValue.FromScalar(100)
+            DataValue.FromFloat32(100)
         ]);
         float[] vector = result.AsVector();
         Assert.Equal(0f, vector[0]);
@@ -54,7 +54,7 @@ public class DenormalizeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromMatrix([0.1f, 0.2f, 0.3f, 0.4f], 2, 2),
-            DataValue.FromScalar(10)
+            DataValue.FromFloat32(10)
         ]);
         float[] data = result.AsMatrix(out int rows, out int columns);
         Assert.Equal(2, rows);
@@ -69,8 +69,8 @@ public class DenormalizeFunctionTests
     public void Execute_NullInput_ReturnsNull()
     {
         DataValue result = _function.Execute([
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(255)
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(255)
         ]);
         Assert.True(result.IsNull);
     }

@@ -136,13 +136,13 @@ public sealed class PiFunction : IScalarFunction
             throw new ArgumentException("pi() takes no arguments.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        return DataValue.FromScalar(MathF.PI);
+        return DataValue.FromFloat32(MathF.PI);
     }
 }
 
@@ -160,12 +160,12 @@ public sealed class EulerFunction : IScalarFunction
             throw new ArgumentException("euler() takes no arguments.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        return DataValue.FromScalar(MathF.E);
+        return DataValue.FromFloat32(MathF.E);
     }
 }

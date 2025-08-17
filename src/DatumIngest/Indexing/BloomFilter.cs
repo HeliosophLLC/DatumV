@@ -151,9 +151,9 @@ public sealed class BloomFilter
     {
         switch (value.Kind)
         {
-            case DataKind.Scalar:
+            case DataKind.Float32:
             {
-                float scalar = value.AsScalar();
+                float scalar = value.AsFloat32();
                 return BitConverter.GetBytes(scalar);
             }
             case DataKind.UInt8:

@@ -21,7 +21,7 @@ public sealed class BPlusTreeRoundTripTests
         int entryCount = 500;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        SourceIndex original = BuildSourceIndexWithBPlusTree("price", DataKind.Scalar, entries);
+        SourceIndex original = BuildSourceIndexWithBPlusTree("price", DataKind.Float32, entries);
         SourceIndex restored = WriteAndRead(original);
 
         Assert.NotNull(restored.BPlusTreeIndexes);
@@ -38,19 +38,19 @@ public sealed class BPlusTreeRoundTripTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(10.0f), 0, 0L),
-            new(DataValue.FromScalar(20.0f), 0, 1L),
-            new(DataValue.FromScalar(30.0f), 1, 0L),
-            new(DataValue.FromScalar(40.0f), 1, 1L),
-            new(DataValue.FromScalar(50.0f), 2, 0L),
+            new(DataValue.FromFloat32(10.0f), 0, 0L),
+            new(DataValue.FromFloat32(20.0f), 0, 1L),
+            new(DataValue.FromFloat32(30.0f), 1, 0L),
+            new(DataValue.FromFloat32(40.0f), 1, 1L),
+            new(DataValue.FromFloat32(50.0f), 2, 0L),
         ];
 
-        SourceIndex original = BuildSourceIndexWithBPlusTree("value", DataKind.Scalar, entries);
+        SourceIndex original = BuildSourceIndexWithBPlusTree("value", DataKind.Float32, entries);
         SourceIndex restored = WriteAndRead(original);
 
         Assert.True(restored.TryGetColumnIndex("value", out IColumnIndex? index));
 
-        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromScalar(30.0f));
+        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromFloat32(30.0f));
         Assert.Single(result);
         Assert.Equal(1, result[0].ChunkIndex);
         Assert.Equal(0L, result[0].RowOffsetInChunk);
@@ -62,13 +62,13 @@ public sealed class BPlusTreeRoundTripTests
         int entryCount = 200;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        SourceIndex original = BuildSourceIndexWithBPlusTree("x", DataKind.Scalar, entries);
+        SourceIndex original = BuildSourceIndexWithBPlusTree("x", DataKind.Float32, entries);
         SourceIndex restored = WriteAndRead(original);
 
         Assert.True(restored.TryGetColumnIndex("x", out IColumnIndex? index));
 
         IReadOnlyList<ValueIndexEntry> range = index.FindRange(
-            DataValue.FromScalar(50.0f), DataValue.FromScalar(60.0f));
+            DataValue.FromFloat32(50.0f), DataValue.FromFloat32(60.0f));
 
         Assert.Equal(11, range.Count); // 50..60 inclusive
     }
@@ -79,7 +79,7 @@ public sealed class BPlusTreeRoundTripTests
         int entryCount = 300;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        SourceIndex original = BuildSourceIndexWithBPlusTree("col", DataKind.Scalar, entries);
+        SourceIndex original = BuildSourceIndexWithBPlusTree("col", DataKind.Float32, entries);
         SourceIndex restored = WriteAndRead(original);
 
         Assert.True(restored.TryGetColumnIndex("col", out IColumnIndex? index));
@@ -90,7 +90,7 @@ public sealed class BPlusTreeRoundTripTests
         // Verify ascending order.
         for (int i = 1; i < traversed.Count; i++)
         {
-            Assert.True(traversed[i].Key.AsScalar() >= traversed[i - 1].Key.AsScalar());
+            Assert.True(traversed[i].Key.AsFloat32() >= traversed[i - 1].Key.AsFloat32());
         }
     }
 
@@ -101,9 +101,9 @@ public sealed class BPlusTreeRoundTripTests
     {
         ValueIndexEntry[] priceEntries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0L),
-            new(DataValue.FromScalar(2.0f), 0, 1L),
-            new(DataValue.FromScalar(3.0f), 1, 0L),
+            new(DataValue.FromFloat32(1.0f), 0, 0L),
+            new(DataValue.FromFloat32(2.0f), 0, 1L),
+            new(DataValue.FromFloat32(3.0f), 1, 0L),
         ];
 
         ValueIndexEntry[] nameEntries =
@@ -114,7 +114,7 @@ public sealed class BPlusTreeRoundTripTests
         ];
 
         (BPlusTreeSectionHeader priceHeader, byte[][] pricePages) =
-            BuildTree(priceEntries, "price", DataKind.Scalar);
+            BuildTree(priceEntries, "price", DataKind.Float32);
         (BPlusTreeSectionHeader nameHeader, byte[][] namePages) =
             BuildTree(nameEntries, "name", DataKind.String);
 
@@ -136,7 +136,7 @@ public sealed class BPlusTreeRoundTripTests
 
         // Verify price column.
         Assert.True(restored.TryGetColumnIndex("price", out IColumnIndex? priceIndex));
-        IReadOnlyList<ValueIndexEntry> priceResult = priceIndex.FindExact(DataValue.FromScalar(2.0f));
+        IReadOnlyList<ValueIndexEntry> priceResult = priceIndex.FindExact(DataValue.FromFloat32(2.0f));
         Assert.Single(priceResult);
 
         // Verify name column.
@@ -153,12 +153,12 @@ public sealed class BPlusTreeRoundTripTests
         // Build a B+Tree index for one column.
         ValueIndexEntry[] bTreeEntries =
         [
-            new(DataValue.FromScalar(100.0f), 0, 0L),
-            new(DataValue.FromScalar(200.0f), 0, 1L),
+            new(DataValue.FromFloat32(100.0f), 0, 0L),
+            new(DataValue.FromFloat32(200.0f), 0, 1L),
         ];
 
         (BPlusTreeSectionHeader header, byte[][] pages) =
-            BuildTree(bTreeEntries, "big_column", DataKind.Scalar);
+            BuildTree(bTreeEntries, "big_column", DataKind.Float32);
 
         BPlusTreeReader treeReader = new(header, pages);
         Dictionary<string, BPlusTreeColumnIndex> bTreeIndexes = new(StringComparer.OrdinalIgnoreCase)
@@ -171,8 +171,8 @@ public sealed class BPlusTreeRoundTripTests
         // Build a sorted index for another column.
         ValueIndexEntry[] sortedEntries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0L),
-            new(DataValue.FromScalar(2.0f), 0, 1L),
+            new(DataValue.FromFloat32(1.0f), 0, 0L),
+            new(DataValue.FromFloat32(2.0f), 0, 1L),
         ];
 
         SortedValueIndex sortedIndex = SortedValueIndex.BuildFromUnsorted(sortedEntries);
@@ -186,8 +186,8 @@ public sealed class BPlusTreeRoundTripTests
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new(
         [
-            new ColumnInfo("big_column", DataKind.Scalar, nullable: false),
-            new ColumnInfo("small_column", DataKind.Scalar, nullable: false),
+            new ColumnInfo("big_column", DataKind.Float32, nullable: false),
+            new ColumnInfo("small_column", DataKind.Float32, nullable: false),
         ]);
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>(),
@@ -212,20 +212,20 @@ public sealed class BPlusTreeRoundTripTests
         int entryCount = 10_000;
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
-        SourceIndex original = BuildSourceIndexWithBPlusTree("large", DataKind.Scalar, entries);
+        SourceIndex original = BuildSourceIndexWithBPlusTree("large", DataKind.Float32, entries);
         SourceIndex restored = WriteAndRead(original);
 
         Assert.True(restored.TryGetColumnIndex("large", out IColumnIndex? index));
         Assert.Equal(entryCount, index.EntryCount);
 
         // Spot-check a few lookups.
-        IReadOnlyList<ValueIndexEntry> first = index.FindExact(DataValue.FromScalar(0.0f));
+        IReadOnlyList<ValueIndexEntry> first = index.FindExact(DataValue.FromFloat32(0.0f));
         Assert.Single(first);
 
-        IReadOnlyList<ValueIndexEntry> last = index.FindExact(DataValue.FromScalar((float)(entryCount - 1)));
+        IReadOnlyList<ValueIndexEntry> last = index.FindExact(DataValue.FromFloat32((float)(entryCount - 1)));
         Assert.Single(last);
 
-        IReadOnlyList<ValueIndexEntry> mid = index.FindExact(DataValue.FromScalar((float)(entryCount / 2)));
+        IReadOnlyList<ValueIndexEntry> mid = index.FindExact(DataValue.FromFloat32((float)(entryCount / 2)));
         Assert.Single(mid);
     }
 
@@ -264,7 +264,7 @@ public sealed class BPlusTreeRoundTripTests
             int chunkIndex = index / chunkSize;
             long rowOffset = index % chunkSize;
             entries[index] = new ValueIndexEntry(
-                DataValue.FromScalar((float)index), chunkIndex, rowOffset);
+                DataValue.FromFloat32((float)index), chunkIndex, rowOffset);
         }
 
         return entries;
@@ -319,7 +319,7 @@ public sealed class BPlusTreeRoundTripTests
     private static SourceIndex BuildSourceIndexWithBTreeSet(
         BPlusTreeIndexSet bTreeSet,
         string columnName = "value",
-        DataKind keyKind = DataKind.Scalar)
+        DataKind keyKind = DataKind.Float32)
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([new ColumnInfo(columnName, keyKind, nullable: false)]);

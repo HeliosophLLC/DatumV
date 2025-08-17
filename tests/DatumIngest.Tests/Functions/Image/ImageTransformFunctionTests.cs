@@ -46,14 +46,14 @@ public sealed class ImageTransformFunctionTests
     public void Resize_Validate_AcceptsCorrectArgs()
     {
         Assert.Equal(DataKind.Image,
-            _resize.ValidateArguments([DataKind.Image, DataKind.Scalar, DataKind.Scalar]));
+            _resize.ValidateArguments([DataKind.Image, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
     public void Resize_Validate_WithFormat()
     {
         Assert.Equal(DataKind.Image,
-            _resize.ValidateArguments([DataKind.Image, DataKind.Scalar, DataKind.Scalar, DataKind.String]));
+            _resize.ValidateArguments([DataKind.Image, DataKind.Float32, DataKind.Float32, DataKind.String]));
     }
 
     [Fact]
@@ -69,8 +69,8 @@ public sealed class ImageTransformFunctionTests
 
         DataValue result = _resize.Execute([
             DataValue.FromImage(png),
-            DataValue.FromScalar(50),
-            DataValue.FromScalar(40)
+            DataValue.FromFloat32(50),
+            DataValue.FromFloat32(40)
         ]);
 
         (int width, int height) = DecodeDimensions(result);
@@ -83,8 +83,8 @@ public sealed class ImageTransformFunctionTests
     {
         DataValue result = _resize.Execute([
             DataValue.Null(DataKind.Image),
-            DataValue.FromScalar(50),
-            DataValue.FromScalar(40)
+            DataValue.FromFloat32(50),
+            DataValue.FromFloat32(40)
         ]);
         Assert.True(result.IsNull);
     }
@@ -104,8 +104,8 @@ public sealed class ImageTransformFunctionTests
     {
         Assert.Equal(DataKind.Image,
             _crop.ValidateArguments([
-                DataKind.Image, DataKind.Scalar, DataKind.Scalar,
-                DataKind.Scalar, DataKind.Scalar
+                DataKind.Image, DataKind.Float32, DataKind.Float32,
+                DataKind.Float32, DataKind.Float32
             ]));
     }
 
@@ -116,10 +116,10 @@ public sealed class ImageTransformFunctionTests
 
         DataValue result = _crop.Execute([
             DataValue.FromImage(png),
-            DataValue.FromScalar(10),  // x
-            DataValue.FromScalar(20),  // y
-            DataValue.FromScalar(30),  // width
-            DataValue.FromScalar(25)   // height
+            DataValue.FromFloat32(10),  // x
+            DataValue.FromFloat32(20),  // y
+            DataValue.FromFloat32(30),  // width
+            DataValue.FromFloat32(25)   // height
         ]);
 
         (int width, int height) = DecodeDimensions(result);
@@ -132,10 +132,10 @@ public sealed class ImageTransformFunctionTests
     {
         DataValue result = _crop.Execute([
             DataValue.Null(DataKind.Image),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(10)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(10)
         ]);
         Assert.True(result.IsNull);
     }
@@ -210,7 +210,7 @@ public sealed class ImageTransformFunctionTests
     [Fact]
     public void Rotate_Validate_AcceptsCorrectArgs()
     {
-        Assert.Equal(DataKind.Image, _rotate.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+        Assert.Equal(DataKind.Image, _rotate.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public sealed class ImageTransformFunctionTests
 
         DataValue result = _rotate.Execute([
             DataValue.FromImage(png),
-            DataValue.FromScalar(90)
+            DataValue.FromFloat32(90)
         ]);
 
         (int width, int height) = DecodeDimensions(result);
@@ -234,7 +234,7 @@ public sealed class ImageTransformFunctionTests
     {
         DataValue result = _rotate.Execute([
             DataValue.Null(DataKind.Image),
-            DataValue.FromScalar(45)
+            DataValue.FromFloat32(45)
         ]);
         Assert.True(result.IsNull);
     }
@@ -253,21 +253,21 @@ public sealed class ImageTransformFunctionTests
     public void Noise_Validate_AcceptsCorrectArgs()
     {
         Assert.Equal(DataKind.Image,
-            _noise.ValidateArguments([DataKind.Image, DataKind.String, DataKind.Scalar]));
+            _noise.ValidateArguments([DataKind.Image, DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
     public void Noise_Validate_TwoArgs()
     {
         Assert.Equal(DataKind.Image,
-            _noise.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+            _noise.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
     public void Noise_Validate_WithFormat()
     {
         Assert.Equal(DataKind.Image,
-            _noise.ValidateArguments([DataKind.Image, DataKind.String, DataKind.Scalar, DataKind.String]));
+            _noise.ValidateArguments([DataKind.Image, DataKind.String, DataKind.Float32, DataKind.String]));
     }
 
     [Fact]
@@ -278,7 +278,7 @@ public sealed class ImageTransformFunctionTests
         DataValue result = _noise.Execute([
             DataValue.FromImage(png),
             DataValue.FromString("gaussian"),
-            DataValue.FromScalar(10)
+            DataValue.FromFloat32(10)
         ]);
 
         (int width, int height) = DecodeDimensions(result);
@@ -294,7 +294,7 @@ public sealed class ImageTransformFunctionTests
         DataValue result = _noise.Execute([
             DataValue.FromImage(png),
             DataValue.FromString("salt_pepper"),
-            DataValue.FromScalar(0.1f)
+            DataValue.FromFloat32(0.1f)
         ]);
 
         (int width, int height) = DecodeDimensions(result);
@@ -311,7 +311,7 @@ public sealed class ImageTransformFunctionTests
             _noise.Execute([
                 DataValue.FromImage(png),
                 DataValue.FromString("invalid"),
-                DataValue.FromScalar(10)
+                DataValue.FromFloat32(10)
             ]));
     }
 
@@ -321,7 +321,7 @@ public sealed class ImageTransformFunctionTests
         DataValue result = _noise.Execute([
             DataValue.Null(DataKind.Image),
             DataValue.FromString("gaussian"),
-            DataValue.FromScalar(10)
+            DataValue.FromFloat32(10)
         ]);
         Assert.True(result.IsNull);
     }
@@ -333,7 +333,7 @@ public sealed class ImageTransformFunctionTests
 
         DataValue result = _noise.Execute([
             DataValue.FromImage(png),
-            DataValue.FromScalar(10)
+            DataValue.FromFloat32(10)
         ]);
 
         Assert.Equal(DataKind.Image, result.Kind);
@@ -356,14 +356,14 @@ public sealed class ImageTransformFunctionTests
     [Fact]
     public void Blur_Validate_AcceptsCorrectArgs()
     {
-        Assert.Equal(DataKind.Image, _blur.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+        Assert.Equal(DataKind.Image, _blur.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
     public void Blur_Validate_WithFormat()
     {
         Assert.Equal(DataKind.Image,
-            _blur.ValidateArguments([DataKind.Image, DataKind.Scalar, DataKind.String]));
+            _blur.ValidateArguments([DataKind.Image, DataKind.Float32, DataKind.String]));
     }
 
     [Fact]
@@ -379,7 +379,7 @@ public sealed class ImageTransformFunctionTests
 
         DataValue result = _blur.Execute([
             DataValue.FromImage(png),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
 
         (int width, int height) = DecodeDimensions(result);
@@ -392,7 +392,7 @@ public sealed class ImageTransformFunctionTests
     {
         DataValue result = _blur.Execute([
             DataValue.Null(DataKind.Image),
-            DataValue.FromScalar(5)
+            DataValue.FromFloat32(5)
         ]);
         Assert.True(result.IsNull);
     }
@@ -414,8 +414,8 @@ public sealed class ImageTransformFunctionTests
         // resize consumes the handle — reuses the bitmap, no second decode
         DataValue resizeResult = _resize.Execute([
             grayscaleResult,
-            DataValue.FromScalar(50),
-            DataValue.FromScalar(40)
+            DataValue.FromFloat32(50),
+            DataValue.FromFloat32(40)
         ]);
 
         (int width, int height) = DecodeDimensions(resizeResult);
@@ -431,13 +431,13 @@ public sealed class ImageTransformFunctionTests
         // Simulate: rotate(crop(img, 10, 10, 50, 50), 90)
         DataValue cropResult = _crop.Execute([
             DataValue.FromImage(png),
-            DataValue.FromScalar(10), DataValue.FromScalar(10),
-            DataValue.FromScalar(50), DataValue.FromScalar(50)
+            DataValue.FromFloat32(10), DataValue.FromFloat32(10),
+            DataValue.FromFloat32(50), DataValue.FromFloat32(50)
         ]);
 
         DataValue rotateResult = _rotate.Execute([
             cropResult,
-            DataValue.FromScalar(90)
+            DataValue.FromFloat32(90)
         ]);
 
         (int width, int height) = DecodeDimensions(rotateResult);
@@ -458,7 +458,7 @@ public sealed class ImageTransformFunctionTests
 
         DataValue blurResult = _blur.Execute([
             grayscaleResult,
-            DataValue.FromScalar(2)
+            DataValue.FromFloat32(2)
         ]);
 
         byte[] resultBytes = blurResult.AsImage();
@@ -481,7 +481,7 @@ public sealed class ImageTransformFunctionTests
 
         DataValue resizeResult = _resize.Execute([
             grayscaleResult,
-            DataValue.FromScalar(10), DataValue.FromScalar(10),
+            DataValue.FromFloat32(10), DataValue.FromFloat32(10),
             DataValue.FromString("jpeg")
         ]);
 
@@ -501,12 +501,12 @@ public sealed class ImageTransformFunctionTests
         DataValue step1 = _grayscale.Execute([DataValue.FromImage(png)]);
         DataValue step2 = _crop.Execute([
             step1,
-            DataValue.FromScalar(0), DataValue.FromScalar(0),
-            DataValue.FromScalar(50), DataValue.FromScalar(40)
+            DataValue.FromFloat32(0), DataValue.FromFloat32(0),
+            DataValue.FromFloat32(50), DataValue.FromFloat32(40)
         ]);
         DataValue step3 = _resize.Execute([
             step2,
-            DataValue.FromScalar(25), DataValue.FromScalar(20)
+            DataValue.FromFloat32(25), DataValue.FromFloat32(20)
         ]);
 
         (int width, int height) = DecodeDimensions(step3);
@@ -544,7 +544,7 @@ public sealed class ImageTransformFunctionTests
         // Simulate what ExpressionEvaluator does: consume then dispose intermediate
         DataValue resizeResult = _resize.Execute([
             grayscaleResult,
-            DataValue.FromScalar(10), DataValue.FromScalar(10)
+            DataValue.FromFloat32(10), DataValue.FromFloat32(10)
         ]);
 
         intermediateHandle.Dispose();

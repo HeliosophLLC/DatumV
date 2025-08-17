@@ -423,7 +423,7 @@ public sealed class JoinEvidenceScorerTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000 - nullCount,
             NullCount = nullCount,
             ValidCount = 1000 - nullCount,
@@ -453,7 +453,7 @@ public sealed class JoinEvidenceScorerTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000,
             NullCount = 0,
             ValidCount = 1000,

@@ -23,27 +23,27 @@ public class ReshapeFunctionTests
     public void Validate_UnsupportedKind_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            _function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+            _function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
     public void Validate_OneDimension_ReturnsVector()
     {
-        DataKind result = _function.ValidateArguments([DataKind.Matrix, DataKind.Scalar]);
+        DataKind result = _function.ValidateArguments([DataKind.Matrix, DataKind.Float32]);
         Assert.Equal(DataKind.Vector, result);
     }
 
     [Fact]
     public void Validate_TwoDimensions_ReturnsMatrix()
     {
-        DataKind result = _function.ValidateArguments([DataKind.Vector, DataKind.Scalar, DataKind.Scalar]);
+        DataKind result = _function.ValidateArguments([DataKind.Vector, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.Matrix, result);
     }
 
     [Fact]
     public void Validate_ThreeDimensions_ReturnsTensor()
     {
-        DataKind result = _function.ValidateArguments([DataKind.Vector, DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]);
+        DataKind result = _function.ValidateArguments([DataKind.Vector, DataKind.Float32, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.Tensor, result);
     }
 
@@ -52,8 +52,8 @@ public class ReshapeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromVector([1, 2, 3, 4, 5, 6]),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(3)
         ]);
         float[] data = result.AsMatrix(out int rows, out int columns);
         Assert.Equal(2, rows);
@@ -66,7 +66,7 @@ public class ReshapeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromMatrix([1, 2, 3, 4], 2, 2),
-            DataValue.FromScalar(4)
+            DataValue.FromFloat32(4)
         ]);
         float[] vector = result.AsVector();
         Assert.Equal([1, 2, 3, 4], vector);
@@ -77,9 +77,9 @@ public class ReshapeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromVector([1, 2, 3, 4, 5, 6, 7, 8]),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(2)
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(2)
         ]);
         float[] data = result.AsTensor(out int[] shape);
         Assert.Equal([2, 2, 2], shape);
@@ -91,8 +91,8 @@ public class ReshapeFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _function.Execute([
             DataValue.FromVector([1, 2, 3]),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(2)
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(2)
         ]));
     }
 
@@ -101,7 +101,7 @@ public class ReshapeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.Null(DataKind.Vector),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.True(result.IsNull);
     }

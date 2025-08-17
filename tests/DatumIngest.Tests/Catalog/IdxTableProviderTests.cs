@@ -179,7 +179,7 @@ public sealed class IdxTableProviderTests : IDisposable
 
         Assert.Equal(2, schema.Columns.Count);
         Assert.Equal("index", schema.Columns[0].Name);
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
         Assert.Equal("value", schema.Columns[1].Name);
         Assert.Equal(DataKind.UInt8, schema.Columns[1].Kind);
     }
@@ -194,7 +194,7 @@ public sealed class IdxTableProviderTests : IDisposable
 
         Assert.Equal(2, schema.Columns.Count);
         Assert.Equal("index", schema.Columns[0].Name);
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
         Assert.Equal("image", schema.Columns[1].Name);
         Assert.Equal(DataKind.Image, schema.Columns[1].Kind);
     }
@@ -222,7 +222,7 @@ public sealed class IdxTableProviderTests : IDisposable
         Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
 
         Assert.Equal("value", schema.Columns[1].Name);
-        Assert.Equal(DataKind.Scalar, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[1].Kind);
     }
 
     [Fact]
@@ -251,8 +251,8 @@ public sealed class IdxTableProviderTests : IDisposable
         Assert.Equal(5, rows.Count);
 
         // Check indices are 0-based sequential.
-        Assert.Equal(0f, rows[0]["index"].AsScalar());
-        Assert.Equal(4f, rows[4]["index"].AsScalar());
+        Assert.Equal(0f, rows[0]["index"].AsFloat32());
+        Assert.Equal(4f, rows[4]["index"].AsFloat32());
 
         // Check label values.
         Assert.Equal((byte)7, rows[0]["value"].AsUInt8());
@@ -367,8 +367,8 @@ public sealed class IdxTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(4, rows.Count);
-        Assert.Equal(1.5f, rows[0]["value"].AsScalar());
-        Assert.Equal(4.5f, rows[3]["value"].AsScalar());
+        Assert.Equal(1.5f, rows[0]["value"].AsFloat32());
+        Assert.Equal(4.5f, rows[3]["value"].AsFloat32());
     }
 
     [Fact]
@@ -426,7 +426,7 @@ public sealed class IdxTableProviderTests : IDisposable
 
         Assert.Equal(5, rows.Count);
         Assert.Equal(1, rows[0].FieldCount);
-        Assert.Equal(0f, rows[0]["index"].AsScalar());
+        Assert.Equal(0f, rows[0]["index"].AsFloat32());
     }
 
     [Fact]
@@ -532,9 +532,9 @@ public sealed class IdxTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(100f, rows[0]["value"].AsScalar());
-        Assert.Equal(-200f, rows[1]["value"].AsScalar());
-        Assert.Equal(300f, rows[2]["value"].AsScalar());
+        Assert.Equal(100f, rows[0]["value"].AsFloat32());
+        Assert.Equal(-200f, rows[1]["value"].AsFloat32());
+        Assert.Equal(300f, rows[2]["value"].AsFloat32());
     }
 
     // ───────────────────── Int32 type support ─────────────────────
@@ -556,8 +556,8 @@ public sealed class IdxTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(42f, rows[0]["value"].AsScalar());
-        Assert.Equal(-1f, rows[1]["value"].AsScalar());
+        Assert.Equal(42f, rows[0]["value"].AsFloat32());
+        Assert.Equal(-1f, rows[1]["value"].AsFloat32());
     }
 
     // ───────────────────── Float64 type support ─────────────────────
@@ -579,9 +579,9 @@ public sealed class IdxTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1.125f, rows[0]["value"].AsScalar());
-        Assert.Equal(2.25f, rows[1]["value"].AsScalar());
-        Assert.Equal(3.375f, rows[2]["value"].AsScalar());
+        Assert.Equal(1.125f, rows[0]["value"].AsFloat32());
+        Assert.Equal(2.25f, rows[1]["value"].AsFloat32());
+        Assert.Equal(3.375f, rows[2]["value"].AsFloat32());
     }
 
     // ───────────────────── Matrix type (float32 2D) ─────────────────────
@@ -642,11 +642,11 @@ public sealed class IdxTableProviderTests : IDisposable
                 CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["index"].AsScalar()); // row 1
+        Assert.Equal(1f, rows[0]["index"].AsFloat32()); // row 1
         Assert.Equal(2f, rows[0]["value"].AsUInt8());
-        Assert.Equal(2f, rows[1]["index"].AsScalar()); // row 2
+        Assert.Equal(2f, rows[1]["index"].AsFloat32()); // row 2
         Assert.Equal(1f, rows[1]["value"].AsUInt8());
-        Assert.Equal(3f, rows[2]["index"].AsScalar()); // row 3
+        Assert.Equal(3f, rows[2]["index"].AsFloat32()); // row 3
         Assert.Equal(0f, rows[2]["value"].AsUInt8());
     }
 
@@ -661,7 +661,7 @@ public sealed class IdxTableProviderTests : IDisposable
                 CancellationToken.None));
 
         Assert.Single(rows);
-        Assert.Equal(0f, rows[0]["index"].AsScalar());
+        Assert.Equal(0f, rows[0]["index"].AsFloat32());
         Assert.Equal(7f, rows[0]["value"].AsUInt8());
     }
 
@@ -676,7 +676,7 @@ public sealed class IdxTableProviderTests : IDisposable
                 CancellationToken.None));
 
         Assert.Single(rows);
-        Assert.Equal(4f, rows[0]["index"].AsScalar());
+        Assert.Equal(4f, rows[0]["index"].AsFloat32());
         Assert.Equal(4f, rows[0]["value"].AsUInt8());
     }
 
@@ -691,8 +691,8 @@ public sealed class IdxTableProviderTests : IDisposable
                 CancellationToken.None));
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(3f, rows[0]["index"].AsScalar());
-        Assert.Equal(4f, rows[1]["index"].AsScalar());
+        Assert.Equal(3f, rows[0]["index"].AsFloat32());
+        Assert.Equal(4f, rows[1]["index"].AsFloat32());
     }
 
     [Fact]
@@ -721,8 +721,8 @@ public sealed class IdxTableProviderTests : IDisposable
 
         Assert.Equal(2, rows.Count);
         Assert.Equal(1, rows[0].FieldCount);
-        Assert.Equal(2f, rows[0]["index"].AsScalar());
-        Assert.Equal(3f, rows[1]["index"].AsScalar());
+        Assert.Equal(2f, rows[0]["index"].AsFloat32());
+        Assert.Equal(3f, rows[1]["index"].AsFloat32());
     }
 
     [Fact]
@@ -741,7 +741,7 @@ public sealed class IdxTableProviderTests : IDisposable
         Assert.Equal(allRows.Count, seekRows.Count);
         for (int i = 0; i < allRows.Count; i++)
         {
-            Assert.Equal(allRows[i]["index"].AsScalar(), seekRows[i]["index"].AsScalar());
+            Assert.Equal(allRows[i]["index"].AsFloat32(), seekRows[i]["index"].AsFloat32());
             Assert.Equal(allRows[i]["value"].AsUInt8(), seekRows[i]["value"].AsUInt8());
         }
     }
@@ -758,7 +758,7 @@ public sealed class IdxTableProviderTests : IDisposable
         string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
         IdxTableProvider provider = new();
 
-        HashSet<DataValue> keys = [DataValue.FromScalar(1), DataValue.FromScalar(3)];
+        HashSet<DataValue> keys = [DataValue.FromFloat32(1), DataValue.FromFloat32(3)];
         List<Row> rows = await ReadAllAsync(
             provider.FetchByKeysAsync(Descriptor(path), "index", keys, null,
                 CancellationToken.None));
@@ -766,10 +766,10 @@ public sealed class IdxTableProviderTests : IDisposable
         Assert.Equal(2, rows.Count);
 
         // Results should be ordered by key.
-        Assert.Equal(1f, rows[0]["index"].AsScalar());
+        Assert.Equal(1f, rows[0]["index"].AsFloat32());
         Assert.Equal(2, rows[0]["value"].AsUInt8());
 
-        Assert.Equal(3f, rows[1]["index"].AsScalar());
+        Assert.Equal(3f, rows[1]["index"].AsFloat32());
         Assert.Equal(0, rows[1]["value"].AsUInt8());
     }
 
@@ -784,7 +784,7 @@ public sealed class IdxTableProviderTests : IDisposable
         string path = CreateLabelsFixture(); // 5 labels: [7, 2, 1, 0, 4]
         IdxTableProvider provider = new();
 
-        HashSet<DataValue> keys = [DataValue.FromScalar(0)];
+        HashSet<DataValue> keys = [DataValue.FromFloat32(0)];
         HashSet<string> requiredColumns = new(StringComparer.OrdinalIgnoreCase) { "value" };
         List<Row> rows = await ReadAllAsync(
             provider.FetchByKeysAsync(Descriptor(path), "index", keys, requiredColumns,
@@ -792,7 +792,7 @@ public sealed class IdxTableProviderTests : IDisposable
 
         Assert.Single(rows);
         // Key column is always included.
-        Assert.Equal(0f, rows[0]["index"].AsScalar());
+        Assert.Equal(0f, rows[0]["index"].AsFloat32());
         Assert.Equal(7, rows[0]["value"].AsUInt8());
     }
 
@@ -806,13 +806,13 @@ public sealed class IdxTableProviderTests : IDisposable
         string path = CreateImagesFixture(); // 3 images of 2×2
         IdxTableProvider provider = new();
 
-        HashSet<DataValue> keys = [DataValue.FromScalar(2)];
+        HashSet<DataValue> keys = [DataValue.FromFloat32(2)];
         List<Row> rows = await ReadAllAsync(
             provider.FetchByKeysAsync(Descriptor(path), "index", keys, null,
                 CancellationToken.None));
 
         Assert.Single(rows);
-        Assert.Equal(2f, rows[0]["index"].AsScalar());
+        Assert.Equal(2f, rows[0]["index"].AsFloat32());
         Assert.Equal(DataKind.Image, rows[0]["image"].Kind);
     }
 
@@ -826,13 +826,13 @@ public sealed class IdxTableProviderTests : IDisposable
         IdxTableProvider provider = new();
 
         HashSet<DataValue> keys =
-            [DataValue.FromScalar(1), DataValue.FromScalar(99), DataValue.FromScalar(-1)];
+            [DataValue.FromFloat32(1), DataValue.FromFloat32(99), DataValue.FromFloat32(-1)];
         List<Row> rows = await ReadAllAsync(
             provider.FetchByKeysAsync(Descriptor(path), "index", keys, null,
                 CancellationToken.None));
 
         Assert.Single(rows);
-        Assert.Equal(1f, rows[0]["index"].AsScalar());
+        Assert.Equal(1f, rows[0]["index"].AsFloat32());
     }
 
     /// <summary>

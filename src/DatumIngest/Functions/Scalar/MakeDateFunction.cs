@@ -21,7 +21,7 @@ public sealed class MakeDateFunction : IScalarFunction
 
         for (int i = 0; i < 3; i++)
         {
-            if (argumentKinds[i] != DataKind.Scalar)
+            if (argumentKinds[i] != DataKind.Float32)
             {
                 throw new ArgumentException($"make_date() argument {i + 1} must be Scalar, got {argumentKinds[i]}.");
             }
@@ -38,9 +38,9 @@ public sealed class MakeDateFunction : IScalarFunction
             return DataValue.Null(DataKind.Date);
         }
 
-        int year = (int)arguments[0].AsScalar();
-        int month = (int)arguments[1].AsScalar();
-        int day = (int)arguments[2].AsScalar();
+        int year = (int)arguments[0].AsFloat32();
+        int month = (int)arguments[1].AsFloat32();
+        int day = (int)arguments[2].AsFloat32();
 
         return DataValue.FromDate(new DateOnly(year, month, day));
     }

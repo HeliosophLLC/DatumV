@@ -30,7 +30,7 @@ public sealed class SidecarSchemaDiscoveryTests : IDisposable
     {
         string csvPath = CreateCsvFile("data.csv", "id,name\n1,Alice\n2,Bob\n");
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
         ]);
         WriteSidecar(csvPath, "data", schema);
@@ -61,7 +61,7 @@ public sealed class SidecarSchemaDiscoveryTests : IDisposable
     public void SkipsSidecar_WhenSchemaAlreadyRegistered()
     {
         string csvPath = CreateCsvFile("data.csv", "id\n1\n");
-        Schema explicitSchema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema explicitSchema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         Schema sidecarSchema = new([new ColumnInfo("id", DataKind.String, nullable: true)]);
         WriteSidecar(csvPath, "data", sidecarSchema);
 
@@ -71,7 +71,7 @@ public sealed class SidecarSchemaDiscoveryTests : IDisposable
         DiscoverSidecarSchemas(catalog);
 
         Assert.True(catalog.TryGetSchema("data", out Schema? found));
-        Assert.Equal(DataKind.Scalar, found!.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, found!.Columns[0].Kind);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class SidecarSchemaDiscoveryTests : IDisposable
     {
         string csvPath1 = CreateCsvFile("images.csv", "pixel\n0\n1\n");
         string csvPath2 = CreateCsvFile("labels.csv", "label\n3\n7\n");
-        WriteSidecar(csvPath1, "images", new Schema([new ColumnInfo("pixel", DataKind.Scalar, nullable: false)]));
+        WriteSidecar(csvPath1, "images", new Schema([new ColumnInfo("pixel", DataKind.Float32, nullable: false)]));
         WriteSidecar(csvPath2, "labels", new Schema([new ColumnInfo("label", DataKind.String, nullable: false)]));
 
         TableCatalog catalog = new();
@@ -97,7 +97,7 @@ public sealed class SidecarSchemaDiscoveryTests : IDisposable
     {
         string csvPath = CreateCsvFile("data.csv", "age,name\n25,Alice\n30,Bob\n");
         Schema schema = new([
-            new ColumnInfo("age", DataKind.Scalar, nullable: false),
+            new ColumnInfo("age", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
         ]);
         WriteSidecar(csvPath, "data", schema);
@@ -109,7 +109,7 @@ public sealed class SidecarSchemaDiscoveryTests : IDisposable
         Assert.True(catalog.TryGetSchema("data", out Schema? discovered));
         Assert.Equal(2, discovered!.Columns.Count);
         Assert.Equal("age", discovered.Columns[0].Name);
-        Assert.Equal(DataKind.Scalar, discovered.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, discovered.Columns[0].Kind);
         Assert.False(discovered.Columns[0].Nullable);
         Assert.Equal("name", discovered.Columns[1].Name);
         Assert.Equal(DataKind.String, discovered.Columns[1].Kind);

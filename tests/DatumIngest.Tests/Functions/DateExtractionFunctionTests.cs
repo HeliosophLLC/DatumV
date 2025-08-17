@@ -28,7 +28,7 @@ public class DateExtractionFunctionTests
     {
         YearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(2026f, result.AsScalar());
+        Assert.Equal(2026f, result.AsFloat32());
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class DateExtractionFunctionTests
     {
         YearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(2026f, result.AsScalar());
+        Assert.Equal(2026f, result.AsFloat32());
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class DateExtractionFunctionTests
         YearFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Date)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class DateExtractionFunctionTests
     {
         MonthFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class DateExtractionFunctionTests
     {
         MonthFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class DateExtractionFunctionTests
         MonthFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.DateTime)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     // ───────────────────── day() ─────────────────────
@@ -111,7 +111,7 @@ public class DateExtractionFunctionTests
     {
         DayFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(16f, result.AsScalar());
+        Assert.Equal(16f, result.AsFloat32());
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class DateExtractionFunctionTests
     {
         DayFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(16f, result.AsScalar());
+        Assert.Equal(16f, result.AsFloat32());
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class DateExtractionFunctionTests
         DayFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Date)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     // ───────────────────── hour() ─────────────────────
@@ -145,7 +145,7 @@ public class DateExtractionFunctionTests
     {
         HourFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(14f, result.AsScalar());
+        Assert.Equal(14f, result.AsFloat32());
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class DateExtractionFunctionTests
     {
         HourFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public class DateExtractionFunctionTests
         HourFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.DateTime)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     // ───────────────────── minute() ─────────────────────
@@ -179,7 +179,7 @@ public class DateExtractionFunctionTests
     {
         MinuteFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class DateExtractionFunctionTests
     {
         MinuteFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     // ───────────────────── second() ─────────────────────
@@ -204,7 +204,7 @@ public class DateExtractionFunctionTests
     {
         SecondFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(45f, result.AsScalar());
+        Assert.Equal(45f, result.AsFloat32());
     }
 
     [Fact]
@@ -212,7 +212,7 @@ public class DateExtractionFunctionTests
     {
         SecondFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     // ───────────────────── quarter() ─────────────────────
@@ -237,7 +237,7 @@ public class DateExtractionFunctionTests
     {
         QuarterFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, month, 1))]);
-        Assert.Equal((float)expectedQuarter, result.AsScalar());
+        Assert.Equal((float)expectedQuarter, result.AsFloat32());
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public class DateExtractionFunctionTests
         QuarterFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Date)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     // ───────────────────── dayofweek() ─────────────────────
@@ -264,7 +264,7 @@ public class DateExtractionFunctionTests
         // 2026-03-16 is a Monday.
         DayOfWeekFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, 3, 16))]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public class DateExtractionFunctionTests
         // 2026-03-15 is a Sunday.
         DayOfWeekFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, 3, 15))]);
-        Assert.Equal(7f, result.AsScalar());
+        Assert.Equal(7f, result.AsFloat32());
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public class DateExtractionFunctionTests
         // 2026-03-18 is a Wednesday.
         DayOfWeekFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, 3, 18))]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public class DateExtractionFunctionTests
         // 2026-03-14 is a Saturday.
         DayOfWeekFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, 3, 14))]);
-        Assert.Equal(6f, result.AsScalar());
+        Assert.Equal(6f, result.AsFloat32());
     }
 
     [Fact]
@@ -299,7 +299,7 @@ public class DateExtractionFunctionTests
     {
         DayOfWeekFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(1f, result.AsScalar()); // Monday
+        Assert.Equal(1f, result.AsFloat32()); // Monday
     }
 
     [Fact]
@@ -308,7 +308,7 @@ public class DateExtractionFunctionTests
         DayOfWeekFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Date)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     // ───────────────────── dayofyear() ─────────────────────
@@ -325,7 +325,7 @@ public class DateExtractionFunctionTests
     {
         DayOfYearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, 1, 1))]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -334,7 +334,7 @@ public class DateExtractionFunctionTests
         // 2026-03-16 is the 75th day of the year.
         DayOfYearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(SampleDate)]);
-        Assert.Equal(75f, result.AsScalar());
+        Assert.Equal(75f, result.AsFloat32());
     }
 
     [Fact]
@@ -342,7 +342,7 @@ public class DateExtractionFunctionTests
     {
         DayOfYearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2026, 12, 31))]);
-        Assert.Equal(365f, result.AsScalar());
+        Assert.Equal(365f, result.AsFloat32());
     }
 
     [Fact]
@@ -350,7 +350,7 @@ public class DateExtractionFunctionTests
     {
         DayOfYearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2024, 12, 31))]);
-        Assert.Equal(366f, result.AsScalar());
+        Assert.Equal(366f, result.AsFloat32());
     }
 
     [Fact]
@@ -358,7 +358,7 @@ public class DateExtractionFunctionTests
     {
         DayOfYearFunction function = new();
         DataValue result = function.Execute([DataValue.FromDateTime(SampleDateTime)]);
-        Assert.Equal(75f, result.AsScalar());
+        Assert.Equal(75f, result.AsFloat32());
     }
 
     [Fact]
@@ -367,6 +367,6 @@ public class DateExtractionFunctionTests
         DayOfYearFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Date)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 }

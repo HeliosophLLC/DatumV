@@ -299,7 +299,7 @@ public sealed class EquivalentTableDetectorTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000,
             NullCount = 0,
             ValidCount = 1000,

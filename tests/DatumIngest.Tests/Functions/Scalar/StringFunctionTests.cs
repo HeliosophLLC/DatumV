@@ -204,7 +204,7 @@ public class StringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("ll")
         ]);
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public class StringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("xyz")
         ]);
-        Assert.Equal(-1f, result.AsScalar());
+        Assert.Equal(-1f, result.AsFloat32());
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class StringFunctionTests
         RepeatFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("ab"),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.Equal("ababab", result.AsString());
     }
@@ -300,7 +300,7 @@ public class StringFunctionTests
         RepeatFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.True(result.IsNull);
     }
@@ -331,7 +331,7 @@ public class StringFunctionTests
         LeftFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello"),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.Equal("hel", result.AsString());
     }
@@ -342,7 +342,7 @@ public class StringFunctionTests
         LeftFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.True(result.IsNull);
     }
@@ -355,7 +355,7 @@ public class StringFunctionTests
         RightFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello"),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.Equal("llo", result.AsString());
     }
@@ -366,7 +366,7 @@ public class StringFunctionTests
         RightFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]);
         Assert.True(result.IsNull);
     }
@@ -379,7 +379,7 @@ public class StringFunctionTests
         LpadFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hi"),
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromString("x")
         ]);
         Assert.Equal("xxxhi", result.AsString());
@@ -391,7 +391,7 @@ public class StringFunctionTests
         LpadFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromString("x")
         ]);
         Assert.True(result.IsNull);
@@ -405,7 +405,7 @@ public class StringFunctionTests
         RpadFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hi"),
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromString("x")
         ]);
         Assert.Equal("hixxx", result.AsString());
@@ -417,7 +417,7 @@ public class StringFunctionTests
         RpadFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromString("x")
         ]);
         Assert.True(result.IsNull);
@@ -443,7 +443,7 @@ public class StringFunctionTests
         DataValue result = function.Execute([
             DataValue.FromString("2024-03-26"),
             DataValue.FromString("(\\d{4})-(\\d{2})-(\\d{2})"),
-            DataValue.FromScalar(2)
+            DataValue.FromFloat32(2)
         ]);
         Assert.Equal("03", result.AsString());
     }
@@ -455,7 +455,7 @@ public class StringFunctionTests
         DataValue result = function.Execute([
             DataValue.FromString("hello world"),
             DataValue.FromString("\\w+"),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(0)
         ]);
         Assert.Equal("hello", result.AsString());
     }
@@ -501,7 +501,7 @@ public class StringFunctionTests
             function.Execute([
                 DataValue.FromString("abc"),
                 DataValue.FromString("(\\w+)"),
-                DataValue.FromScalar(5)
+                DataValue.FromFloat32(5)
             ]));
     }
 

@@ -24,7 +24,7 @@ public sealed class LeftFunction : IScalarFunction
             throw new ArgumentException($"left() requires a String as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Scalar)
+        if (argumentKinds[1] != DataKind.Float32)
         {
             throw new ArgumentException($"left() requires a Scalar as the second argument, got {argumentKinds[1]}.");
         }
@@ -44,7 +44,7 @@ public sealed class LeftFunction : IScalarFunction
         }
 
         string inputString = input.AsString();
-        int count = (int)countValue.AsScalar();
+        int count = (int)countValue.AsFloat32();
         string result = inputString[..System.Math.Min(count, inputString.Length)];
         return DataValue.FromString(result);
     }

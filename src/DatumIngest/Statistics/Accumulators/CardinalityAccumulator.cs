@@ -26,7 +26,7 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
         // float.ToString("R") and still unique per distinct float value.
         string representation = value.Kind switch
         {
-            DataKind.Scalar => BitConverter.SingleToInt32Bits(value.AsScalar()).ToString(),
+            DataKind.Float32 => BitConverter.SingleToInt32Bits(value.AsFloat32()).ToString(),
             DataKind.UInt8 => value.AsUInt8().ToString(),
             DataKind.String => value.AsString(),
             DataKind.Date => value.AsDate().ToString("O"),

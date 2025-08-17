@@ -78,7 +78,7 @@ public sealed record DatumColumnDescriptor
     /// </summary>
     public int ElementsPerRow()
     {
-        if (Kind == DataKind.Scalar || Kind == DataKind.UInt8)
+        if (Kind == DataKind.Float32 || Kind == DataKind.UInt8)
         {
             return 1;
         }

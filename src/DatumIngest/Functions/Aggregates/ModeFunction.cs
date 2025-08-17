@@ -52,7 +52,7 @@ public sealed class ModeFunction : IAggregateFunction
     {
         private readonly Dictionary<DataValue, long> _frequencies = [];
         private readonly List<DataValue> _insertionOrder = [];
-        private DataKind _kind = DataKind.Scalar;
+        private DataKind _kind = DataKind.Float32;
 
         public void Accumulate(ReadOnlySpan<DataValue> arguments)
         {

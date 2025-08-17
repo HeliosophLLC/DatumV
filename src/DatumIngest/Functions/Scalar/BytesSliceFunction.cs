@@ -25,12 +25,12 @@ public sealed class BytesSliceFunction : IScalarFunction
             throw new ArgumentException($"bytes_slice() first argument must be UInt8Array, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Scalar)
+        if (argumentKinds[1] != DataKind.Float32)
         {
             throw new ArgumentException($"bytes_slice() second argument must be Scalar, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds[2] != DataKind.Scalar)
+        if (argumentKinds[2] != DataKind.Float32)
         {
             throw new ArgumentException($"bytes_slice() third argument must be Scalar, got {argumentKinds[2]}.");
         }
@@ -47,8 +47,8 @@ public sealed class BytesSliceFunction : IScalarFunction
         }
 
         ReadOnlyMemory<byte> source = arguments[0].AsUInt8Array();
-        int start = (int)arguments[1].AsScalar();
-        int length = (int)arguments[2].AsScalar();
+        int start = (int)arguments[1].AsFloat32();
+        int length = (int)arguments[2].AsFloat32();
 
         start = System.Math.Max(0, System.Math.Min(start, source.Length));
         length = System.Math.Max(0, System.Math.Min(length, source.Length - start));

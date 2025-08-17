@@ -42,7 +42,7 @@ public sealed class LoadImageFunctionTests
     [Fact]
     public void Validate_RejectsScalar()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
@@ -85,8 +85,8 @@ public sealed class LoadImageFunctionTests
         ResizeImageFunction resize = new();
         DataValue resized = resize.Execute([
             loaded,
-            DataValue.FromScalar(4),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(4),
+            DataValue.FromFloat32(3)
         ]);
 
         Assert.Equal(DataKind.Image, resized.Kind);

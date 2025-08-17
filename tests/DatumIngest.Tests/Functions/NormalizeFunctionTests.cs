@@ -17,7 +17,7 @@ public class NormalizeFunctionTests
     public void Validate_UInt8_ReturnsScalar()
     {
         DataKind result = _function.ValidateArguments([DataKind.UInt8]);
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class NormalizeFunctionTests
     [Fact]
     public void Validate_VectorWithMinMax_ReturnsVector()
     {
-        DataKind result = _function.ValidateArguments([DataKind.Vector, DataKind.Scalar, DataKind.Scalar]);
+        DataKind result = _function.ValidateArguments([DataKind.Vector, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.Vector, result);
     }
 
@@ -50,13 +50,13 @@ public class NormalizeFunctionTests
     public void Execute_UInt8_NormalizesTo0_1()
     {
         DataValue result = _function.Execute([DataValue.FromUInt8(255)]);
-        Assert.Equal(1.0f, result.AsScalar());
+        Assert.Equal(1.0f, result.AsFloat32());
 
         DataValue result2 = _function.Execute([DataValue.FromUInt8(0)]);
-        Assert.Equal(0.0f, result2.AsScalar());
+        Assert.Equal(0.0f, result2.AsFloat32());
 
         DataValue result3 = _function.Execute([DataValue.FromUInt8(128)]);
-        Assert.Equal(128.0f / 255.0f, result3.AsScalar(), 0.0001f);
+        Assert.Equal(128.0f / 255.0f, result3.AsFloat32(), 0.0001f);
     }
 
     [Fact]
@@ -74,22 +74,22 @@ public class NormalizeFunctionTests
     public void Execute_Scalar_NormalizesWithMinMax()
     {
         DataValue result = _function.Execute([
-            DataValue.FromScalar(50),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(100)
+            DataValue.FromFloat32(50),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(100)
         ]);
-        Assert.Equal(0.5f, result.AsScalar(), 0.0001f);
+        Assert.Equal(0.5f, result.AsFloat32(), 0.0001f);
     }
 
     [Fact]
     public void Execute_Scalar_ZeroRange_ReturnsZero()
     {
         DataValue result = _function.Execute([
-            DataValue.FromScalar(50),
-            DataValue.FromScalar(50),
-            DataValue.FromScalar(50)
+            DataValue.FromFloat32(50),
+            DataValue.FromFloat32(50),
+            DataValue.FromFloat32(50)
         ]);
-        Assert.Equal(0.0f, result.AsScalar());
+        Assert.Equal(0.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -97,8 +97,8 @@ public class NormalizeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromVector([10, 20, 30]),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(30)
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(30)
         ]);
         float[] vector = result.AsVector();
         Assert.Equal(0.0f, vector[0], 0.0001f);
@@ -118,8 +118,8 @@ public class NormalizeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromMatrix([0, 50, 100, 200], 2, 2),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(200)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(200)
         ]);
         float[] data = result.AsMatrix(out int rows, out int columns);
         Assert.Equal(2, rows);
@@ -135,8 +135,8 @@ public class NormalizeFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromTensor([0, 100], [2]),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(100)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(100)
         ]);
         float[] data = result.AsTensor(out int[] shape);
         Assert.Equal([2], shape);

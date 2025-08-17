@@ -138,7 +138,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new TopKAccumulator(_topK, kind));
         }
 
-        if (kind is DataKind.Scalar or DataKind.UInt8)
+        if (kind is DataKind.Float32 or DataKind.UInt8)
         {
             accumulators.Add(new NumericAccumulator());
             accumulators.Add(new HistogramAccumulator());
@@ -177,7 +177,7 @@ public sealed class StatisticsCollector
             accumulators.Add(new QuantileAccumulator());
         }
 
-        if (kind is DataKind.Scalar or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime or DataKind.Uuid or DataKind.Boolean or DataKind.Time or DataKind.Duration)
+        if (kind is DataKind.Float32 or DataKind.UInt8 or DataKind.String or DataKind.JsonValue or DataKind.Date or DataKind.DateTime or DataKind.Uuid or DataKind.Boolean or DataKind.Time or DataKind.Duration)
         {
             accumulators.Add(new EntropyAccumulator(kind));
             accumulators.Add(new CategoricalDiagnosticsAccumulator(_topK, kind));

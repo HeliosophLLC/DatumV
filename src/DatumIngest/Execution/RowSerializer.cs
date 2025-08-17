@@ -114,8 +114,8 @@ internal static class RowSerializer
 
         switch (value.Kind)
         {
-            case DataKind.Scalar:
-                writer.Write(value.AsScalar());
+            case DataKind.Float32:
+                writer.Write(value.AsFloat32());
                 break;
 
             case DataKind.UInt8:
@@ -240,7 +240,7 @@ internal static class RowSerializer
 
         return kind switch
         {
-            DataKind.Scalar => DataValue.FromScalar(reader.ReadSingle()),
+            DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
             DataKind.String => DataValue.FromString(reader.ReadString()),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),

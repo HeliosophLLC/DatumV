@@ -19,11 +19,11 @@ public sealed class CombinedRowSchemaTests
     {
         Row left = new(
             ["left_alias.index", "left_alias.label"],
-            [DataValue.FromScalar(0), DataValue.FromScalar(5)]);
+            [DataValue.FromFloat32(0), DataValue.FromFloat32(5)]);
 
         Row right = new(
             ["right_alias.index", "right_alias.image"],
-            [DataValue.FromScalar(0), DataValue.FromScalar(42)]);
+            [DataValue.FromFloat32(0), DataValue.FromFloat32(42)]);
 
         JoinOperator.CombinedRowSchema schema =
             JoinOperator.CombinedRowSchema.Build(left, right);
@@ -31,10 +31,10 @@ public sealed class CombinedRowSchemaTests
 
         // Unique columns should be reachable by unqualified name.
         Assert.True(combined.TryGetValue("label", out DataValue? label));
-        Assert.Equal(5.0, label!.AsScalar());
+        Assert.Equal(5.0, label!.AsFloat32());
 
         Assert.True(combined.TryGetValue("image", out DataValue? image));
-        Assert.Equal(42.0, image!.AsScalar());
+        Assert.Equal(42.0, image!.AsFloat32());
 
         // Qualified names should still work.
         Assert.True(combined.TryGetValue("left_alias.label", out _));
@@ -50,11 +50,11 @@ public sealed class CombinedRowSchemaTests
     {
         Row left = new(
             ["left_alias.index", "left_alias.label"],
-            [DataValue.FromScalar(0), DataValue.FromScalar(5)]);
+            [DataValue.FromFloat32(0), DataValue.FromFloat32(5)]);
 
         Row right = new(
             ["right_alias.index", "right_alias.image"],
-            [DataValue.FromScalar(0), DataValue.FromScalar(42)]);
+            [DataValue.FromFloat32(0), DataValue.FromFloat32(42)]);
 
         JoinOperator.CombinedRowSchema schema =
             JoinOperator.CombinedRowSchema.Build(left, right);
@@ -75,8 +75,8 @@ public sealed class CombinedRowSchemaTests
     [Fact]
     public void Build_UnaliasedColumns_PreservesOriginalNames()
     {
-        Row left = new(["id", "name"], [DataValue.FromScalar(1), DataValue.FromScalar(2)]);
-        Row right = new(["value"], [DataValue.FromScalar(3)]);
+        Row left = new(["id", "name"], [DataValue.FromFloat32(1), DataValue.FromFloat32(2)]);
+        Row right = new(["value"], [DataValue.FromFloat32(3)]);
 
         JoinOperator.CombinedRowSchema schema =
             JoinOperator.CombinedRowSchema.Build(left, right);

@@ -22,7 +22,7 @@ public class AggregateFunctionTests
         accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
         accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
 
-        Assert.Equal(3f, accumulator.Result.AsScalar());
+        Assert.Equal(3f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -31,14 +31,14 @@ public class AggregateFunctionTests
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] nonNull = [DataValue.FromScalar(10f)];
-        DataValue[] nullValue = [DataValue.Null(DataKind.Scalar)];
+        DataValue[] nonNull = [DataValue.FromFloat32(10f)];
+        DataValue[] nullValue = [DataValue.Null(DataKind.Float32)];
 
         accumulator.Accumulate(nonNull);
         accumulator.Accumulate(nullValue);
         accumulator.Accumulate(nonNull);
 
-        Assert.Equal(2f, accumulator.Result.AsScalar());
+        Assert.Equal(2f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class AggregateFunctionTests
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        Assert.Equal(0f, accumulator.Result.AsScalar());
+        Assert.Equal(0f, accumulator.Result.AsFloat32());
     }
 
     // ─────────────── SUM ───────────────
@@ -58,15 +58,15 @@ public class AggregateFunctionTests
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] val1 = [DataValue.FromScalar(10f)];
-        DataValue[] val2 = [DataValue.FromScalar(20f)];
-        DataValue[] val3 = [DataValue.FromScalar(30f)];
+        DataValue[] val1 = [DataValue.FromFloat32(10f)];
+        DataValue[] val2 = [DataValue.FromFloat32(20f)];
+        DataValue[] val3 = [DataValue.FromFloat32(30f)];
 
         accumulator.Accumulate(val1);
         accumulator.Accumulate(val2);
         accumulator.Accumulate(val3);
 
-        Assert.Equal(60f, accumulator.Result.AsScalar());
+        Assert.Equal(60f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -75,14 +75,14 @@ public class AggregateFunctionTests
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] val1 = [DataValue.FromScalar(5f)];
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
+        DataValue[] val1 = [DataValue.FromFloat32(5f)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
 
         accumulator.Accumulate(val1);
         accumulator.Accumulate(nullVal);
         accumulator.Accumulate(val1);
 
-        Assert.Equal(10f, accumulator.Result.AsScalar());
+        Assert.Equal(10f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class AggregateFunctionTests
         SumFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         accumulator.Accumulate(nullVal);
         accumulator.Accumulate(nullVal);
 
@@ -106,15 +106,15 @@ public class AggregateFunctionTests
         AvgFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] val1 = [DataValue.FromScalar(10f)];
-        DataValue[] val2 = [DataValue.FromScalar(20f)];
-        DataValue[] val3 = [DataValue.FromScalar(30f)];
+        DataValue[] val1 = [DataValue.FromFloat32(10f)];
+        DataValue[] val2 = [DataValue.FromFloat32(20f)];
+        DataValue[] val3 = [DataValue.FromFloat32(30f)];
 
         accumulator.Accumulate(val1);
         accumulator.Accumulate(val2);
         accumulator.Accumulate(val3);
 
-        Assert.Equal(20f, accumulator.Result.AsScalar());
+        Assert.Equal(20f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -123,16 +123,16 @@ public class AggregateFunctionTests
         AvgFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] val1 = [DataValue.FromScalar(10f)];
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
-        DataValue[] val2 = [DataValue.FromScalar(30f)];
+        DataValue[] val1 = [DataValue.FromFloat32(10f)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
+        DataValue[] val2 = [DataValue.FromFloat32(30f)];
 
         accumulator.Accumulate(val1);
         accumulator.Accumulate(nullVal);
         accumulator.Accumulate(val2);
 
         // AVG of 10 and 30, ignoring NULL = 20
-        Assert.Equal(20f, accumulator.Result.AsScalar());
+        Assert.Equal(20f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class AggregateFunctionTests
         AvgFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         accumulator.Accumulate(nullVal);
 
         Assert.True(accumulator.Result.IsNull);
@@ -155,15 +155,15 @@ public class AggregateFunctionTests
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] val1 = [DataValue.FromScalar(30f)];
-        DataValue[] val2 = [DataValue.FromScalar(10f)];
-        DataValue[] val3 = [DataValue.FromScalar(20f)];
+        DataValue[] val1 = [DataValue.FromFloat32(30f)];
+        DataValue[] val2 = [DataValue.FromFloat32(10f)];
+        DataValue[] val3 = [DataValue.FromFloat32(20f)];
 
         accumulator.Accumulate(val1);
         accumulator.Accumulate(val2);
         accumulator.Accumulate(val3);
 
-        Assert.Equal(10f, accumulator.Result.AsScalar());
+        Assert.Equal(10f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -189,13 +189,13 @@ public class AggregateFunctionTests
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
-        DataValue[] val1 = [DataValue.FromScalar(5f)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
+        DataValue[] val1 = [DataValue.FromFloat32(5f)];
 
         accumulator.Accumulate(nullVal);
         accumulator.Accumulate(val1);
 
-        Assert.Equal(5f, accumulator.Result.AsScalar());
+        Assert.Equal(5f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class AggregateFunctionTests
         MinFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
         accumulator.Accumulate(nullVal);
 
         Assert.True(accumulator.Result.IsNull);
@@ -218,15 +218,15 @@ public class AggregateFunctionTests
         MaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] val1 = [DataValue.FromScalar(10f)];
-        DataValue[] val2 = [DataValue.FromScalar(30f)];
-        DataValue[] val3 = [DataValue.FromScalar(20f)];
+        DataValue[] val1 = [DataValue.FromFloat32(10f)];
+        DataValue[] val2 = [DataValue.FromFloat32(30f)];
+        DataValue[] val3 = [DataValue.FromFloat32(20f)];
 
         accumulator.Accumulate(val1);
         accumulator.Accumulate(val2);
         accumulator.Accumulate(val3);
 
-        Assert.Equal(30f, accumulator.Result.AsScalar());
+        Assert.Equal(30f, accumulator.Result.AsFloat32());
     }
 
     [Fact]
@@ -252,13 +252,13 @@ public class AggregateFunctionTests
         MaxFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        DataValue[] nullVal = [DataValue.Null(DataKind.Scalar)];
-        DataValue[] val1 = [DataValue.FromScalar(5f)];
+        DataValue[] nullVal = [DataValue.Null(DataKind.Float32)];
+        DataValue[] val1 = [DataValue.FromFloat32(5f)];
 
         accumulator.Accumulate(nullVal);
         accumulator.Accumulate(val1);
 
-        Assert.Equal(5f, accumulator.Result.AsScalar());
+        Assert.Equal(5f, accumulator.Result.AsFloat32());
     }
 
     // ─────────────── FunctionRegistry ───────────────

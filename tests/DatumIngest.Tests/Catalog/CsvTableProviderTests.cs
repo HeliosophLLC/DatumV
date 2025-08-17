@@ -47,8 +47,8 @@ public sealed class CsvTableProviderTests
         Schema schema = await provider.GetSchemaAsync(Descriptor("simple.csv"), CancellationToken.None);
 
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
-        Assert.Equal(DataKind.Scalar, schema.Columns[1].Kind);
-        Assert.Equal(DataKind.Scalar, schema.Columns[2].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[2].Kind);
     }
 
     [Fact]
@@ -96,8 +96,8 @@ public sealed class CsvTableProviderTests
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor("simple.csv"), null, CancellationToken.None));
 
-        Assert.Equal(30f, rows[0]["age"].AsScalar());
-        Assert.Equal(95.5f, rows[0]["score"].AsScalar());
+        Assert.Equal(30f, rows[0]["age"].AsFloat32());
+        Assert.Equal(95.5f, rows[0]["score"].AsFloat32());
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public sealed class CsvTableProviderTests
                 CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
         Assert.Equal("cat", rows[0]["label"].AsString());
     }
 
@@ -142,16 +142,16 @@ public sealed class CsvTableProviderTests
         Assert.Equal(3, rows.Count);
 
         // First row: x=1, y=null
-        Assert.Equal(1f, rows[0]["x"].AsScalar());
+        Assert.Equal(1f, rows[0]["x"].AsFloat32());
         Assert.True(rows[0]["y"].IsNull);
 
         // Second row: x=null, y=3
         Assert.True(rows[1]["x"].IsNull);
-        Assert.Equal(3f, rows[1]["y"].AsScalar());
+        Assert.Equal(3f, rows[1]["y"].AsFloat32());
 
         // Third row: x=4, y=5
-        Assert.Equal(4f, rows[2]["x"].AsScalar());
-        Assert.Equal(5f, rows[2]["y"].AsScalar());
+        Assert.Equal(4f, rows[2]["x"].AsFloat32());
+        Assert.Equal(5f, rows[2]["y"].AsFloat32());
     }
 
     // ───────────────────── Empty file (header only) ─────────────────────
@@ -190,7 +190,7 @@ public sealed class CsvTableProviderTests
         Assert.Equal(3, rows.Count);
         Assert.Equal(2, rows[0].FieldCount);
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal(95.5f, rows[0]["score"].AsScalar());
+        Assert.Equal(95.5f, rows[0]["score"].AsFloat32());
     }
 
     // ───────────────────── Capabilities ─────────────────────
@@ -230,7 +230,7 @@ public sealed class CsvTableProviderTests
             provider.OpenAsync(Descriptor("semicolon.csv"), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
         Assert.Equal("cat", rows[0]["label"].AsString());
     }
 
@@ -274,7 +274,7 @@ public sealed class CsvTableProviderTests
 
         foreach (ColumnInfo column in schema.Columns)
         {
-            Assert.Equal(DataKind.Scalar, column.Kind);
+            Assert.Equal(DataKind.Float32, column.Kind);
         }
     }
 
@@ -287,8 +287,8 @@ public sealed class CsvTableProviderTests
 
         // 5 data rows — first row (39,77516,13,...) should be data, not skipped.
         Assert.Equal(5, rows.Count);
-        Assert.Equal(39f, rows[0]["col_0"].AsScalar());
-        Assert.Equal(77516f, rows[0]["col_1"].AsScalar());
+        Assert.Equal(39f, rows[0]["col_0"].AsFloat32());
+        Assert.Equal(77516f, rows[0]["col_1"].AsFloat32());
     }
 
     [Fact]
@@ -358,7 +358,7 @@ public sealed class CsvTableProviderTests
 
         // 5 rows in file, header=true skips row 1 → 4 data rows.
         Assert.Equal(4, rows.Count);
-        Assert.Equal(50f, rows[0]["39"].AsScalar());
+        Assert.Equal(50f, rows[0]["39"].AsFloat32());
     }
 
     [Fact]
@@ -372,8 +372,8 @@ public sealed class CsvTableProviderTests
 
         Assert.Equal(5, rows.Count);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal(39f, rows[0]["col_0"].AsScalar());
-        Assert.Equal(13f, rows[0]["col_2"].AsScalar());
+        Assert.Equal(39f, rows[0]["col_0"].AsFloat32());
+        Assert.Equal(13f, rows[0]["col_2"].AsFloat32());
     }
 
     // ───────────────────── ISO 8601 date auto-detection ─────────────────────
@@ -384,7 +384,7 @@ public sealed class CsvTableProviderTests
         CsvTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor("dates.csv"), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);   // id
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);   // id
         Assert.Equal(DataKind.Date, schema.Columns[1].Kind);     // event_date (no time component)
         Assert.Equal(DataKind.DateTime, schema.Columns[2].Kind); // event_time (has time component)
         Assert.Equal(DataKind.String, schema.Columns[3].Kind);   // label
@@ -533,7 +533,7 @@ public sealed class CsvTableProviderTests
         Assert.Equal(3, rows.Count);
         Assert.Equal(3, rows[0].FieldCount);
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal(91f, rows[2]["score"].AsScalar());
+        Assert.Equal(91f, rows[2]["score"].AsFloat32());
     }
 
     // ───────── All-string header detection (value disjointness) ─────────

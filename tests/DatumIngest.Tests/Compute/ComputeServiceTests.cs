@@ -837,7 +837,7 @@ public sealed class ComputeServiceTests : IDisposable
                 new NumericFeatureManifest
                 {
                     Name = "customer_id",
-                    Kind = DataKind.Scalar,
+                    Kind = DataKind.Float32,
                     Count = 1000,
                     NullCount = 0,
                     ValidCount = 1000,
@@ -869,7 +869,7 @@ public sealed class ComputeServiceTests : IDisposable
                 new NumericFeatureManifest
                 {
                     Name = "customer_id",
-                    Kind = DataKind.Scalar,
+                    Kind = DataKind.Float32,
                     Count = 1000,
                     NullCount = 0,
                     ValidCount = 1000,

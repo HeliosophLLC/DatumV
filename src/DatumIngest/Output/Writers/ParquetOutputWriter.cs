@@ -254,7 +254,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
             ColumnInfo column = schema.Columns[i];
             fields[i] = column.Kind switch
             {
-                DataKind.Scalar => new DataField<float>(column.Name),
+                DataKind.Float32 => new DataField<float>(column.Name),
                 DataKind.UInt8 => new DataField<int>(column.Name),
                 DataKind.UInt8Array or DataKind.Image when embedBinary => new DataField<byte[]>(column.Name),
                 DataKind.UInt8Array or DataKind.Image => new DataField<string>(column.Name),
@@ -282,7 +282,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
         // In stream mode, binary columns are embedded directly.
         return column.Kind switch
         {
-            DataKind.Scalar => BuildFloatColumn(field, column.Name, rowCount),
+            DataKind.Float32 => BuildFloatColumn(field, column.Name, rowCount),
             DataKind.UInt8 => BuildIntColumn(field, column.Name, rowCount),
             DataKind.UInt8Array or DataKind.Image when embedBinary => BuildBinaryColumn(field, column, rowCount),
             DataKind.UInt8Array or DataKind.Image => BuildExternalizedPathColumn(field, column.Name, rowCount),
@@ -305,7 +305,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
         for (int i = 0; i < rowCount; i++)
         {
             DataValue value = _rows[i][columnName];
-            data[i] = value.IsNull ? float.NaN : value.AsScalar();
+            data[i] = value.IsNull ? float.NaN : value.AsFloat32();
         }
 
         return new DataColumn(field, data);

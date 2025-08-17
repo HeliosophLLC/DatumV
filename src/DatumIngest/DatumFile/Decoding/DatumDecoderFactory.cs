@@ -50,7 +50,7 @@ public static class DatumDecoderFactory
 
         return descriptor.Kind switch
         {
-            DataKind.Scalar => ScalarDecoder,
+            DataKind.Float32 => ScalarDecoder,
             DataKind.UInt8 => UInt8Decoder,
             DataKind.Boolean => BooleanDecoder,
             DataKind.Date => DateDecoder,

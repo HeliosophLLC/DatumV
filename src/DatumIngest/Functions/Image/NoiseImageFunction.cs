@@ -76,13 +76,13 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
         if (arguments.Length == 2)
         {
             noiseType = "GAUSSIAN";
-            value = arguments[1].AsScalar();
+            value = arguments[1].AsFloat32();
             formatOverride = null;
         }
         else
         {
             noiseType = arguments[1].AsString().ToUpperInvariant();
-            value = arguments[2].AsScalar();
+            value = arguments[2].AsFloat32();
             formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
         }
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

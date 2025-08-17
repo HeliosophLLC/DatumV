@@ -24,19 +24,19 @@ public abstract class BinaryMathFunction : IScalarFunction
         DataKind kindA = argumentKinds[0];
         DataKind kindB = argumentKinds[1];
 
-        if (kindA is not (DataKind.Scalar or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kindA is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"{Name}() does not support {kindA} as first argument.");
         }
 
-        if (kindB is not (DataKind.Scalar or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kindB is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"{Name}() does not support {kindB} as second argument.");
         }
 
         // Result kind: highest rank of the two inputs (UInt8 promotes to Scalar)
-        DataKind effectiveA = kindA is DataKind.UInt8 ? DataKind.Scalar : kindA;
-        DataKind effectiveB = kindB is DataKind.UInt8 ? DataKind.Scalar : kindB;
+        DataKind effectiveA = kindA is DataKind.UInt8 ? DataKind.Float32 : kindA;
+        DataKind effectiveB = kindB is DataKind.UInt8 ? DataKind.Float32 : kindB;
 
         return effectiveA >= effectiveB ? effectiveA : effectiveB;
     }
@@ -54,14 +54,14 @@ public abstract class BinaryMathFunction : IScalarFunction
         }
 
         // Extract scalar values for broadcast cases
-        bool aIsScalar = inputA.Kind is DataKind.Scalar or DataKind.UInt8;
-        bool bIsScalar = inputB.Kind is DataKind.Scalar or DataKind.UInt8;
+        bool aIsScalar = inputA.Kind is DataKind.Float32 or DataKind.UInt8;
+        bool bIsScalar = inputB.Kind is DataKind.Float32 or DataKind.UInt8;
 
         if (aIsScalar && bIsScalar)
         {
-            float a = inputA.Kind is DataKind.UInt8 ? inputA.AsUInt8() : inputA.AsScalar();
-            float b = inputB.Kind is DataKind.UInt8 ? inputB.AsUInt8() : inputB.AsScalar();
-            return DataValue.FromScalar(Apply(a, b));
+            float a = inputA.Kind is DataKind.UInt8 ? inputA.AsUInt8() : inputA.AsFloat32();
+            float b = inputB.Kind is DataKind.UInt8 ? inputB.AsUInt8() : inputB.AsFloat32();
+            return DataValue.FromFloat32(Apply(a, b));
         }
 
         // At least one is array-like
@@ -80,13 +80,13 @@ public abstract class BinaryMathFunction : IScalarFunction
 
     private DataValue ApplyScalarLeft(DataValue scalarVal, DataValue arrayVal)
     {
-        float scalar = scalarVal.Kind is DataKind.UInt8 ? scalarVal.AsUInt8() : scalarVal.AsScalar();
+        float scalar = scalarVal.Kind is DataKind.UInt8 ? scalarVal.AsUInt8() : scalarVal.AsFloat32();
         return MapArray(arrayVal, element => Apply(scalar, element));
     }
 
     private DataValue ApplyScalarRight(DataValue arrayVal, DataValue scalarVal)
     {
-        float scalar = scalarVal.Kind is DataKind.UInt8 ? scalarVal.AsUInt8() : scalarVal.AsScalar();
+        float scalar = scalarVal.Kind is DataKind.UInt8 ? scalarVal.AsUInt8() : scalarVal.AsFloat32();
         return MapArray(arrayVal, element => Apply(element, scalar));
     }
 

@@ -48,9 +48,9 @@ public class GroupByOperatorTests
     public async Task GlobalAggregation_CountStar()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -63,16 +63,16 @@ public class GroupByOperatorTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["COUNT(*)"].AsScalar());
+        Assert.Equal(3f, results[0]["COUNT(*)"].AsFloat32());
     }
 
     [Fact]
     public async Task GlobalAggregation_SumAndAvg()
     {
         MockOperator source = new(
-            MakeRow(("price", DataValue.FromScalar(10f))),
-            MakeRow(("price", DataValue.FromScalar(20f))),
-            MakeRow(("price", DataValue.FromScalar(30f))));
+            MakeRow(("price", DataValue.FromFloat32(10f))),
+            MakeRow(("price", DataValue.FromFloat32(20f))),
+            MakeRow(("price", DataValue.FromFloat32(30f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -92,8 +92,8 @@ public class GroupByOperatorTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(60f, results[0]["SUM(price)"].AsScalar());
-        Assert.Equal(20f, results[0]["AVG(price)"].AsScalar());
+        Assert.Equal(60f, results[0]["SUM(price)"].AsFloat32());
+        Assert.Equal(20f, results[0]["AVG(price)"].AsFloat32());
     }
 
     // ─────────────── Single-key GROUP BY ───────────────
@@ -102,11 +102,11 @@ public class GroupByOperatorTests
     public async Task SingleKey_GroupBy_WithCount()
     {
         MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(2f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(3f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(4f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(5f))));
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(2f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(3f))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(4f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -128,11 +128,11 @@ public class GroupByOperatorTests
         Row groupA = results.First(row => row["category"].AsString() == "A");
         Row groupB = results.First(row => row["category"].AsString() == "B");
 
-        Assert.Equal(3f, groupA["COUNT(*)"].AsScalar());
-        Assert.Equal(9f, groupA["SUM(value)"].AsScalar());
+        Assert.Equal(3f, groupA["COUNT(*)"].AsFloat32());
+        Assert.Equal(9f, groupA["SUM(value)"].AsFloat32());
 
-        Assert.Equal(2f, groupB["COUNT(*)"].AsScalar());
-        Assert.Equal(6f, groupB["SUM(value)"].AsScalar());
+        Assert.Equal(2f, groupB["COUNT(*)"].AsFloat32());
+        Assert.Equal(6f, groupB["SUM(value)"].AsFloat32());
     }
 
     // ─────────────── Composite-key GROUP BY ───────────────
@@ -141,10 +141,10 @@ public class GroupByOperatorTests
     public async Task CompositeKey_GroupBy()
     {
         MockOperator source = new(
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(100f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromScalar(200f))),
-            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(300f))),
-            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromScalar(50f))));
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(100f))),
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("inactive")), ("amount", DataValue.FromFloat32(200f))),
+            MakeRow(("dept", DataValue.FromString("X")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(300f))),
+            MakeRow(("dept", DataValue.FromString("Y")), ("status", DataValue.FromString("active")), ("amount", DataValue.FromFloat32(50f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -164,13 +164,13 @@ public class GroupByOperatorTests
 
         Row groupXActive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "active");
-        Assert.Equal(2f, groupXActive["COUNT(*)"].AsScalar());
-        Assert.Equal(400f, groupXActive["SUM(amount)"].AsScalar());
+        Assert.Equal(2f, groupXActive["COUNT(*)"].AsFloat32());
+        Assert.Equal(400f, groupXActive["SUM(amount)"].AsFloat32());
 
         Row groupXInactive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "inactive");
-        Assert.Equal(1f, groupXInactive["COUNT(*)"].AsScalar());
-        Assert.Equal(200f, groupXInactive["SUM(amount)"].AsScalar());
+        Assert.Equal(1f, groupXInactive["COUNT(*)"].AsFloat32());
+        Assert.Equal(200f, groupXInactive["SUM(amount)"].AsFloat32());
     }
 
     // ─────────────── MIN / MAX ───────────────
@@ -179,9 +179,9 @@ public class GroupByOperatorTests
     public async Task GroupBy_MinMax()
     {
         MockOperator source = new(
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromScalar(5f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromScalar(15f))),
-            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromScalar(10f))));
+            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(5f))),
+            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(15f))),
+            MakeRow(("group", DataValue.FromString("G1")), ("val", DataValue.FromFloat32(10f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -201,8 +201,8 @@ public class GroupByOperatorTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(5f, results[0]["MIN(val)"].AsScalar());
-        Assert.Equal(15f, results[0]["MAX(val)"].AsScalar());
+        Assert.Equal(5f, results[0]["MIN(val)"].AsFloat32());
+        Assert.Equal(15f, results[0]["MAX(val)"].AsFloat32());
     }
 
     // ─────────────── Empty input ───────────────
@@ -242,7 +242,7 @@ public class GroupByOperatorTests
 
         // Global aggregation on empty input returns a single row with COUNT(*) = 0.
         Assert.Single(results);
-        Assert.Equal(0f, results[0]["COUNT(*)"].AsScalar());
+        Assert.Equal(0f, results[0]["COUNT(*)"].AsFloat32());
     }
 
     // ─────────────── Null handling ───────────────
@@ -251,9 +251,9 @@ public class GroupByOperatorTests
     public async Task GroupBy_NullGroupKeyCreatesGroup()
     {
         MockOperator source = new(
-            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(2f))),
-            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromScalar(3f))));
+            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(2f))),
+            MakeRow(("category", DataValue.Null(DataKind.String)), ("value", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -268,7 +268,7 @@ public class GroupByOperatorTests
         Assert.Equal(2, results.Count);
 
         Row nullGroup = results.First(row => row["category"].IsNull);
-        Assert.Equal(2f, nullGroup["COUNT(*)"].AsScalar());
+        Assert.Equal(2f, nullGroup["COUNT(*)"].AsFloat32());
     }
 
     // ─────────────── Output column schema ───────────────
@@ -277,7 +277,7 @@ public class GroupByOperatorTests
     public async Task OutputRow_HasCorrectColumnNames()
     {
         MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("A")), ("price", DataValue.FromScalar(10f))));
+            MakeRow(("category", DataValue.FromString("A")), ("price", DataValue.FromFloat32(10f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -317,10 +317,10 @@ public class GroupByOperatorTests
         // IsBudgetExceeded uses >). After the second row, consumed = 2 > 1,
         // so the third row's pre-evaluation check triggers the exception.
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(4f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -350,8 +350,8 @@ public class GroupByOperatorTests
     public async Task GroupBy_CancellationToken_ThrowsDuringMaterialization()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))));
 
         GroupByOperator groupBy = new(
             source,

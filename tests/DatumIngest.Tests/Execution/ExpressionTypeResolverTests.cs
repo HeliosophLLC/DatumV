@@ -14,20 +14,20 @@ public sealed class ExpressionTypeResolverTests
 
     private static readonly Schema TestSchema = new(
     [
-        new ColumnInfo("id", DataKind.Scalar, nullable: false),
+        new ColumnInfo("id", DataKind.Float32, nullable: false),
         new ColumnInfo("name", DataKind.String, nullable: true),
         new ColumnInfo("embedding", DataKind.Vector, nullable: false),
         new ColumnInfo("created", DataKind.Date, nullable: false),
-        new ColumnInfo("t.qualified_col", DataKind.Scalar, nullable: false),
+        new ColumnInfo("t.qualified_col", DataKind.Float32, nullable: false),
     ]);
 
     // ───────────────────── Literals ─────────────────────
 
     [Theory]
-    [InlineData(42, DataKind.Scalar)]
-    [InlineData(42L, DataKind.Scalar)]
-    [InlineData(3.14f, DataKind.Scalar)]
-    [InlineData(3.14, DataKind.Scalar)]
+    [InlineData(42, DataKind.Float32)]
+    [InlineData(42L, DataKind.Float32)]
+    [InlineData(3.14f, DataKind.Float32)]
+    [InlineData(3.14, DataKind.Float32)]
     [InlineData(true, DataKind.Boolean)]
     public void ResolveLiteral_NumericOrBool_ReturnsScalar(object value, DataKind expected)
     {
@@ -52,7 +52,7 @@ public sealed class ExpressionTypeResolverTests
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new LiteralExpression(null), TestSchema, DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ───────────────────── Column references ─────────────────────
@@ -72,7 +72,7 @@ public sealed class ExpressionTypeResolverTests
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new ColumnReference("t", "qualified_col"), TestSchema, DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ───────────────────── Unary expressions ─────────────────────
@@ -132,7 +132,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -143,7 +143,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ───────────────────── Function calls ─────────────────────
@@ -156,7 +156,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -256,7 +256,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -287,7 +287,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -320,7 +320,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -348,7 +348,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]

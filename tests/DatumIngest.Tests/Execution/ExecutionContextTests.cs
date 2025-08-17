@@ -18,7 +18,7 @@ public sealed class ExecutionContextTests
     [Fact]
     public void WithOuterRow_PropagatesAllProperties()
     {
-        Row outerRow = new(["x"], [DataValue.FromScalar(1f)]);
+        Row outerRow = new(["x"], [DataValue.FromFloat32(1f)]);
         ExecutionContext original = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
@@ -47,7 +47,7 @@ public sealed class ExecutionContextTests
     [Fact]
     public void WithOuterRow_PreservesDefaultMaxRecursionDepth()
     {
-        Row outerRow = new(["y"], [DataValue.FromScalar(2f)]);
+        Row outerRow = new(["y"], [DataValue.FromFloat32(2f)]);
         ExecutionContext original = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),

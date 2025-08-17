@@ -24,7 +24,7 @@ public sealed class YearFunction : IScalarFunction
             throw new ArgumentException($"year() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,13 +34,13 @@ public sealed class YearFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int year = input.Kind == DataKind.Date
             ? input.AsDate().Year
             : input.AsDateTime().Year;
 
-        return DataValue.FromScalar(year);
+        return DataValue.FromFloat32(year);
     }
 }

@@ -17,8 +17,8 @@ public sealed class SourceAnalyzerTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("name", DataValue.FromString("bob"))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -44,13 +44,13 @@ public sealed class SourceAnalyzerTests
     {
         Row[] ordersRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("total", DataValue.FromScalar(99.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("total", DataValue.FromScalar(42.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("total", DataValue.FromFloat32(99.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("total", DataValue.FromFloat32(42.0f))),
         ];
 
         Row[] itemsRows =
         [
-            MakeRow(("orderId", DataValue.FromScalar(1.0f)), ("product", DataValue.FromString("widget"))),
+            MakeRow(("orderId", DataValue.FromFloat32(1.0f)), ("product", DataValue.FromString("widget"))),
         ];
 
         InMemoryTableProvider ordersProvider = new(ordersRows);
@@ -77,7 +77,7 @@ public sealed class SourceAnalyzerTests
     [Fact]
     public async Task AnalyzeAsync_SharesFingerprint_AcrossAllTables()
     {
-        Row[] rows = [MakeRow(("x", DataValue.FromScalar(1.0f)))];
+        Row[] rows = [MakeRow(("x", DataValue.FromFloat32(1.0f)))];
         SourceFingerprint fingerprint = new(123, new byte[] { 1, 2, 3 });
         SourceAnalyzer analyzer = new(chunkSize: 100);
 
@@ -96,9 +96,9 @@ public sealed class SourceAnalyzerTests
     {
         Row[] rows =
         [
-            MakeRow(("score", DataValue.FromScalar(1.0f)), ("label", DataValue.FromString("cat"))),
-            MakeRow(("score", DataValue.FromScalar(2.0f)), ("label", DataValue.FromString("dog"))),
-            MakeRow(("score", DataValue.FromScalar(3.0f)), ("label", DataValue.FromString("cat"))),
+            MakeRow(("score", DataValue.FromFloat32(1.0f)), ("label", DataValue.FromString("cat"))),
+            MakeRow(("score", DataValue.FromFloat32(2.0f)), ("label", DataValue.FromString("dog"))),
+            MakeRow(("score", DataValue.FromFloat32(3.0f)), ("label", DataValue.FromString("cat"))),
         ];
 
         SourceAnalyzer analyzer = new(chunkSize: 100);
@@ -121,9 +121,9 @@ public sealed class SourceAnalyzerTests
     {
         Row[] rows =
         [
-            MakeRow(("x", DataValue.FromScalar(1.0f)), ("y", DataValue.FromScalar(10.0f))),
-            MakeRow(("x", DataValue.FromScalar(2.0f)), ("y", DataValue.FromScalar(20.0f))),
-            MakeRow(("x", DataValue.FromScalar(3.0f)), ("y", DataValue.FromScalar(30.0f))),
+            MakeRow(("x", DataValue.FromFloat32(1.0f)), ("y", DataValue.FromFloat32(10.0f))),
+            MakeRow(("x", DataValue.FromFloat32(2.0f)), ("y", DataValue.FromFloat32(20.0f))),
+            MakeRow(("x", DataValue.FromFloat32(3.0f)), ("y", DataValue.FromFloat32(30.0f))),
         ];
 
         SourceAnalyzer analyzer = new(chunkSize: 100, withInteractions: true);
@@ -142,8 +142,8 @@ public sealed class SourceAnalyzerTests
     {
         Row[] rows =
         [
-            MakeRow(("value", DataValue.FromScalar(1.0f))),
-            MakeRow(("value", DataValue.FromScalar(2.0f))),
+            MakeRow(("value", DataValue.FromFloat32(1.0f))),
+            MakeRow(("value", DataValue.FromFloat32(2.0f))),
         ];
 
         SourceAnalyzer analyzer = new(chunkSize: 100);
@@ -170,7 +170,7 @@ public sealed class SourceAnalyzerTests
     {
         Row[] rows =
         [
-            MakeRow(("score", DataValue.FromScalar(42.0f))),
+            MakeRow(("score", DataValue.FromFloat32(42.0f))),
         ];
 
         SourceAnalyzer analyzer = new(chunkSize: 100);

@@ -47,8 +47,8 @@ public sealed class LanguageServerHubTests : IAsyncLifetime
                     Name = "sensors",
                     Columns =
                     [
-                        new TableColumnEntry { Name = "id", Kind = "Scalar", Nullable = false },
-                        new TableColumnEntry { Name = "reading", Kind = "Scalar", Nullable = true },
+                        new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false },
+                        new TableColumnEntry { Name = "reading", Kind = "Float32", Nullable = true },
                     ],
                 },
             ],
@@ -57,8 +57,8 @@ public sealed class LanguageServerHubTests : IAsyncLifetime
                 new FunctionSignature
                 {
                     Name = "abs",
-                    Parameters = [new ParameterSignature { Name = "value", Kind = "Scalar" }],
-                    ReturnType = "Scalar",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
                     Description = "Absolute value.",
                 },
             ],
@@ -355,7 +355,7 @@ public sealed class LanguageServerHubTests : IAsyncLifetime
                     Name = "metrics",
                     Columns =
                     [
-                        new TableColumnEntry { Name = "value", Kind = "Scalar", Nullable = false },
+                        new TableColumnEntry { Name = "value", Kind = "Float32", Nullable = false },
                     ],
                 },
             ],

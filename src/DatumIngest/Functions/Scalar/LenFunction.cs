@@ -25,7 +25,7 @@ public sealed class LenFunction : IScalarFunction
             throw new ArgumentException($"len() does not support {inputKind}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,24 +34,24 @@ public sealed class LenFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         switch (input.Kind)
         {
             case DataKind.String:
-                return DataValue.FromScalar(input.AsString().Length);
+                return DataValue.FromFloat32(input.AsString().Length);
 
             case DataKind.Vector:
-                return DataValue.FromScalar(input.AsVector().Length);
+                return DataValue.FromFloat32(input.AsVector().Length);
 
             case DataKind.UInt8Array:
-                return DataValue.FromScalar(input.AsUInt8Array().Length);
+                return DataValue.FromFloat32(input.AsUInt8Array().Length);
 
             case DataKind.Matrix:
             {
                 input.AsMatrix(out int rows, out int columns);
-                return DataValue.FromScalar(rows * columns);
+                return DataValue.FromFloat32(rows * columns);
             }
 
             case DataKind.Tensor:
@@ -62,14 +62,14 @@ public sealed class LenFunction : IScalarFunction
                 {
                     totalElements *= dimension;
                 }
-                return DataValue.FromScalar(totalElements);
+                return DataValue.FromFloat32(totalElements);
             }
 
             case DataKind.JsonValue:
-                return DataValue.FromScalar(input.AsJsonValue().Length);
+                return DataValue.FromFloat32(input.AsJsonValue().Length);
 
             case DataKind.Array:
-                return DataValue.FromScalar(input.AsArray().Length);
+                return DataValue.FromFloat32(input.AsArray().Length);
 
             default:
                 throw new InvalidOperationException($"len() does not support {input.Kind}.");

@@ -66,7 +66,7 @@ public sealed class StringLengthAccumulatorTests
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
         accumulator.Add(DataValue.FromUInt8(42));
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;

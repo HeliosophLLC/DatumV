@@ -21,13 +21,13 @@ public sealed class CosineSimilarityFunction : IScalarFunction
             throw new ArgumentException("cosine_similarity() requires exactly 2 arguments.");
         if (argumentKinds[0] is not DataKind.Vector || argumentKinds[1] is not DataKind.Vector)
             throw new ArgumentException("cosine_similarity() requires two Vector arguments.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         float[] a = arguments[0].AsVector();
         float[] b = arguments[1].AsVector();
         int length = System.Math.Min(a.Length, b.Length);
@@ -41,7 +41,7 @@ public sealed class CosineSimilarityFunction : IScalarFunction
         }
 
         float denominator = MathF.Sqrt(normA) * MathF.Sqrt(normB);
-        return DataValue.FromScalar(denominator == 0f ? 0f : dot / denominator);
+        return DataValue.FromFloat32(denominator == 0f ? 0f : dot / denominator);
     }
 }
 
@@ -63,13 +63,13 @@ public sealed class EuclideanDistanceFunction : IScalarFunction
             throw new ArgumentException("euclidean_distance() requires exactly 2 arguments.");
         if (argumentKinds[0] is not DataKind.Vector || argumentKinds[1] is not DataKind.Vector)
             throw new ArgumentException("euclidean_distance() requires two Vector arguments.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         float[] a = arguments[0].AsVector();
         float[] b = arguments[1].AsVector();
         int length = System.Math.Min(a.Length, b.Length);
@@ -81,7 +81,7 @@ public sealed class EuclideanDistanceFunction : IScalarFunction
             sumSqDiff += diff * diff;
         }
 
-        return DataValue.FromScalar(MathF.Sqrt(sumSqDiff));
+        return DataValue.FromFloat32(MathF.Sqrt(sumSqDiff));
     }
 }
 
@@ -103,13 +103,13 @@ public sealed class ManhattanDistanceFunction : IScalarFunction
             throw new ArgumentException("manhattan_distance() requires exactly 2 arguments.");
         if (argumentKinds[0] is not DataKind.Vector || argumentKinds[1] is not DataKind.Vector)
             throw new ArgumentException("manhattan_distance() requires two Vector arguments.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         float[] a = arguments[0].AsVector();
         float[] b = arguments[1].AsVector();
         int length = System.Math.Min(a.Length, b.Length);
@@ -120,7 +120,7 @@ public sealed class ManhattanDistanceFunction : IScalarFunction
             sum += MathF.Abs(a[i] - b[i]);
         }
 
-        return DataValue.FromScalar(sum);
+        return DataValue.FromFloat32(sum);
     }
 }
 
@@ -142,13 +142,13 @@ public sealed class DotFunction : IScalarFunction
             throw new ArgumentException("dot() requires exactly 2 arguments.");
         if (argumentKinds[0] is not DataKind.Vector || argumentKinds[1] is not DataKind.Vector)
             throw new ArgumentException("dot() requires two Vector arguments.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         float[] a = arguments[0].AsVector();
         float[] b = arguments[1].AsVector();
         int length = System.Math.Min(a.Length, b.Length);
@@ -159,7 +159,7 @@ public sealed class DotFunction : IScalarFunction
             dot += a[i] * b[i];
         }
 
-        return DataValue.FromScalar(dot);
+        return DataValue.FromFloat32(dot);
     }
 }
 
@@ -182,13 +182,13 @@ public sealed class HammingDistanceFunction : IScalarFunction
             throw new ArgumentException("hamming_distance() requires exactly 2 arguments.");
         if (argumentKinds[0] is not DataKind.String || argumentKinds[1] is not DataKind.String)
             throw new ArgumentException("hamming_distance() requires two String arguments.");
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Scalar);
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         string a = arguments[0].AsString();
         string b = arguments[1].AsString();
 
@@ -200,6 +200,6 @@ public sealed class HammingDistanceFunction : IScalarFunction
             if (a[i] != b[i]) distance++;
         }
 
-        return DataValue.FromScalar(distance);
+        return DataValue.FromFloat32(distance);
     }
 }

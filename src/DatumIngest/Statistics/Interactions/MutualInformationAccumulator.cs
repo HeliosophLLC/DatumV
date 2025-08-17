@@ -235,7 +235,7 @@ public sealed class MutualInformationAccumulator
         {
             return value.Kind switch
             {
-                DataKind.Scalar => value.AsScalar(),
+                DataKind.Float32 => value.AsFloat32(),
                 DataKind.UInt8 => (float)value.AsUInt8(),
                 _ => null
             };
@@ -253,7 +253,7 @@ public sealed class MutualInformationAccumulator
 
     private static bool IsNumericKind(DataKind kind)
     {
-        return kind is DataKind.Scalar or DataKind.UInt8;
+        return kind is DataKind.Float32 or DataKind.UInt8;
     }
 }
 

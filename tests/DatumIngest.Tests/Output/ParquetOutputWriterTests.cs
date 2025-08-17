@@ -30,17 +30,17 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
     {
         string path = Path.Combine(_tempDir, "simple.parquet");
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("name", DataKind.String, false)
         ]);
 
         await using ParquetOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(1.0f)),
+            ("id", DataValue.FromFloat32(1.0f)),
             ("name", DataValue.FromString("Alice"))));
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(2.0f)),
+            ("id", DataValue.FromFloat32(2.0f)),
             ("name", DataValue.FromString("Bob"))));
         OutputSummary summary = await writer.FinalizeAsync();
 
@@ -69,7 +69,7 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
     public async Task FinalizeAsync_EmptyDataset_CreatesValidFile()
     {
         string path = Path.Combine(_tempDir, "empty.parquet");
-        Schema schema = new([new ColumnInfo("val", DataKind.Scalar, false)]);
+        Schema schema = new([new ColumnInfo("val", DataKind.Float32, false)]);
 
         await using ParquetOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
@@ -107,17 +107,17 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
     {
         string path = Path.Combine(_tempDir, "roundtrip.parquet");
         Schema schema = new([
-            new ColumnInfo("score", DataKind.Scalar, false),
+            new ColumnInfo("score", DataKind.Float32, false),
             new ColumnInfo("label", DataKind.String, false)
         ]);
 
         await using ParquetOutputWriter writer = new(path);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
-            ("score", DataValue.FromScalar(95.5f)),
+            ("score", DataValue.FromFloat32(95.5f)),
             ("label", DataValue.FromString("high"))));
         await writer.WriteRowAsync(CreateRow(
-            ("score", DataValue.FromScalar(60.2f)),
+            ("score", DataValue.FromFloat32(60.2f)),
             ("label", DataValue.FromString("low"))));
         await writer.FinalizeAsync();
 
@@ -132,7 +132,7 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         }
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(95.5f, rows[0]["score"].AsScalar(), 0.01f);
+        Assert.Equal(95.5f, rows[0]["score"].AsFloat32(), 0.01f);
         Assert.Equal("high", rows[0]["label"].AsString());
     }
 
@@ -252,17 +252,17 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
     {
         using MemoryStream stream = new();
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("name", DataKind.String, false)
         ]);
 
         await using ParquetOutputWriter writer = new(stream);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(1.0f)),
+            ("id", DataValue.FromFloat32(1.0f)),
             ("name", DataValue.FromString("Alice"))));
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(2.0f)),
+            ("id", DataValue.FromFloat32(2.0f)),
             ("name", DataValue.FromString("Bob"))));
         OutputSummary summary = await writer.FinalizeAsync();
 
@@ -290,14 +290,14 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         byte[] rawBytes = [0x01, 0x02, 0x03, 0x04, 0x05];
         using MemoryStream stream = new();
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
             new ColumnInfo("data", DataKind.UInt8Array, false)
         ]);
 
         await using ParquetOutputWriter writer = new(stream);
         await writer.InitializeAsync(schema);
         await writer.WriteRowAsync(CreateRow(
-            ("id", DataValue.FromScalar(1.0f)),
+            ("id", DataValue.FromFloat32(1.0f)),
             ("data", DataValue.FromUInt8Array(rawBytes))));
         OutputSummary summary = await writer.FinalizeAsync();
 

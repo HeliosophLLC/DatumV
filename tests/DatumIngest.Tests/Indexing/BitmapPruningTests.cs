@@ -323,12 +323,12 @@ public sealed class BitmapPruningTests
         // (red appears in both). Net result: chunk 1 rows with color='red'.
         Row[] rows =
         [
-            new(["value", "color"], [DataValue.FromScalar(1f), DataValue.FromString("red")]),
-            new(["value", "color"], [DataValue.FromScalar(2f), DataValue.FromString("blue")]),
-            new(["value", "color"], [DataValue.FromScalar(3f), DataValue.FromString("red")]),
-            new(["value", "color"], [DataValue.FromScalar(11f), DataValue.FromString("blue")]),
-            new(["value", "color"], [DataValue.FromScalar(12f), DataValue.FromString("red")]),
-            new(["value", "color"], [DataValue.FromScalar(13f), DataValue.FromString("red")]),
+            new(["value", "color"], [DataValue.FromFloat32(1f), DataValue.FromString("red")]),
+            new(["value", "color"], [DataValue.FromFloat32(2f), DataValue.FromString("blue")]),
+            new(["value", "color"], [DataValue.FromFloat32(3f), DataValue.FromString("red")]),
+            new(["value", "color"], [DataValue.FromFloat32(11f), DataValue.FromString("blue")]),
+            new(["value", "color"], [DataValue.FromFloat32(12f), DataValue.FromString("red")]),
+            new(["value", "color"], [DataValue.FromFloat32(13f), DataValue.FromString("red")]),
         ];
 
         InMemoryProvider provider = new(rows);
@@ -366,7 +366,7 @@ public sealed class BitmapPruningTests
             new SourceFingerprint(100, DummyHash),
             new IndexSchema(
                 new Schema([
-                    new ColumnInfo("value", DataKind.Scalar, false),
+                    new ColumnInfo("value", DataKind.Float32, false),
                     new ColumnInfo("color", DataKind.String, false),
                 ]),
                 rows.Length),

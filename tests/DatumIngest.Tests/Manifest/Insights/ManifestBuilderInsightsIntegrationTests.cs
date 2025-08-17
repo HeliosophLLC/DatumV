@@ -20,11 +20,11 @@ public sealed class ManifestBuilderInsightsIntegrationTests
         // All-constant column → should trigger ConstantFeature insight.
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(new Row(["constant"], [DataValue.FromScalar(42.0f)]));
+            collector.AddRow(new Row(["constant"], [DataValue.FromFloat32(42.0f)]));
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["constant"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["constant"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(
             stats, kinds, 100, insightThresholds: new InsightThresholds());
@@ -43,14 +43,14 @@ public sealed class ManifestBuilderInsightsIntegrationTests
         {
             collector.AddRow(new Row(
                 ["constant", "normal"],
-                [DataValue.FromScalar(42.0f), DataValue.FromScalar(i * 1.0f)]));
+                [DataValue.FromFloat32(42.0f), DataValue.FromFloat32(i * 1.0f)]));
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
         {
-            ["constant"] = DataKind.Scalar,
-            ["normal"] = DataKind.Scalar
+            ["constant"] = DataKind.Float32,
+            ["normal"] = DataKind.Float32
         };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(
@@ -68,11 +68,11 @@ public sealed class ManifestBuilderInsightsIntegrationTests
 
         for (int i = 0; i < 10; i++)
         {
-            collector.AddRow(new Row(["value"], [DataValue.FromScalar(42.0f)]));
+            collector.AddRow(new Row(["value"], [DataValue.FromFloat32(42.0f)]));
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 10);
 
@@ -89,11 +89,11 @@ public sealed class ManifestBuilderInsightsIntegrationTests
 
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(new Row(["constant"], [DataValue.FromScalar(42.0f)]));
+            collector.AddRow(new Row(["constant"], [DataValue.FromFloat32(42.0f)]));
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["constant"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["constant"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(
             stats, kinds, 100, insightThresholds: new InsightThresholds());

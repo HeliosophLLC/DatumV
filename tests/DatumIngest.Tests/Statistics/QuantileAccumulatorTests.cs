@@ -11,7 +11,7 @@ public sealed class QuantileAccumulatorTests
     {
         QuantileAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(42.0f));
+        accumulator.Add(DataValue.FromFloat32(42.0f));
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
         Assert.Equal(42.0, result.P01);
@@ -34,7 +34,7 @@ public sealed class QuantileAccumulatorTests
         // Add values 1 through 100
         for (int i = 1; i <= 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
@@ -63,10 +63,10 @@ public sealed class QuantileAccumulatorTests
     {
         QuantileAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(10.0f));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(20.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(10.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(20.0f));
 
         Assert.Equal(2, accumulator.SampleCount);
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
@@ -82,7 +82,7 @@ public sealed class QuantileAccumulatorTests
         QuantileAccumulator accumulator = new();
 
         accumulator.Add(DataValue.FromString("hello"));
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         Assert.Equal(1, accumulator.SampleCount);
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
@@ -134,20 +134,20 @@ public sealed class QuantileAccumulatorTests
         QuantileAccumulator single = new();
         for (int i = 1; i <= 100; i++)
         {
-            single.Add(DataValue.FromScalar(i));
+            single.Add(DataValue.FromFloat32(i));
         }
 
         // Split accumulator
         QuantileAccumulator first = new();
         for (int i = 1; i <= 50; i++)
         {
-            first.Add(DataValue.FromScalar(i));
+            first.Add(DataValue.FromFloat32(i));
         }
 
         QuantileAccumulator second = new();
         for (int i = 51; i <= 100; i++)
         {
-            second.Add(DataValue.FromScalar(i));
+            second.Add(DataValue.FromFloat32(i));
         }
 
         first.Merge(second);
@@ -165,8 +165,8 @@ public sealed class QuantileAccumulatorTests
     public void Merge_WithEmpty_NoChange()
     {
         QuantileAccumulator accumulator = new();
-        accumulator.Add(DataValue.FromScalar(10.0f));
-        accumulator.Add(DataValue.FromScalar(20.0f));
+        accumulator.Add(DataValue.FromFloat32(10.0f));
+        accumulator.Add(DataValue.FromFloat32(20.0f));
 
         QuantileAccumulator empty = new();
         accumulator.Merge(empty);
@@ -201,7 +201,7 @@ public sealed class QuantileAccumulatorTests
         QuantileAccumulator accumulator = new();
         for (int i = 1; i <= 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
@@ -216,8 +216,8 @@ public sealed class QuantileAccumulatorTests
     public void Add_TwoIdenticalValues_AllPercentilesEqual()
     {
         QuantileAccumulator accumulator = new();
-        accumulator.Add(DataValue.FromScalar(7.0f));
-        accumulator.Add(DataValue.FromScalar(7.0f));
+        accumulator.Add(DataValue.FromFloat32(7.0f));
+        accumulator.Add(DataValue.FromFloat32(7.0f));
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
         Assert.Equal(7.0, result.P01);
@@ -235,12 +235,12 @@ public sealed class QuantileAccumulatorTests
         // Bulk of values: 10 through 90
         for (int i = 10; i <= 90; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         // Add clear outliers well beyond what IQR fences allow
-        accumulator.Add(DataValue.FromScalar(-500.0f));
-        accumulator.Add(DataValue.FromScalar(600.0f));
+        accumulator.Add(DataValue.FromFloat32(-500.0f));
+        accumulator.Add(DataValue.FromFloat32(600.0f));
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
 
@@ -257,11 +257,11 @@ public sealed class QuantileAccumulatorTests
         QuantileAccumulator accumulator = new();
 
         // 5 evenly spaced values: 0, 25, 50, 75, 100
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(25.0f));
-        accumulator.Add(DataValue.FromScalar(50.0f));
-        accumulator.Add(DataValue.FromScalar(75.0f));
-        accumulator.Add(DataValue.FromScalar(100.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(25.0f));
+        accumulator.Add(DataValue.FromFloat32(50.0f));
+        accumulator.Add(DataValue.FromFloat32(75.0f));
+        accumulator.Add(DataValue.FromFloat32(100.0f));
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
 
@@ -280,7 +280,7 @@ public sealed class QuantileAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.FromScalar(42.0f));
+            accumulator.Add(DataValue.FromFloat32(42.0f));
         }
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;
@@ -298,7 +298,7 @@ public sealed class QuantileAccumulatorTests
         QuantileAccumulator accumulator = new();
         for (int i = 1; i <= 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         QuantileResult result = (QuantileResult)accumulator.GetResult().Value!;

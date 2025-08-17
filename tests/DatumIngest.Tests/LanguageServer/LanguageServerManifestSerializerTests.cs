@@ -20,7 +20,7 @@ public sealed class LanguageServerManifestSerializerTests
                     Columns =
                     [
                         new TableColumnEntry { Name = "timestamp", Kind = "DateTime", Nullable = false },
-                        new TableColumnEntry { Name = "reading", Kind = "Scalar", Nullable = true },
+                        new TableColumnEntry { Name = "reading", Kind = "Float32", Nullable = true },
                     ],
                 },
             ],
@@ -29,15 +29,15 @@ public sealed class LanguageServerManifestSerializerTests
                 new FunctionSignature
                 {
                     Name = "abs",
-                    Parameters = [new ParameterSignature { Name = "value", Kind = "Scalar" }],
-                    ReturnType = "Scalar",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
                     Description = "Absolute value.",
                 },
                 new FunctionSignature
                 {
                     Name = "unnest",
                     Parameters = [new ParameterSignature { Name = "array_column", Kind = "Vector" }],
-                    ReturnType = "Scalar",
+                    ReturnType = "Float32",
                     Description = "Expands a vector column.",
                     IsTableValued = true,
                 },
@@ -93,7 +93,7 @@ public sealed class LanguageServerManifestSerializerTests
 
         FunctionSignature scalarFunction = restored.Functions[0];
         Assert.Equal("abs", scalarFunction.Name);
-        Assert.Equal("Scalar", scalarFunction.ReturnType);
+        Assert.Equal("Float32", scalarFunction.ReturnType);
         Assert.False(scalarFunction.IsTableValued);
         Assert.Single(scalarFunction.Parameters);
         Assert.Equal("value", scalarFunction.Parameters[0].Name);

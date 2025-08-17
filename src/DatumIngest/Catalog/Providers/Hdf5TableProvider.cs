@@ -290,12 +290,12 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
             {
                 return DataKind.UInt8;
             }
-            return DataKind.Scalar;
+            return DataKind.Float32;
         }
 
         if (type.Class == H5DataTypeClass.FloatingPoint)
         {
-            return DataKind.Scalar;
+            return DataKind.Float32;
         }
 
         return DataKind.String;
@@ -348,7 +348,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         }
 
         public override DataValue GetValue(long rowIndex) =>
-            DataValue.FromScalar(_data[rowIndex]);
+            DataValue.FromFloat32(_data[rowIndex]);
     }
 
     private sealed class UInt8ColumnData : ColumnData

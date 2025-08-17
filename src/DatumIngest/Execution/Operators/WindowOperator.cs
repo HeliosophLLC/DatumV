@@ -352,7 +352,7 @@ public sealed class WindowOperator : IQueryOperator
 
         return left.Kind switch
         {
-            DataKind.Scalar => left.AsScalar().CompareTo(right.AsScalar()),
+            DataKind.Float32 => left.AsFloat32().CompareTo(right.AsFloat32()),
             DataKind.UInt8 => left.AsUInt8().CompareTo(right.AsUInt8()),
             DataKind.String => string.Compare(
                 left.AsString(), right.AsString(), StringComparison.Ordinal),

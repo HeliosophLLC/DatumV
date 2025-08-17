@@ -20,7 +20,7 @@ public sealed class DenormalizeFunction : IScalarFunction
         }
 
         DataKind inputKind = argumentKinds[0];
-        if (inputKind is not (DataKind.Scalar or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (inputKind is not (DataKind.Float32 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"denormalize() does not support {inputKind}.");
         }
@@ -37,12 +37,12 @@ public sealed class DenormalizeFunction : IScalarFunction
             return DataValue.Null(input.Kind);
         }
 
-        float factor = arguments[1].AsScalar();
+        float factor = arguments[1].AsFloat32();
 
         switch (input.Kind)
         {
-            case DataKind.Scalar:
-                return DataValue.FromScalar(input.AsScalar() * factor);
+            case DataKind.Float32:
+                return DataValue.FromFloat32(input.AsFloat32() * factor);
 
             case DataKind.Vector:
             {

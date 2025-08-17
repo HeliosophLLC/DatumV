@@ -19,10 +19,10 @@ public sealed class RandomDistributionFunctionTests
         for (int i = 0; i < 500; i++)
         {
             DataValue result = function.Execute([
-                DataValue.FromScalar(0), DataValue.FromScalar(1),
-                DataValue.FromScalar(-2), DataValue.FromScalar(2)
+                DataValue.FromFloat32(0), DataValue.FromFloat32(1),
+                DataValue.FromFloat32(-2), DataValue.FromFloat32(2)
             ]);
-            float value = result.AsScalar();
+            float value = result.AsFloat32();
             Assert.InRange(value, -2f, 2f);
         }
     }
@@ -33,8 +33,8 @@ public sealed class RandomDistributionFunctionTests
         RandomTruncatedNormalFunction function = new();
         Assert.Throws<ArgumentException>(() =>
             function.Execute([
-                DataValue.FromScalar(0), DataValue.FromScalar(-1),
-                DataValue.FromScalar(-2), DataValue.FromScalar(2)
+                DataValue.FromFloat32(0), DataValue.FromFloat32(-1),
+                DataValue.FromFloat32(-2), DataValue.FromFloat32(2)
             ]));
     }
 
@@ -44,8 +44,8 @@ public sealed class RandomDistributionFunctionTests
         RandomTruncatedNormalFunction function = new();
         Assert.Throws<ArgumentException>(() =>
             function.Execute([
-                DataValue.FromScalar(0), DataValue.FromScalar(1),
-                DataValue.FromScalar(2), DataValue.FromScalar(2)
+                DataValue.FromFloat32(0), DataValue.FromFloat32(1),
+                DataValue.FromFloat32(2), DataValue.FromFloat32(2)
             ]));
     }
 
@@ -54,7 +54,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomTruncatedNormalFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     // ──────────────────── random_log_normal ────────────────────
@@ -65,8 +65,8 @@ public sealed class RandomDistributionFunctionTests
         RandomLogNormalFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(0), DataValue.FromScalar(1)]);
-            Assert.True(result.AsScalar() > 0, "Log-normal samples must be positive.");
+            DataValue result = function.Execute([DataValue.FromFloat32(0), DataValue.FromFloat32(1)]);
+            Assert.True(result.AsFloat32() > 0, "Log-normal samples must be positive.");
         }
     }
 
@@ -75,14 +75,14 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomLogNormalFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(0), DataValue.FromScalar(-1)]));
+            function.Execute([DataValue.FromFloat32(0), DataValue.FromFloat32(-1)]));
     }
 
     [Fact]
     public void RandomLogNormal_ValidateArguments_WrongArity()
     {
         RandomLogNormalFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     // ──────────────────── random_exponential ────────────────────
@@ -93,8 +93,8 @@ public sealed class RandomDistributionFunctionTests
         RandomExponentialFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(1)]);
-            Assert.True(result.AsScalar() >= 0, "Exponential samples must be non-negative.");
+            DataValue result = function.Execute([DataValue.FromFloat32(1)]);
+            Assert.True(result.AsFloat32() >= 0, "Exponential samples must be non-negative.");
         }
     }
 
@@ -103,7 +103,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomExponentialFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(0)]));
+            function.Execute([DataValue.FromFloat32(0)]));
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomExponentialFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(-1)]));
+            function.Execute([DataValue.FromFloat32(-1)]));
     }
 
     [Fact]
@@ -123,8 +123,8 @@ public sealed class RandomDistributionFunctionTests
         int count = 10_000;
         for (int i = 0; i < count; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(rate)]);
-            sum += result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(rate)]);
+            sum += result.AsFloat32();
         }
 
         // Expected mean = 1/rate = 0.5
@@ -137,7 +137,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomExponentialFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     // ──────────────────── random_beta ────────────────────
@@ -148,8 +148,8 @@ public sealed class RandomDistributionFunctionTests
         RandomBetaFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(2), DataValue.FromScalar(5)]);
-            float value = result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(2), DataValue.FromFloat32(5)]);
+            float value = result.AsFloat32();
             Assert.InRange(value, 0f, 1f);
         }
     }
@@ -162,8 +162,8 @@ public sealed class RandomDistributionFunctionTests
         int count = 10_000;
         for (int i = 0; i < count; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(5), DataValue.FromScalar(5)]);
-            sum += result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(5), DataValue.FromFloat32(5)]);
+            sum += result.AsFloat32();
         }
 
         // Beta(5,5) has mean = 0.5
@@ -176,7 +176,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomBetaFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(0), DataValue.FromScalar(1)]));
+            function.Execute([DataValue.FromFloat32(0), DataValue.FromFloat32(1)]));
     }
 
     [Fact]
@@ -184,14 +184,14 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomBetaFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(1), DataValue.FromScalar(-1)]));
+            function.Execute([DataValue.FromFloat32(1), DataValue.FromFloat32(-1)]));
     }
 
     [Fact]
     public void RandomBeta_ValidateArguments_WrongArity()
     {
         RandomBetaFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     // ──────────────────── random_poisson ────────────────────
@@ -202,8 +202,8 @@ public sealed class RandomDistributionFunctionTests
         RandomPoissonFunction function = new();
         for (int i = 0; i < 100; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(5)]);
-            float value = result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(5)]);
+            float value = result.AsFloat32();
             Assert.True(value >= 0, "Poisson samples must be non-negative.");
             Assert.Equal(MathF.Truncate(value), value);
         }
@@ -213,8 +213,8 @@ public sealed class RandomDistributionFunctionTests
     public void RandomPoisson_ZeroLambda_ReturnsZero()
     {
         RandomPoissonFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(0)]);
-        Assert.Equal(0f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(0)]);
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomPoissonFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.Execute([DataValue.FromScalar(-1)]));
+            function.Execute([DataValue.FromFloat32(-1)]));
     }
 
     [Fact]
@@ -234,8 +234,8 @@ public sealed class RandomDistributionFunctionTests
         int count = 10_000;
         for (int i = 0; i < count; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(lambda)]);
-            sum += result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(lambda)]);
+            sum += result.AsFloat32();
         }
 
         float mean = sum / count;
@@ -251,8 +251,8 @@ public sealed class RandomDistributionFunctionTests
         int count = 5_000;
         for (int i = 0; i < count; i++)
         {
-            DataValue result = function.Execute([DataValue.FromScalar(lambda)]);
-            sum += result.AsScalar();
+            DataValue result = function.Execute([DataValue.FromFloat32(lambda)]);
+            sum += result.AsFloat32();
         }
 
         float mean = sum / count;
@@ -264,7 +264,7 @@ public sealed class RandomDistributionFunctionTests
     {
         RandomPoissonFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     // ──────────────────── random_categorical ────────────────────
@@ -277,7 +277,7 @@ public sealed class RandomDistributionFunctionTests
         for (int i = 0; i < 100; i++)
         {
             DataValue result = function.Execute([DataValue.FromVector(weights)]);
-            float value = result.AsScalar();
+            float value = result.AsFloat32();
             Assert.InRange(value, 0f, 3f);
             Assert.Equal(MathF.Truncate(value), value);
         }
@@ -291,7 +291,7 @@ public sealed class RandomDistributionFunctionTests
         for (int i = 0; i < 10; i++)
         {
             DataValue result = function.Execute([DataValue.FromVector(weights)]);
-            Assert.Equal(0f, result.AsScalar());
+            Assert.Equal(0f, result.AsFloat32());
         }
     }
 
@@ -331,6 +331,6 @@ public sealed class RandomDistributionFunctionTests
     public void RandomCategorical_ValidateArguments_WrongType()
     {
         RandomCategoricalFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 }

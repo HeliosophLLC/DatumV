@@ -132,7 +132,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
     private static SourceIndex CreateTestIndex(int rowCount)
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("col", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("col", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, rowCount);
         return new SourceIndex(fingerprint, indexSchema, Array.Empty<IndexChunk>());
     }

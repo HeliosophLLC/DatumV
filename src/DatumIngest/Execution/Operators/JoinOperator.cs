@@ -696,7 +696,7 @@ public sealed class JoinOperator : IQueryOperator
         for (int index = 0; index < template.FieldCount; index++)
         {
             names[index] = template.ColumnNames[index];
-            values[index] = DataValue.Null(DataKind.Scalar);
+            values[index] = DataValue.Null(DataKind.Float32);
         }
 
         return new Row(names, values);

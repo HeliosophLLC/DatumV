@@ -233,7 +233,7 @@ public sealed class ParquetTableProviderTests : IDisposable
         ParquetTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public sealed class ParquetTableProviderTests : IDisposable
         ParquetTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.Columns[2].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[2].Kind);
     }
 
     [Fact]
@@ -263,7 +263,7 @@ public sealed class ParquetTableProviderTests : IDisposable
         ParquetTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
     }
 
     [Fact]
@@ -284,7 +284,7 @@ public sealed class ParquetTableProviderTests : IDisposable
         ParquetTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor(path), CancellationToken.None);
 
-        Assert.Equal(DataKind.Scalar, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
     }
 
     [Fact]
@@ -329,9 +329,9 @@ public sealed class ParquetTableProviderTests : IDisposable
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
-        Assert.Equal(1.0f, rows[0]["id"].AsScalar());
-        Assert.Equal(2.0f, rows[1]["id"].AsScalar());
-        Assert.Equal(3.0f, rows[2]["id"].AsScalar());
+        Assert.Equal(1.0f, rows[0]["id"].AsFloat32());
+        Assert.Equal(2.0f, rows[1]["id"].AsFloat32());
+        Assert.Equal(3.0f, rows[2]["id"].AsFloat32());
     }
 
     [Fact]
@@ -342,8 +342,8 @@ public sealed class ParquetTableProviderTests : IDisposable
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
-        Assert.Equal(95.5f, rows[0]["score"].AsScalar());
-        Assert.Equal(87.3f, rows[1]["score"].AsScalar(), 0.05f);
+        Assert.Equal(95.5f, rows[0]["score"].AsFloat32());
+        Assert.Equal(87.3f, rows[1]["score"].AsFloat32(), 0.05f);
     }
 
     [Fact]
@@ -368,8 +368,8 @@ public sealed class ParquetTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1.5f, rows[0]["value"].AsScalar());
-        Assert.Equal(0.9f, rows[1]["weight"].AsScalar());
+        Assert.Equal(1.5f, rows[0]["value"].AsFloat32());
+        Assert.Equal(0.9f, rows[1]["weight"].AsFloat32());
     }
 
     [Fact]
@@ -381,9 +381,9 @@ public sealed class ParquetTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(10.0f, rows[0]["value"].AsScalar());
+        Assert.Equal(10.0f, rows[0]["value"].AsFloat32());
         Assert.True(rows[1]["value"].IsNull);
-        Assert.Equal(30.0f, rows[2]["value"].AsScalar());
+        Assert.Equal(30.0f, rows[2]["value"].AsFloat32());
     }
 
     [Fact]
@@ -422,7 +422,7 @@ public sealed class ParquetTableProviderTests : IDisposable
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
-        Assert.Equal(100000f, rows[0]["big_number"].AsScalar());
+        Assert.Equal(100000f, rows[0]["big_number"].AsFloat32());
     }
 
     [Fact]
@@ -434,7 +434,7 @@ public sealed class ParquetTableProviderTests : IDisposable
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
         Assert.Equal(5, rows.Count);
-        Assert.Equal(1.0f, rows[0]["id"].AsScalar());
+        Assert.Equal(1.0f, rows[0]["id"].AsFloat32());
         Assert.Equal("e", rows[4]["value"].AsString());
     }
 
@@ -527,8 +527,8 @@ public sealed class ParquetTableProviderTests : IDisposable
             filterable.OpenAsync(Descriptor(path), null, filter, CancellationToken.None));
 
         Assert.Equal(5, rows.Count); // All rows from group 2
-        Assert.Equal(6f, rows[0]["id"].AsScalar());
-        Assert.Equal(10f, rows[4]["id"].AsScalar());
+        Assert.Equal(6f, rows[0]["id"].AsFloat32());
+        Assert.Equal(10f, rows[4]["id"].AsFloat32());
         Assert.Equal(2, provider.TotalRowGroups);
         Assert.Equal(1, provider.PrunedRowGroups);
     }
@@ -700,7 +700,7 @@ public sealed class ParquetTableProviderTests : IDisposable
             provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 0, count: 1, CancellationToken.None));
 
         Assert.Single(rows);
-        Assert.Equal(1f, rows[0]["id"].AsScalar());
+        Assert.Equal(1f, rows[0]["id"].AsFloat32());
         Assert.Equal("Alice", rows[0]["name"].AsString());
     }
 
@@ -716,11 +716,11 @@ public sealed class ParquetTableProviderTests : IDisposable
             provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 1, count: 3, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(2f, rows[0]["id"].AsScalar());   // Last row of group 1
+        Assert.Equal(2f, rows[0]["id"].AsFloat32());   // Last row of group 1
         Assert.Equal("b", rows[0]["value"].AsString());
-        Assert.Equal(3f, rows[1]["id"].AsScalar());   // First row of group 2
+        Assert.Equal(3f, rows[1]["id"].AsFloat32());   // First row of group 2
         Assert.Equal("c", rows[1]["value"].AsString());
-        Assert.Equal(4f, rows[2]["id"].AsScalar());   // Second row of group 2
+        Assert.Equal(4f, rows[2]["id"].AsFloat32());   // Second row of group 2
         Assert.Equal("d", rows[2]["value"].AsString());
     }
 
@@ -736,8 +736,8 @@ public sealed class ParquetTableProviderTests : IDisposable
             provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 3, count: 2, CancellationToken.None));
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(4f, rows[0]["id"].AsScalar());
-        Assert.Equal(5f, rows[1]["id"].AsScalar());
+        Assert.Equal(4f, rows[0]["id"].AsFloat32());
+        Assert.Equal(5f, rows[1]["id"].AsFloat32());
     }
 
     [Fact]

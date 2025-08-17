@@ -9,11 +9,11 @@ public sealed class ColumnInteractionCollectorTests
     public void GetInteractions_NumericPair_ProducesPearsonSpearmanMI()
     {
         ColumnInteractionCollector collector = new();
-        Row row = CreateRow(("x", DataValue.FromScalar(1.0f)), ("y", DataValue.FromScalar(2.0f)));
+        Row row = CreateRow(("x", DataValue.FromFloat32(1.0f)), ("y", DataValue.FromFloat32(2.0f)));
 
         for (int i = 0; i < 100; i++)
         {
-            row = CreateRow(("x", DataValue.FromScalar(i)), ("y", DataValue.FromScalar(i * 2.0f)));
+            row = CreateRow(("x", DataValue.FromFloat32(i)), ("y", DataValue.FromFloat32(i * 2.0f)));
             collector.AddRow(row);
         }
 
@@ -68,7 +68,7 @@ public sealed class ColumnInteractionCollectorTests
         {
             Row row = CreateRow(
                 ("group", DataValue.FromString((i % 5).ToString())),
-                ("score", DataValue.FromScalar(i * 1.5f)));
+                ("score", DataValue.FromFloat32(i * 1.5f)));
             collector.AddRow(row);
         }
 
@@ -127,9 +127,9 @@ public sealed class ColumnInteractionCollectorTests
         for (int i = 0; i < 50; i++)
         {
             Row row = CreateRow(
-                ("a", DataValue.FromScalar(i)),
-                ("b", DataValue.FromScalar(i * 2.0f)),
-                ("c", DataValue.FromScalar(i * 3.0f)));
+                ("a", DataValue.FromFloat32(i)),
+                ("b", DataValue.FromFloat32(i * 2.0f)),
+                ("c", DataValue.FromFloat32(i * 3.0f)));
             collector.AddRow(row);
         }
 
@@ -165,7 +165,7 @@ public sealed class ColumnInteractionCollectorTests
 
         for (int i = 0; i < 10; i++)
         {
-            Row row = CreateRow(("x", DataValue.FromScalar(i)));
+            Row row = CreateRow(("x", DataValue.FromFloat32(i)));
             collector.AddRow(row);
         }
 
@@ -215,7 +215,7 @@ public sealed class ColumnInteractionCollectorTests
         for (int i = 0; i < 50; i++)
         {
             Row row = CreateRow(
-                ("score", DataValue.FromScalar(i)),
+                ("score", DataValue.FromFloat32(i)),
                 ("label", DataValue.FromString("cat")),
                 ("image", DataValue.FromImage(new byte[] { 0xFF })));
             collector.AddRow(row);

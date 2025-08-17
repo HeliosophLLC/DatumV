@@ -40,10 +40,10 @@ public sealed class CardinalityAccumulatorTests
     {
         CardinalityAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
 
         CardinalityResult result = (CardinalityResult)accumulator.GetResult().Value!;
         Assert.InRange(result.EstimatedDistinctCount, 2, 4);

@@ -900,7 +900,7 @@ SELECT CASE WHEN x > 0 THEN 'not_a_number' ELSE 1 END AS value
 FROM data
 ```
 
-Coercible String targets include: `Scalar`, `UInt8`, `Boolean`, `Date`,
+Coercible String targets include: `Float32`, `UInt8`, `Boolean`, `Date`,
 `DateTime`, `Time`, `Duration`, `Uuid`, and `JsonValue`. Types like `Vector`,
 `Matrix`, `Tensor`, `Image`, and `UInt8Array` cannot be coerced from String.
 
@@ -1247,7 +1247,7 @@ See [Compute Backend — Query](compute.md#query-server-streaming) for details.
 
 | DataKind | Description | Internal representation |
 |----------|-------------|------------------------|
-| `Scalar` | 32-bit float | `float` |
+| `Float32` | 32-bit float | `float` |
 | `UInt8` | Unsigned 8-bit integer | `byte` |
 | `Vector` | Rank-1 float array | `float[]` |
 | `Matrix` | Rank-2 float array | `float[]` + shape `[rows, cols]` |
@@ -1262,17 +1262,17 @@ See [Compute Backend — Query](compute.md#query-server-streaming) for details.
 ### Type conversions
 
 Implicit widening (automatic):
-- `UInt8` → `Scalar`
-- `Scalar` → `Vector[1]`
+- `UInt8` → `Float32`
+- `Float32` → `Vector[1]`
 - `Vector` → `Tensor` (rank 1)
 - `Matrix` → `Tensor` (rank 2)
 
 Explicit narrowing via `CAST(value AS type)`:
-- `Scalar` → `UInt8` (truncates)
+- `Float32` → `UInt8` (truncates)
 - `Tensor` → `Vector` (requires rank 1)
 - `Tensor` → `Matrix` (requires rank 2)
-- `Date` → `Scalar` (epoch days since 1970-01-01)
-- `DateTime` → `Scalar` (epoch seconds since 1970-01-01T00:00:00Z, float32)
+- `Date` → `Float32` (epoch days since 1970-01-01)
+- `DateTime` → `Float32` (epoch seconds since 1970-01-01T00:00:00Z, float32)
 
 ### Vector, Matrix, and Tensor relationship
 

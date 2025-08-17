@@ -14,14 +14,14 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
-            new(DataValue.FromScalar(3.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromScalar(2.0f));
+        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromFloat32(2.0f));
 
         Assert.Single(results);
         Assert.Equal(0, results[0].ChunkIndex);
@@ -33,13 +33,13 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(3.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromScalar(2.0f));
+        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromFloat32(2.0f));
 
         Assert.Empty(results);
     }
@@ -49,16 +49,16 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
-            new(DataValue.FromScalar(2.0f), 1, 0),
-            new(DataValue.FromScalar(2.0f), 1, 5),
-            new(DataValue.FromScalar(3.0f), 2, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
+            new(DataValue.FromFloat32(2.0f), 1, 0),
+            new(DataValue.FromFloat32(2.0f), 1, 5),
+            new(DataValue.FromFloat32(3.0f), 2, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromScalar(2.0f));
+        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromFloat32(2.0f));
 
         Assert.Equal(3, results.Count);
     }
@@ -68,7 +68,7 @@ public sealed class SortedValueIndexTests
     {
         SortedValueIndex index = new(Array.Empty<ValueIndexEntry>());
 
-        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromScalar(1.0f));
+        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromFloat32(1.0f));
 
         Assert.Empty(results);
     }
@@ -97,17 +97,17 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
-            new(DataValue.FromScalar(3.0f), 1, 0),
-            new(DataValue.FromScalar(4.0f), 1, 1),
-            new(DataValue.FromScalar(5.0f), 2, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
+            new(DataValue.FromFloat32(4.0f), 1, 1),
+            new(DataValue.FromFloat32(5.0f), 2, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
         IReadOnlyList<ValueIndexEntry> results = index.FindRange(
-            DataValue.FromScalar(2.0f), DataValue.FromScalar(4.0f));
+            DataValue.FromFloat32(2.0f), DataValue.FromFloat32(4.0f));
 
         Assert.Equal(3, results.Count);
     }
@@ -117,14 +117,14 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(5.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(5.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
         IReadOnlyList<ValueIndexEntry> results = index.FindRange(
-            DataValue.FromScalar(2.0f), DataValue.FromScalar(4.0f));
+            DataValue.FromFloat32(2.0f), DataValue.FromFloat32(4.0f));
 
         Assert.Empty(results);
     }
@@ -134,15 +134,15 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(2.0f), 0, 0),
-            new(DataValue.FromScalar(3.0f), 0, 1),
-            new(DataValue.FromScalar(4.0f), 1, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 0),
+            new(DataValue.FromFloat32(3.0f), 0, 1),
+            new(DataValue.FromFloat32(4.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
         IReadOnlyList<ValueIndexEntry> results = index.FindRange(
-            DataValue.FromScalar(1.0f), DataValue.FromScalar(5.0f));
+            DataValue.FromFloat32(1.0f), DataValue.FromFloat32(5.0f));
 
         Assert.Equal(3, results.Count);
     }
@@ -152,15 +152,15 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
-            new(DataValue.FromScalar(2.0f), 1, 0),
-            new(DataValue.FromScalar(3.0f), 2, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
+            new(DataValue.FromFloat32(2.0f), 1, 0),
+            new(DataValue.FromFloat32(3.0f), 2, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromScalar(2.0f));
+        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromFloat32(2.0f));
 
         Assert.Equal(2, chunks.Count);
         Assert.Contains(0, chunks);
@@ -172,13 +172,13 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(3.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromScalar(2.0f));
+        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromFloat32(2.0f));
 
         Assert.Empty(chunks);
     }
@@ -188,16 +188,16 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(3.0f), 1, 0),
-            new(DataValue.FromScalar(5.0f), 2, 0),
-            new(DataValue.FromScalar(7.0f), 3, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
+            new(DataValue.FromFloat32(5.0f), 2, 0),
+            new(DataValue.FromFloat32(7.0f), 3, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
         IReadOnlySet<int> chunks = index.FindChunksInRange(
-            DataValue.FromScalar(2.0f), DataValue.FromScalar(6.0f));
+            DataValue.FromFloat32(2.0f), DataValue.FromFloat32(6.0f));
 
         Assert.Equal(2, chunks.Count);
         Assert.Contains(1, chunks);
@@ -209,18 +209,18 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(3.0f), 1, 0),
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
         ];
 
         SortedValueIndex index = SortedValueIndex.BuildFromUnsorted(entries);
 
         Assert.Equal(3, index.Count);
         ReadOnlySpan<ValueIndexEntry> sorted = index.Entries;
-        Assert.Equal(1.0f, sorted[0].Key.AsScalar());
-        Assert.Equal(2.0f, sorted[1].Key.AsScalar());
-        Assert.Equal(3.0f, sorted[2].Key.AsScalar());
+        Assert.Equal(1.0f, sorted[0].Key.AsFloat32());
+        Assert.Equal(2.0f, sorted[1].Key.AsFloat32());
+        Assert.Equal(3.0f, sorted[2].Key.AsFloat32());
     }
 
     [Fact]
@@ -256,14 +256,14 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
-            new(DataValue.FromScalar(3.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromScalar(1.0f));
+        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromFloat32(1.0f));
 
         Assert.Single(results);
     }
@@ -273,14 +273,14 @@ public sealed class SortedValueIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0),
-            new(DataValue.FromScalar(2.0f), 0, 1),
-            new(DataValue.FromScalar(3.0f), 1, 0),
+            new(DataValue.FromFloat32(1.0f), 0, 0),
+            new(DataValue.FromFloat32(2.0f), 0, 1),
+            new(DataValue.FromFloat32(3.0f), 1, 0),
         ];
 
         SortedValueIndex index = new(entries);
 
-        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromScalar(3.0f));
+        IReadOnlyList<ValueIndexEntry> results = index.FindExact(DataValue.FromFloat32(3.0f));
 
         Assert.Single(results);
         Assert.Equal(1, results[0].ChunkIndex);

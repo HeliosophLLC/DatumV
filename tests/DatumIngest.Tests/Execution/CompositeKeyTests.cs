@@ -12,8 +12,8 @@ public class CompositeKeyTests
     [Fact]
     public void Equals_IdenticalSinglePart_ReturnsTrue()
     {
-        CompositeKey a = new([DataValue.FromScalar(42f)]);
-        CompositeKey b = new([DataValue.FromScalar(42f)]);
+        CompositeKey a = new([DataValue.FromFloat32(42f)]);
+        CompositeKey b = new([DataValue.FromFloat32(42f)]);
 
         Assert.Equal(a, b);
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
@@ -22,8 +22,8 @@ public class CompositeKeyTests
     [Fact]
     public void Equals_DifferentSinglePart_ReturnsFalse()
     {
-        CompositeKey a = new([DataValue.FromScalar(1f)]);
-        CompositeKey b = new([DataValue.FromScalar(2f)]);
+        CompositeKey a = new([DataValue.FromFloat32(1f)]);
+        CompositeKey b = new([DataValue.FromFloat32(2f)]);
 
         Assert.NotEqual(a, b);
     }
@@ -31,8 +31,8 @@ public class CompositeKeyTests
     [Fact]
     public void Equals_IdenticalMultipleParts_ReturnsTrue()
     {
-        CompositeKey a = new([DataValue.FromScalar(1f), DataValue.FromString("hello")]);
-        CompositeKey b = new([DataValue.FromScalar(1f), DataValue.FromString("hello")]);
+        CompositeKey a = new([DataValue.FromFloat32(1f), DataValue.FromString("hello")]);
+        CompositeKey b = new([DataValue.FromFloat32(1f), DataValue.FromString("hello")]);
 
         Assert.Equal(a, b);
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
@@ -41,8 +41,8 @@ public class CompositeKeyTests
     [Fact]
     public void Equals_DifferentSecondPart_ReturnsFalse()
     {
-        CompositeKey a = new([DataValue.FromScalar(1f), DataValue.FromString("hello")]);
-        CompositeKey b = new([DataValue.FromScalar(1f), DataValue.FromString("world")]);
+        CompositeKey a = new([DataValue.FromFloat32(1f), DataValue.FromString("hello")]);
+        CompositeKey b = new([DataValue.FromFloat32(1f), DataValue.FromString("world")]);
 
         Assert.NotEqual(a, b);
     }
@@ -50,8 +50,8 @@ public class CompositeKeyTests
     [Fact]
     public void Equals_DifferentPartCount_ReturnsFalse()
     {
-        CompositeKey a = new([DataValue.FromScalar(1f)]);
-        CompositeKey b = new([DataValue.FromScalar(1f), DataValue.FromScalar(2f)]);
+        CompositeKey a = new([DataValue.FromFloat32(1f)]);
+        CompositeKey b = new([DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]);
 
         Assert.NotEqual(a, b);
     }
@@ -71,13 +71,13 @@ public class CompositeKeyTests
     {
         Dictionary<CompositeKey, string> table = new();
 
-        CompositeKey key1 = new([DataValue.FromScalar(1f), DataValue.FromString("a")]);
-        CompositeKey key2 = new([DataValue.FromScalar(2f), DataValue.FromString("b")]);
+        CompositeKey key1 = new([DataValue.FromFloat32(1f), DataValue.FromString("a")]);
+        CompositeKey key2 = new([DataValue.FromFloat32(2f), DataValue.FromString("b")]);
 
         table[key1] = "first";
         table[key2] = "second";
 
-        CompositeKey lookupKey = new([DataValue.FromScalar(1f), DataValue.FromString("a")]);
+        CompositeKey lookupKey = new([DataValue.FromFloat32(1f), DataValue.FromString("a")]);
         Assert.True(table.TryGetValue(lookupKey, out string? value));
         Assert.Equal("first", value);
     }
@@ -85,8 +85,8 @@ public class CompositeKeyTests
     [Fact]
     public void OperatorEquals_Works()
     {
-        CompositeKey a = new([DataValue.FromScalar(5f)]);
-        CompositeKey b = new([DataValue.FromScalar(5f)]);
+        CompositeKey a = new([DataValue.FromFloat32(5f)]);
+        CompositeKey b = new([DataValue.FromFloat32(5f)]);
 
         Assert.True(a == b);
         Assert.False(a != b);

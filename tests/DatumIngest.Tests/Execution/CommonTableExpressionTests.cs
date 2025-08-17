@@ -149,9 +149,9 @@ public sealed class CommonTableExpressionTests
     {
         Row[] orders =
         [
-            MakeRow(("user_id", DataValue.FromScalar(1f)), ("amount", DataValue.FromScalar(100f))),
-            MakeRow(("user_id", DataValue.FromScalar(1f)), ("amount", DataValue.FromScalar(200f))),
-            MakeRow(("user_id", DataValue.FromScalar(2f)), ("amount", DataValue.FromScalar(50f))),
+            MakeRow(("user_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(100f))),
+            MakeRow(("user_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(200f))),
+            MakeRow(("user_id", DataValue.FromFloat32(2f)), ("amount", DataValue.FromFloat32(50f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("orders", orders));
@@ -172,7 +172,7 @@ public sealed class CommonTableExpressionTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f)), ("y", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f)), ("y", DataValue.FromFloat32(2f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("t", data));
@@ -182,8 +182,8 @@ public sealed class CommonTableExpressionTests
             catalog);
 
         Assert.Single(results);
-        Assert.Equal(1f, results[0]["a"].AsScalar());
-        Assert.Equal(2f, results[0]["b"].AsScalar());
+        Assert.Equal(1f, results[0]["a"].AsFloat32());
+        Assert.Equal(2f, results[0]["b"].AsFloat32());
     }
 
     /// <summary>
@@ -194,8 +194,8 @@ public sealed class CommonTableExpressionTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(10f))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("val", DataValue.FromScalar(20f))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("val", DataValue.FromFloat32(20f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("t", data));
@@ -216,8 +216,8 @@ public sealed class CommonTableExpressionTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
-            MakeRow(("id", DataValue.FromScalar(2f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
+            MakeRow(("id", DataValue.FromFloat32(2f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("t", data));
@@ -238,9 +238,9 @@ public sealed class CommonTableExpressionTests
     {
         Row[] data =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("score", DataValue.FromScalar(90f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("score", DataValue.FromScalar(50f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("score", DataValue.FromScalar(75f))),
+            MakeRow(("name", DataValue.FromString("alice")), ("score", DataValue.FromFloat32(90f))),
+            MakeRow(("name", DataValue.FromString("bob")), ("score", DataValue.FromFloat32(50f))),
+            MakeRow(("name", DataValue.FromString("carol")), ("score", DataValue.FromFloat32(75f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("students", data));
@@ -265,7 +265,7 @@ public sealed class CommonTableExpressionTests
         // We need a single-row table to seed the anchor.
         Row[] dual =
         [
-            MakeRow(("dummy", DataValue.FromScalar(1f))),
+            MakeRow(("dummy", DataValue.FromFloat32(1f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("dual", dual));
@@ -281,7 +281,7 @@ public sealed class CommonTableExpressionTests
         Assert.Equal(5, results.Count);
         for (int index = 0; index < 5; index++)
         {
-            Assert.Equal(index + 1, (int)results[index]["n"].AsScalar());
+            Assert.Equal(index + 1, (int)results[index]["n"].AsFloat32());
         }
     }
 
@@ -293,7 +293,7 @@ public sealed class CommonTableExpressionTests
     {
         Row[] dual =
         [
-            MakeRow(("dummy", DataValue.FromScalar(1f))),
+            MakeRow(("dummy", DataValue.FromFloat32(1f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("dual", dual));
@@ -338,7 +338,7 @@ public sealed class CommonTableExpressionTests
     {
         int executionCount = 0;
         CountingOperator inner = new(() => executionCount++,
-            MakeRow(("x", DataValue.FromScalar(1f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))));
 
         CommonTableExpressionOperator cteOperator = new(inner, "test_cte", isMaterialized: false);
 
@@ -361,8 +361,8 @@ public sealed class CommonTableExpressionTests
     {
         int executionCount = 0;
         CountingOperator inner = new(() => executionCount++,
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))));
 
         CommonTableExpressionOperator cteOperator = new(inner, "test_cte", isMaterialized: true);
 
@@ -384,7 +384,7 @@ public sealed class CommonTableExpressionTests
     {
         // Create rows that will exceed a tiny memory budget.
         Row[] rows = Enumerable.Range(0, 100)
-            .Select(index => MakeRow(("id", DataValue.FromScalar((float)index))))
+            .Select(index => MakeRow(("id", DataValue.FromFloat32((float)index))))
             .ToArray();
 
         MockOperator inner = new(rows);
@@ -417,7 +417,7 @@ public sealed class CommonTableExpressionTests
     [Fact]
     public void Plan_WithCte_CreatesCteOperator()
     {
-        Row[] data = [MakeRow(("x", DataValue.FromScalar(1f)))];
+        Row[] data = [MakeRow(("x", DataValue.FromFloat32(1f)))];
         TableCatalog catalog = CreateCatalog(("t", data));
         QueryPlanner planner = new(catalog, DefaultFunctions);
 
@@ -440,8 +440,8 @@ public sealed class CommonTableExpressionTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("b"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("a"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("b"))),
         ];
 
         TableCatalog catalog = CreateCatalog(("t", data));

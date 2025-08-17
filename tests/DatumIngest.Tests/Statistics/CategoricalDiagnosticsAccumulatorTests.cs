@@ -186,8 +186,8 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
     {
         CategoricalDiagnosticsAccumulator accumulator = new(10);
 
-        for (int i = 0; i < 10; i++) accumulator.Add(DataValue.FromScalar(1.0f));
-        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromScalar(2.0f));
+        for (int i = 0; i < 10; i++) accumulator.Add(DataValue.FromFloat32(1.0f));
+        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromFloat32(2.0f));
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
 

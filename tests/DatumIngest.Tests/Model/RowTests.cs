@@ -9,11 +9,11 @@ public class RowTests
     {
         Row row = new Row(
             ["name", "age"],
-            [DataValue.FromString("Alice"), DataValue.FromScalar(30.0f)]);
+            [DataValue.FromString("Alice"), DataValue.FromFloat32(30.0f)]);
 
         Assert.Equal(2, row.FieldCount);
         Assert.Equal("Alice", row["name"].AsString());
-        Assert.Equal(30.0f, row["age"].AsScalar());
+        Assert.Equal(30.0f, row["age"].AsFloat32());
     }
 
     [Fact]
@@ -21,10 +21,10 @@ public class RowTests
     {
         Row row = new Row(
             ["x", "y"],
-            [DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f)]);
+            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)]);
 
-        Assert.Equal(1.0f, row[0].AsScalar());
-        Assert.Equal(2.0f, row[1].AsScalar());
+        Assert.Equal(1.0f, row[0].AsFloat32());
+        Assert.Equal(2.0f, row[1].AsFloat32());
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class RowTests
     {
         Row row = new Row(
             ["alpha", "beta", "gamma"],
-            [DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), DataValue.FromScalar(3.0f)]);
+            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), DataValue.FromFloat32(3.0f)]);
 
         Assert.Equal(["alpha", "beta", "gamma"], row.ColumnNames);
     }
@@ -69,11 +69,11 @@ public class RowTests
 
         Row row = new Row(
             ["cheap", "expensive_col"],
-            [DataValue.FromScalar(1.0f), lazy.Value]);
+            [DataValue.FromFloat32(1.0f), lazy.Value]);
 
         // Accessing the cheap column should not affect the lazy value
         DataValue cheap = row["cheap"];
-        Assert.Equal(1.0f, cheap.AsScalar());
+        Assert.Equal(1.0f, cheap.AsFloat32());
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class RowTests
     {
         Assert.Throws<ArgumentException>(() => new Row(
             ["a", "b"],
-            [DataValue.FromScalar(1.0f)]));
+            [DataValue.FromFloat32(1.0f)]));
     }
 
     [Fact]

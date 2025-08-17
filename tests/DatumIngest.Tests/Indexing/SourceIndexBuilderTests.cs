@@ -24,9 +24,9 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("charlie"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("name", DataValue.FromString("charlie"))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -46,7 +46,7 @@ public sealed class SourceIndexBuilderTests
     public async Task BuildAsync_MultipleChunks_SplitsCorrectly()
     {
         Row[] rows = Enumerable.Range(0, 25).Select(i =>
-            MakeRow(("value", DataValue.FromScalar((float)i)))).ToArray();
+            MakeRow(("value", DataValue.FromFloat32((float)i)))).ToArray();
 
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("data");
@@ -72,10 +72,10 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("x", DataValue.FromScalar(10.0f))),
-            MakeRow(("x", DataValue.FromScalar(5.0f))),
-            MakeRow(("x", DataValue.FromScalar(20.0f))),
-            MakeRow(("x", DataValue.FromScalar(1.0f))),
+            MakeRow(("x", DataValue.FromFloat32(10.0f))),
+            MakeRow(("x", DataValue.FromFloat32(5.0f))),
+            MakeRow(("x", DataValue.FromFloat32(20.0f))),
+            MakeRow(("x", DataValue.FromFloat32(1.0f))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -85,8 +85,8 @@ public sealed class SourceIndexBuilderTests
         SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
         ChunkColumnStatistics stats = index.Chunks[0].ColumnStatistics["x"];
-        Assert.Equal(1.0f, stats.Minimum!.AsScalar());
-        Assert.Equal(20.0f, stats.Maximum!.AsScalar());
+        Assert.Equal(1.0f, stats.Minimum!.AsFloat32());
+        Assert.Equal(20.0f, stats.Maximum!.AsFloat32());
     }
 
     [Fact]
@@ -94,10 +94,10 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("x", DataValue.FromScalar(1.0f))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.FromScalar(2.0f))),
+            MakeRow(("x", DataValue.FromFloat32(1.0f))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.FromFloat32(2.0f))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -113,7 +113,7 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildAsync_WithStream_ComputesFingerprint()
     {
-        Row[] rows = [MakeRow(("x", DataValue.FromScalar(1.0f)))];
+        Row[] rows = [MakeRow(("x", DataValue.FromFloat32(1.0f)))];
         byte[] fileContent = new byte[256];
         Random.Shared.NextBytes(fileContent);
 
@@ -131,7 +131,7 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildAsync_WithoutStream_ProducesEmptyFingerprint()
     {
-        Row[] rows = [MakeRow(("x", DataValue.FromScalar(1.0f)))];
+        Row[] rows = [MakeRow(("x", DataValue.FromFloat32(1.0f)))];
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("no-stream");
         SourceIndexBuilder builder = new(chunkSize: 100);
@@ -167,7 +167,7 @@ public sealed class SourceIndexBuilderTests
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
         Row[] rows = Enumerable.Range(0, 12).Select(i =>
-            MakeRow(("value", DataValue.FromScalar((float)i)))).ToArray();
+            MakeRow(("value", DataValue.FromFloat32((float)i)))).ToArray();
 
         foreach (Row row in rows)
         {
@@ -227,7 +227,7 @@ public sealed class SourceIndexBuilderTests
     public async Task BuildAsync_WithBloomColumns_ProducesBloomFilters()
     {
         Row[] rows = Enumerable.Range(0, 20).Select(i =>
-            MakeRow(("id", DataValue.FromScalar((float)i)),
+            MakeRow(("id", DataValue.FromFloat32((float)i)),
                     ("name", DataValue.FromString($"name_{i}")))).ToArray();
 
         InMemoryTableProvider provider = new(rows);
@@ -244,20 +244,20 @@ public sealed class SourceIndexBuilderTests
 
         // Values in chunk 0 (ids 0-9) should be found.
         Assert.True(index.BloomFilters.TryGetFilter("id", 0, out BloomFilter? chunk0));
-        Assert.True(chunk0!.MayContain(DataValue.FromScalar(5.0f)));
+        Assert.True(chunk0!.MayContain(DataValue.FromFloat32(5.0f)));
 
         // Values in chunk 1 (ids 10-19) should be found.
         Assert.True(index.BloomFilters.TryGetFilter("id", 1, out BloomFilter? chunk1));
-        Assert.True(chunk1!.MayContain(DataValue.FromScalar(15.0f)));
+        Assert.True(chunk1!.MayContain(DataValue.FromFloat32(15.0f)));
 
         // Value 15 should NOT be in chunk 0 (it was in chunk 1).
-        Assert.False(chunk0.MayContain(DataValue.FromScalar(15.0f)));
+        Assert.False(chunk0.MayContain(DataValue.FromFloat32(15.0f)));
     }
 
     [Fact]
     public async Task BuildAsync_WithoutBloomColumns_NoBloomFilters()
     {
-        Row[] rows = [MakeRow(("id", DataValue.FromScalar(1.0f)))];
+        Row[] rows = [MakeRow(("id", DataValue.FromFloat32(1.0f)))];
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("no-bloom");
         SourceIndexBuilder builder = new(chunkSize: 100);
@@ -301,9 +301,9 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("charlie"))),
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("name", DataValue.FromString("charlie"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("name", DataValue.FromString("bob"))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -320,7 +320,7 @@ public sealed class SourceIndexBuilderTests
         Assert.True(index.SortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
         Assert.Equal(3, sortedIndex!.Count);
 
-        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(2.0f));
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromFloat32(2.0f));
         Assert.Single(found);
         Assert.Equal(0, found[0].ChunkIndex);
         Assert.Equal(2, found[0].RowOffsetInChunk);
@@ -330,7 +330,7 @@ public sealed class SourceIndexBuilderTests
     public async Task BuildAsync_WithIndexColumns_MultipleChunks_CorrectChunkIndexes()
     {
         Row[] rows = Enumerable.Range(0, 15).Select(i =>
-            MakeRow(("value", DataValue.FromScalar((float)i)))).ToArray();
+            MakeRow(("value", DataValue.FromFloat32((float)i)))).ToArray();
 
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("multi");
@@ -344,19 +344,19 @@ public sealed class SourceIndexBuilderTests
         Assert.Equal(15, sortedIndex!.Count);
 
         // Value 0.0 should be in chunk 0, row 0.
-        IReadOnlyList<ValueIndexEntry> found0 = sortedIndex.FindExact(DataValue.FromScalar(0.0f));
+        IReadOnlyList<ValueIndexEntry> found0 = sortedIndex.FindExact(DataValue.FromFloat32(0.0f));
         Assert.Single(found0);
         Assert.Equal(0, found0[0].ChunkIndex);
         Assert.Equal(0, found0[0].RowOffsetInChunk);
 
         // Value 7.0 should be in chunk 1, row 2 (rows 5-9 are chunk 1).
-        IReadOnlyList<ValueIndexEntry> found7 = sortedIndex.FindExact(DataValue.FromScalar(7.0f));
+        IReadOnlyList<ValueIndexEntry> found7 = sortedIndex.FindExact(DataValue.FromFloat32(7.0f));
         Assert.Single(found7);
         Assert.Equal(1, found7[0].ChunkIndex);
         Assert.Equal(2, found7[0].RowOffsetInChunk);
 
         // Value 12.0 should be in chunk 2, row 2 (rows 10-14 are chunk 2).
-        IReadOnlyList<ValueIndexEntry> found12 = sortedIndex.FindExact(DataValue.FromScalar(12.0f));
+        IReadOnlyList<ValueIndexEntry> found12 = sortedIndex.FindExact(DataValue.FromFloat32(12.0f));
         Assert.Single(found12);
         Assert.Equal(2, found12[0].ChunkIndex);
         Assert.Equal(2, found12[0].RowOffsetInChunk);
@@ -365,7 +365,7 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildAsync_WithoutIndexColumns_NoSortedIndexes()
     {
-        Row[] rows = [MakeRow(("id", DataValue.FromScalar(1.0f)))];
+        Row[] rows = [MakeRow(("id", DataValue.FromFloat32(1.0f)))];
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("test");
         SourceIndexBuilder builder = new(chunkSize: 100);
@@ -380,9 +380,9 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f))),
-            MakeRow(("id", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("id", DataValue.FromScalar(3.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("id", DataValue.Null(DataKind.Float32))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -406,9 +406,9 @@ public sealed class SourceIndexBuilderTests
         SourceIndexBuilder builder = new(chunkSize: 100, indexColumns: indexColumns);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
-        incremental.AddRow(MakeRow(("id", DataValue.FromScalar(3.0f))));
-        incremental.AddRow(MakeRow(("id", DataValue.FromScalar(1.0f))));
-        incremental.AddRow(MakeRow(("id", DataValue.FromScalar(2.0f))));
+        incremental.AddRow(MakeRow(("id", DataValue.FromFloat32(3.0f))));
+        incremental.AddRow(MakeRow(("id", DataValue.FromFloat32(1.0f))));
+        incremental.AddRow(MakeRow(("id", DataValue.FromFloat32(2.0f))));
 
         SourceIndex result = incremental.Finalize();
 
@@ -422,7 +422,7 @@ public sealed class SourceIndexBuilderTests
         Assert.True(sortedIndexes.TryGetIndex("id", out SortedValueIndex? sortedIndex));
         Assert.Equal(3, sortedIndex!.Count);
 
-        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(2.0f));
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromFloat32(2.0f));
         Assert.Single(found);
         incremental.Dispose();
     }
@@ -432,8 +432,8 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("category", DataValue.FromString("A"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("category", DataValue.FromString("B"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("category", DataValue.FromString("A"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("category", DataValue.FromString("B"))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -457,8 +457,8 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -478,13 +478,13 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] ordersRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("total", DataValue.FromScalar(99.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("total", DataValue.FromScalar(42.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("total", DataValue.FromFloat32(99.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("total", DataValue.FromFloat32(42.0f))),
         ];
 
         Row[] itemsRows =
         [
-            MakeRow(("orderId", DataValue.FromScalar(1.0f)), ("product", DataValue.FromString("widget"))),
+            MakeRow(("orderId", DataValue.FromFloat32(1.0f)), ("product", DataValue.FromString("widget"))),
         ];
 
         InMemoryTableProvider ordersProvider = new(ordersRows);
@@ -507,7 +507,7 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildSetAsync_SharesFingerprint_AcrossAllTables()
     {
-        Row[] rows = [MakeRow(("x", DataValue.FromScalar(1.0f)))];
+        Row[] rows = [MakeRow(("x", DataValue.FromFloat32(1.0f)))];
         InMemoryTableProvider provider1 = new(rows);
         InMemoryTableProvider provider2 = new(rows);
         SourceIndexBuilder builder = new(chunkSize: 100);
@@ -527,8 +527,8 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("value", DataValue.FromScalar(1.0f))),
-            MakeRow(("value", DataValue.FromScalar(2.0f))),
+            MakeRow(("value", DataValue.FromFloat32(1.0f))),
+            MakeRow(("value", DataValue.FromFloat32(2.0f))),
         ];
 
         InMemoryTableProvider provider1 = new(rows);
@@ -558,7 +558,7 @@ public sealed class SourceIndexBuilderTests
     public async Task BuildAsync_WithBloomAllColumns_ProducesBloomFiltersForEveryColumn()
     {
         Row[] rows = Enumerable.Range(0, 20).Select(i =>
-            MakeRow(("id", DataValue.FromScalar((float)i)),
+            MakeRow(("id", DataValue.FromFloat32((float)i)),
                     ("name", DataValue.FromString($"name_{i}")),
                     ("category", DataValue.FromString(i % 2 == 0 ? "even" : "odd")))).ToArray();
 
@@ -580,9 +580,9 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows =
         [
-            MakeRow(("id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("charlie"))),
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("name", DataValue.FromString("charlie"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("name", DataValue.FromString("bob"))),
         ];
 
         InMemoryTableProvider provider = new(rows);
@@ -606,7 +606,7 @@ public sealed class SourceIndexBuilderTests
         for (int index = 0; index < 10; index++)
         {
             incremental.AddRow(MakeRow(
-                ("id", DataValue.FromScalar((float)index)),
+                ("id", DataValue.FromFloat32((float)index)),
                 ("category", DataValue.FromString(index < 5 ? "A" : "B"))));
         }
 
@@ -626,13 +626,13 @@ public sealed class SourceIndexBuilderTests
         Row[] rows =
         [
             MakeRow(
-                ("id", DataValue.FromScalar(1.0f)),
+                ("id", DataValue.FromFloat32(1.0f)),
                 ("name", DataValue.FromString("alice")),
                 ("data", DataValue.FromVector(new float[] { 1.0f, 2.0f })),
                 ("active", DataValue.FromBoolean(true)),
                 ("created", DataValue.FromDate(new DateOnly(2024, 1, 1)))),
             MakeRow(
-                ("id", DataValue.FromScalar(2.0f)),
+                ("id", DataValue.FromFloat32(2.0f)),
                 ("name", DataValue.FromString("bob")),
                 ("data", DataValue.FromVector(new float[] { 3.0f, 4.0f })),
                 ("active", DataValue.FromBoolean(false)),
@@ -662,11 +662,11 @@ public sealed class SourceIndexBuilderTests
         Row[] rows =
         [
             MakeRow(
-                ("id", DataValue.FromScalar(1.0f)),
+                ("id", DataValue.FromFloat32(1.0f)),
                 ("short_text", DataValue.FromString("ok")),
                 ("long_text", DataValue.FromString("this is way too long for auto-indexing"))),
             MakeRow(
-                ("id", DataValue.FromScalar(2.0f)),
+                ("id", DataValue.FromFloat32(2.0f)),
                 ("short_text", DataValue.FromString("fine")),
                 ("long_text", DataValue.FromString("another long value exceeding the limit"))),
         ];
@@ -690,7 +690,7 @@ public sealed class SourceIndexBuilderTests
     {
         Row[] rows = Enumerable.Range(0, 25).Select(i =>
             MakeRow(
-                ("id", DataValue.FromScalar((float)i)),
+                ("id", DataValue.FromFloat32((float)i)),
                 ("tag", DataValue.FromString($"t{i % 5}")))).ToArray();
 
         InMemoryTableProvider provider = new(rows);
@@ -705,7 +705,7 @@ public sealed class SourceIndexBuilderTests
         Assert.Equal(25, idIndex!.Count);
 
         // Verify correct chunk assignment after spill+merge.
-        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromScalar(12.0f));
+        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromFloat32(12.0f));
         Assert.Single(found);
         Assert.Equal(2, found[0].ChunkIndex); // rows 10-14 are chunk 2
         Assert.Equal(2, found[0].RowOffsetInChunk);
@@ -720,10 +720,10 @@ public sealed class SourceIndexBuilderTests
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
         incremental.AddRow(MakeRow(
-            ("id", DataValue.FromScalar(3.0f)),
+            ("id", DataValue.FromFloat32(3.0f)),
             ("vec", DataValue.FromVector(new float[] { 1.0f }))));
         incremental.AddRow(MakeRow(
-            ("id", DataValue.FromScalar(1.0f)),
+            ("id", DataValue.FromFloat32(1.0f)),
             ("vec", DataValue.FromVector(new float[] { 2.0f }))));
 
         SourceIndex result = incremental.Finalize();
@@ -771,7 +771,7 @@ public sealed class SourceIndexBuilderTests
 
         for (int i = 0; i < 15; i++)
         {
-            incremental.AddRow(MakeRow(("value", DataValue.FromScalar((float)i))));
+            incremental.AddRow(MakeRow(("value", DataValue.FromFloat32((float)i))));
         }
 
         SourceIndex result = incremental.Finalize();
@@ -783,7 +783,7 @@ public sealed class SourceIndexBuilderTests
         Assert.Equal(15, sortedIndex!.Count);
 
         // Value 7.0 should be in chunk 1, row 2.
-        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromScalar(7.0f));
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromFloat32(7.0f));
         Assert.Single(found);
         Assert.Equal(1, found[0].ChunkIndex);
         Assert.Equal(2, found[0].RowOffsetInChunk);
@@ -791,7 +791,7 @@ public sealed class SourceIndexBuilderTests
     }
 
     [Theory]
-    [InlineData(DataKind.Scalar, true)]
+    [InlineData(DataKind.Float32, true)]
     [InlineData(DataKind.UInt8, true)]
     [InlineData(DataKind.Boolean, true)]
     [InlineData(DataKind.Date, true)]

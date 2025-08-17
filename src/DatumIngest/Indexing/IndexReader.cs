@@ -474,7 +474,7 @@ public sealed class IndexReader
 
         return kind switch
         {
-            DataKind.Scalar => DataValue.FromScalar(reader.ReadSingle()),
+            DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
             DataKind.String => DataValue.FromString(reader.ReadString()),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),

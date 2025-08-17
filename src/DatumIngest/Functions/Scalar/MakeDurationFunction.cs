@@ -21,7 +21,7 @@ public sealed class MakeDurationFunction : IScalarFunction
 
         for (int index = 0; index < argumentKinds.Length; index++)
         {
-            if (argumentKinds[index] != DataKind.Scalar)
+            if (argumentKinds[index] != DataKind.Float32)
             {
                 throw new ArgumentException($"make_duration() argument {index + 1} must be Scalar, got {argumentKinds[index]}.");
             }
@@ -41,10 +41,10 @@ public sealed class MakeDurationFunction : IScalarFunction
             }
         }
 
-        int days = (int)arguments[0].AsScalar();
-        int hours = (int)arguments[1].AsScalar();
-        int minutes = (int)arguments[2].AsScalar();
-        int seconds = (int)arguments[3].AsScalar();
+        int days = (int)arguments[0].AsFloat32();
+        int hours = (int)arguments[1].AsFloat32();
+        int minutes = (int)arguments[2].AsFloat32();
+        int seconds = (int)arguments[3].AsFloat32();
 
         return DataValue.FromDuration(new TimeSpan(days, hours, minutes, seconds));
     }

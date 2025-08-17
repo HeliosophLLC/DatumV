@@ -52,7 +52,7 @@ public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float degrees = arguments[1].AsScalar();
+        float degrees = arguments[1].AsFloat32();
 
         string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

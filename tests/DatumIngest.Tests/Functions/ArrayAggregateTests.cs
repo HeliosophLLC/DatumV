@@ -16,7 +16,7 @@ public class ArrayAggregateTests
     {
         ArrayAggregateFunction function = new();
 
-        DataKind result = function.ValidateArguments([DataKind.Scalar]);
+        DataKind result = function.ValidateArguments([DataKind.Float32]);
 
         Assert.Equal(DataKind.Array, result);
     }
@@ -48,7 +48,7 @@ public class ArrayAggregateTests
         ArrayAggregateFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.String]));
+            function.ValidateArguments([DataKind.Float32, DataKind.String]));
     }
 
     // ─────────────── NAME ───────────────
@@ -81,19 +81,19 @@ public class ArrayAggregateTests
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromScalar(10f)]);
-        accumulator.Accumulate([DataValue.FromScalar(20f)]);
-        accumulator.Accumulate([DataValue.FromScalar(30f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(10f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(20f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(30f)]);
 
         DataValue result = accumulator.Result;
         Assert.Equal(DataKind.Array, result.Kind);
-        Assert.Equal(DataKind.Scalar, result.ArrayElementKind);
+        Assert.Equal(DataKind.Float32, result.ArrayElementKind);
 
         DataValue[] elements = result.AsArray();
         Assert.Equal(3, elements.Length);
-        Assert.Equal(10f, elements[0].AsScalar());
-        Assert.Equal(20f, elements[1].AsScalar());
-        Assert.Equal(30f, elements[2].AsScalar());
+        Assert.Equal(10f, elements[0].AsFloat32());
+        Assert.Equal(20f, elements[1].AsFloat32());
+        Assert.Equal(30f, elements[2].AsFloat32());
     }
 
     // ─────────────── STRING VALUES ───────────────
@@ -150,15 +150,15 @@ public class ArrayAggregateTests
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromScalar(1f)]);
-        accumulator.Accumulate([DataValue.Null(DataKind.Scalar)]);
-        accumulator.Accumulate([DataValue.FromScalar(3f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(1f)]);
+        accumulator.Accumulate([DataValue.Null(DataKind.Float32)]);
+        accumulator.Accumulate([DataValue.FromFloat32(3f)]);
 
         DataValue result = accumulator.Result;
         DataValue[] elements = result.AsArray();
         Assert.Equal(2, elements.Length);
-        Assert.Equal(1f, elements[0].AsScalar());
-        Assert.Equal(3f, elements[1].AsScalar());
+        Assert.Equal(1f, elements[0].AsFloat32());
+        Assert.Equal(3f, elements[1].AsFloat32());
     }
 
     [Fact]
@@ -167,8 +167,8 @@ public class ArrayAggregateTests
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.Null(DataKind.Scalar)]);
-        accumulator.Accumulate([DataValue.Null(DataKind.Scalar)]);
+        accumulator.Accumulate([DataValue.Null(DataKind.Float32)]);
+        accumulator.Accumulate([DataValue.Null(DataKind.Float32)]);
 
         DataValue result = accumulator.Result;
         Assert.True(result.IsNull);
@@ -194,12 +194,12 @@ public class ArrayAggregateTests
         ArrayAggregateFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        accumulator.Accumulate([DataValue.FromScalar(42f)]);
+        accumulator.Accumulate([DataValue.FromFloat32(42f)]);
 
         DataValue result = accumulator.Result;
         DataValue[] elements = result.AsArray();
         Assert.Single(elements);
-        Assert.Equal(42f, elements[0].AsScalar());
+        Assert.Equal(42f, elements[0].AsFloat32());
     }
 
     // ─────────────── PRESERVES INSERTION ORDER ───────────────

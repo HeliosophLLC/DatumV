@@ -25,26 +25,26 @@ public sealed class BloomJoinPruningTests
         // Chunk 0: ids 1, 2 | Chunk 1: ids 3, 4 | Chunk 2: ids 5, 6
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("value", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("value", DataValue.FromString("b"))),
-            MakeRow(("id", DataValue.FromScalar(3.0f)), ("value", DataValue.FromString("c"))),
-            MakeRow(("id", DataValue.FromScalar(4.0f)), ("value", DataValue.FromString("d"))),
-            MakeRow(("id", DataValue.FromScalar(5.0f)), ("value", DataValue.FromString("e"))),
-            MakeRow(("id", DataValue.FromScalar(6.0f)), ("value", DataValue.FromString("f"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("value", DataValue.FromString("a"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("value", DataValue.FromString("b"))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("value", DataValue.FromString("c"))),
+            MakeRow(("id", DataValue.FromFloat32(4.0f)), ("value", DataValue.FromString("d"))),
+            MakeRow(("id", DataValue.FromFloat32(5.0f)), ("value", DataValue.FromString("e"))),
+            MakeRow(("id", DataValue.FromFloat32(6.0f)), ("value", DataValue.FromString("f"))),
         ];
 
         // Build bloom filters per chunk for the "id" column.
         BloomFilter chunk0Bloom = new(expectedElements: 10);
-        chunk0Bloom.Add(DataValue.FromScalar(1.0f));
-        chunk0Bloom.Add(DataValue.FromScalar(2.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(1.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(2.0f));
 
         BloomFilter chunk1Bloom = new(expectedElements: 10);
-        chunk1Bloom.Add(DataValue.FromScalar(3.0f));
-        chunk1Bloom.Add(DataValue.FromScalar(4.0f));
+        chunk1Bloom.Add(DataValue.FromFloat32(3.0f));
+        chunk1Bloom.Add(DataValue.FromFloat32(4.0f));
 
         BloomFilter chunk2Bloom = new(expectedElements: 10);
-        chunk2Bloom.Add(DataValue.FromScalar(5.0f));
-        chunk2Bloom.Add(DataValue.FromScalar(6.0f));
+        chunk2Bloom.Add(DataValue.FromFloat32(5.0f));
+        chunk2Bloom.Add(DataValue.FromFloat32(6.0f));
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -56,15 +56,15 @@ public sealed class BloomJoinPruningTests
         // Build source index with 3 chunks, each having 2 rows.
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> chunk2Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(5.0f), DataValue.FromScalar(6.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(5.0f), DataValue.FromFloat32(6.0f), 0, 2, 2)
         };
 
         List<IndexChunk> chunks =
@@ -75,7 +75,7 @@ public sealed class BloomJoinPruningTests
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 6);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
@@ -88,7 +88,7 @@ public sealed class BloomJoinPruningTests
 
         // Right (build) side: only has key value 3.0 — should match chunk 1 only.
         MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromScalar(3.0f)), ("data", DataValue.FromString("match"))));
+            MakeRow(("rid", DataValue.FromFloat32(3.0f)), ("data", DataValue.FromString("match"))));
 
         // Create join: left.id = right.rid
         JoinOperator join = new(
@@ -114,7 +114,7 @@ public sealed class BloomJoinPruningTests
 
         // Assert: only row with id=3 should match.
         Assert.Single(results);
-        Assert.Equal(3.0f, results[0]["id"].AsScalar());
+        Assert.Equal(3.0f, results[0]["id"].AsFloat32());
 
         // Chunks 0 and 2 should have been pruned by bloom filters.
         Assert.Equal(3, scanOperator.TotalIndexChunks);
@@ -127,13 +127,13 @@ public sealed class BloomJoinPruningTests
         // All chunks contain values that might match — nothing should be pruned.
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f))),
         ];
 
         BloomFilter chunk0Bloom = new(expectedElements: 10);
-        chunk0Bloom.Add(DataValue.FromScalar(1.0f));
-        chunk0Bloom.Add(DataValue.FromScalar(2.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(1.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(2.0f));
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -144,13 +144,13 @@ public sealed class BloomJoinPruningTests
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
 
         List<IndexChunk> chunks = [new IndexChunk(0, 2, -1, -1, stats)];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
@@ -161,7 +161,7 @@ public sealed class BloomJoinPruningTests
         scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromScalar(1.0f))));
+            MakeRow(("rid", DataValue.FromFloat32(1.0f))));
 
         JoinOperator join = new(
             scanOperator,
@@ -194,19 +194,19 @@ public sealed class BloomJoinPruningTests
         // Source index exists but has no bloom filters — no pruning should occur.
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f))),
         ];
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
 
         List<IndexChunk> chunks = [new IndexChunk(0, 2, -1, -1, stats)];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks);
 
@@ -217,7 +217,7 @@ public sealed class BloomJoinPruningTests
         scanOperator.SetSourceIndex(sourceIndex);
 
         MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromScalar(999.0f))));
+            MakeRow(("rid", DataValue.FromFloat32(999.0f))));
 
         JoinOperator join = new(
             scanOperator,
@@ -250,19 +250,19 @@ public sealed class BloomJoinPruningTests
         // Probe side is wrapped in AliasOperator — FindScanOperator should traverse it.
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f))),
-            MakeRow(("id", DataValue.FromScalar(3.0f))),
-            MakeRow(("id", DataValue.FromScalar(4.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f))),
+            MakeRow(("id", DataValue.FromFloat32(4.0f))),
         ];
 
         BloomFilter chunk0Bloom = new(expectedElements: 10);
-        chunk0Bloom.Add(DataValue.FromScalar(1.0f));
-        chunk0Bloom.Add(DataValue.FromScalar(2.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(1.0f));
+        chunk0Bloom.Add(DataValue.FromFloat32(2.0f));
 
         BloomFilter chunk1Bloom = new(expectedElements: 10);
-        chunk1Bloom.Add(DataValue.FromScalar(3.0f));
-        chunk1Bloom.Add(DataValue.FromScalar(4.0f));
+        chunk1Bloom.Add(DataValue.FromFloat32(3.0f));
+        chunk1Bloom.Add(DataValue.FromFloat32(4.0f));
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -273,11 +273,11 @@ public sealed class BloomJoinPruningTests
 
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
         };
 
         List<IndexChunk> chunks =
@@ -287,7 +287,7 @@ public sealed class BloomJoinPruningTests
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 4);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks, bloomFilterSet);
 
@@ -302,7 +302,7 @@ public sealed class BloomJoinPruningTests
 
         // Right side has key 4.0 — only chunk 1 should match.
         MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromScalar(4.0f))));
+            MakeRow(("rid", DataValue.FromFloat32(4.0f))));
 
         JoinOperator join = new(
             aliased,
@@ -343,19 +343,19 @@ public sealed class BloomJoinPruningTests
         // Chunk 0: product_id 1.0, 2.0 | Chunk 1: product_id 3.0, 4.0
         Row[] orderRows =
         [
-            MakeRow(("order_id", DataValue.FromScalar(100.0f)), ("product_id", DataValue.FromScalar(1.0f))),
-            MakeRow(("order_id", DataValue.FromScalar(101.0f)), ("product_id", DataValue.FromScalar(2.0f))),
-            MakeRow(("order_id", DataValue.FromScalar(102.0f)), ("product_id", DataValue.FromScalar(3.0f))),
-            MakeRow(("order_id", DataValue.FromScalar(103.0f)), ("product_id", DataValue.FromScalar(4.0f))),
+            MakeRow(("order_id", DataValue.FromFloat32(100.0f)), ("product_id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("order_id", DataValue.FromFloat32(101.0f)), ("product_id", DataValue.FromFloat32(2.0f))),
+            MakeRow(("order_id", DataValue.FromFloat32(102.0f)), ("product_id", DataValue.FromFloat32(3.0f))),
+            MakeRow(("order_id", DataValue.FromFloat32(103.0f)), ("product_id", DataValue.FromFloat32(4.0f))),
         ];
 
         BloomFilter orderChunk0Bloom = new(expectedElements: 10);
-        orderChunk0Bloom.Add(DataValue.FromScalar(1.0f));
-        orderChunk0Bloom.Add(DataValue.FromScalar(2.0f));
+        orderChunk0Bloom.Add(DataValue.FromFloat32(1.0f));
+        orderChunk0Bloom.Add(DataValue.FromFloat32(2.0f));
 
         BloomFilter orderChunk1Bloom = new(expectedElements: 10);
-        orderChunk1Bloom.Add(DataValue.FromScalar(3.0f));
-        orderChunk1Bloom.Add(DataValue.FromScalar(4.0f));
+        orderChunk1Bloom.Add(DataValue.FromFloat32(3.0f));
+        orderChunk1Bloom.Add(DataValue.FromFloat32(4.0f));
 
         Dictionary<string, BloomFilter[]> orderBloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -366,11 +366,11 @@ public sealed class BloomJoinPruningTests
 
         Dictionary<string, ChunkColumnStatistics> orderChunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["product_id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["product_id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> orderChunk1Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["product_id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+            ["product_id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
         };
 
         List<IndexChunk> orderChunks =
@@ -380,7 +380,7 @@ public sealed class BloomJoinPruningTests
         ];
 
         SourceFingerprint orderFingerprint = new(0, new byte[32]);
-        Schema orderSchema = new([new ColumnInfo("product_id", DataKind.Scalar, nullable: false)]);
+        Schema orderSchema = new([new ColumnInfo("product_id", DataKind.Float32, nullable: false)]);
         IndexSchema orderIndexSchema = new(orderSchema, 4);
         SourceIndex orderSourceIndex = new(orderFingerprint, orderIndexSchema, orderChunks, orderBloomSet);
 
@@ -392,7 +392,7 @@ public sealed class BloomJoinPruningTests
 
         // Inner right: "customers" table — simple, no bloom needed.
         MockOperator customerSide = new(
-            MakeRow(("customer_id", DataValue.FromScalar(1.0f)), ("order_id", DataValue.FromScalar(100.0f))));
+            MakeRow(("customer_id", DataValue.FromFloat32(1.0f)), ("order_id", DataValue.FromFloat32(100.0f))));
 
         // Inner join: orders JOIN customers ON orders.order_id = customers.order_id
         JoinOperator innerJoin = new(
@@ -407,7 +407,7 @@ public sealed class BloomJoinPruningTests
         // Outer right (build): "products" table has product_id = 3.0.
         // This should prune the orders scan to chunk 1 only.
         MockOperator productsSide = new(
-            MakeRow(("product_id", DataValue.FromScalar(3.0f)), ("name", DataValue.FromString("Widget"))));
+            MakeRow(("product_id", DataValue.FromFloat32(3.0f)), ("name", DataValue.FromString("Widget"))));
 
         // Outer join: (orders ⋈ customers) JOIN products ON orders.product_id = products.product_id
         JoinOperator outerJoin = new(
@@ -489,23 +489,23 @@ public sealed class BloomJoinPruningTests
         // Chunk 0: ids 1, 2 | Chunk 1: ids 3, 4 | Chunk 2: ids 5, 6
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f)), ("value", DataValue.FromString("a"))),
-            MakeRow(("id", DataValue.FromScalar(2.0f)), ("value", DataValue.FromString("b"))),
-            MakeRow(("id", DataValue.FromScalar(3.0f)), ("value", DataValue.FromString("c"))),
-            MakeRow(("id", DataValue.FromScalar(4.0f)), ("value", DataValue.FromString("d"))),
-            MakeRow(("id", DataValue.FromScalar(5.0f)), ("value", DataValue.FromString("e"))),
-            MakeRow(("id", DataValue.FromScalar(6.0f)), ("value", DataValue.FromString("f"))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f)), ("value", DataValue.FromString("a"))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f)), ("value", DataValue.FromString("b"))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f)), ("value", DataValue.FromString("c"))),
+            MakeRow(("id", DataValue.FromFloat32(4.0f)), ("value", DataValue.FromString("d"))),
+            MakeRow(("id", DataValue.FromFloat32(5.0f)), ("value", DataValue.FromString("e"))),
+            MakeRow(("id", DataValue.FromFloat32(6.0f)), ("value", DataValue.FromString("f"))),
         ];
 
         // Build a sorted value index for the "id" column.
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(5.0f), ChunkIndex: 2, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(6.0f), ChunkIndex: 2, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(5.0f), ChunkIndex: 2, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(6.0f), ChunkIndex: 2, RowOffsetInChunk: 1),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -517,15 +517,15 @@ public sealed class BloomJoinPruningTests
 
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> chunk2Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(5.0f), DataValue.FromScalar(6.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(5.0f), DataValue.FromFloat32(6.0f), 0, 2, 2)
         };
 
         List<IndexChunk> chunks =
@@ -536,7 +536,7 @@ public sealed class BloomJoinPruningTests
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 6);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks,
             bloomFilters: null, sortedIndexes: sortedIndexSet);
@@ -549,7 +549,7 @@ public sealed class BloomJoinPruningTests
 
         // Build side: only key 4.0 — should match chunk 1 only.
         MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromScalar(4.0f)), ("data", DataValue.FromString("match"))));
+            MakeRow(("rid", DataValue.FromFloat32(4.0f)), ("data", DataValue.FromString("match"))));
 
         JoinOperator join = new(
             scanOperator,
@@ -573,7 +573,7 @@ public sealed class BloomJoinPruningTests
 
         // Only row with id=4 should match.
         Assert.Single(results);
-        Assert.Equal(4.0f, results[0]["id"].AsScalar());
+        Assert.Equal(4.0f, results[0]["id"].AsFloat32());
 
         // Chunks 0 and 2 should have been pruned via sorted index.
         Assert.Equal(3, scanOperator.TotalIndexChunks);
@@ -588,18 +588,18 @@ public sealed class BloomJoinPruningTests
     {
         Row[] leftRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1.0f))),
-            MakeRow(("id", DataValue.FromScalar(2.0f))),
-            MakeRow(("id", DataValue.FromScalar(3.0f))),
-            MakeRow(("id", DataValue.FromScalar(4.0f))),
+            MakeRow(("id", DataValue.FromFloat32(1.0f))),
+            MakeRow(("id", DataValue.FromFloat32(2.0f))),
+            MakeRow(("id", DataValue.FromFloat32(3.0f))),
+            MakeRow(("id", DataValue.FromFloat32(4.0f))),
         ];
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(1.0f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2.0f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(3.0f), ChunkIndex: 1, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(4.0f), ChunkIndex: 1, RowOffsetInChunk: 1),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -611,11 +611,11 @@ public sealed class BloomJoinPruningTests
 
         Dictionary<string, ChunkColumnStatistics> chunk0Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(1.0f), DataValue.FromScalar(2.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), 0, 2, 2)
         };
         Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = new(DataValue.FromScalar(3.0f), DataValue.FromScalar(4.0f), 0, 2, 2)
+            ["id"] = new(DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f), 0, 2, 2)
         };
 
         List<IndexChunk> chunks =
@@ -625,7 +625,7 @@ public sealed class BloomJoinPruningTests
         ];
 
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 4);
         SourceIndex sourceIndex = new(fingerprint, indexSchema, chunks,
             bloomFilters: null, sortedIndexes: sortedIndexSet);
@@ -638,8 +638,8 @@ public sealed class BloomJoinPruningTests
 
         // Build side has keys from both chunks.
         MockOperator rightSide = new(
-            MakeRow(("rid", DataValue.FromScalar(1.0f))),
-            MakeRow(("rid", DataValue.FromScalar(3.0f))));
+            MakeRow(("rid", DataValue.FromFloat32(1.0f))),
+            MakeRow(("rid", DataValue.FromFloat32(3.0f))));
 
         JoinOperator join = new(
             scanOperator,

@@ -38,7 +38,7 @@ public sealed class SubstringFunction : IScalarFunction
         }
 
         string text = input.AsString();
-        int start = (int)arguments[1].AsScalar();
+        int start = (int)arguments[1].AsFloat32();
 
         if (start < 0)
         {
@@ -52,7 +52,7 @@ public sealed class SubstringFunction : IScalarFunction
 
         if (arguments.Length == 3)
         {
-            int length = (int)arguments[2].AsScalar();
+            int length = (int)arguments[2].AsFloat32();
             int availableLength = text.Length - start;
             if (length > availableLength)
             {

@@ -10,7 +10,7 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_EmptyIndex_PreservesStructure()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 0);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
 
@@ -44,7 +44,7 @@ public sealed class IndexWriterReaderRoundTripTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
             new ColumnInfo("created", DataKind.DateTime, nullable: true),
             new ColumnInfo("data", DataKind.UInt8Array, nullable: false),
@@ -57,7 +57,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.Equal(50_000, restored.Schema.TotalRowCount);
         Assert.Equal(4, restored.Schema.Schema.Columns.Count);
         Assert.Equal("id", restored.Schema.Schema.Columns[0].Name);
-        Assert.Equal(DataKind.Scalar, restored.Schema.Schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float32, restored.Schema.Schema.Columns[0].Kind);
         Assert.False(restored.Schema.Schema.Columns[0].Nullable);
         Assert.Equal("name", restored.Schema.Schema.Columns[1].Name);
         Assert.True(restored.Schema.Schema.Columns[1].Nullable);
@@ -69,27 +69,27 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_ChunkDirectory_PreservesChunkMetadata()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, nullable: true)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: true)]);
         IndexSchema indexSchema = new(schema, 25_000);
 
         Dictionary<string, ChunkColumnStatistics> chunk1Stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["value"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(100.0f),
                 NullCount: 5, RowCount: 10_000, EstimatedCardinality: 95)
         };
 
         Dictionary<string, ChunkColumnStatistics> chunk2Stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["value"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(50.0f), DataValue.FromScalar(200.0f),
+                DataValue.FromFloat32(50.0f), DataValue.FromFloat32(200.0f),
                 NullCount: 0, RowCount: 10_000, EstimatedCardinality: 150)
         };
 
         Dictionary<string, ChunkColumnStatistics> chunk3Stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["value"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(150.0f), DataValue.FromScalar(300.0f),
+                DataValue.FromFloat32(150.0f), DataValue.FromFloat32(300.0f),
                 NullCount: 10, RowCount: 5_000, EstimatedCardinality: 80)
         };
 
@@ -121,14 +121,14 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_ChunkColumnStatistics_PreservesMinMaxNullCardinality()
     {
         SourceIndex original = BuildIndexWithChunk(new ChunkColumnStatistics(
-            DataValue.FromScalar(1.5f), DataValue.FromScalar(99.9f),
+            DataValue.FromFloat32(1.5f), DataValue.FromFloat32(99.9f),
             NullCount: 3, RowCount: 100, EstimatedCardinality: 42));
 
         SourceIndex restored = WriteAndRead(original);
 
         ChunkColumnStatistics stats = restored.Chunks[0].ColumnStatistics["value"];
-        Assert.Equal(1.5f, stats.Minimum!.AsScalar());
-        Assert.Equal(99.9f, stats.Maximum!.AsScalar());
+        Assert.Equal(1.5f, stats.Minimum!.AsFloat32());
+        Assert.Equal(99.9f, stats.Maximum!.AsFloat32());
         Assert.Equal(3, stats.NullCount);
         Assert.Equal(100, stats.RowCount);
         Assert.Equal(42, stats.EstimatedCardinality);
@@ -166,7 +166,7 @@ public sealed class IndexWriterReaderRoundTripTests
 
     public static TheoryData<DataValue, string> DataValueRoundTripCases => new()
     {
-        { DataValue.FromScalar(3.14f), "Scalar" },
+        { DataValue.FromFloat32(3.14f), "Float32" },
         { DataValue.FromUInt8(42), "UInt8" },
         { DataValue.FromString("hello world"), "String" },
         { DataValue.FromDate(new DateOnly(2024, 6, 15)), "Date" },
@@ -184,7 +184,7 @@ public sealed class IndexWriterReaderRoundTripTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
         ]);
         IndexSchema indexSchema = new(schema, 100);
@@ -192,7 +192,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(100.0f),
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 100),
             ["name"] = new ChunkColumnStatistics(
                 DataValue.FromString("alice"), DataValue.FromString("zoe"),
@@ -214,13 +214,13 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_ByteOffsets_PreservedWhenSet()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("x", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("x", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 100);
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["x"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(10.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(10.0f),
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 10)
         };
 
@@ -278,7 +278,7 @@ public sealed class IndexWriterReaderRoundTripTests
     private static SourceIndex BuildIndexWithChunk(ChunkColumnStatistics statistics)
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("value", DataKind.Scalar, nullable: true)]);
+        Schema schema = new([new ColumnInfo("value", DataKind.Float32, nullable: true)]);
         IndexSchema indexSchema = new(schema, 100);
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
@@ -296,8 +296,8 @@ public sealed class IndexWriterReaderRoundTripTests
 
         switch (expected.Kind)
         {
-            case DataKind.Scalar:
-                Assert.Equal(expected.AsScalar(), actual.AsScalar());
+            case DataKind.Float32:
+                Assert.Equal(expected.AsFloat32(), actual.AsFloat32());
                 break;
             case DataKind.UInt8:
                 Assert.Equal(expected.AsUInt8(), actual.AsUInt8());
@@ -343,13 +343,13 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_BloomFilters_PreservesMembership()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 200);
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(100.0f),
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 100)
         };
 
@@ -360,12 +360,12 @@ public sealed class IndexWriterReaderRoundTripTests
         ];
 
         BloomFilter filter0 = new(expectedElements: 100);
-        filter0.Add(DataValue.FromScalar(1.0f));
-        filter0.Add(DataValue.FromScalar(50.0f));
+        filter0.Add(DataValue.FromFloat32(1.0f));
+        filter0.Add(DataValue.FromFloat32(50.0f));
 
         BloomFilter filter1 = new(expectedElements: 100);
-        filter1.Add(DataValue.FromScalar(51.0f));
-        filter1.Add(DataValue.FromScalar(100.0f));
+        filter1.Add(DataValue.FromFloat32(51.0f));
+        filter1.Add(DataValue.FromFloat32(100.0f));
 
         Dictionary<string, BloomFilter[]> bloomFilters = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -382,20 +382,20 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.Equal(2, restored.BloomFilters.ChunkCount);
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? restoredFilter0));
-        Assert.True(restoredFilter0!.MayContain(DataValue.FromScalar(1.0f)));
-        Assert.True(restoredFilter0.MayContain(DataValue.FromScalar(50.0f)));
-        Assert.False(restoredFilter0.MayContain(DataValue.FromScalar(999.0f)));
+        Assert.True(restoredFilter0!.MayContain(DataValue.FromFloat32(1.0f)));
+        Assert.True(restoredFilter0.MayContain(DataValue.FromFloat32(50.0f)));
+        Assert.False(restoredFilter0.MayContain(DataValue.FromFloat32(999.0f)));
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 1, out BloomFilter? restoredFilter1));
-        Assert.True(restoredFilter1!.MayContain(DataValue.FromScalar(51.0f)));
-        Assert.True(restoredFilter1.MayContain(DataValue.FromScalar(100.0f)));
+        Assert.True(restoredFilter1!.MayContain(DataValue.FromFloat32(51.0f)));
+        Assert.True(restoredFilter1.MayContain(DataValue.FromFloat32(100.0f)));
     }
 
     [Fact]
     public void RoundTrip_NoBloomFilters_PreservesNull()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 10);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
 
@@ -409,7 +409,7 @@ public sealed class IndexWriterReaderRoundTripTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
         ]);
         IndexSchema indexSchema = new(schema, 100);
@@ -417,7 +417,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(50.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(50.0f),
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 50),
             ["name"] = new ChunkColumnStatistics(
                 DataValue.FromString("alice"), DataValue.FromString("zoe"),
@@ -427,7 +427,7 @@ public sealed class IndexWriterReaderRoundTripTests
         List<IndexChunk> chunks = [new IndexChunk(0, 100, -1, -1, stats)];
 
         BloomFilter idFilter = new(expectedElements: 100);
-        idFilter.Add(DataValue.FromScalar(42.0f));
+        idFilter.Add(DataValue.FromFloat32(42.0f));
 
         BloomFilter nameFilter = new(expectedElements: 100);
         nameFilter.Add(DataValue.FromString("alice"));
@@ -447,7 +447,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.Equal(2, restored.BloomFilters.ColumnNames.Count);
 
         Assert.True(restored.BloomFilters.TryGetFilter("id", 0, out BloomFilter? idResult));
-        Assert.True(idResult!.MayContain(DataValue.FromScalar(42.0f)));
+        Assert.True(idResult!.MayContain(DataValue.FromFloat32(42.0f)));
 
         Assert.True(restored.BloomFilters.TryGetFilter("name", 0, out BloomFilter? nameResult));
         Assert.True(nameResult!.MayContain(DataValue.FromString("alice")));
@@ -458,7 +458,7 @@ public sealed class IndexWriterReaderRoundTripTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("name", DataKind.String, nullable: true),
         ]);
         IndexSchema indexSchema = new(schema, 300);
@@ -466,7 +466,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(100.0f),
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 100),
             ["name"] = new ChunkColumnStatistics(
                 DataValue.FromString("alice"), DataValue.FromString("zoe"),
@@ -484,9 +484,9 @@ public sealed class IndexWriterReaderRoundTripTests
         {
             ["id"] = SortedValueIndex.BuildFromUnsorted(
             [
-                new ValueIndexEntry(DataValue.FromScalar(50.0f), 1, 10),
-                new ValueIndexEntry(DataValue.FromScalar(1.0f), 0, 0),
-                new ValueIndexEntry(DataValue.FromScalar(100.0f), 2, 99),
+                new ValueIndexEntry(DataValue.FromFloat32(50.0f), 1, 10),
+                new ValueIndexEntry(DataValue.FromFloat32(1.0f), 0, 0),
+                new ValueIndexEntry(DataValue.FromFloat32(100.0f), 2, 99),
             ]),
             ["name"] = SortedValueIndex.BuildFromUnsorted(
             [
@@ -509,7 +509,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.Equal(3, idIndex!.Count);
 
         // Verify lookup works on deserialized index.
-        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromScalar(50.0f));
+        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromFloat32(50.0f));
         Assert.Single(found);
         Assert.Equal(1, found[0].ChunkIndex);
         Assert.Equal(10, found[0].RowOffsetInChunk);
@@ -524,7 +524,7 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_NoSortedIndexes_PreservesNull()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 10);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
 
@@ -537,7 +537,7 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_ZipDirectory_PreservesEntries()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("x", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("x", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 10);
 
         ZipDirectoryEntry[] zipEntries =
@@ -572,7 +572,7 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_NoZipDirectory_PreservesNull()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 10);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>());
 
@@ -585,13 +585,13 @@ public sealed class IndexWriterReaderRoundTripTests
     public void RoundTrip_AllSections_PreservedTogether()
     {
         SourceFingerprint fingerprint = new(42, new byte[32]);
-        Schema schema = new([new ColumnInfo("id", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("id", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 200);
 
         Dictionary<string, ChunkColumnStatistics> stats = new(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = new ChunkColumnStatistics(
-                DataValue.FromScalar(1.0f), DataValue.FromScalar(100.0f),
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(100.0f),
                 NullCount: 0, RowCount: 100, EstimatedCardinality: 100)
         };
 
@@ -603,9 +603,9 @@ public sealed class IndexWriterReaderRoundTripTests
 
         // Bloom filters
         BloomFilter filter0 = new(100);
-        filter0.Add(DataValue.FromScalar(1.0f));
+        filter0.Add(DataValue.FromFloat32(1.0f));
         BloomFilter filter1 = new(100);
-        filter1.Add(DataValue.FromScalar(50.0f));
+        filter1.Add(DataValue.FromFloat32(50.0f));
         BloomFilterSet bloomFilterSet = new(
             new Dictionary<string, BloomFilter[]>(StringComparer.OrdinalIgnoreCase)
             {
@@ -618,8 +618,8 @@ public sealed class IndexWriterReaderRoundTripTests
         {
             ["id"] = SortedValueIndex.BuildFromUnsorted(
             [
-                new ValueIndexEntry(DataValue.FromScalar(1.0f), 0, 0),
-                new ValueIndexEntry(DataValue.FromScalar(50.0f), 1, 25),
+                new ValueIndexEntry(DataValue.FromFloat32(1.0f), 0, 0),
+                new ValueIndexEntry(DataValue.FromFloat32(50.0f), 1, 25),
             ]),
         };
         SortedValueIndexSet sortedIndexSet = new(sortedIndexes);
@@ -654,7 +654,7 @@ public sealed class IndexWriterReaderRoundTripTests
         foreach (float value in values)
         {
             string[] names = ["id"];
-            DataValue[] dataValues = [DataValue.FromScalar(value)];
+            DataValue[] dataValues = [DataValue.FromFloat32(value)];
             incremental.AddRow(new Row(names, dataValues));
         }
 
@@ -680,12 +680,12 @@ public sealed class IndexWriterReaderRoundTripTests
         // Verify all values survived and lookup works on the round-tripped index.
         foreach (float value in values)
         {
-            IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromScalar(value));
+            IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromFloat32(value));
             Assert.Single(found);
         }
 
         // Verify sorted order: first entry should be 1.0, last should be 9.0.
-        IReadOnlyList<ValueIndexEntry> first = idIndex.FindExact(DataValue.FromScalar(1.0f));
+        IReadOnlyList<ValueIndexEntry> first = idIndex.FindExact(DataValue.FromFloat32(1.0f));
         Assert.Equal(1, first[0].ChunkIndex); // rows 3-5 → chunk 1, value 1.0 is the 2nd row in chunk 1
         Assert.Equal(1, first[0].RowOffsetInChunk);
 

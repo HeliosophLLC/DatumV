@@ -11,8 +11,8 @@ public class VectorManipulationFunctionTests
         VecSliceFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromVector([10f, 20f, 30f, 40f, 50f]),
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(3)
         ]);
         Assert.Equal([20f, 30f, 40f], result.AsVector());
     }
@@ -23,8 +23,8 @@ public class VectorManipulationFunctionTests
         VecSliceFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromVector([10f, 20f, 30f]),
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(100)
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(100)
         ]);
         Assert.Equal([20f, 30f], result.AsVector());
     }
@@ -99,8 +99,8 @@ public class VectorManipulationFunctionTests
         VecPadFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromVector([1f, 2f]),
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(0)
         ]);
         Assert.Equal([1f, 2f, 0f, 0f, 0f], result.AsVector());
     }
@@ -111,8 +111,8 @@ public class VectorManipulationFunctionTests
         VecPadFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromVector([1f, 2f, 3f]),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(0)
         ]);
         Assert.Equal([1f, 2f, 3f], result.AsVector());
     }
@@ -121,7 +121,7 @@ public class VectorManipulationFunctionTests
     public void VecRepeat_Twice()
     {
         VecRepeatFunction function = new();
-        DataValue result = function.Execute([DataValue.FromVector([1f, 2f]), DataValue.FromScalar(3)]);
+        DataValue result = function.Execute([DataValue.FromVector([1f, 2f]), DataValue.FromFloat32(3)]);
         Assert.Equal([1f, 2f, 1f, 2f, 1f, 2f], result.AsVector());
     }
 
@@ -130,9 +130,9 @@ public class VectorManipulationFunctionTests
     {
         LinspaceFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(5)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(5)
         ]);
         float[] values = result.AsVector();
         Assert.Equal(5, values.Length);
@@ -148,9 +148,9 @@ public class VectorManipulationFunctionTests
     {
         LinspaceFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(1)
         ]);
         Assert.Equal([5f], result.AsVector());
     }
@@ -160,9 +160,9 @@ public class VectorManipulationFunctionTests
     {
         ArangeFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(1)
         ]);
         Assert.Equal([0f, 1f, 2f, 3f, 4f], result.AsVector());
     }
@@ -172,9 +172,9 @@ public class VectorManipulationFunctionTests
     {
         ArangeFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(10),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(3)
         ]);
         Assert.Equal([0f, 3f, 6f, 9f], result.AsVector());
     }
@@ -184,9 +184,9 @@ public class VectorManipulationFunctionTests
     {
         ArangeFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(-1)
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(-1)
         ]);
         Assert.Equal([5f, 4f, 3f, 2f, 1f], result.AsVector());
     }
@@ -196,9 +196,9 @@ public class VectorManipulationFunctionTests
     {
         ArangeFunction function = new();
         Assert.Throws<ArgumentException>(() => function.Execute([
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(5),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(0)
         ]));
     }
 
@@ -206,7 +206,7 @@ public class VectorManipulationFunctionTests
     public void VecSlice_Null_ReturnsNull()
     {
         VecSliceFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.Vector), DataValue.FromScalar(0), DataValue.FromScalar(1)]);
+        DataValue result = function.Execute([DataValue.Null(DataKind.Vector), DataValue.FromFloat32(0), DataValue.FromFloat32(1)]);
         Assert.True(result.IsNull);
     }
 
@@ -229,9 +229,9 @@ public class VectorManipulationFunctionTests
     {
         VecFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(2),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(3)
         ]);
         Assert.Equal([1f, 2f, 3f], result.AsVector());
     }
@@ -252,9 +252,9 @@ public class VectorManipulationFunctionTests
     {
         VecFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromVector([2f, 3f]),
-            DataValue.FromScalar(4)
+            DataValue.FromFloat32(4)
         ]);
         Assert.Equal([1f, 2f, 3f, 4f], result.AsVector());
     }
@@ -263,7 +263,7 @@ public class VectorManipulationFunctionTests
     public void Vec_SingleScalar()
     {
         VecFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(5)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(5)]);
         Assert.Equal([5f], result.AsVector());
     }
 
@@ -279,7 +279,7 @@ public class VectorManipulationFunctionTests
     public void Vec_Null_ReturnsNull()
     {
         VecFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(1), DataValue.Null(DataKind.Vector)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(1), DataValue.Null(DataKind.Vector)]);
         Assert.True(result.IsNull);
     }
 
@@ -355,6 +355,6 @@ public class VectorManipulationFunctionTests
     [Fact]
     public void Tensor_Validate_NonVector_Throws()
     {
-        Assert.Throws<ArgumentException>(() => new TensorFunction().ValidateArguments([DataKind.Scalar, DataKind.Vector]));
+        Assert.Throws<ArgumentException>(() => new TensorFunction().ValidateArguments([DataKind.Float32, DataKind.Vector]));
     }
 }

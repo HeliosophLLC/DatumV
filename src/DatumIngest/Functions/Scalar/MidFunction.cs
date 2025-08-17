@@ -38,8 +38,8 @@ public sealed class MidFunction : IScalarFunction
         }
 
         string text = input.AsString();
-        int start = (int)arguments[1].AsScalar();
-        int length = (int)arguments[2].AsScalar();
+        int start = (int)arguments[1].AsFloat32();
+        int length = (int)arguments[2].AsFloat32();
 
         if (start < 0)
         {

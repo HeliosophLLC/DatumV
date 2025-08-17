@@ -12,7 +12,7 @@ namespace DatumIngest.Functions.Scalar;
 /// Implements <see cref="IElementKindAwareFunction"/> so that the return type
 /// reflects the array's element kind at plan time (e.g. <c>Array&lt;String&gt;</c>
 /// yields <see cref="DataKind.String"/>). When the element kind is unknown at plan
-/// time, falls back to <see cref="DataKind.Scalar"/>.
+/// time, falls back to <see cref="DataKind.Float32"/>.
 /// </remarks>
 public sealed class ArrayGetFunction : IElementKindAwareFunction
 {
@@ -23,7 +23,7 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         ValidateArgumentCount(argumentKinds);
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
         ValidateArgumentCount(argumentKinds);
         return arrayElementKinds.Length > 0 && arrayElementKinds[0] is DataKind elementKind
             ? elementKind
-            : DataKind.Scalar;
+            : DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -46,12 +46,12 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
         if (arrayValue.IsNull || indexValue.IsNull)
         {
             return DataValue.Null(arrayValue.IsNull
-                ? DataKind.Scalar
+                ? DataKind.Float32
                 : arrayValue.ArrayElementKind);
         }
 
         DataValue[] elements = arrayValue.AsArray();
-        int index = (int)indexValue.AsScalar() - 1; // 1-based → 0-based
+        int index = (int)indexValue.AsFloat32() - 1; // 1-based → 0-based
 
         if (index < 0 || index >= elements.Length)
         {
@@ -74,7 +74,7 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
                 $"array_get() requires an Array as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Scalar)
+        if (argumentKinds[1] != DataKind.Float32)
         {
             throw new ArgumentException(
                 $"array_get() requires a Scalar index as the second argument, got {argumentKinds[1]}.");

@@ -9,14 +9,14 @@ public class ArithmeticFunctionTests
     public void Abs_Scalar_Positive()
     {
         AbsFunction function = new();
-        Assert.Equal(5f, function.Execute([DataValue.FromScalar(5)]).AsScalar());
+        Assert.Equal(5f, function.Execute([DataValue.FromFloat32(5)]).AsFloat32());
     }
 
     [Fact]
     public void Abs_Scalar_Negative()
     {
         AbsFunction function = new();
-        Assert.Equal(5f, function.Execute([DataValue.FromScalar(-5)]).AsScalar());
+        Assert.Equal(5f, function.Execute([DataValue.FromFloat32(-5)]).AsFloat32());
     }
 
     [Fact]
@@ -32,54 +32,54 @@ public class ArithmeticFunctionTests
     public void Abs_Null_ReturnsNull()
     {
         AbsFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void Sign_Positive() => Assert.Equal(1f, new SignFunction().Execute([DataValue.FromScalar(42)]).AsScalar());
+    public void Sign_Positive() => Assert.Equal(1f, new SignFunction().Execute([DataValue.FromFloat32(42)]).AsFloat32());
 
     [Fact]
-    public void Sign_Negative() => Assert.Equal(-1f, new SignFunction().Execute([DataValue.FromScalar(-7)]).AsScalar());
+    public void Sign_Negative() => Assert.Equal(-1f, new SignFunction().Execute([DataValue.FromFloat32(-7)]).AsFloat32());
 
     [Fact]
-    public void Sign_Zero() => Assert.Equal(0f, new SignFunction().Execute([DataValue.FromScalar(0)]).AsScalar());
+    public void Sign_Zero() => Assert.Equal(0f, new SignFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32());
 
     [Fact]
     public void Negate_Scalar()
     {
         NegateFunction function = new();
-        Assert.Equal(-3f, function.Execute([DataValue.FromScalar(3)]).AsScalar());
+        Assert.Equal(-3f, function.Execute([DataValue.FromFloat32(3)]).AsFloat32());
     }
 
     [Fact]
     public void Negate_NegativeBecomesPositive()
     {
         NegateFunction function = new();
-        Assert.Equal(5f, function.Execute([DataValue.FromScalar(-5)]).AsScalar());
+        Assert.Equal(5f, function.Execute([DataValue.FromFloat32(-5)]).AsFloat32());
     }
 
     [Fact]
     public void Mod_BasicModulus()
     {
         ModFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(7), DataValue.FromScalar(3)]);
-        Assert.Equal(1f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(7), DataValue.FromFloat32(3)]);
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
     public void Add_Scalars()
     {
         AddFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(3), DataValue.FromScalar(4)]);
-        Assert.Equal(7f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(3), DataValue.FromFloat32(4)]);
+        Assert.Equal(7f, result.AsFloat32());
     }
 
     [Fact]
     public void Add_ScalarBroadcastToVector()
     {
         AddFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(10), DataValue.FromVector([1f, 2f, 3f])]);
+        DataValue result = function.Execute([DataValue.FromFloat32(10), DataValue.FromVector([1f, 2f, 3f])]);
         Assert.Equal([11f, 12f, 13f], result.AsVector());
     }
 
@@ -87,7 +87,7 @@ public class ArithmeticFunctionTests
     public void Add_VectorAndScalar()
     {
         AddFunction function = new();
-        DataValue result = function.Execute([DataValue.FromVector([1f, 2f, 3f]), DataValue.FromScalar(10)]);
+        DataValue result = function.Execute([DataValue.FromVector([1f, 2f, 3f]), DataValue.FromFloat32(10)]);
         Assert.Equal([11f, 12f, 13f], result.AsVector());
     }
 
@@ -103,39 +103,39 @@ public class ArithmeticFunctionTests
     public void Subtract_Scalars()
     {
         SubtractFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(10), DataValue.FromScalar(3)]);
-        Assert.Equal(7f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(10), DataValue.FromFloat32(3)]);
+        Assert.Equal(7f, result.AsFloat32());
     }
 
     [Fact]
     public void Multiply_Scalars()
     {
         MultiplyFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(4), DataValue.FromScalar(5)]);
-        Assert.Equal(20f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(4), DataValue.FromFloat32(5)]);
+        Assert.Equal(20f, result.AsFloat32());
     }
 
     [Fact]
     public void Divide_Scalars()
     {
         DivideFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(10), DataValue.FromScalar(4)]);
-        Assert.Equal(2.5f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromFloat32(10), DataValue.FromFloat32(4)]);
+        Assert.Equal(2.5f, result.AsFloat32());
     }
 
     [Fact]
     public void Divide_ByZero_ReturnsInfinity()
     {
         DivideFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(1), DataValue.FromScalar(0)]);
-        Assert.True(float.IsInfinity(result.AsScalar()));
+        DataValue result = function.Execute([DataValue.FromFloat32(1), DataValue.FromFloat32(0)]);
+        Assert.True(float.IsInfinity(result.AsFloat32()));
     }
 
     [Fact]
     public void Add_Null_ReturnsNull()
     {
         AddFunction function = new();
-        DataValue result = function.Execute([DataValue.Null(DataKind.Scalar), DataValue.FromScalar(5)]);
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32), DataValue.FromFloat32(5)]);
         Assert.True(result.IsNull);
     }
 
@@ -143,14 +143,14 @@ public class ArithmeticFunctionTests
     public void Binary_Validate_WrongArgCount_Throws()
     {
         AddFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void Binary_Validate_UnsupportedKind_Throws()
     {
         AddFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public class ArithmeticFunctionTests
         AddFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromMatrix([1f, 2f, 3f, 4f], 2, 2),
-            DataValue.FromScalar(10)
+            DataValue.FromFloat32(10)
         ]);
         float[] data = result.AsMatrix(out int rows, out int columns);
         Assert.Equal(2, rows);
@@ -172,6 +172,6 @@ public class ArithmeticFunctionTests
     {
         AbsFunction function = new();
         DataKind resultKind = function.ValidateArguments([DataKind.UInt8]);
-        Assert.Equal(DataKind.Scalar, resultKind);
+        Assert.Equal(DataKind.Float32, resultKind);
     }
 }

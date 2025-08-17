@@ -27,19 +27,19 @@ public sealed class CorrelationFunction : IAggregateFunction
             throw new ArgumentException("CORR() requires exactly two arguments: y and x.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"CORR() first argument (y) must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"CORR() second argument (x) must be numeric, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -63,8 +63,8 @@ public sealed class CorrelationFunction : IAggregateFunction
         {
             if (arguments[0].IsNull || arguments[1].IsNull) return;
 
-            double y = arguments[0].AsScalar();
-            double x = arguments[1].AsScalar();
+            double y = arguments[0].AsFloat32();
+            double x = arguments[1].AsFloat32();
 
             _count++;
 
@@ -88,17 +88,17 @@ public sealed class CorrelationFunction : IAggregateFunction
             {
                 if (_count < 2)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
                 double denominator = System.Math.Sqrt(_m2Y * _m2X);
 
                 if (denominator == 0.0)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
-                return DataValue.FromScalar((float)(_coMoment / denominator));
+                return DataValue.FromFloat32((float)(_coMoment / denominator));
             }
         }
     }

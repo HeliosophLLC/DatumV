@@ -47,7 +47,7 @@ public static class DatumEncoderFactory
 
         return descriptor.Kind switch
         {
-            DataKind.Scalar => ScalarEncoder,
+            DataKind.Float32 => ScalarEncoder,
             DataKind.UInt8 => UInt8Encoder,
             DataKind.Boolean => BooleanEncoder,
             DataKind.Date => DateEncoder,

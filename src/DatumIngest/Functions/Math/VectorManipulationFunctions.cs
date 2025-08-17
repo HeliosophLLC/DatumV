@@ -21,9 +21,9 @@ public sealed class VecSliceFunction : IScalarFunction
             throw new ArgumentException("vec_slice() requires exactly 3 arguments (vector, start, length).");
         if (argumentKinds[0] is not DataKind.Vector)
             throw new ArgumentException("vec_slice() first argument must be a Vector.");
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("vec_slice() second argument (start) must be Scalar or UInt8.");
-        if (argumentKinds[2] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[2] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("vec_slice() third argument (length) must be Scalar or UInt8.");
         return DataKind.Vector;
     }
@@ -33,8 +33,8 @@ public sealed class VecSliceFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
         float[] source = arguments[0].AsVector();
-        int start = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar());
-        int length = (int)(arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsScalar());
+        int start = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32());
+        int length = (int)(arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsFloat32());
 
         start = System.Math.Clamp(start, 0, source.Length);
         length = System.Math.Clamp(length, 0, source.Length - start);
@@ -64,7 +64,7 @@ public sealed class VecFunction : IScalarFunction
             throw new ArgumentException("vec() requires at least 1 argument.");
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8 or DataKind.Vector))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector))
                 throw new ArgumentException($"vec() argument {i + 1} must be Scalar, UInt8, or Vector.");
         }
         return DataKind.Vector;
@@ -94,7 +94,7 @@ public sealed class VecFunction : IScalarFunction
             {
                 result[offset++] = arguments[i].Kind is DataKind.UInt8
                     ? arguments[i].AsUInt8()
-                    : arguments[i].AsScalar();
+                    : arguments[i].AsFloat32();
             }
         }
 
@@ -356,9 +356,9 @@ public sealed class VecPadFunction : IScalarFunction
             throw new ArgumentException("vec_pad() requires exactly 3 arguments (vector, targetLength, fillValue).");
         if (argumentKinds[0] is not DataKind.Vector)
             throw new ArgumentException("vec_pad() first argument must be a Vector.");
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("vec_pad() second argument (targetLength) must be Scalar or UInt8.");
-        if (argumentKinds[2] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[2] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("vec_pad() third argument (fillValue) must be Scalar or UInt8.");
         return DataKind.Vector;
     }
@@ -368,8 +368,8 @@ public sealed class VecPadFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
         float[] source = arguments[0].AsVector();
-        int targetLength = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar());
-        float fillValue = arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsScalar();
+        int targetLength = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32());
+        float fillValue = arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsFloat32();
 
         if (source.Length >= targetLength)
         {
@@ -406,7 +406,7 @@ public sealed class VecRepeatFunction : IScalarFunction
             throw new ArgumentException("vec_repeat() requires exactly 2 arguments (vector, count).");
         if (argumentKinds[0] is not DataKind.Vector)
             throw new ArgumentException("vec_repeat() first argument must be a Vector.");
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException("vec_repeat() second argument (count) must be Scalar or UInt8.");
         return DataKind.Vector;
     }
@@ -416,7 +416,7 @@ public sealed class VecRepeatFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
         float[] source = arguments[0].AsVector();
-        int count = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar());
+        int count = (int)(arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32());
         if (count <= 0) return DataValue.FromVector([]);
 
         float[] result = new float[source.Length * count];
@@ -446,7 +446,7 @@ public sealed class LinspaceFunction : IScalarFunction
             throw new ArgumentException("linspace() requires exactly 3 arguments (start, stop, count).");
         for (int i = 0; i < 3; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
                 throw new ArgumentException($"linspace() argument {i + 1} must be Scalar or UInt8.");
         }
         return DataKind.Vector;
@@ -455,9 +455,9 @@ public sealed class LinspaceFunction : IScalarFunction
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        float start = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
-        float stop = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar();
-        int count = (int)(arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsScalar());
+        float start = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        float stop = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32();
+        int count = (int)(arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsFloat32());
 
         if (count <= 0) return DataValue.FromVector([]);
         if (count == 1) return DataValue.FromVector([start]);
@@ -492,7 +492,7 @@ public sealed class ArangeFunction : IScalarFunction
             throw new ArgumentException("arange() requires exactly 3 arguments (start, stop, step).");
         for (int i = 0; i < 3; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
                 throw new ArgumentException($"arange() argument {i + 1} must be Scalar or UInt8.");
         }
         return DataKind.Vector;
@@ -501,9 +501,9 @@ public sealed class ArangeFunction : IScalarFunction
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        float start = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsScalar();
-        float stop = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsScalar();
-        float step = arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsScalar();
+        float start = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        float stop = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32();
+        float step = arguments[2].Kind is DataKind.UInt8 ? arguments[2].AsUInt8() : arguments[2].AsFloat32();
 
         if (step == 0f) throw new ArgumentException("arange() step cannot be zero.");
 

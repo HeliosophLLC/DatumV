@@ -35,7 +35,7 @@ public sealed class ImagePixelStatisticsFunctionTests
     [Fact]
     public void PixelMean_Validate_OneArg_ReturnsScalar()
     {
-        Assert.Equal(DataKind.Scalar, _pixelMean.ValidateArguments([DataKind.Image]));
+        Assert.Equal(DataKind.Float32, _pixelMean.ValidateArguments([DataKind.Image]));
     }
 
     [Fact]
@@ -54,14 +54,14 @@ public sealed class ImagePixelStatisticsFunctionTests
     [Fact]
     public void PixelMean_Validate_WrongType_Throws()
     {
-        Assert.Throws<ArgumentException>(() => _pixelMean.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _pixelMean.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
     public void PixelMean_Validate_WrongChannelsType_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
-            _pixelMean.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+            _pixelMean.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class ImagePixelStatisticsFunctionTests
         byte[] png = MakeTestPng(4, 4, SKColors.Red);
         DataValue result = _pixelMean.Execute([DataValue.FromImage(png)]);
 
-        Assert.InRange(result.AsScalar(), 127f, 128f);
+        Assert.InRange(result.AsFloat32(), 127f, 128f);
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public sealed class ImagePixelStatisticsFunctionTests
     [Fact]
     public void PixelStd_Validate_OneArg_ReturnsScalar()
     {
-        Assert.Equal(DataKind.Scalar,
+        Assert.Equal(DataKind.Float32,
             _pixelStandardDeviation.ValidateArguments([DataKind.Image]));
     }
 
@@ -158,7 +158,7 @@ public sealed class ImagePixelStatisticsFunctionTests
         byte[] png = MakeTestPng(4, 4, SKColors.Red);
         DataValue result = _pixelStandardDeviation.Execute([DataValue.FromImage(png)]);
 
-        Assert.True(result.AsScalar() > 0f);
+        Assert.True(result.AsFloat32() > 0f);
     }
 
     [Fact]

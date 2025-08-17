@@ -11,9 +11,9 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromScalar(1.0f))));
-        collector.AddRow(CreateRow(("value", DataValue.FromScalar(2.0f))));
-        collector.AddRow(CreateRow(("value", DataValue.FromScalar(3.0f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(2.0f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(3.0f))));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -51,7 +51,7 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromScalar(1.0f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         ColumnStatistics columnStats = stats["value"];
@@ -79,10 +79,10 @@ public sealed class StatisticsCollectorTests
 
         collector.AddRow(CreateRow(
             ("name", DataValue.FromString("Alice")),
-            ("age", DataValue.FromScalar(30.0f))));
+            ("age", DataValue.FromFloat32(30.0f))));
         collector.AddRow(CreateRow(
             ("name", DataValue.FromString("Bob")),
-            ("age", DataValue.FromScalar(25.0f))));
+            ("age", DataValue.FromFloat32(25.0f))));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -118,12 +118,12 @@ public sealed class StatisticsCollectorTests
     public void Merge_CombinesCollectors()
     {
         StatisticsCollector first = new();
-        first.AddRow(CreateRow(("value", DataValue.FromScalar(1.0f))));
-        first.AddRow(CreateRow(("value", DataValue.FromScalar(2.0f))));
+        first.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))));
+        first.AddRow(CreateRow(("value", DataValue.FromFloat32(2.0f))));
 
         StatisticsCollector second = new();
-        second.AddRow(CreateRow(("value", DataValue.FromScalar(3.0f))));
-        second.AddRow(CreateRow(("value", DataValue.FromScalar(4.0f))));
+        second.AddRow(CreateRow(("value", DataValue.FromFloat32(3.0f))));
+        second.AddRow(CreateRow(("value", DataValue.FromFloat32(4.0f))));
 
         first.Merge(second);
 
@@ -185,7 +185,7 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("my_column", DataValue.FromScalar(1.0f))));
+        collector.AddRow(CreateRow(("my_column", DataValue.FromFloat32(1.0f))));
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Assert.Equal("my_column", stats["my_column"].ColumnName);

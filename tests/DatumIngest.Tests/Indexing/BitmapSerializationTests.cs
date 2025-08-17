@@ -86,7 +86,7 @@ public sealed class BitmapSerializationTests
 
         Dictionary<DataValue, byte[][]> compressedBitmaps = new();
 
-        DataValue value = DataValue.FromScalar(1.0f);
+        DataValue value = DataValue.FromFloat32(1.0f);
         byte[][] chunks = new byte[chunkCount][];
 
         for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
@@ -193,7 +193,7 @@ public sealed class BitmapSerializationTests
         ChunkBitmap chunk0 = ChunkBitmap.Create(rowCount);
         chunk0.SetBit(1);
 
-        DataValue value = DataValue.FromScalar(42.0f);
+        DataValue value = DataValue.FromFloat32(42.0f);
 
         Dictionary<DataValue, byte[][]> compressedBitmaps = new()
         {
@@ -301,7 +301,7 @@ public sealed class BitmapSerializationTests
     [Fact]
     public void RoundTrip_ScalarValues_Preserved()
     {
-        DataValue value = DataValue.FromScalar(3.14f);
+        DataValue value = DataValue.FromFloat32(3.14f);
         BitmapColumnIndex original = BuildSingleValueIndex(value, rowCount: 8, chunkCount: 1, setRows: [0, 7]);
 
         SourceIndex restored = WriteAndRead(BuildSourceIndex("score", original));

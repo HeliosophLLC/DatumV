@@ -19,7 +19,7 @@ public sealed class HoverProviderTests
                     Name = "users",
                     Columns =
                     [
-                        new TableColumnEntry { Name = "id", Kind = "Scalar", Nullable = false },
+                        new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false },
                         new TableColumnEntry { Name = "name", Kind = "String", Nullable = true },
                     ],
                 },
@@ -29,8 +29,8 @@ public sealed class HoverProviderTests
                 new FunctionSignature
                 {
                     Name = "abs",
-                    Parameters = [new ParameterSignature { Name = "value", Kind = "Scalar" }],
-                    ReturnType = "Scalar",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
                     Description = "Absolute value.",
                 },
             ],
@@ -132,7 +132,7 @@ public sealed class HoverProviderTests
 
         Assert.NotNull(result);
         Assert.Contains("id", result.Contents);
-        Assert.Contains("Scalar", result.Contents);
+        Assert.Contains("Float32", result.Contents);
     }
 
     // ───────────────────── Hover span ─────────────────────

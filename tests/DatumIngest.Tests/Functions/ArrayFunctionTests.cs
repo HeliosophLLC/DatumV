@@ -20,7 +20,7 @@ public class ArrayFunctionTests
     // ───────── helper ─────────
 
     private static DataValue MakeScalarArray(params float[] values) =>
-        DataValue.FromArray(DataKind.Scalar, values.Select(DataValue.FromScalar).ToArray());
+        DataValue.FromArray(DataKind.Float32, values.Select(DataValue.FromFloat32).ToArray());
 
     private static DataValue MakeStringArray(params string[] values) =>
         DataValue.FromArray(DataKind.String, values.Select(DataValue.FromString).ToArray());
@@ -32,22 +32,22 @@ public class ArrayFunctionTests
     {
         ArrayLengthFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(1f, 2f, 3f)]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
     public void ArrayLength_EmptyArray_ReturnsZero()
     {
         ArrayLengthFunction function = new();
-        DataValue result = function.Execute([DataValue.FromArray(DataKind.Scalar, [])]);
-        Assert.Equal(0f, result.AsScalar());
+        DataValue result = function.Execute([DataValue.FromArray(DataKind.Float32, [])]);
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
     public void ArrayLength_NullInput_ReturnsNull()
     {
         ArrayLengthFunction function = new();
-        DataValue result = function.Execute([DataValue.NullArray(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.NullArray(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -71,7 +71,7 @@ public class ArrayFunctionTests
     public void ArrayLength_ValidateReturnsScalar()
     {
         ArrayLengthFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Array]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Array]));
     }
 
     // ───────────────── ARRAY_JOIN ─────────────────
@@ -161,7 +161,7 @@ public class ArrayFunctionTests
     {
         ArrayJoinFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Array, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Array, DataKind.Float32]));
     }
 
     [Fact]
@@ -200,7 +200,7 @@ public class ArrayFunctionTests
         ArrayContainsFunction function = new();
         DataValue result = function.Execute([
             MakeScalarArray(10f, 20f, 30f),
-            DataValue.FromScalar(20f)]);
+            DataValue.FromFloat32(20f)]);
         Assert.True(result.AsBoolean());
     }
 
@@ -249,7 +249,7 @@ public class ArrayFunctionTests
     {
         ArrayContainsFunction function = new();
         // Second argument can be any kind — checked at runtime
-        DataKind result = function.ValidateArguments([DataKind.Array, DataKind.Scalar]);
+        DataKind result = function.ValidateArguments([DataKind.Array, DataKind.Float32]);
         Assert.Equal(DataKind.Boolean, result);
     }
 
@@ -262,7 +262,7 @@ public class ArrayFunctionTests
         DataValue result = function.Execute([
             MakeStringArray("a", "b", "c"),
             DataValue.FromString("b")]);
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -272,7 +272,7 @@ public class ArrayFunctionTests
         DataValue result = function.Execute([
             MakeStringArray("a", "b", "c"),
             DataValue.FromString("a")]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -292,7 +292,7 @@ public class ArrayFunctionTests
         DataValue result = function.Execute([
             MakeStringArray("a", "b", "a"),
             DataValue.FromString("a")]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -311,8 +311,8 @@ public class ArrayFunctionTests
         ArrayPositionFunction function = new();
         DataValue result = function.Execute([
             MakeScalarArray(10f, 20f, 30f),
-            DataValue.FromScalar(30f)]);
-        Assert.Equal(3f, result.AsScalar());
+            DataValue.FromFloat32(30f)]);
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -330,17 +330,17 @@ public class ArrayFunctionTests
     {
         ArrayConstructorFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(1f),
-            DataValue.FromScalar(2f),
-            DataValue.FromScalar(3f)]);
+            DataValue.FromFloat32(1f),
+            DataValue.FromFloat32(2f),
+            DataValue.FromFloat32(3f)]);
 
         Assert.Equal(DataKind.Array, result.Kind);
-        Assert.Equal(DataKind.Scalar, result.ArrayElementKind);
+        Assert.Equal(DataKind.Float32, result.ArrayElementKind);
         DataValue[] elements = result.AsArray();
         Assert.Equal(3, elements.Length);
-        Assert.Equal(1f, elements[0].AsScalar());
-        Assert.Equal(2f, elements[1].AsScalar());
-        Assert.Equal(3f, elements[2].AsScalar());
+        Assert.Equal(1f, elements[0].AsFloat32());
+        Assert.Equal(2f, elements[1].AsFloat32());
+        Assert.Equal(3f, elements[2].AsFloat32());
     }
 
     [Fact]
@@ -362,11 +362,11 @@ public class ArrayFunctionTests
     public void ArrayConstructor_SingleElement()
     {
         ArrayConstructorFunction function = new();
-        DataValue result = function.Execute([DataValue.FromScalar(42f)]);
+        DataValue result = function.Execute([DataValue.FromFloat32(42f)]);
 
         DataValue[] elements = result.AsArray();
         Assert.Single(elements);
-        Assert.Equal(42f, elements[0].AsScalar());
+        Assert.Equal(42f, elements[0].AsFloat32());
     }
 
     [Fact]
@@ -390,7 +390,7 @@ public class ArrayFunctionTests
     {
         ArrayConstructorFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.String]));
+            function.ValidateArguments([DataKind.Float32, DataKind.String]));
     }
 
     [Fact]
@@ -415,14 +415,14 @@ public class ArrayFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(1f, 2f, 3f)]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
     public void Len_NullArray_ReturnsNull()
     {
         LenFunction function = new();
-        DataValue result = function.Execute([DataValue.NullArray(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.NullArray(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -430,7 +430,7 @@ public class ArrayFunctionTests
     public void Len_ArrayKind_Validates()
     {
         LenFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Array]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Array]));
     }
 
     // ───────────────── ARRAY_SORT ─────────────────
@@ -442,9 +442,9 @@ public class ArrayFunctionTests
         DataValue result = function.Execute([MakeScalarArray(3f, 1f, 2f)]);
 
         DataValue[] elements = result.AsArray();
-        Assert.Equal(1f, elements[0].AsScalar());
-        Assert.Equal(2f, elements[1].AsScalar());
-        Assert.Equal(3f, elements[2].AsScalar());
+        Assert.Equal(1f, elements[0].AsFloat32());
+        Assert.Equal(2f, elements[1].AsFloat32());
+        Assert.Equal(3f, elements[2].AsFloat32());
     }
 
     [Fact]
@@ -463,15 +463,15 @@ public class ArrayFunctionTests
     public void ArraySort_NullsLast()
     {
         ArraySortFunction function = new();
-        DataValue array = DataValue.FromArray(DataKind.Scalar, [
-            DataValue.FromScalar(3f),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(1f)]);
+        DataValue array = DataValue.FromArray(DataKind.Float32, [
+            DataValue.FromFloat32(3f),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(1f)]);
         DataValue result = function.Execute([array]);
 
         DataValue[] elements = result.AsArray();
-        Assert.Equal(1f, elements[0].AsScalar());
-        Assert.Equal(3f, elements[1].AsScalar());
+        Assert.Equal(1f, elements[0].AsFloat32());
+        Assert.Equal(3f, elements[1].AsFloat32());
         Assert.True(elements[2].IsNull);
     }
 
@@ -479,7 +479,7 @@ public class ArrayFunctionTests
     public void ArraySort_NullInput_ReturnsNull()
     {
         ArraySortFunction function = new();
-        DataValue result = function.Execute([DataValue.NullArray(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.NullArray(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -491,7 +491,7 @@ public class ArrayFunctionTests
         function.Execute([original]);
 
         DataValue[] originalElements = original.AsArray();
-        Assert.Equal(3f, originalElements[0].AsScalar());
+        Assert.Equal(3f, originalElements[0].AsFloat32());
     }
 
     [Fact]
@@ -519,9 +519,9 @@ public class ArrayFunctionTests
         DataValue result = function.Execute([MakeScalarArray(1f, 2f, 3f)]);
 
         DataValue[] elements = result.AsArray();
-        Assert.Equal(3f, elements[0].AsScalar());
-        Assert.Equal(2f, elements[1].AsScalar());
-        Assert.Equal(1f, elements[2].AsScalar());
+        Assert.Equal(3f, elements[0].AsFloat32());
+        Assert.Equal(2f, elements[1].AsFloat32());
+        Assert.Equal(1f, elements[2].AsFloat32());
     }
 
     [Fact]
@@ -539,7 +539,7 @@ public class ArrayFunctionTests
     public void ArrayReverse_NullInput_ReturnsNull()
     {
         ArrayReverseFunction function = new();
-        DataValue result = function.Execute([DataValue.NullArray(DataKind.Scalar)]);
+        DataValue result = function.Execute([DataValue.NullArray(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -550,7 +550,7 @@ public class ArrayFunctionTests
         DataValue original = MakeScalarArray(1f, 2f, 3f);
         function.Execute([original]);
 
-        Assert.Equal(1f, original.AsArray()[0].AsScalar());
+        Assert.Equal(1f, original.AsArray()[0].AsFloat32());
     }
 
     [Fact]
@@ -558,7 +558,7 @@ public class ArrayFunctionTests
     {
         ArrayReverseFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     // ───────────────── ARRAY_DISTINCT ─────────────────
@@ -621,7 +621,7 @@ public class ArrayFunctionTests
     {
         ArrayDistinctFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     // ───────────────── ARRAY_SLICE ─────────────────
@@ -632,14 +632,14 @@ public class ArrayFunctionTests
         ArraySliceFunction function = new();
         DataValue result = function.Execute([
             MakeScalarArray(10f, 20f, 30f, 40f, 50f),
-            DataValue.FromScalar(2f),
-            DataValue.FromScalar(3f)]);
+            DataValue.FromFloat32(2f),
+            DataValue.FromFloat32(3f)]);
 
         DataValue[] elements = result.AsArray();
         Assert.Equal(3, elements.Length);
-        Assert.Equal(20f, elements[0].AsScalar());
-        Assert.Equal(30f, elements[1].AsScalar());
-        Assert.Equal(40f, elements[2].AsScalar());
+        Assert.Equal(20f, elements[0].AsFloat32());
+        Assert.Equal(30f, elements[1].AsFloat32());
+        Assert.Equal(40f, elements[2].AsFloat32());
     }
 
     [Fact]
@@ -648,8 +648,8 @@ public class ArrayFunctionTests
         ArraySliceFunction function = new();
         DataValue result = function.Execute([
             MakeStringArray("a", "b", "c", "d"),
-            DataValue.FromScalar(1f),
-            DataValue.FromScalar(2f)]);
+            DataValue.FromFloat32(1f),
+            DataValue.FromFloat32(2f)]);
 
         DataValue[] elements = result.AsArray();
         Assert.Equal(2, elements.Length);
@@ -663,13 +663,13 @@ public class ArrayFunctionTests
         ArraySliceFunction function = new();
         DataValue result = function.Execute([
             MakeScalarArray(1f, 2f, 3f),
-            DataValue.FromScalar(2f),
-            DataValue.FromScalar(100f)]);
+            DataValue.FromFloat32(2f),
+            DataValue.FromFloat32(100f)]);
 
         DataValue[] elements = result.AsArray();
         Assert.Equal(2, elements.Length);
-        Assert.Equal(2f, elements[0].AsScalar());
-        Assert.Equal(3f, elements[1].AsScalar());
+        Assert.Equal(2f, elements[0].AsFloat32());
+        Assert.Equal(3f, elements[1].AsFloat32());
     }
 
     [Fact]
@@ -678,8 +678,8 @@ public class ArrayFunctionTests
         ArraySliceFunction function = new();
         DataValue result = function.Execute([
             MakeScalarArray(1f, 2f),
-            DataValue.FromScalar(10f),
-            DataValue.FromScalar(5f)]);
+            DataValue.FromFloat32(10f),
+            DataValue.FromFloat32(5f)]);
 
         Assert.Empty(result.AsArray());
     }
@@ -689,9 +689,9 @@ public class ArrayFunctionTests
     {
         ArraySliceFunction function = new();
         DataValue result = function.Execute([
-            DataValue.NullArray(DataKind.Scalar),
-            DataValue.FromScalar(1f),
-            DataValue.FromScalar(2f)]);
+            DataValue.NullArray(DataKind.Float32),
+            DataValue.FromFloat32(1f),
+            DataValue.FromFloat32(2f)]);
         Assert.True(result.IsNull);
     }
 
@@ -701,8 +701,8 @@ public class ArrayFunctionTests
         ArraySliceFunction function = new();
         DataValue result = function.Execute([
             MakeStringArray("a", "b", "c"),
-            DataValue.FromScalar(1f),
-            DataValue.FromScalar(2f)]);
+            DataValue.FromFloat32(1f),
+            DataValue.FromFloat32(2f)]);
         Assert.Equal(DataKind.String, result.ArrayElementKind);
     }
 
@@ -711,7 +711,7 @@ public class ArrayFunctionTests
     {
         ArraySliceFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Array, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Array, DataKind.Float32]));
     }
 
     [Fact]
@@ -719,7 +719,7 @@ public class ArrayFunctionTests
     {
         ArraySliceFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Float32]));
     }
 
     // ───────────────── ARRAY_CONCAT ─────────────────
@@ -734,10 +734,10 @@ public class ArrayFunctionTests
 
         DataValue[] elements = result.AsArray();
         Assert.Equal(4, elements.Length);
-        Assert.Equal(1f, elements[0].AsScalar());
-        Assert.Equal(2f, elements[1].AsScalar());
-        Assert.Equal(3f, elements[2].AsScalar());
-        Assert.Equal(4f, elements[3].AsScalar());
+        Assert.Equal(1f, elements[0].AsFloat32());
+        Assert.Equal(2f, elements[1].AsFloat32());
+        Assert.Equal(3f, elements[2].AsFloat32());
+        Assert.Equal(4f, elements[3].AsFloat32());
     }
 
     [Fact]
@@ -759,7 +759,7 @@ public class ArrayFunctionTests
     {
         ArrayConcatFunction function = new();
         DataValue result = function.Execute([
-            DataValue.NullArray(DataKind.Scalar),
+            DataValue.NullArray(DataKind.Float32),
             MakeScalarArray(1f)]);
         Assert.True(result.IsNull);
     }
@@ -770,7 +770,7 @@ public class ArrayFunctionTests
         ArrayConcatFunction function = new();
         DataValue result = function.Execute([
             MakeScalarArray(1f),
-            DataValue.NullArray(DataKind.Scalar)]);
+            DataValue.NullArray(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -841,15 +841,15 @@ public class ArrayFunctionTests
     public void ArrayGet_ReturnsElementAtIndex()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeScalarArray(10f, 20f, 30f), DataValue.FromScalar(2f)]);
-        Assert.Equal(20f, result.AsScalar());
+        DataValue result = function.Execute([MakeScalarArray(10f, 20f, 30f), DataValue.FromFloat32(2f)]);
+        Assert.Equal(20f, result.AsFloat32());
     }
 
     [Fact]
     public void ArrayGet_FirstElement()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeStringArray("a", "b", "c"), DataValue.FromScalar(1f)]);
+        DataValue result = function.Execute([MakeStringArray("a", "b", "c"), DataValue.FromFloat32(1f)]);
         Assert.Equal("a", result.AsString());
     }
 
@@ -857,7 +857,7 @@ public class ArrayFunctionTests
     public void ArrayGet_LastElement()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeStringArray("x", "y", "z"), DataValue.FromScalar(3f)]);
+        DataValue result = function.Execute([MakeStringArray("x", "y", "z"), DataValue.FromFloat32(3f)]);
         Assert.Equal("z", result.AsString());
     }
 
@@ -865,7 +865,7 @@ public class ArrayFunctionTests
     public void ArrayGet_IndexOutOfBounds_ReturnsNull()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromScalar(5f)]);
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromFloat32(5f)]);
         Assert.True(result.IsNull);
     }
 
@@ -873,7 +873,7 @@ public class ArrayFunctionTests
     public void ArrayGet_IndexZero_ReturnsNull()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromScalar(0f)]);
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromFloat32(0f)]);
         Assert.True(result.IsNull);
     }
 
@@ -881,7 +881,7 @@ public class ArrayFunctionTests
     public void ArrayGet_NegativeIndex_ReturnsNull()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromScalar(-1f)]);
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.FromFloat32(-1f)]);
         Assert.True(result.IsNull);
     }
 
@@ -889,7 +889,7 @@ public class ArrayFunctionTests
     public void ArrayGet_NullArray_ReturnsNull()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([DataValue.NullArray(DataKind.Scalar), DataValue.FromScalar(1f)]);
+        DataValue result = function.Execute([DataValue.NullArray(DataKind.Float32), DataValue.FromFloat32(1f)]);
         Assert.True(result.IsNull);
     }
 
@@ -897,7 +897,7 @@ public class ArrayFunctionTests
     public void ArrayGet_NullIndex_ReturnsNull()
     {
         ArrayGetFunction function = new();
-        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.Null(DataKind.Scalar)]);
+        DataValue result = function.Execute([MakeScalarArray(1f, 2f), DataValue.Null(DataKind.Float32)]);
         Assert.True(result.IsNull);
     }
 
@@ -906,7 +906,7 @@ public class ArrayFunctionTests
     {
         ArrayGetFunction function = new();
         DataKind result = function.ValidateArgumentsWithElementKinds(
-            [DataKind.Array, DataKind.Scalar], [DataKind.String, null]);
+            [DataKind.Array, DataKind.Float32], [DataKind.String, null]);
         Assert.Equal(DataKind.String, result);
     }
 
@@ -915,8 +915,8 @@ public class ArrayFunctionTests
     {
         ArrayGetFunction function = new();
         DataKind result = function.ValidateArgumentsWithElementKinds(
-            [DataKind.Array, DataKind.Scalar], [null, null]);
-        Assert.Equal(DataKind.Scalar, result);
+            [DataKind.Array, DataKind.Float32], [null, null]);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
@@ -932,7 +932,7 @@ public class ArrayFunctionTests
     {
         ArrayMinFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(3f, 1f, 2f)]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -948,27 +948,27 @@ public class ArrayFunctionTests
     {
         ArrayMinFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(42f)]);
-        Assert.Equal(42f, result.AsScalar());
+        Assert.Equal(42f, result.AsFloat32());
     }
 
     [Fact]
     public void ArrayMin_SkipsNullElements()
     {
         ArrayMinFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(5f),
-            DataValue.FromScalar(2f)]);
-        Assert.Equal(2f, function.Execute([arr]).AsScalar());
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(5f),
+            DataValue.FromFloat32(2f)]);
+        Assert.Equal(2f, function.Execute([arr]).AsFloat32());
     }
 
     [Fact]
     public void ArrayMin_AllNulls_ReturnsNull()
     {
         ArrayMinFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
-            DataValue.Null(DataKind.Scalar),
-            DataValue.Null(DataKind.Scalar)]);
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [
+            DataValue.Null(DataKind.Float32),
+            DataValue.Null(DataKind.Float32)]);
         Assert.True(function.Execute([arr]).IsNull);
     }
 
@@ -976,14 +976,14 @@ public class ArrayFunctionTests
     public void ArrayMin_EmptyArray_ReturnsNull()
     {
         ArrayMinFunction function = new();
-        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Float32, [])]).IsNull);
     }
 
     [Fact]
     public void ArrayMin_NullArray_ReturnsNull()
     {
         ArrayMinFunction function = new();
-        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
@@ -1001,7 +1001,7 @@ public class ArrayFunctionTests
     {
         ArrayMaxFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(3f, 1f, 5f, 2f)]);
-        Assert.Equal(5f, result.AsScalar());
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
@@ -1016,25 +1016,25 @@ public class ArrayFunctionTests
     public void ArrayMax_SkipsNullElements()
     {
         ArrayMaxFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(5f),
-            DataValue.FromScalar(2f)]);
-        Assert.Equal(5f, function.Execute([arr]).AsScalar());
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(5f),
+            DataValue.FromFloat32(2f)]);
+        Assert.Equal(5f, function.Execute([arr]).AsFloat32());
     }
 
     [Fact]
     public void ArrayMax_EmptyArray_ReturnsNull()
     {
         ArrayMaxFunction function = new();
-        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Float32, [])]).IsNull);
     }
 
     [Fact]
     public void ArrayMax_NullArray_ReturnsNull()
     {
         ArrayMaxFunction function = new();
-        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
@@ -1052,32 +1052,32 @@ public class ArrayFunctionTests
     {
         ArraySumFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(1f, 2f, 3f, 4f)]);
-        Assert.Equal(10f, result.AsScalar());
+        Assert.Equal(10f, result.AsFloat32());
     }
 
     [Fact]
     public void ArraySum_SkipsNullElements()
     {
         ArraySumFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
-            DataValue.FromScalar(1f),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(3f)]);
-        Assert.Equal(4f, function.Execute([arr]).AsScalar());
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [
+            DataValue.FromFloat32(1f),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(3f)]);
+        Assert.Equal(4f, function.Execute([arr]).AsFloat32());
     }
 
     [Fact]
     public void ArraySum_EmptyArray_ReturnsNull()
     {
         ArraySumFunction function = new();
-        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Float32, [])]).IsNull);
     }
 
     [Fact]
     public void ArraySum_AllNulls_ReturnsNull()
     {
         ArraySumFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [DataValue.Null(DataKind.Scalar)]);
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [DataValue.Null(DataKind.Float32)]);
         Assert.True(function.Execute([arr]).IsNull);
     }
 
@@ -1085,16 +1085,16 @@ public class ArrayFunctionTests
     public void ArraySum_NullArray_ReturnsNull()
     {
         ArraySumFunction function = new();
-        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
     public void ArraySum_AlwaysReturnsScalar()
     {
         ArraySumFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Array]));
-        Assert.Equal(DataKind.Scalar,
-            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.Scalar]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Array]));
+        Assert.Equal(DataKind.Float32,
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.Float32]));
     }
 
     [Fact]
@@ -1112,39 +1112,39 @@ public class ArrayFunctionTests
     {
         ArrayAvgFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(2f, 4f, 6f)]);
-        Assert.Equal(4f, result.AsScalar(), tolerance: 0.001f);
+        Assert.Equal(4f, result.AsFloat32(), tolerance: 0.001f);
     }
 
     [Fact]
     public void ArrayAvg_SkipsNullElements()
     {
         ArrayAvgFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [
-            DataValue.FromScalar(10f),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(20f)]);
-        Assert.Equal(15f, function.Execute([arr]).AsScalar(), tolerance: 0.001f);
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [
+            DataValue.FromFloat32(10f),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(20f)]);
+        Assert.Equal(15f, function.Execute([arr]).AsFloat32(), tolerance: 0.001f);
     }
 
     [Fact]
     public void ArrayAvg_SingleElement()
     {
         ArrayAvgFunction function = new();
-        Assert.Equal(7f, function.Execute([MakeScalarArray(7f)]).AsScalar(), tolerance: 0.001f);
+        Assert.Equal(7f, function.Execute([MakeScalarArray(7f)]).AsFloat32(), tolerance: 0.001f);
     }
 
     [Fact]
     public void ArrayAvg_EmptyArray_ReturnsNull()
     {
         ArrayAvgFunction function = new();
-        Assert.True(function.Execute([DataValue.FromArray(DataKind.Scalar, [])]).IsNull);
+        Assert.True(function.Execute([DataValue.FromArray(DataKind.Float32, [])]).IsNull);
     }
 
     [Fact]
     public void ArrayAvg_AllNulls_ReturnsNull()
     {
         ArrayAvgFunction function = new();
-        DataValue arr = DataValue.FromArray(DataKind.Scalar, [DataValue.Null(DataKind.Scalar)]);
+        DataValue arr = DataValue.FromArray(DataKind.Float32, [DataValue.Null(DataKind.Float32)]);
         Assert.True(function.Execute([arr]).IsNull);
     }
 
@@ -1152,14 +1152,14 @@ public class ArrayFunctionTests
     public void ArrayAvg_NullArray_ReturnsNull()
     {
         ArrayAvgFunction function = new();
-        Assert.True(function.Execute([DataValue.NullArray(DataKind.Scalar)]).IsNull);
+        Assert.True(function.Execute([DataValue.NullArray(DataKind.Float32)]).IsNull);
     }
 
     [Fact]
     public void ArrayAvg_AlwaysReturnsScalar()
     {
         ArrayAvgFunction function = new();
-        Assert.Equal(DataKind.Scalar, function.ValidateArguments([DataKind.Array]));
+        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Array]));
     }
 
     [Fact]

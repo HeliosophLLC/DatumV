@@ -53,9 +53,9 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// </summary>
     private static int CompareDataValues(DataValue left, DataValue right)
     {
-        if (left.Kind == DataKind.Scalar && right.Kind == DataKind.Scalar)
+        if (left.Kind == DataKind.Float32 && right.Kind == DataKind.Float32)
         {
-            return left.AsScalar().CompareTo(right.AsScalar());
+            return left.AsFloat32().CompareTo(right.AsFloat32());
         }
 
         return StatisticsPredicateEvaluator.CompareValues(left, right);

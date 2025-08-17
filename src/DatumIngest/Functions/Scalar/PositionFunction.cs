@@ -29,7 +29,7 @@ public sealed class PositionFunction : IScalarFunction
             throw new ArgumentException($"position() requires a String as the second argument, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -40,10 +40,10 @@ public sealed class PositionFunction : IScalarFunction
 
         if (input.IsNull || substring.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int index = input.AsString().IndexOf(substring.AsString(), StringComparison.Ordinal);
-        return DataValue.FromScalar(index);
+        return DataValue.FromFloat32(index);
     }
 }

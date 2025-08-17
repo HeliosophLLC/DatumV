@@ -58,7 +58,7 @@ public sealed class EntropyAccumulatorTests
         // 8 values, each appearing exactly once → H = log₂(8) = 3
         for (int i = 0; i < 8; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
@@ -147,7 +147,7 @@ public sealed class EntropyAccumulatorTests
     public void GetResult_ResultNameIsEntropy()
     {
         EntropyAccumulator accumulator = new();
-        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
 
         StatisticResult result = accumulator.GetResult();
 

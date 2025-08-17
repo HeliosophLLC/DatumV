@@ -38,7 +38,7 @@ public sealed class ImagePixelMeanFunction : IScalarFunction, ICostAwareFunction
                 $"image_pixel_mean() second argument (channels) must be Vector, got {argumentKinds[1]}.");
         }
 
-        return argumentKinds.Length == 1 ? DataKind.Scalar : DataKind.Vector;
+        return argumentKinds.Length == 1 ? DataKind.Float32 : DataKind.Vector;
     }
 
     /// <inheritdoc />
@@ -48,7 +48,7 @@ public sealed class ImagePixelMeanFunction : IScalarFunction, ICostAwareFunction
 
         if (input.IsNull)
         {
-            DataKind resultKind = arguments.Length == 1 ? DataKind.Scalar : DataKind.Vector;
+            DataKind resultKind = arguments.Length == 1 ? DataKind.Float32 : DataKind.Vector;
             return DataValue.Null(resultKind);
         }
 
@@ -89,7 +89,7 @@ public sealed class ImagePixelMeanFunction : IScalarFunction, ICostAwareFunction
         }
 
         float mean = (float)(sum / totalElements);
-        return DataValue.FromScalar(mean);
+        return DataValue.FromFloat32(mean);
     }
 
     private static DataValue ComputePerChannelMean(nint pixelPointer, int totalPixels, float[] channelIndices)

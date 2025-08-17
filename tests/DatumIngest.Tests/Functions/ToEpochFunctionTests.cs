@@ -21,21 +21,21 @@ public class ToEpochFunctionTests
     {
         // 2000-01-01 is 10957 days after 1970-01-01.
         DataValue result = _function.Execute([DataValue.FromDate(new DateOnly(2000, 1, 1))]);
-        Assert.Equal(10957f, result.AsScalar());
+        Assert.Equal(10957f, result.AsFloat32());
     }
 
     [Fact]
     public void ToEpoch_UnixEpochDateReturnsZero()
     {
         DataValue result = _function.Execute([DataValue.FromDate(new DateOnly(1970, 1, 1))]);
-        Assert.Equal(0f, result.AsScalar());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]
     public void ToEpoch_DateBeforeEpochReturnsNegative()
     {
         DataValue result = _function.Execute([DataValue.FromDate(new DateOnly(1969, 12, 31))]);
-        Assert.Equal(-1f, result.AsScalar());
+        Assert.Equal(-1f, result.AsFloat32());
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class ToEpochFunctionTests
     {
         // 2000-01-01T00:00:00 is 946684800 seconds after Unix epoch.
         DataValue result = _function.Execute([DataValue.FromDateTime(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero))]);
-        Assert.Equal(946684800f, result.AsScalar());
+        Assert.Equal(946684800f, result.AsFloat32());
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class ToEpochFunctionTests
     {
         // 1970-01-01T01:00:00 is 3600 seconds after Unix epoch.
         DataValue result = _function.Execute([DataValue.FromDateTime(new DateTimeOffset(1970, 1, 1, 1, 0, 0, TimeSpan.Zero))]);
-        Assert.Equal(3600f, result.AsScalar());
+        Assert.Equal(3600f, result.AsFloat32());
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public class ToEpochFunctionTests
     {
         DataValue result = _function.Execute([DataValue.Null(DataKind.Date)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class ToEpochFunctionTests
     {
         DataValue result = _function.Execute([DataValue.Null(DataKind.DateTime)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -86,13 +86,13 @@ public class ToEpochFunctionTests
     public void ValidateArguments_AcceptsDate()
     {
         DataKind result = _function.ValidateArguments([DataKind.Date]);
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     [Fact]
     public void ValidateArguments_AcceptsDateTime()
     {
         DataKind result = _function.ValidateArguments([DataKind.DateTime]);
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 }

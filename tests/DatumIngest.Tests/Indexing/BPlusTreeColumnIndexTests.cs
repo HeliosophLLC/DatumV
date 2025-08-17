@@ -19,9 +19,9 @@ public sealed class BPlusTreeColumnIndexTests
     {
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
-        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromScalar(50.0f));
+        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromFloat32(50.0f));
         Assert.Single(result);
-        Assert.Equal(DataValue.FromScalar(50.0f), result[0].Key);
+        Assert.Equal(DataValue.FromFloat32(50.0f), result[0].Key);
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public sealed class BPlusTreeColumnIndexTests
     {
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
-        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromScalar(999.0f));
+        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromFloat32(999.0f));
         Assert.Empty(result);
     }
 
@@ -38,15 +38,15 @@ public sealed class BPlusTreeColumnIndexTests
     {
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1.0f), 0, 0L),
-            new(DataValue.FromScalar(1.0f), 0, 10L),
-            new(DataValue.FromScalar(1.0f), 1, 0L),
-            new(DataValue.FromScalar(2.0f), 1, 10L),
+            new(DataValue.FromFloat32(1.0f), 0, 0L),
+            new(DataValue.FromFloat32(1.0f), 0, 10L),
+            new(DataValue.FromFloat32(1.0f), 1, 0L),
+            new(DataValue.FromFloat32(2.0f), 1, 10L),
         ];
 
         BPlusTreeColumnIndex index = BuildColumnIndex(entries);
 
-        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromScalar(1.0f));
+        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromFloat32(1.0f));
         Assert.Equal(3, result.Count);
     }
 
@@ -58,13 +58,13 @@ public sealed class BPlusTreeColumnIndexTests
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
         IReadOnlyList<ValueIndexEntry> result = index.FindRange(
-            DataValue.FromScalar(10.0f), DataValue.FromScalar(20.0f));
+            DataValue.FromFloat32(10.0f), DataValue.FromFloat32(20.0f));
 
         Assert.Equal(11, result.Count); // 10, 11, 12, ..., 20
 
         foreach (ValueIndexEntry entry in result)
         {
-            float key = entry.Key.AsScalar();
+            float key = entry.Key.AsFloat32();
             Assert.True(key >= 10.0f && key <= 20.0f);
         }
     }
@@ -75,10 +75,10 @@ public sealed class BPlusTreeColumnIndexTests
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
         IReadOnlyList<ValueIndexEntry> result = index.FindRange(
-            DataValue.FromScalar(50.0f), DataValue.FromScalar(50.0f));
+            DataValue.FromFloat32(50.0f), DataValue.FromFloat32(50.0f));
 
         Assert.Single(result);
-        Assert.Equal(DataValue.FromScalar(50.0f), result[0].Key);
+        Assert.Equal(DataValue.FromFloat32(50.0f), result[0].Key);
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class BPlusTreeColumnIndexTests
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
         IReadOnlyList<ValueIndexEntry> result = index.FindRange(
-            DataValue.FromScalar(200.0f), DataValue.FromScalar(300.0f));
+            DataValue.FromFloat32(200.0f), DataValue.FromFloat32(300.0f));
 
         Assert.Empty(result);
     }
@@ -99,7 +99,7 @@ public sealed class BPlusTreeColumnIndexTests
     {
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
-        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromScalar(50.0f));
+        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromFloat32(50.0f));
         Assert.Single(chunks);
         Assert.Contains(0, chunks); // Chunk 0 (entries 0-99 all in chunk 0 with chunkSize=1000)
     }
@@ -109,7 +109,7 @@ public sealed class BPlusTreeColumnIndexTests
     {
         BPlusTreeColumnIndex index = BuildColumnIndex(GenerateEntries(100));
 
-        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromScalar(999.0f));
+        IReadOnlySet<int> chunks = index.FindChunksContaining(DataValue.FromFloat32(999.0f));
         Assert.Empty(chunks);
     }
 
@@ -123,7 +123,7 @@ public sealed class BPlusTreeColumnIndexTests
         BPlusTreeColumnIndex index = BuildColumnIndex(entries);
 
         IReadOnlySet<int> chunks = index.FindChunksInRange(
-            DataValue.FromScalar(0.0f), DataValue.FromScalar(1999.0f));
+            DataValue.FromFloat32(0.0f), DataValue.FromFloat32(1999.0f));
 
         // Should include all 4 chunks (0, 1, 2, 3).
         Assert.Equal(4, chunks.Count);
@@ -142,7 +142,7 @@ public sealed class BPlusTreeColumnIndexTests
         ValueIndexEntry[] entries = GenerateMultiChunkEntries(2000, 500);
         BPlusTreeColumnIndex index = BuildColumnIndex(entries);
 
-        IReadOnlySet<int> chunks = index.FindChunksLessThan(DataValue.FromScalar(500.0f));
+        IReadOnlySet<int> chunks = index.FindChunksLessThan(DataValue.FromFloat32(500.0f));
 
         // Entries 0-499 are in chunk 0, entry 500 is boundary — so only chunk 0.
         Assert.Contains(0, chunks);
@@ -157,7 +157,7 @@ public sealed class BPlusTreeColumnIndexTests
         ValueIndexEntry[] entries = GenerateMultiChunkEntries(2000, 500);
         BPlusTreeColumnIndex index = BuildColumnIndex(entries);
 
-        IReadOnlySet<int> chunks = index.FindChunksLessThanOrEqual(DataValue.FromScalar(500.0f));
+        IReadOnlySet<int> chunks = index.FindChunksLessThanOrEqual(DataValue.FromFloat32(500.0f));
 
         Assert.Contains(0, chunks);
         // Entry 500 (key=500.0f) is in chunk 1, row 0 — should be included.
@@ -172,7 +172,7 @@ public sealed class BPlusTreeColumnIndexTests
         ValueIndexEntry[] entries = GenerateMultiChunkEntries(2000, 500);
         BPlusTreeColumnIndex index = BuildColumnIndex(entries);
 
-        IReadOnlySet<int> chunks = index.FindChunksGreaterThan(DataValue.FromScalar(1499.0f));
+        IReadOnlySet<int> chunks = index.FindChunksGreaterThan(DataValue.FromFloat32(1499.0f));
 
         // Entries 1500-1999 are in chunk 3.
         Assert.Contains(3, chunks);
@@ -187,7 +187,7 @@ public sealed class BPlusTreeColumnIndexTests
         ValueIndexEntry[] entries = GenerateMultiChunkEntries(2000, 500);
         BPlusTreeColumnIndex index = BuildColumnIndex(entries);
 
-        IReadOnlySet<int> chunks = index.FindChunksGreaterThanOrEqual(DataValue.FromScalar(1500.0f));
+        IReadOnlySet<int> chunks = index.FindChunksGreaterThanOrEqual(DataValue.FromFloat32(1500.0f));
 
         Assert.Contains(3, chunks);
     }
@@ -205,7 +205,7 @@ public sealed class BPlusTreeColumnIndexTests
 
         for (int i = 1; i < traversed.Count; i++)
         {
-            Assert.True(traversed[i].Key.AsScalar() >= traversed[i - 1].Key.AsScalar());
+            Assert.True(traversed[i].Key.AsFloat32() >= traversed[i - 1].Key.AsFloat32());
         }
     }
 
@@ -220,7 +220,7 @@ public sealed class BPlusTreeColumnIndexTests
 
         for (int i = 1; i < traversed.Count; i++)
         {
-            Assert.True(traversed[i].Key.AsScalar() <= traversed[i - 1].Key.AsScalar());
+            Assert.True(traversed[i].Key.AsFloat32() <= traversed[i - 1].Key.AsFloat32());
         }
     }
 
@@ -245,7 +245,7 @@ public sealed class BPlusTreeColumnIndexTests
         for (int index = 0; index < count; index++)
         {
             entries[index] = new ValueIndexEntry(
-                DataValue.FromScalar((float)index), 0, (long)index);
+                DataValue.FromFloat32((float)index), 0, (long)index);
         }
 
         return entries;
@@ -263,7 +263,7 @@ public sealed class BPlusTreeColumnIndexTests
             int chunkIndex = index / chunkSize;
             long rowOffset = index % chunkSize;
             entries[index] = new ValueIndexEntry(
-                DataValue.FromScalar((float)index), chunkIndex, rowOffset);
+                DataValue.FromFloat32((float)index), chunkIndex, rowOffset);
         }
 
         return entries;
@@ -278,7 +278,7 @@ public sealed class BPlusTreeColumnIndexTests
         using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
 
         BPlusTreeSectionHeader? header = BPlusTreeBulkLoader.Build(
-            entries, "test_column", DataKind.Scalar, writer);
+            entries, "test_column", DataKind.Float32, writer);
 
         Assert.NotNull(header);
 

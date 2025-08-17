@@ -32,17 +32,17 @@ public sealed class IndexNestedLoopJoinTests
         // Build side: 3 rows keyed on "id".
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("Charlie"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("Charlie"))),
         ];
 
         // Sorted index on "id" column, pointing to each row.
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(3f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(3f), ChunkIndex: 0, RowOffsetInChunk: 2),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -50,8 +50,8 @@ public sealed class IndexNestedLoopJoinTests
 
         // Probe side: 2 rows that should match build-side ids 1 and 3.
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.FromScalar(1f)), ("p.score", DataValue.FromScalar(95f))),
-            MakeRow(("p.id", DataValue.FromScalar(3f)), ("p.score", DataValue.FromScalar(87f))));
+            MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.score", DataValue.FromFloat32(95f))),
+            MakeRow(("p.id", DataValue.FromFloat32(3f)), ("p.score", DataValue.FromFloat32(87f))));
 
         MockOperator buildOperator = new();
 
@@ -76,15 +76,15 @@ public sealed class IndexNestedLoopJoinTests
         Assert.Equal(2, results.Count);
 
         Row first = results[0];
-        Assert.Equal(1f, first["p.id"].AsScalar());
-        Assert.Equal(95f, first["p.score"].AsScalar());
-        Assert.Equal(1f, first["id"].AsScalar());
+        Assert.Equal(1f, first["p.id"].AsFloat32());
+        Assert.Equal(95f, first["p.score"].AsFloat32());
+        Assert.Equal(1f, first["id"].AsFloat32());
         Assert.Equal("Alice", first["name"].AsString());
 
         Row second = results[1];
-        Assert.Equal(3f, second["p.id"].AsScalar());
-        Assert.Equal(87f, second["p.score"].AsScalar());
-        Assert.Equal(3f, second["id"].AsScalar());
+        Assert.Equal(3f, second["p.id"].AsFloat32());
+        Assert.Equal(87f, second["p.score"].AsFloat32());
+        Assert.Equal(3f, second["id"].AsFloat32());
         Assert.Equal("Charlie", second["name"].AsString());
     }
 
@@ -97,12 +97,12 @@ public sealed class IndexNestedLoopJoinTests
     {
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(10f)), ("val", DataValue.FromString("X"))),
+            MakeRow(("id", DataValue.FromFloat32(10f)), ("val", DataValue.FromString("X"))),
         ];
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(10f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(10f), ChunkIndex: 0, RowOffsetInChunk: 0),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -110,8 +110,8 @@ public sealed class IndexNestedLoopJoinTests
 
         // Probe keys 1 and 2 have no match in the build index.
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.FromScalar(1f))),
-            MakeRow(("p.id", DataValue.FromScalar(2f))));
+            MakeRow(("p.id", DataValue.FromFloat32(1f))),
+            MakeRow(("p.id", DataValue.FromFloat32(2f))));
 
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("p", "id"), new ColumnReference("id"))],
@@ -140,20 +140,20 @@ public sealed class IndexNestedLoopJoinTests
     {
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("val", DataValue.FromString("A"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromString("A"))),
         ];
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
         IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 1)];
 
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("p.id", DataValue.FromScalar(1f))));
+            MakeRow(("p.id", DataValue.Null(DataKind.Float32))),
+            MakeRow(("p.id", DataValue.FromFloat32(1f))));
 
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("p", "id"), new ColumnReference("id"))],
@@ -173,7 +173,7 @@ public sealed class IndexNestedLoopJoinTests
 
         // Only the non-null key should produce a match.
         Assert.Single(results);
-        Assert.Equal(1f, results[0]["p.id"].AsScalar());
+        Assert.Equal(1f, results[0]["p.id"].AsFloat32());
         Assert.Equal("A", results[0]["val"].AsString());
     }
 
@@ -186,22 +186,22 @@ public sealed class IndexNestedLoopJoinTests
     {
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("extra", DataValue.FromString("ignored"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("extra", DataValue.FromString("also ignored"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("extra", DataValue.FromString("ignored"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("extra", DataValue.FromString("also ignored"))),
         ];
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
         IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 2)];
 
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.FromScalar(1f)), ("p.val", DataValue.FromString("keep"))),
-            MakeRow(("p.id", DataValue.FromScalar(99f)), ("p.val", DataValue.FromString("no match"))));
+            MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.val", DataValue.FromString("keep"))),
+            MakeRow(("p.id", DataValue.FromFloat32(99f)), ("p.val", DataValue.FromString("no match"))));
 
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("p", "id"), new ColumnReference("id"))],
@@ -221,7 +221,7 @@ public sealed class IndexNestedLoopJoinTests
 
         // Only the probe row with key=1 should be emitted (key=99 has no match).
         Assert.Single(results);
-        Assert.Equal(1f, results[0]["p.id"].AsScalar());
+        Assert.Equal(1f, results[0]["p.id"].AsFloat32());
         Assert.Equal("keep", results[0]["p.val"].AsString());
 
         // Build-side columns should NOT be present.
@@ -237,23 +237,23 @@ public sealed class IndexNestedLoopJoinTests
     {
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("val", DataValue.FromString("A"))),
-            MakeRow(("id", DataValue.FromScalar(1f)), ("val", DataValue.FromString("B"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("val", DataValue.FromString("C"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromString("A"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromString("B"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("val", DataValue.FromString("C"))),
         ];
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(2f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 2),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
         IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 3)];
 
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.FromScalar(1f))));
+            MakeRow(("p.id", DataValue.FromFloat32(1f))));
 
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("p", "id"), new ColumnReference("id"))],
@@ -286,23 +286,23 @@ public sealed class IndexNestedLoopJoinTests
         // 6 rows across 2 chunks (3 rows each).
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(10f)), ("val", DataValue.FromString("chunk0-row0"))),
-            MakeRow(("id", DataValue.FromScalar(20f)), ("val", DataValue.FromString("chunk0-row1"))),
-            MakeRow(("id", DataValue.FromScalar(30f)), ("val", DataValue.FromString("chunk0-row2"))),
-            MakeRow(("id", DataValue.FromScalar(40f)), ("val", DataValue.FromString("chunk1-row0"))),
-            MakeRow(("id", DataValue.FromScalar(50f)), ("val", DataValue.FromString("chunk1-row1"))),
-            MakeRow(("id", DataValue.FromScalar(60f)), ("val", DataValue.FromString("chunk1-row2"))),
+            MakeRow(("id", DataValue.FromFloat32(10f)), ("val", DataValue.FromString("chunk0-row0"))),
+            MakeRow(("id", DataValue.FromFloat32(20f)), ("val", DataValue.FromString("chunk0-row1"))),
+            MakeRow(("id", DataValue.FromFloat32(30f)), ("val", DataValue.FromString("chunk0-row2"))),
+            MakeRow(("id", DataValue.FromFloat32(40f)), ("val", DataValue.FromString("chunk1-row0"))),
+            MakeRow(("id", DataValue.FromFloat32(50f)), ("val", DataValue.FromString("chunk1-row1"))),
+            MakeRow(("id", DataValue.FromFloat32(60f)), ("val", DataValue.FromString("chunk1-row2"))),
         ];
 
         // Index entry for key=50 is in chunk 1 at offset 1 → absolute row 4.
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(10f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(20f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(30f), ChunkIndex: 0, RowOffsetInChunk: 2),
-            new(DataValue.FromScalar(40f), ChunkIndex: 1, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(50f), ChunkIndex: 1, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(60f), ChunkIndex: 1, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(10f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(20f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(30f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(40f), ChunkIndex: 1, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(50f), ChunkIndex: 1, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(60f), ChunkIndex: 1, RowOffsetInChunk: 2),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
@@ -315,7 +315,7 @@ public sealed class IndexNestedLoopJoinTests
 
         // Probe for key=50 (chunk 1, offset 1 → absolute row 4).
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.FromScalar(50f))));
+            MakeRow(("p.id", DataValue.FromFloat32(50f))));
 
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("p", "id"), new ColumnReference("id"))],
@@ -334,7 +334,7 @@ public sealed class IndexNestedLoopJoinTests
         List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, new MockOperator(), context));
 
         Assert.Single(results);
-        Assert.Equal(50f, results[0]["id"].AsScalar());
+        Assert.Equal(50f, results[0]["id"].AsFloat32());
         Assert.Equal("chunk1-row1", results[0]["val"].AsString());
     }
 
@@ -347,21 +347,21 @@ public sealed class IndexNestedLoopJoinTests
     {
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("val", DataValue.FromString("A"))),
-            MakeRow(("id", DataValue.FromScalar(1f)), ("val", DataValue.FromString("B"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromString("A"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("val", DataValue.FromString("B"))),
         ];
 
         ValueIndexEntry[] entries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 1),
         ];
 
         SortedValueIndex sortedIndex = new(entries);
         IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 2)];
 
         MockOperator probe = new(
-            MakeRow(("p.id", DataValue.FromScalar(1f)), ("p.x", DataValue.FromScalar(42f))));
+            MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.x", DataValue.FromFloat32(42f))));
 
         JoinKeyExtractionResult extraction = new(
             [(new ColumnReference("p", "id"), new ColumnReference("id"))],
@@ -381,7 +381,7 @@ public sealed class IndexNestedLoopJoinTests
 
         // SEMI: probe row emitted once even though there are 2 build matches.
         Assert.Single(results);
-        Assert.Equal(42f, results[0]["p.x"].AsScalar());
+        Assert.Equal(42f, results[0]["p.x"].AsFloat32());
     }
 
     // ------------------------------------------------------------------
@@ -399,16 +399,16 @@ public sealed class IndexNestedLoopJoinTests
         // Build side: ScanOperator with a sorted index on "id".
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("Charlie"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("Charlie"))),
         ];
 
         ValueIndexEntry[] indexEntries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
-            new(DataValue.FromScalar(3f), ChunkIndex: 0, RowOffsetInChunk: 2),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(3f), ChunkIndex: 0, RowOffsetInChunk: 2),
         ];
 
         SortedValueIndex sortedIndex = new(indexEntries);
@@ -421,7 +421,7 @@ public sealed class IndexNestedLoopJoinTests
 
         SourceIndex sourceIndex = new(
             new SourceFingerprint(100, new byte[32]),
-            new IndexSchema(new Schema([new ColumnInfo("id", DataKind.Scalar, false), new ColumnInfo("name", DataKind.String, false)]), 3),
+            new IndexSchema(new Schema([new ColumnInfo("id", DataKind.Float32, false), new ColumnInfo("name", DataKind.String, false)]), 3),
             chunks,
             sortedIndexes: sortedIndexSet);
 
@@ -431,8 +431,8 @@ public sealed class IndexNestedLoopJoinTests
 
         // Probe side: MockOperator with 2 rows.
         MockOperator probeOperator = new(
-            MakeRow(("p.id", DataValue.FromScalar(1f)), ("p.score", DataValue.FromScalar(95f))),
-            MakeRow(("p.id", DataValue.FromScalar(3f)), ("p.score", DataValue.FromScalar(87f))));
+            MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.score", DataValue.FromFloat32(95f))),
+            MakeRow(("p.id", DataValue.FromFloat32(3f)), ("p.score", DataValue.FromFloat32(87f))));
 
         // Create JoinOperator: probe ON buildScan with p.id = id.
         JoinOperator join = new(probeOperator, buildScan, JoinType.Inner,
@@ -458,10 +458,10 @@ public sealed class IndexNestedLoopJoinTests
         Assert.Equal(2, results.Count);
 
         Row alice = results.First(row => row["name"].AsString() == "Alice");
-        Assert.Equal(95f, alice["p.score"].AsScalar());
+        Assert.Equal(95f, alice["p.score"].AsFloat32());
 
         Row charlie = results.First(row => row["name"].AsString() == "Charlie");
-        Assert.Equal(87f, charlie["p.score"].AsScalar());
+        Assert.Equal(87f, charlie["p.score"].AsFloat32());
     }
 
     /// <summary>
@@ -476,14 +476,14 @@ public sealed class IndexNestedLoopJoinTests
         // Build side: raw column names (no alias prefix), simulating seekable reads.
         Row[] buildRows =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("Alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("Bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
         ];
 
         ValueIndexEntry[] indexEntries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
-            new(DataValue.FromScalar(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
         ];
 
         SortedValueIndex sortedIndex = new(indexEntries);
@@ -496,7 +496,7 @@ public sealed class IndexNestedLoopJoinTests
 
         SourceIndex sourceIndex = new(
             new SourceFingerprint(100, new byte[32]),
-            new IndexSchema(new Schema([new ColumnInfo("id", DataKind.Scalar, false), new ColumnInfo("name", DataKind.String, false)]), 2),
+            new IndexSchema(new Schema([new ColumnInfo("id", DataKind.Float32, false), new ColumnInfo("name", DataKind.String, false)]), 2),
             chunks,
             sortedIndexes: sortedIndexSet);
 
@@ -510,7 +510,7 @@ public sealed class IndexNestedLoopJoinTests
 
         // Probe side with alias-qualified columns (from AliasOperator on probe side).
         MockOperator probeOperator = new(
-            MakeRow(("left_table.id", DataValue.FromScalar(1f)), ("left_table.score", DataValue.FromScalar(95f))));
+            MakeRow(("left_table.id", DataValue.FromFloat32(1f)), ("left_table.score", DataValue.FromFloat32(95f))));
 
         JoinOperator join = new(probeOperator, aliasedBuild, JoinType.Inner,
             new BinaryExpression(
@@ -538,7 +538,7 @@ public sealed class IndexNestedLoopJoinTests
         Assert.True(row.TryGetValue("right_table.name", out _), "Expected qualified column 'right_table.name'");
 
         // Probe-side columns should still be present.
-        Assert.Equal(95f, row["left_table.score"].AsScalar());
+        Assert.Equal(95f, row["left_table.score"].AsFloat32());
         Assert.Equal("Alice", row["right_table.name"].AsString());
     }
 
@@ -552,8 +552,8 @@ public sealed class IndexNestedLoopJoinTests
         // Build side: ScanOperator with NO source index.
         Row[] buildRows =
         [
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.val", DataValue.FromString("X"))),
-            MakeRow(("r.id", DataValue.FromScalar(2f)), ("r.val", DataValue.FromString("Y"))),
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("X"))),
+            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.val", DataValue.FromString("Y"))),
         ];
 
         TableDescriptor buildDescriptor = CreateDescriptor("build");
@@ -561,8 +561,8 @@ public sealed class IndexNestedLoopJoinTests
         // No SetSourceIndex call — no sorted index available.
 
         MockOperator probeOperator = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(2f)), ("l.name", DataValue.FromString("Bob"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(2f)), ("l.name", DataValue.FromString("Bob"))));
 
         JoinOperator join = new(probeOperator, buildScan, JoinType.Inner,
             new BinaryExpression(
@@ -595,12 +595,12 @@ public sealed class IndexNestedLoopJoinTests
     {
         Row[] buildRows =
         [
-            MakeRow(("r.id", DataValue.FromScalar(1f)), ("r.val", DataValue.FromString("X"))),
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("X"))),
         ];
 
         ValueIndexEntry[] indexEntries =
         [
-            new(DataValue.FromScalar(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
         ];
 
         SortedValueIndex sortedIndex = new(indexEntries);
@@ -613,7 +613,7 @@ public sealed class IndexNestedLoopJoinTests
 
         SourceIndex sourceIndex = new(
             new SourceFingerprint(100, new byte[32]),
-            new IndexSchema(new Schema([new ColumnInfo("r.id", DataKind.Scalar, false), new ColumnInfo("r.val", DataKind.String, false)]), 1),
+            new IndexSchema(new Schema([new ColumnInfo("r.id", DataKind.Float32, false), new ColumnInfo("r.val", DataKind.String, false)]), 1),
             chunks,
             sortedIndexes: sortedIndexSet);
 
@@ -622,8 +622,8 @@ public sealed class IndexNestedLoopJoinTests
         buildScan.SetSourceIndex(sourceIndex);
 
         MockOperator probeOperator = new(
-            MakeRow(("l.id", DataValue.FromScalar(1f)), ("l.name", DataValue.FromString("Alice"))),
-            MakeRow(("l.id", DataValue.FromScalar(999f)), ("l.name", DataValue.FromString("NoMatch"))));
+            MakeRow(("l.id", DataValue.FromFloat32(1f)), ("l.name", DataValue.FromString("Alice"))),
+            MakeRow(("l.id", DataValue.FromFloat32(999f)), ("l.name", DataValue.FromString("NoMatch"))));
 
         JoinOperator join = new(probeOperator, buildScan, JoinType.Left,
             new BinaryExpression(
@@ -735,7 +735,7 @@ public sealed class IndexNestedLoopJoinTests
             TableDescriptor descriptor, CancellationToken cancellationToken)
         {
             ColumnInfo[] columns = _rows[0].ColumnNames
-                .Select(name => new ColumnInfo(name, DataKind.Scalar, false))
+                .Select(name => new ColumnInfo(name, DataKind.Float32, false))
                 .ToArray();
             return Task.FromResult(new Schema(columns));
         }

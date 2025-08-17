@@ -24,7 +24,7 @@ public sealed class MinuteFunction : IScalarFunction
             throw new ArgumentException($"minute() requires a Date, DateTime, or Time argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class MinuteFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int minute = input.Kind switch
@@ -44,6 +44,6 @@ public sealed class MinuteFunction : IScalarFunction
             _ => input.AsDateTime().Minute,
         };
 
-        return DataValue.FromScalar(minute);
+        return DataValue.FromFloat32(minute);
     }
 }

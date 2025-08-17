@@ -198,7 +198,7 @@ public sealed class InsightAnalyzerTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000 - nullCount,
             NullCount = nullCount,
             ValidCount = 1000 - nullCount,

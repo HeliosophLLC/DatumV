@@ -24,7 +24,7 @@ public sealed class NormalizeFunction : IScalarFunction
 
         if (inputKind == DataKind.UInt8)
         {
-            return DataKind.Scalar;
+            return DataKind.Float32;
         }
 
         if (inputKind == DataKind.UInt8Array)
@@ -32,7 +32,7 @@ public sealed class NormalizeFunction : IScalarFunction
             return DataKind.Vector;
         }
 
-        if (inputKind is DataKind.Scalar or DataKind.Vector or DataKind.Tensor or DataKind.Matrix)
+        if (inputKind is DataKind.Float32 or DataKind.Vector or DataKind.Tensor or DataKind.Matrix)
         {
             if (argumentKinds.Length < 3)
             {
@@ -56,7 +56,7 @@ public sealed class NormalizeFunction : IScalarFunction
         switch (input.Kind)
         {
             case DataKind.UInt8:
-                return DataValue.FromScalar(input.AsUInt8() / 255.0f);
+                return DataValue.FromFloat32(input.AsUInt8() / 255.0f);
 
             case DataKind.UInt8Array:
             {
@@ -69,22 +69,22 @@ public sealed class NormalizeFunction : IScalarFunction
                 return DataValue.FromVector(result);
             }
 
-            case DataKind.Scalar:
+            case DataKind.Float32:
             {
-                float min = arguments[1].AsScalar();
-                float max = arguments[2].AsScalar();
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
                 float range = max - min;
                 if (range == 0)
                 {
-                    return DataValue.FromScalar(0);
+                    return DataValue.FromFloat32(0);
                 }
-                return DataValue.FromScalar((input.AsScalar() - min) / range);
+                return DataValue.FromFloat32((input.AsFloat32() - min) / range);
             }
 
             case DataKind.Vector:
             {
-                float min = arguments[1].AsScalar();
-                float max = arguments[2].AsScalar();
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
                 float range = max - min;
                 float[] sourceVector = input.AsVector();
                 float[] result = new float[sourceVector.Length];
@@ -97,8 +97,8 @@ public sealed class NormalizeFunction : IScalarFunction
 
             case DataKind.Matrix:
             {
-                float min = arguments[1].AsScalar();
-                float max = arguments[2].AsScalar();
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
                 float range = max - min;
                 float[] sourceData = input.AsMatrix(out int rows, out int columns);
                 float[] result = new float[sourceData.Length];
@@ -111,8 +111,8 @@ public sealed class NormalizeFunction : IScalarFunction
 
             case DataKind.Tensor:
             {
-                float min = arguments[1].AsScalar();
-                float max = arguments[2].AsScalar();
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
                 float range = max - min;
                 float[] sourceData = input.AsTensor(out int[] shape);
                 float[] result = new float[sourceData.Length];

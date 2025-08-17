@@ -123,8 +123,8 @@ internal static class ColumnMatcher
         }
 
         // Numeric coercion: Scalar ↔ UInt8.
-        if ((left is DataKind.Scalar && right is DataKind.UInt8) ||
-            (left is DataKind.UInt8 && right is DataKind.Scalar))
+        if ((left is DataKind.Float32 && right is DataKind.UInt8) ||
+            (left is DataKind.UInt8 && right is DataKind.Float32))
         {
             return 0.8;
         }

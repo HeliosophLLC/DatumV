@@ -21,11 +21,11 @@ public sealed class RandomTruncatedNormalFunction : IScalarFunction
 
         for (int i = 0; i < 4; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
                 throw new ArgumentException($"random_truncated_normal() argument {i + 1} must be Scalar or UInt8, got {argumentKinds[i]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -47,16 +47,16 @@ public sealed class RandomTruncatedNormalFunction : IScalarFunction
         {
             float sample = mean + stddev * RandomNormalFunction.SampleStandardNormal();
             if (sample >= min && sample <= max)
-                return DataValue.FromScalar(sample);
+                return DataValue.FromFloat32(sample);
         }
 
         // Fallback: clamp to range if rejection sampling exhausted (degenerate parameters).
         float fallback = mean + stddev * RandomNormalFunction.SampleStandardNormal();
-        return DataValue.FromScalar(System.Math.Clamp(fallback, min, max));
+        return DataValue.FromFloat32(System.Math.Clamp(fallback, min, max));
     }
 
     private static float ExtractFloat(DataValue value) =>
-        value.Kind is DataKind.UInt8 ? value.AsUInt8() : value.AsScalar();
+        value.Kind is DataKind.UInt8 ? value.AsUInt8() : value.AsFloat32();
 }
 
 /// <summary>
@@ -74,13 +74,13 @@ public sealed class RandomLogNormalFunction : IScalarFunction
         if (argumentKinds.Length != 2)
             throw new ArgumentException("random_log_normal() requires exactly 2 arguments (mean, stddev).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_log_normal() mean (argument 1) must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_log_normal() stddev (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -88,17 +88,17 @@ public sealed class RandomLogNormalFunction : IScalarFunction
     {
         float mean = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         float stddev = arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar();
+            : arguments[1].AsFloat32();
 
         if (stddev < 0)
             throw new ArgumentException($"random_log_normal() stddev must be non-negative, got {stddev}.");
 
         float normalSample = mean + stddev * RandomNormalFunction.SampleStandardNormal();
-        return DataValue.FromScalar(MathF.Exp(normalSample));
+        return DataValue.FromFloat32(MathF.Exp(normalSample));
     }
 }
 
@@ -118,10 +118,10 @@ public sealed class RandomExponentialFunction : IScalarFunction
         if (argumentKinds.Length != 1)
             throw new ArgumentException("random_exponential() requires exactly 1 argument (rate).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_exponential() rate must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -129,14 +129,14 @@ public sealed class RandomExponentialFunction : IScalarFunction
     {
         float rate = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         if (rate <= 0)
             throw new ArgumentException($"random_exponential() rate must be positive, got {rate}.");
 
         // 1 - NextDouble() avoids log(0).
         double sample = -System.Math.Log(1.0 - Random.Shared.NextDouble()) / rate;
-        return DataValue.FromScalar((float)sample);
+        return DataValue.FromFloat32((float)sample);
     }
 }
 
@@ -156,13 +156,13 @@ public sealed class RandomBetaFunction : IScalarFunction
         if (argumentKinds.Length != 2)
             throw new ArgumentException("random_beta() requires exactly 2 arguments (alpha, beta).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_beta() alpha (argument 1) must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_beta() beta (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -170,11 +170,11 @@ public sealed class RandomBetaFunction : IScalarFunction
     {
         float alpha = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         float beta = arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar();
+            : arguments[1].AsFloat32();
 
         if (alpha <= 0)
             throw new ArgumentException($"random_beta() alpha must be positive, got {alpha}.");
@@ -183,7 +183,7 @@ public sealed class RandomBetaFunction : IScalarFunction
 
         double x = SampleGamma(alpha);
         double y = SampleGamma(beta);
-        return DataValue.FromScalar((float)(x / (x + y)));
+        return DataValue.FromFloat32((float)(x / (x + y)));
     }
 
     /// <summary>
@@ -233,10 +233,10 @@ public sealed class RandomPoissonFunction : IScalarFunction
         if (argumentKinds.Length != 1)
             throw new ArgumentException("random_poisson() requires exactly 1 argument (lambda).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_poisson() lambda must be Scalar or UInt8, got {argumentKinds[0]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -244,13 +244,13 @@ public sealed class RandomPoissonFunction : IScalarFunction
     {
         float lambda = arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar();
+            : arguments[0].AsFloat32();
 
         if (lambda < 0)
             throw new ArgumentException($"random_poisson() lambda must be non-negative, got {lambda}.");
 
         if (lambda == 0)
-            return DataValue.FromScalar(0f);
+            return DataValue.FromFloat32(0f);
 
         int count;
         if (lambda <= 30)
@@ -272,7 +272,7 @@ public sealed class RandomPoissonFunction : IScalarFunction
             count = System.Math.Max(0, (int)System.Math.Round(sample));
         }
 
-        return DataValue.FromScalar(count);
+        return DataValue.FromFloat32(count);
     }
 }
 
@@ -296,14 +296,14 @@ public sealed class RandomCategoricalFunction : IScalarFunction
         if (argumentKinds[0] != DataKind.Vector)
             throw new ArgumentException($"random_categorical() requires a Vector argument, got {argumentKinds[0]}.");
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull)
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
 
         float[] weights = arguments[0].AsVector();
         if (weights.Length == 0)
@@ -326,10 +326,10 @@ public sealed class RandomCategoricalFunction : IScalarFunction
         {
             cumulative += weights[i];
             if (threshold < cumulative)
-                return DataValue.FromScalar(i);
+                return DataValue.FromFloat32(i);
         }
 
         // Floating-point edge case — return the last category.
-        return DataValue.FromScalar(weights.Length - 1);
+        return DataValue.FromFloat32(weights.Length - 1);
     }
 }

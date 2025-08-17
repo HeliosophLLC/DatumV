@@ -94,7 +94,7 @@ public class HashingFunctionTests
     {
         Crc32Function function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
         Assert.False(result.IsNull);
     }
 
@@ -216,8 +216,8 @@ public class HashingFunctionTests
         BytesSliceFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromUInt8Array([1, 2, 3, 4, 5]),
-            DataValue.FromScalar(1),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(3)
         ]);
         byte[] expected = [2, 3, 4];
         Assert.Equal(expected, result.AsUInt8Array().ToArray());
@@ -229,8 +229,8 @@ public class HashingFunctionTests
         BytesSliceFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.UInt8Array),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(1)
         ]);
         Assert.True(result.IsNull);
     }
@@ -242,9 +242,9 @@ public class HashingFunctionTests
     {
         BytesFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(65),
-            DataValue.FromScalar(66),
-            DataValue.FromScalar(67)
+            DataValue.FromFloat32(65),
+            DataValue.FromFloat32(66),
+            DataValue.FromFloat32(67)
         ]);
         byte[] expected = [65, 66, 67];
         Assert.Equal(expected, result.AsUInt8Array().ToArray());
@@ -255,9 +255,9 @@ public class HashingFunctionTests
     {
         BytesFunction function = new();
         DataValue result = function.Execute([
-            DataValue.FromScalar(1),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(1),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(3)
         ]);
         byte[] expected = [1, 0, 3];
         Assert.Equal(expected, result.AsUInt8Array().ToArray());

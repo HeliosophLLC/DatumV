@@ -55,13 +55,13 @@ public sealed class ImageAnalysisFunctionTests
     [Fact]
     public void BrightnessMean_Validate_AcceptsImage()
     {
-        Assert.Equal(DataKind.Scalar, _brightnessMean.ValidateArguments([DataKind.Image]));
+        Assert.Equal(DataKind.Float32, _brightnessMean.ValidateArguments([DataKind.Image]));
     }
 
     [Fact]
     public void BrightnessMean_Validate_AcceptsUInt8Array()
     {
-        Assert.Equal(DataKind.Scalar, _brightnessMean.ValidateArguments([DataKind.UInt8Array]));
+        Assert.Equal(DataKind.Float32, _brightnessMean.ValidateArguments([DataKind.UInt8Array]));
     }
 
     [Fact]
@@ -69,13 +69,13 @@ public sealed class ImageAnalysisFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _brightnessMean.ValidateArguments([]));
         Assert.Throws<ArgumentException>(() =>
-            _brightnessMean.ValidateArguments([DataKind.Image, DataKind.Scalar]));
+            _brightnessMean.ValidateArguments([DataKind.Image, DataKind.Float32]));
     }
 
     [Fact]
     public void BrightnessMean_Validate_WrongType_Throws()
     {
-        Assert.Throws<ArgumentException>(() => _brightnessMean.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _brightnessMean.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _brightnessMean.Execute([DataValue.FromImage(png)]);
 
         // White = (255, 255, 255) → luminance ≈ 255
-        Assert.InRange(result.AsScalar(), 254f, 255.1f);
+        Assert.InRange(result.AsFloat32(), 254f, 255.1f);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public sealed class ImageAnalysisFunctionTests
         byte[] png = MakeTestPng(4, 4, SKColors.Black);
         DataValue result = _brightnessMean.Execute([DataValue.FromImage(png)]);
 
-        Assert.InRange(result.AsScalar(), -0.1f, 0.1f);
+        Assert.InRange(result.AsFloat32(), -0.1f, 0.1f);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class ImageAnalysisFunctionTests
     [Fact]
     public void BrightnessStd_Validate_AcceptsImage()
     {
-        Assert.Equal(DataKind.Scalar,
+        Assert.Equal(DataKind.Float32,
             _brightnessStandardDeviation.ValidateArguments([DataKind.Image]));
     }
 
@@ -135,7 +135,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _brightnessStandardDeviation.Execute([DataValue.FromImage(png)]);
 
         // All pixels have identical luminance → std dev = 0
-        Assert.InRange(result.AsScalar(), -0.1f, 0.1f);
+        Assert.InRange(result.AsFloat32(), -0.1f, 0.1f);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _brightnessStandardDeviation.Execute([DataValue.FromImage(png)]);
 
         // Black/white checkerboard → high std dev
-        Assert.True(result.AsScalar() > 50f);
+        Assert.True(result.AsFloat32() > 50f);
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public sealed class ImageAnalysisFunctionTests
     [Fact]
     public void DetectBlur_Validate_AcceptsImage()
     {
-        Assert.Equal(DataKind.Scalar, _detectBlur.ValidateArguments([DataKind.Image]));
+        Assert.Equal(DataKind.Float32, _detectBlur.ValidateArguments([DataKind.Image]));
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _detectBlur.Execute([DataValue.FromImage(png)]);
 
         // Solid color → no edges → Laplacian variance = 0
-        Assert.InRange(result.AsScalar(), -0.1f, 0.1f);
+        Assert.InRange(result.AsFloat32(), -0.1f, 0.1f);
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _detectBlur.Execute([DataValue.FromImage(png)]);
 
         // High-frequency pattern → high Laplacian variance
-        Assert.True(result.AsScalar() > 100f);
+        Assert.True(result.AsFloat32() > 100f);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public sealed class ImageAnalysisFunctionTests
     [Fact]
     public void CompressionArtifactScore_Validate_AcceptsImage()
     {
-        Assert.Equal(DataKind.Scalar,
+        Assert.Equal(DataKind.Float32,
             _compressionArtifactScore.ValidateArguments([DataKind.Image]));
     }
 
@@ -284,7 +284,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _compressionArtifactScore.Execute([DataValue.FromImage(png)]);
 
         // Solid color → no block artifacts → score near 0
-        Assert.InRange(result.AsScalar(), 0f, 0.1f);
+        Assert.InRange(result.AsFloat32(), 0f, 0.1f);
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public sealed class ImageAnalysisFunctionTests
         DataValue result = _compressionArtifactScore.Execute([DataValue.FromImage(png)]);
 
         // Too small for block analysis
-        Assert.InRange(result.AsScalar(), 0f, 0.01f);
+        Assert.InRange(result.AsFloat32(), 0f, 0.01f);
     }
 
     [Fact]

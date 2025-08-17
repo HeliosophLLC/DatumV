@@ -7,7 +7,7 @@ using DatumIngest.Model;
 /// When more than K distinct values are observed, the least frequent are evicted.
 /// </summary>
 /// <remarks>
-/// For <see cref="DataKind.Scalar"/> and <see cref="DataKind.UInt8"/> columns, frequencies
+/// For <see cref="DataKind.Float32"/> and <see cref="DataKind.UInt8"/> columns, frequencies
 /// are tracked using integer keys (float bit patterns or byte values) to avoid per-row
 /// string allocations on the hot path. String keys are produced on demand for results.
 /// </remarks>
@@ -33,7 +33,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     /// </summary>
     /// <param name="k">Maximum number of top values to track.</param>
     /// <param name="kind">
-    /// The <see cref="DataKind"/> of the column. <see cref="DataKind.Scalar"/> and
+    /// The <see cref="DataKind"/> of the column. <see cref="DataKind.Float32"/> and
     /// <see cref="DataKind.UInt8"/> use integer-keyed dictionaries to avoid per-row
     /// string allocations.
     /// </param>
@@ -42,7 +42,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
         _k = k;
         _kind = kind;
 
-        if (kind is DataKind.Scalar or DataKind.UInt8)
+        if (kind is DataKind.Float32 or DataKind.UInt8)
         {
             _numericFrequencies = new();
         }
@@ -85,7 +85,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
         {
             int key = _kind == DataKind.UInt8
                 ? value.AsUInt8()
-                : BitConverter.SingleToInt32Bits(value.AsScalar());
+                : BitConverter.SingleToInt32Bits(value.AsFloat32());
 
             if (_numericFrequencies.TryGetValue(key, out long currentCount))
             {
@@ -234,7 +234,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     {
         return _kind switch
         {
-            DataKind.Scalar => BitConverter.Int32BitsToSingle(key).ToString("G"),
+            DataKind.Float32 => BitConverter.Int32BitsToSingle(key).ToString("G"),
             DataKind.UInt8 => ((byte)key).ToString(),
             _ => key.ToString()
         };
@@ -244,7 +244,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     {
         return value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar().ToString("G"),
+            DataKind.Float32 => value.AsFloat32().ToString("G"),
             DataKind.UInt8 => value.AsUInt8().ToString(),
             DataKind.String => value.AsString(),
             DataKind.Date => value.AsDate().ToString("O"),

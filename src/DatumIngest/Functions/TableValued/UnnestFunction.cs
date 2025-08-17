@@ -30,7 +30,7 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
     {
         if (argumentKinds.Length != 1)
         {
-            return new Schema([new ColumnInfo("value", DataKind.Scalar, nullable: true)]);
+            return new Schema([new ColumnInfo("value", DataKind.Float32, nullable: true)]);
         }
 
         DataKind inputKind = argumentKinds[0];
@@ -40,7 +40,7 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
         {
             // Vector elements are floats.
             DataKind.Vector => new Schema(
-                [new ColumnInfo("value", DataKind.Scalar, nullable: false)]),
+                [new ColumnInfo("value", DataKind.Float32, nullable: false)]),
 
             // UInt8Array elements are bytes.
             DataKind.UInt8Array => new Schema(
@@ -85,7 +85,7 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 foreach (float item in values)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    yield return new Row(names, [DataValue.FromScalar(item)], nameIndex);
+                    yield return new Row(names, [DataValue.FromFloat32(item)], nameIndex);
                 }
                 break;
             }
@@ -173,9 +173,9 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
         return element.ValueKind switch
         {
             JsonValueKind.String => DataValue.FromString(element.GetString()!),
-            JsonValueKind.Number => DataValue.FromScalar(element.GetSingle()),
-            JsonValueKind.True => DataValue.FromScalar(1.0f),
-            JsonValueKind.False => DataValue.FromScalar(0.0f),
+            JsonValueKind.Number => DataValue.FromFloat32(element.GetSingle()),
+            JsonValueKind.True => DataValue.FromFloat32(1.0f),
+            JsonValueKind.False => DataValue.FromFloat32(0.0f),
             JsonValueKind.Null => DataValue.Null(DataKind.String),
             JsonValueKind.Array or JsonValueKind.Object => DataValue.FromJsonValue(element.GetRawText()),
             _ => DataValue.Null(DataKind.String),

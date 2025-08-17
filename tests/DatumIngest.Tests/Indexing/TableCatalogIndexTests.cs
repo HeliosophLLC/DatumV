@@ -57,7 +57,7 @@ public sealed class TableCatalogIndexTests
         catalog.Register(new TableDescriptor("csv", "data", "data.csv", new Dictionary<string, string>()));
 
         Schema expectedSchema = new([
-            new ColumnInfo("id", DataKind.Scalar, nullable: false),
+            new ColumnInfo("id", DataKind.Float32, nullable: false),
             new ColumnInfo("value", DataKind.String, nullable: true),
         ]);
         IndexSchema indexSchema = new(expectedSchema, 500);
@@ -89,7 +89,7 @@ public sealed class TableCatalogIndexTests
     private static SourceIndex CreateTestIndex()
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
-        Schema schema = new([new ColumnInfo("x", DataKind.Scalar, nullable: false)]);
+        Schema schema = new([new ColumnInfo("x", DataKind.Float32, nullable: false)]);
         IndexSchema indexSchema = new(schema, 100);
         return new SourceIndex(fingerprint, indexSchema, []);
     }

@@ -19,7 +19,7 @@ public sealed class RandomVectorFunction : IScalarFunction
         if (argumentKinds.Length != 1)
             throw new ArgumentException("random_vector() requires exactly 1 argument (length).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_vector() length must be Scalar or UInt8, got {argumentKinds[0]}.");
 
         return DataKind.Vector;
@@ -30,7 +30,7 @@ public sealed class RandomVectorFunction : IScalarFunction
     {
         int length = (int)(arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar());
+            : arguments[0].AsFloat32());
 
         if (length <= 0)
             throw new ArgumentException($"random_vector() length must be positive, got {length}.");
@@ -63,7 +63,7 @@ public sealed class RandomNormalVectorFunction : IScalarFunction
 
         for (int i = 0; i < 3; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Scalar or DataKind.UInt8))
+            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
                 throw new ArgumentException($"random_normal_vector() argument {i + 1} must be Scalar or UInt8, got {argumentKinds[i]}.");
         }
 
@@ -75,15 +75,15 @@ public sealed class RandomNormalVectorFunction : IScalarFunction
     {
         int length = (int)(arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar());
+            : arguments[0].AsFloat32());
 
         float mean = arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar();
+            : arguments[1].AsFloat32();
 
         float stddev = arguments[2].Kind is DataKind.UInt8
             ? arguments[2].AsUInt8()
-            : arguments[2].AsScalar();
+            : arguments[2].AsFloat32();
 
         if (length <= 0)
             throw new ArgumentException($"random_normal_vector() length must be positive, got {length}.");
@@ -117,7 +117,7 @@ public sealed class RandomPermutationFunction : IScalarFunction
         if (argumentKinds.Length != 1)
             throw new ArgumentException("random_permutation() requires exactly 1 argument (length).");
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_permutation() length must be Scalar or UInt8, got {argumentKinds[0]}.");
 
         return DataKind.Vector;
@@ -128,7 +128,7 @@ public sealed class RandomPermutationFunction : IScalarFunction
     {
         int length = (int)(arguments[0].Kind is DataKind.UInt8
             ? arguments[0].AsUInt8()
-            : arguments[0].AsScalar());
+            : arguments[0].AsFloat32());
 
         if (length <= 0)
             throw new ArgumentException($"random_permutation() length must be positive, got {length}.");
@@ -170,7 +170,7 @@ public sealed class RandomChoiceFunction : IScalarFunction
         if (argumentKinds[0] != DataKind.Array)
             throw new ArgumentException($"random_choice() first argument must be Array, got {argumentKinds[0]}.");
 
-        if (argumentKinds[1] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
             throw new ArgumentException($"random_choice() count (argument 2) must be Scalar or UInt8, got {argumentKinds[1]}.");
 
         return DataKind.Array;
@@ -187,7 +187,7 @@ public sealed class RandomChoiceFunction : IScalarFunction
 
         int count = (int)(arguments[1].Kind is DataKind.UInt8
             ? arguments[1].AsUInt8()
-            : arguments[1].AsScalar());
+            : arguments[1].AsFloat32());
 
         if (count < 0)
             throw new ArgumentException($"random_choice() count must be non-negative, got {count}.");

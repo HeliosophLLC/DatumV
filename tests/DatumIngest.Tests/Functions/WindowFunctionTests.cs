@@ -61,28 +61,28 @@ public class WindowFunctionTests
         RowNumberFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("x", DataValue.FromScalar(10f))),
-            MakeRow(("x", DataValue.FromScalar(20f))),
-            MakeRow(("x", DataValue.FromScalar(30f))),
+            MakeRow(("x", DataValue.FromFloat32(10f))),
+            MakeRow(("x", DataValue.FromFloat32(20f))),
+            MakeRow(("x", DataValue.FromFloat32(30f))),
         ];
 
         DataValue[] results = ComputeWindow(function, rows);
 
-        Assert.Equal(1f, results[0].AsScalar());
-        Assert.Equal(2f, results[1].AsScalar());
-        Assert.Equal(3f, results[2].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(2f, results[1].AsFloat32());
+        Assert.Equal(3f, results[2].AsFloat32());
     }
 
     [Fact]
     public void RowNumber_SingleRow()
     {
         RowNumberFunction function = new();
-        List<Row> rows = [MakeRow(("x", DataValue.FromScalar(1f)))];
+        List<Row> rows = [MakeRow(("x", DataValue.FromFloat32(1f)))];
 
         DataValue[] results = ComputeWindow(function, rows);
 
         Assert.Single(results);
-        Assert.Equal(1f, results[0].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class WindowFunctionTests
     {
         RowNumberFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class WindowFunctionTests
     {
         RowNumberFunction function = new();
         DataKind result = function.ValidateArguments([]);
-        Assert.Equal(DataKind.Scalar, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ─────────────── RANK ───────────────
@@ -109,10 +109,10 @@ public class WindowFunctionTests
         RankFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("score", DataValue.FromScalar(100f))),
-            MakeRow(("score", DataValue.FromScalar(100f))),
-            MakeRow(("score", DataValue.FromScalar(90f))),
-            MakeRow(("score", DataValue.FromScalar(80f))),
+            MakeRow(("score", DataValue.FromFloat32(100f))),
+            MakeRow(("score", DataValue.FromFloat32(100f))),
+            MakeRow(("score", DataValue.FromFloat32(90f))),
+            MakeRow(("score", DataValue.FromFloat32(80f))),
         ];
 
         IReadOnlyList<OrderByItem> orderBy =
@@ -123,10 +123,10 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, orderByItems: orderBy);
 
         // Tied at rank 1, then rank 3 (gap), then rank 4
-        Assert.Equal(1f, results[0].AsScalar());
-        Assert.Equal(1f, results[1].AsScalar());
-        Assert.Equal(3f, results[2].AsScalar());
-        Assert.Equal(4f, results[3].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(1f, results[1].AsFloat32());
+        Assert.Equal(3f, results[2].AsFloat32());
+        Assert.Equal(4f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -135,9 +135,9 @@ public class WindowFunctionTests
         RankFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("score", DataValue.FromScalar(100f))),
-            MakeRow(("score", DataValue.FromScalar(90f))),
-            MakeRow(("score", DataValue.FromScalar(80f))),
+            MakeRow(("score", DataValue.FromFloat32(100f))),
+            MakeRow(("score", DataValue.FromFloat32(90f))),
+            MakeRow(("score", DataValue.FromFloat32(80f))),
         ];
 
         IReadOnlyList<OrderByItem> orderBy =
@@ -147,9 +147,9 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, orderByItems: orderBy);
 
-        Assert.Equal(1f, results[0].AsScalar());
-        Assert.Equal(2f, results[1].AsScalar());
-        Assert.Equal(3f, results[2].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(2f, results[1].AsFloat32());
+        Assert.Equal(3f, results[2].AsFloat32());
     }
 
     // ─────────────── DENSE_RANK ───────────────
@@ -160,10 +160,10 @@ public class WindowFunctionTests
         DenseRankFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("score", DataValue.FromScalar(100f))),
-            MakeRow(("score", DataValue.FromScalar(100f))),
-            MakeRow(("score", DataValue.FromScalar(90f))),
-            MakeRow(("score", DataValue.FromScalar(80f))),
+            MakeRow(("score", DataValue.FromFloat32(100f))),
+            MakeRow(("score", DataValue.FromFloat32(100f))),
+            MakeRow(("score", DataValue.FromFloat32(90f))),
+            MakeRow(("score", DataValue.FromFloat32(80f))),
         ];
 
         IReadOnlyList<OrderByItem> orderBy =
@@ -174,10 +174,10 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, orderByItems: orderBy);
 
         // Tied at rank 1, then rank 2 (no gap), then rank 3
-        Assert.Equal(1f, results[0].AsScalar());
-        Assert.Equal(1f, results[1].AsScalar());
-        Assert.Equal(2f, results[2].AsScalar());
-        Assert.Equal(3f, results[3].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(1f, results[1].AsFloat32());
+        Assert.Equal(2f, results[2].AsFloat32());
+        Assert.Equal(3f, results[3].AsFloat32());
     }
 
     // ─────────────── NTILE ───────────────
@@ -188,20 +188,20 @@ public class WindowFunctionTests
         NtileFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
         ];
 
         // NTILE(2) on 4 rows → buckets 1,1,2,2
         IReadOnlyList<Expression> arguments = [new LiteralExpression(2)];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(1f, results[0].AsScalar());
-        Assert.Equal(1f, results[1].AsScalar());
-        Assert.Equal(2f, results[2].AsScalar());
-        Assert.Equal(2f, results[3].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(1f, results[1].AsFloat32());
+        Assert.Equal(2f, results[2].AsFloat32());
+        Assert.Equal(2f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -210,22 +210,22 @@ public class WindowFunctionTests
         NtileFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(3f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(5f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
         ];
 
         // NTILE(3) on 5 rows → 2+2+1 distribution → buckets 1,1,2,2,3
         IReadOnlyList<Expression> arguments = [new LiteralExpression(3)];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(1f, results[0].AsScalar());
-        Assert.Equal(1f, results[1].AsScalar());
-        Assert.Equal(2f, results[2].AsScalar());
-        Assert.Equal(2f, results[3].AsScalar());
-        Assert.Equal(3f, results[4].AsScalar());
+        Assert.Equal(1f, results[0].AsFloat32());
+        Assert.Equal(1f, results[1].AsFloat32());
+        Assert.Equal(2f, results[2].AsFloat32());
+        Assert.Equal(2f, results[3].AsFloat32());
+        Assert.Equal(3f, results[4].AsFloat32());
     }
 
     [Fact]
@@ -244,17 +244,17 @@ public class WindowFunctionTests
         LagFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
         Assert.True(results[0].IsNull);
-        Assert.Equal(10f, results[1].AsScalar());
-        Assert.Equal(20f, results[2].AsScalar());
+        Assert.Equal(10f, results[1].AsFloat32());
+        Assert.Equal(20f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -263,10 +263,10 @@ public class WindowFunctionTests
         LagFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
-            MakeRow(("val", DataValue.FromScalar(40f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
+            MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
         // LAG(val, 2) — offset of 2
@@ -280,8 +280,8 @@ public class WindowFunctionTests
 
         Assert.True(results[0].IsNull);
         Assert.True(results[1].IsNull);
-        Assert.Equal(10f, results[2].AsScalar());
-        Assert.Equal(20f, results[3].AsScalar());
+        Assert.Equal(10f, results[2].AsFloat32());
+        Assert.Equal(20f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -290,8 +290,8 @@ public class WindowFunctionTests
         LagFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
         // LAG(val, 1, -1) — offset 1, default -1
@@ -304,8 +304,8 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(-1f, results[0].AsScalar());
-        Assert.Equal(10f, results[1].AsScalar());
+        Assert.Equal(-1f, results[0].AsFloat32());
+        Assert.Equal(10f, results[1].AsFloat32());
     }
 
     // ─────────────── LEAD ───────────────
@@ -316,16 +316,16 @@ public class WindowFunctionTests
         LeadFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(20f, results[0].AsScalar());
-        Assert.Equal(30f, results[1].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
+        Assert.Equal(30f, results[1].AsFloat32());
         Assert.True(results[2].IsNull);
     }
 
@@ -335,10 +335,10 @@ public class WindowFunctionTests
         LeadFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
-            MakeRow(("val", DataValue.FromScalar(40f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
+            MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
         // LEAD(val, 2) — offset of 2
@@ -350,8 +350,8 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(30f, results[0].AsScalar());
-        Assert.Equal(40f, results[1].AsScalar());
+        Assert.Equal(30f, results[0].AsFloat32());
+        Assert.Equal(40f, results[1].AsFloat32());
         Assert.True(results[2].IsNull);
         Assert.True(results[3].IsNull);
     }
@@ -362,8 +362,8 @@ public class WindowFunctionTests
         LeadFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
         // LEAD(val, 1, 999) — offset 1, default 999
@@ -376,8 +376,8 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(20f, results[0].AsScalar());
-        Assert.Equal(999f, results[1].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
+        Assert.Equal(999f, results[1].AsFloat32());
     }
 
     // ─────────────── AggregateWindowAdapter ───────────────
@@ -388,9 +388,9 @@ public class WindowFunctionTests
         AggregateWindowAdapter function = new(new SumFunction());
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -398,9 +398,9 @@ public class WindowFunctionTests
         // No frame → whole partition, sum = 60 for every row
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(60f, results[0].AsScalar());
-        Assert.Equal(60f, results[1].AsScalar());
-        Assert.Equal(60f, results[2].AsScalar());
+        Assert.Equal(60f, results[0].AsFloat32());
+        Assert.Equal(60f, results[1].AsFloat32());
+        Assert.Equal(60f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -409,9 +409,9 @@ public class WindowFunctionTests
         AggregateWindowAdapter function = new(new SumFunction());
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -425,9 +425,9 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows,
             argumentExpressions: arguments, frame: frame);
 
-        Assert.Equal(10f, results[0].AsScalar());
-        Assert.Equal(30f, results[1].AsScalar());
-        Assert.Equal(60f, results[2].AsScalar());
+        Assert.Equal(10f, results[0].AsFloat32());
+        Assert.Equal(30f, results[1].AsFloat32());
+        Assert.Equal(60f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -436,17 +436,17 @@ public class WindowFunctionTests
         AggregateWindowAdapter function = new(new CountFunction());
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(3f, results[0].AsScalar());
-        Assert.Equal(3f, results[1].AsScalar());
-        Assert.Equal(3f, results[2].AsScalar());
+        Assert.Equal(3f, results[0].AsFloat32());
+        Assert.Equal(3f, results[1].AsFloat32());
+        Assert.Equal(3f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -455,10 +455,10 @@ public class WindowFunctionTests
         AggregateWindowAdapter function = new(new AvgFunction());
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
-            MakeRow(("val", DataValue.FromScalar(40f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
+            MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -473,13 +473,13 @@ public class WindowFunctionTests
             argumentExpressions: arguments, frame: frame);
 
         // Row 0: avg(10,20) = 15
-        Assert.Equal(15f, results[0].AsScalar());
+        Assert.Equal(15f, results[0].AsFloat32());
         // Row 1: avg(10,20,30) = 20
-        Assert.Equal(20f, results[1].AsScalar());
+        Assert.Equal(20f, results[1].AsFloat32());
         // Row 2: avg(20,30,40) = 30
-        Assert.Equal(30f, results[2].AsScalar());
+        Assert.Equal(30f, results[2].AsFloat32());
         // Row 3: avg(30,40) = 35
-        Assert.Equal(35f, results[3].AsScalar());
+        Assert.Equal(35f, results[3].AsFloat32());
     }
 
     // ─────────────── FunctionRegistry integration ───────────────
@@ -554,17 +554,17 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(10f, results[0].AsScalar());
-        Assert.Equal(10f, results[1].AsScalar());
-        Assert.Equal(10f, results[2].AsScalar());
+        Assert.Equal(10f, results[0].AsFloat32());
+        Assert.Equal(10f, results[1].AsFloat32());
+        Assert.Equal(10f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -573,9 +573,9 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -589,9 +589,9 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
 
         // First value of the running frame is always the first partition row.
-        Assert.Equal(10f, results[0].AsScalar());
-        Assert.Equal(10f, results[1].AsScalar());
-        Assert.Equal(10f, results[2].AsScalar());
+        Assert.Equal(10f, results[0].AsFloat32());
+        Assert.Equal(10f, results[1].AsFloat32());
+        Assert.Equal(10f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -600,10 +600,10 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
-            MakeRow(("val", DataValue.FromScalar(40f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
+            MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -617,13 +617,13 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
 
         // Row 0: frame [0,1] → first = 10
-        Assert.Equal(10f, results[0].AsScalar());
+        Assert.Equal(10f, results[0].AsFloat32());
         // Row 1: frame [0,2] → first = 10
-        Assert.Equal(10f, results[1].AsScalar());
+        Assert.Equal(10f, results[1].AsFloat32());
         // Row 2: frame [1,3] → first = 20
-        Assert.Equal(20f, results[2].AsScalar());
+        Assert.Equal(20f, results[2].AsFloat32());
         // Row 3: frame [2,3] → first = 30
-        Assert.Equal(30f, results[3].AsScalar());
+        Assert.Equal(30f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -632,20 +632,20 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
-            MakeRow(("val", DataValue.FromScalar(40f))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
+            MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
-        Assert.Equal(30f, results[0].AsScalar());
-        Assert.Equal(30f, results[1].AsScalar());
-        Assert.Equal(30f, results[2].AsScalar());
-        Assert.Equal(30f, results[3].AsScalar());
+        Assert.Equal(30f, results[0].AsFloat32());
+        Assert.Equal(30f, results[1].AsFloat32());
+        Assert.Equal(30f, results[2].AsFloat32());
+        Assert.Equal(30f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -654,8 +654,8 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -672,13 +672,13 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(42f))),
+            MakeRow(("val", DataValue.FromFloat32(42f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(42f, results[0].AsScalar());
+        Assert.Equal(42f, results[0].AsFloat32());
     }
 
     [Fact]
@@ -687,7 +687,7 @@ public class WindowFunctionTests
         FirstValueFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([]));
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     // ─────────────── LAST_VALUE ───────────────
@@ -698,17 +698,17 @@ public class WindowFunctionTests
         LastValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(30f, results[0].AsScalar());
-        Assert.Equal(30f, results[1].AsScalar());
-        Assert.Equal(30f, results[2].AsScalar());
+        Assert.Equal(30f, results[0].AsFloat32());
+        Assert.Equal(30f, results[1].AsFloat32());
+        Assert.Equal(30f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -717,9 +717,9 @@ public class WindowFunctionTests
         LastValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
@@ -732,9 +732,9 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
 
-        Assert.Equal(10f, results[0].AsScalar());
-        Assert.Equal(20f, results[1].AsScalar());
-        Assert.Equal(30f, results[2].AsScalar());
+        Assert.Equal(10f, results[0].AsFloat32());
+        Assert.Equal(20f, results[1].AsFloat32());
+        Assert.Equal(30f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -743,20 +743,20 @@ public class WindowFunctionTests
         LastValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
-        Assert.Equal(20f, results[0].AsScalar());
-        Assert.Equal(20f, results[1].AsScalar());
-        Assert.Equal(20f, results[2].AsScalar());
-        Assert.Equal(20f, results[3].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
+        Assert.Equal(20f, results[1].AsFloat32());
+        Assert.Equal(20f, results[2].AsFloat32());
+        Assert.Equal(20f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -765,13 +765,13 @@ public class WindowFunctionTests
         LastValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(99f))),
+            MakeRow(("val", DataValue.FromFloat32(99f))),
         ];
 
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(99f, results[0].AsScalar());
+        Assert.Equal(99f, results[0].AsFloat32());
     }
 
     [Fact]
@@ -780,7 +780,7 @@ public class WindowFunctionTests
         LastValueFunction function = new();
         Assert.Throws<ArgumentException>(() => function.ValidateArguments([]));
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     // ─────────────── NTH_VALUE ───────────────
@@ -791,9 +791,9 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         // NTH_VALUE(val, 2)
@@ -806,9 +806,9 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
         // All rows see the same whole-partition frame, so 2nd value = 20 for all.
-        Assert.Equal(20f, results[0].AsScalar());
-        Assert.Equal(20f, results[1].AsScalar());
-        Assert.Equal(20f, results[2].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
+        Assert.Equal(20f, results[1].AsFloat32());
+        Assert.Equal(20f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -817,8 +817,8 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
         IReadOnlyList<Expression> arguments =
@@ -829,8 +829,8 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(10f, results[0].AsScalar());
-        Assert.Equal(10f, results[1].AsScalar());
+        Assert.Equal(10f, results[0].AsFloat32());
+        Assert.Equal(10f, results[1].AsFloat32());
     }
 
     [Fact]
@@ -839,8 +839,8 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
         // NTH_VALUE(val, 5) — only 2 rows
@@ -862,9 +862,9 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         // NTH_VALUE(val, 1) FROM LAST → last row = 30
@@ -877,9 +877,9 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
             fromLast: true);
 
-        Assert.Equal(30f, results[0].AsScalar());
-        Assert.Equal(30f, results[1].AsScalar());
-        Assert.Equal(30f, results[2].AsScalar());
+        Assert.Equal(30f, results[0].AsFloat32());
+        Assert.Equal(30f, results[1].AsFloat32());
+        Assert.Equal(30f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -888,9 +888,9 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
         ];
 
         // NTH_VALUE(val, 2) FROM LAST → second-to-last = 20
@@ -903,9 +903,9 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
             fromLast: true);
 
-        Assert.Equal(20f, results[0].AsScalar());
-        Assert.Equal(20f, results[1].AsScalar());
-        Assert.Equal(20f, results[2].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
+        Assert.Equal(20f, results[1].AsFloat32());
+        Assert.Equal(20f, results[2].AsFloat32());
     }
 
     [Fact]
@@ -914,10 +914,10 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.Null(DataKind.Float32))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
         // NTH_VALUE(val, 2) IGNORE NULLS → 2nd non-null = 20
@@ -930,10 +930,10 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments,
             nullHandling: NullHandling.IgnoreNulls);
 
-        Assert.Equal(20f, results[0].AsScalar());
-        Assert.Equal(20f, results[1].AsScalar());
-        Assert.Equal(20f, results[2].AsScalar());
-        Assert.Equal(20f, results[3].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
+        Assert.Equal(20f, results[1].AsFloat32());
+        Assert.Equal(20f, results[2].AsFloat32());
+        Assert.Equal(20f, results[3].AsFloat32());
     }
 
     [Fact]
@@ -942,10 +942,10 @@ public class WindowFunctionTests
         NthValueFunction function = new();
         List<Row> rows =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
-            MakeRow(("val", DataValue.FromScalar(30f))),
-            MakeRow(("val", DataValue.FromScalar(40f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
+            MakeRow(("val", DataValue.FromFloat32(30f))),
+            MakeRow(("val", DataValue.FromFloat32(40f))),
         ];
 
         // NTH_VALUE(val, 2) with ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
@@ -963,11 +963,11 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments, frame: frame);
 
         // Row 0: frame [0,3], 2nd = 20
-        Assert.Equal(20f, results[0].AsScalar());
+        Assert.Equal(20f, results[0].AsFloat32());
         // Row 1: frame [1,3], 2nd = 30
-        Assert.Equal(30f, results[1].AsScalar());
+        Assert.Equal(30f, results[1].AsFloat32());
         // Row 2: frame [2,3], 2nd = 40
-        Assert.Equal(40f, results[2].AsScalar());
+        Assert.Equal(40f, results[2].AsFloat32());
         // Row 3: frame [3,3], only 1 row, 2nd = NULL
         Assert.True(results[3].IsNull);
     }
@@ -976,9 +976,9 @@ public class WindowFunctionTests
     public void NthValue_InvalidArgumentCount_Throws()
     {
         NthValueFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -986,6 +986,6 @@ public class WindowFunctionTests
     {
         NthValueFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.String]));
+            function.ValidateArguments([DataKind.Float32, DataKind.String]));
     }
 }

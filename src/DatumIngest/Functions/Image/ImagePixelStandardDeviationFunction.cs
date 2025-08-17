@@ -38,7 +38,7 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICost
                 $"image_pixel_std() second argument (channels) must be Vector, got {argumentKinds[1]}.");
         }
 
-        return argumentKinds.Length == 1 ? DataKind.Scalar : DataKind.Vector;
+        return argumentKinds.Length == 1 ? DataKind.Float32 : DataKind.Vector;
     }
 
     /// <inheritdoc />
@@ -48,7 +48,7 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICost
 
         if (input.IsNull)
         {
-            DataKind resultKind = arguments.Length == 1 ? DataKind.Scalar : DataKind.Vector;
+            DataKind resultKind = arguments.Length == 1 ? DataKind.Float32 : DataKind.Vector;
             return DataValue.Null(resultKind);
         }
 
@@ -97,7 +97,7 @@ public sealed class ImagePixelStandardDeviationFunction : IScalarFunction, ICost
 
             double variance = sumSquaredDifferences / totalElements;
             float standardDeviation = (float)System.Math.Sqrt(variance);
-            return DataValue.FromScalar(standardDeviation);
+            return DataValue.FromFloat32(standardDeviation);
         }
     }
 

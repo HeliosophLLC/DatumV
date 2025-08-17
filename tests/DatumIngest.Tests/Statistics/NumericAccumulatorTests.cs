@@ -11,7 +11,7 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.Count);
@@ -26,10 +26,10 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(6.0f));
-        accumulator.Add(DataValue.FromScalar(8.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(6.0f));
+        accumulator.Add(DataValue.FromFloat32(8.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(4, result.Count);
@@ -60,9 +60,9 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
-        accumulator.Add(DataValue.FromScalar(5.0f));
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.Count);
@@ -75,7 +75,7 @@ public sealed class NumericAccumulatorTests
         NumericAccumulator accumulator = new();
 
         accumulator.Add(DataValue.FromString("hello"));
-        accumulator.Add(DataValue.FromScalar(10.0f));
+        accumulator.Add(DataValue.FromFloat32(10.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.Count);
@@ -103,7 +103,7 @@ public sealed class NumericAccumulatorTests
 
         foreach (float value in values)
         {
-            accumulator.Add(DataValue.FromScalar(value));
+            accumulator.Add(DataValue.FromFloat32(value));
         }
 
         // Naive calculation
@@ -130,13 +130,13 @@ public sealed class NumericAccumulatorTests
     public void Merge_CombinesTwoAccumulators()
     {
         NumericAccumulator first = new();
-        first.Add(DataValue.FromScalar(1.0f));
-        first.Add(DataValue.FromScalar(2.0f));
-        first.Add(DataValue.FromScalar(3.0f));
+        first.Add(DataValue.FromFloat32(1.0f));
+        first.Add(DataValue.FromFloat32(2.0f));
+        first.Add(DataValue.FromFloat32(3.0f));
 
         NumericAccumulator second = new();
-        second.Add(DataValue.FromScalar(4.0f));
-        second.Add(DataValue.FromScalar(5.0f));
+        second.Add(DataValue.FromFloat32(4.0f));
+        second.Add(DataValue.FromFloat32(5.0f));
 
         first.Merge(second);
 
@@ -153,17 +153,17 @@ public sealed class NumericAccumulatorTests
         NumericAccumulator combined = new();
         foreach (float value in new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f })
         {
-            combined.Add(DataValue.FromScalar(value));
+            combined.Add(DataValue.FromFloat32(value));
         }
 
         NumericAccumulator first = new();
-        first.Add(DataValue.FromScalar(1.0f));
-        first.Add(DataValue.FromScalar(2.0f));
+        first.Add(DataValue.FromFloat32(1.0f));
+        first.Add(DataValue.FromFloat32(2.0f));
 
         NumericAccumulator second = new();
-        second.Add(DataValue.FromScalar(3.0f));
-        second.Add(DataValue.FromScalar(4.0f));
-        second.Add(DataValue.FromScalar(5.0f));
+        second.Add(DataValue.FromFloat32(3.0f));
+        second.Add(DataValue.FromFloat32(4.0f));
+        second.Add(DataValue.FromFloat32(5.0f));
 
         first.Merge(second);
 
@@ -178,7 +178,7 @@ public sealed class NumericAccumulatorTests
     public void Merge_WithEmptyAccumulator_NoChange()
     {
         NumericAccumulator first = new();
-        first.Add(DataValue.FromScalar(5.0f));
+        first.Add(DataValue.FromFloat32(5.0f));
 
         NumericAccumulator empty = new();
         first.Merge(empty);
@@ -205,14 +205,14 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
-        accumulator.Add(DataValue.FromScalar(7.0f));
-        accumulator.Add(DataValue.FromScalar(9.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(7.0f));
+        accumulator.Add(DataValue.FromFloat32(9.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(2.0, result.StandardDeviation, 1e-10);
@@ -230,10 +230,10 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.ZeroCount);
@@ -245,9 +245,9 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.ZeroCount);
@@ -259,9 +259,9 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.ZeroCount);
@@ -282,13 +282,13 @@ public sealed class NumericAccumulatorTests
     public void Merge_CombinesZeroCounts()
     {
         NumericAccumulator first = new();
-        first.Add(DataValue.FromScalar(0.0f));
-        first.Add(DataValue.FromScalar(1.0f));
+        first.Add(DataValue.FromFloat32(0.0f));
+        first.Add(DataValue.FromFloat32(1.0f));
 
         NumericAccumulator second = new();
-        second.Add(DataValue.FromScalar(0.0f));
-        second.Add(DataValue.FromScalar(0.0f));
-        second.Add(DataValue.FromScalar(5.0f));
+        second.Add(DataValue.FromFloat32(0.0f));
+        second.Add(DataValue.FromFloat32(0.0f));
+        second.Add(DataValue.FromFloat32(5.0f));
 
         first.Merge(second);
 
@@ -306,11 +306,11 @@ public sealed class NumericAccumulatorTests
         // Add many similar values to establish a stable mean/stddev
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(50.0f + (i % 5)));
+            accumulator.Add(DataValue.FromFloat32(50.0f + (i % 5)));
         }
 
         // Add a value far from the mean
-        accumulator.Add(DataValue.FromScalar(500.0f));
+        accumulator.Add(DataValue.FromFloat32(500.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.True(result.OutlierCount > 0, "Expected at least one outlier detected");
@@ -323,11 +323,11 @@ public sealed class NumericAccumulatorTests
         NumericAccumulator accumulator = new();
 
         // Tight cluster of values — no outliers
-        accumulator.Add(DataValue.FromScalar(10.0f));
-        accumulator.Add(DataValue.FromScalar(10.1f));
-        accumulator.Add(DataValue.FromScalar(10.2f));
-        accumulator.Add(DataValue.FromScalar(9.9f));
-        accumulator.Add(DataValue.FromScalar(9.8f));
+        accumulator.Add(DataValue.FromFloat32(10.0f));
+        accumulator.Add(DataValue.FromFloat32(10.1f));
+        accumulator.Add(DataValue.FromFloat32(10.2f));
+        accumulator.Add(DataValue.FromFloat32(9.9f));
+        accumulator.Add(DataValue.FromFloat32(9.8f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.OutlierCount);
@@ -339,7 +339,7 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(42.0f));
+        accumulator.Add(DataValue.FromFloat32(42.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.OutlierCount);
@@ -351,10 +351,10 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(5.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.OutlierCount);
@@ -377,16 +377,16 @@ public sealed class NumericAccumulatorTests
         NumericAccumulator first = new();
         for (int i = 0; i < 100; i++)
         {
-            first.Add(DataValue.FromScalar(50.0f));
+            first.Add(DataValue.FromFloat32(50.0f));
         }
-        first.Add(DataValue.FromScalar(500.0f));
+        first.Add(DataValue.FromFloat32(500.0f));
 
         NumericAccumulator second = new();
         for (int i = 0; i < 100; i++)
         {
-            second.Add(DataValue.FromScalar(50.0f));
+            second.Add(DataValue.FromFloat32(50.0f));
         }
-        second.Add(DataValue.FromScalar(500.0f));
+        second.Add(DataValue.FromFloat32(500.0f));
 
         long firstOutliers = ((NumericResult)first.GetResult().Value!).OutlierCount;
         long secondOutliers = ((NumericResult)second.GetResult().Value!).OutlierCount;
@@ -405,7 +405,7 @@ public sealed class NumericAccumulatorTests
         // Symmetric distribution around 50: [1,2,...,99]
         for (int i = 1; i <= 99; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
@@ -420,12 +420,12 @@ public sealed class NumericAccumulatorTests
         // Many small values and a few large ones → right-skewed
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(1.0f));
+            accumulator.Add(DataValue.FromFloat32(1.0f));
         }
 
         for (int i = 0; i < 10; i++)
         {
-            accumulator.Add(DataValue.FromScalar(100.0f));
+            accumulator.Add(DataValue.FromFloat32(100.0f));
         }
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
@@ -440,12 +440,12 @@ public sealed class NumericAccumulatorTests
         // Many large values and a few small ones → left-skewed
         for (int i = 0; i < 10; i++)
         {
-            accumulator.Add(DataValue.FromScalar(1.0f));
+            accumulator.Add(DataValue.FromFloat32(1.0f));
         }
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromScalar(100.0f));
+            accumulator.Add(DataValue.FromFloat32(100.0f));
         }
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
@@ -460,7 +460,7 @@ public sealed class NumericAccumulatorTests
         // Uniform distribution has kurtosis = 1.8
         for (int i = 1; i <= 1000; i++)
         {
-            accumulator.Add(DataValue.FromScalar(i));
+            accumulator.Add(DataValue.FromFloat32(i));
         }
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
@@ -476,14 +476,14 @@ public sealed class NumericAccumulatorTests
         // Bulk of values in center, with extreme tails → leptokurtic (kurtosis > 3)
         for (int i = 0; i < 1000; i++)
         {
-            accumulator.Add(DataValue.FromScalar(50.0f));
+            accumulator.Add(DataValue.FromFloat32(50.0f));
         }
 
         // Add extreme tail values
         for (int i = 0; i < 20; i++)
         {
-            accumulator.Add(DataValue.FromScalar(-500.0f));
-            accumulator.Add(DataValue.FromScalar(600.0f));
+            accumulator.Add(DataValue.FromFloat32(-500.0f));
+            accumulator.Add(DataValue.FromFloat32(600.0f));
         }
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
@@ -495,7 +495,7 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(42.0f));
+        accumulator.Add(DataValue.FromFloat32(42.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0.0, result.Skewness);
@@ -506,8 +506,8 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0.0, result.Kurtosis);
@@ -520,7 +520,7 @@ public sealed class NumericAccumulatorTests
 
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.FromScalar(7.0f));
+            accumulator.Add(DataValue.FromFloat32(7.0f));
         }
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
@@ -545,35 +545,35 @@ public sealed class NumericAccumulatorTests
         NumericAccumulator combined = new();
         for (int i = 0; i < 100; i++)
         {
-            combined.Add(DataValue.FromScalar(1.0f));
+            combined.Add(DataValue.FromFloat32(1.0f));
         }
 
         for (int i = 0; i < 10; i++)
         {
-            combined.Add(DataValue.FromScalar(100.0f));
+            combined.Add(DataValue.FromFloat32(100.0f));
         }
 
         // Split into two accumulators and merge
         NumericAccumulator first = new();
         for (int i = 0; i < 60; i++)
         {
-            first.Add(DataValue.FromScalar(1.0f));
+            first.Add(DataValue.FromFloat32(1.0f));
         }
 
         for (int i = 0; i < 5; i++)
         {
-            first.Add(DataValue.FromScalar(100.0f));
+            first.Add(DataValue.FromFloat32(100.0f));
         }
 
         NumericAccumulator second = new();
         for (int i = 0; i < 40; i++)
         {
-            second.Add(DataValue.FromScalar(1.0f));
+            second.Add(DataValue.FromFloat32(1.0f));
         }
 
         for (int i = 0; i < 5; i++)
         {
-            second.Add(DataValue.FromScalar(100.0f));
+            second.Add(DataValue.FromFloat32(100.0f));
         }
 
         first.Merge(second);
@@ -592,11 +592,11 @@ public sealed class NumericAccumulatorTests
 
         // Values: [1, 2, 3, 4, 5]
         // Mean = 3, M2 = 10, M3 = 0 (symmetric)
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(3.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0.0, result.Skewness, 1e-10);
@@ -609,11 +609,11 @@ public sealed class NumericAccumulatorTests
 
         // Uniform discrete [1..5]: population kurtosis = n * M4 / M2^2
         // M2 = 10, M4 = 34, n = 5 → kurtosis = 5 * 34 / 100 = 1.7
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(3.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(5.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(1.7, result.Kurtosis, 1e-10);
@@ -624,11 +624,11 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(4.0f));
-        accumulator.Add(DataValue.FromScalar(6.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(4.0f));
+        accumulator.Add(DataValue.FromFloat32(6.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.NonzeroCount);
@@ -645,9 +645,9 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
-        accumulator.Add(DataValue.FromScalar(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(3.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(result.Count, result.NonzeroCount);
@@ -660,8 +660,8 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.NonzeroCount);
@@ -685,9 +685,9 @@ public sealed class NumericAccumulatorTests
     {
         NumericAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(0.0f));
-        accumulator.Add(DataValue.FromScalar(7.0f));
-        accumulator.Add(DataValue.FromScalar(0.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
+        accumulator.Add(DataValue.FromFloat32(7.0f));
+        accumulator.Add(DataValue.FromFloat32(0.0f));
 
         NumericResult result = (NumericResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.NonzeroCount);
@@ -700,21 +700,21 @@ public sealed class NumericAccumulatorTests
     {
         // Single pass with all values
         NumericAccumulator combined = new();
-        combined.Add(DataValue.FromScalar(0.0f));
-        combined.Add(DataValue.FromScalar(2.0f));
-        combined.Add(DataValue.FromScalar(4.0f));
-        combined.Add(DataValue.FromScalar(0.0f));
-        combined.Add(DataValue.FromScalar(6.0f));
+        combined.Add(DataValue.FromFloat32(0.0f));
+        combined.Add(DataValue.FromFloat32(2.0f));
+        combined.Add(DataValue.FromFloat32(4.0f));
+        combined.Add(DataValue.FromFloat32(0.0f));
+        combined.Add(DataValue.FromFloat32(6.0f));
 
         // Split into two accumulators
         NumericAccumulator first = new();
-        first.Add(DataValue.FromScalar(0.0f));
-        first.Add(DataValue.FromScalar(2.0f));
+        first.Add(DataValue.FromFloat32(0.0f));
+        first.Add(DataValue.FromFloat32(2.0f));
 
         NumericAccumulator second = new();
-        second.Add(DataValue.FromScalar(4.0f));
-        second.Add(DataValue.FromScalar(0.0f));
-        second.Add(DataValue.FromScalar(6.0f));
+        second.Add(DataValue.FromFloat32(4.0f));
+        second.Add(DataValue.FromFloat32(0.0f));
+        second.Add(DataValue.FromFloat32(6.0f));
 
         first.Merge(second);
 
@@ -731,8 +731,8 @@ public sealed class NumericAccumulatorTests
     public void Merge_NonzeroWithEmpty_PreservesStats()
     {
         NumericAccumulator first = new();
-        first.Add(DataValue.FromScalar(0.0f));
-        first.Add(DataValue.FromScalar(5.0f));
+        first.Add(DataValue.FromFloat32(0.0f));
+        first.Add(DataValue.FromFloat32(5.0f));
 
         NumericAccumulator empty = new();
         first.Merge(empty);

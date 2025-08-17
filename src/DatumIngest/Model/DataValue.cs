@@ -4,7 +4,7 @@ namespace DatumIngest.Model;
 
 /// <summary>
 /// An immutable, discriminated union value that carries typed data through the query pipeline.
-/// Use the static factory methods (<see cref="FromScalar"/>, <see cref="FromVector"/>, etc.)
+/// Use the static factory methods (<see cref="FromFloat32"/>, <see cref="FromVector"/>, etc.)
 /// to construct instances and the accessor methods to retrieve typed payloads.
 /// </summary>
 public sealed class DataValue : IEquatable<DataValue>
@@ -34,14 +34,23 @@ public sealed class DataValue : IEquatable<DataValue>
 
     // ───────────────────────── Cached common instances ─────────────────────────
 
-    /// <summary>Cached scalar 0 — returned by all boolean-false results to avoid per-evaluation allocation.</summary>
-    private static readonly DataValue ScalarZero = new(DataKind.Scalar, 0f, shape: null, isNull: false);
+    /// <summary>Cached Float32 0 — returned by all boolean-false results to avoid per-evaluation allocation.</summary>
+    private static readonly DataValue Float32Zero = new(DataKind.Float32, 0f, shape: null, isNull: false);
 
-    /// <summary>Cached scalar 1 — returned by all boolean-true results to avoid per-evaluation allocation.</summary>
-    private static readonly DataValue ScalarOne = new(DataKind.Scalar, 1f, shape: null, isNull: false);
+    /// <summary>Cached Float32 1 — returned by all boolean-true results to avoid per-evaluation allocation.</summary>
+    private static readonly DataValue Float32One = new(DataKind.Float32, 1f, shape: null, isNull: false);
 
-    /// <summary>Cached null scalar — the most common null kind in expression evaluation.</summary>
-    private static readonly DataValue NullScalar = new(DataKind.Scalar, payload: null, shape: null, isNull: true);
+    /// <summary>Cached null Float32 — the most common null kind in expression evaluation.</summary>
+    private static readonly DataValue NullFloat32 = new(DataKind.Float32, payload: null, shape: null, isNull: true);
+
+    /// <summary>Cached null Int32 — common for integer column nulls.</summary>
+    private static readonly DataValue NullInt32 = new(DataKind.Int32, payload: null, shape: null, isNull: true);
+
+    /// <summary>Cached null Int64 — common for integer column nulls.</summary>
+    private static readonly DataValue NullInt64 = new(DataKind.Int64, payload: null, shape: null, isNull: true);
+
+    /// <summary>Cached null Float64 — common for double-precision column nulls.</summary>
+    private static readonly DataValue NullFloat64 = new(DataKind.Float64, payload: null, shape: null, isNull: true);
 
     /// <summary>Cached boolean true — avoids per-evaluation allocation for boolean results.</summary>
     private static readonly DataValue BooleanTrue = new(DataKind.Boolean, true, shape: null, isNull: false);
@@ -51,18 +60,50 @@ public sealed class DataValue : IEquatable<DataValue>
 
     // ───────────────────────── Factory methods ─────────────────────────
 
-    /// <summary>Creates a scalar value from a 32-bit float.</summary>
-    public static DataValue FromScalar(float value)
+    /// <summary>Creates a value from a 32-bit floating-point number.</summary>
+    public static DataValue FromFloat32(float value)
     {
         // Reuse cached instances for the two most common boolean-result values.
-        if (value == 0f) return ScalarZero;
-        if (value == 1f) return ScalarOne;
-        return new(DataKind.Scalar, value, shape: null, isNull: false);
+        if (value == 0f) return Float32Zero;
+        if (value == 1f) return Float32One;
+        return new(DataKind.Float32, value, shape: null, isNull: false);
     }
 
     /// <summary>Creates a value from an unsigned 8-bit integer.</summary>
     public static DataValue FromUInt8(byte value) =>
         new(DataKind.UInt8, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a signed 8-bit integer.</summary>
+    public static DataValue FromInt8(sbyte value) =>
+        new(DataKind.Int8, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a signed 16-bit integer.</summary>
+    public static DataValue FromInt16(short value) =>
+        new(DataKind.Int16, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from an unsigned 16-bit integer.</summary>
+    public static DataValue FromUInt16(ushort value) =>
+        new(DataKind.UInt16, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a signed 32-bit integer.</summary>
+    public static DataValue FromInt32(int value) =>
+        new(DataKind.Int32, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from an unsigned 32-bit integer.</summary>
+    public static DataValue FromUInt32(uint value) =>
+        new(DataKind.UInt32, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a signed 64-bit integer.</summary>
+    public static DataValue FromInt64(long value) =>
+        new(DataKind.Int64, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from an unsigned 64-bit integer.</summary>
+    public static DataValue FromUInt64(ulong value) =>
+        new(DataKind.UInt64, value, shape: null, isNull: false);
+
+    /// <summary>Creates a value from a 64-bit double-precision floating-point number.</summary>
+    public static DataValue FromFloat64(double value) =>
+        new(DataKind.Float64, value, shape: null, isNull: false);
 
     /// <summary>Creates a value from a byte array.</summary>
     public static DataValue FromUInt8Array(byte[] value) =>
@@ -169,17 +210,23 @@ public sealed class DataValue : IEquatable<DataValue>
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
     {
-        if (kind == DataKind.Scalar) return NullScalar;
-        return new(kind, payload: null, shape: null, isNull: true);
+        return kind switch
+        {
+            DataKind.Float32 => NullFloat32,
+            DataKind.Int32 => NullInt32,
+            DataKind.Int64 => NullInt64,
+            DataKind.Float64 => NullFloat64,
+            _ => new(kind, payload: null, shape: null, isNull: true),
+        };
     }
 
     // ───────────────────────── Accessor methods ─────────────────────────
 
-    /// <summary>Returns the scalar float payload.</summary>
+    /// <summary>Returns the 32-bit floating-point payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    public float AsScalar()
+    public float AsFloat32()
     {
-        ThrowIfNullOrWrongKind(DataKind.Scalar);
+        ThrowIfNullOrWrongKind(DataKind.Float32);
         return (float)_payload!;
     }
 
@@ -189,6 +236,70 @@ public sealed class DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8);
         return (byte)_payload!;
+    }
+
+    /// <summary>Returns the signed 8-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public sbyte AsInt8()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Int8);
+        return (sbyte)_payload!;
+    }
+
+    /// <summary>Returns the signed 16-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public short AsInt16()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Int16);
+        return (short)_payload!;
+    }
+
+    /// <summary>Returns the unsigned 16-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public ushort AsUInt16()
+    {
+        ThrowIfNullOrWrongKind(DataKind.UInt16);
+        return (ushort)_payload!;
+    }
+
+    /// <summary>Returns the signed 32-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public int AsInt32()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Int32);
+        return (int)_payload!;
+    }
+
+    /// <summary>Returns the unsigned 32-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public uint AsUInt32()
+    {
+        ThrowIfNullOrWrongKind(DataKind.UInt32);
+        return (uint)_payload!;
+    }
+
+    /// <summary>Returns the signed 64-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public long AsInt64()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Int64);
+        return (long)_payload!;
+    }
+
+    /// <summary>Returns the unsigned 64-bit integer payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public ulong AsUInt64()
+    {
+        ThrowIfNullOrWrongKind(DataKind.UInt64);
+        return (ulong)_payload!;
+    }
+
+    /// <summary>Returns the 64-bit double-precision floating-point payload.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public double AsFloat64()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Float64);
+        return (double)_payload!;
     }
 
     /// <summary>Returns the byte array payload.</summary>
@@ -444,8 +555,16 @@ public sealed class DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
-            DataKind.Scalar => (float)_payload! == (float)other._payload!,
+            DataKind.Float32 => (float)_payload! == (float)other._payload!,
             DataKind.UInt8 => (byte)_payload! == (byte)other._payload!,
+            DataKind.Int8 => (sbyte)_payload! == (sbyte)other._payload!,
+            DataKind.Int16 => (short)_payload! == (short)other._payload!,
+            DataKind.UInt16 => (ushort)_payload! == (ushort)other._payload!,
+            DataKind.Int32 => (int)_payload! == (int)other._payload!,
+            DataKind.UInt32 => (uint)_payload! == (uint)other._payload!,
+            DataKind.Int64 => (long)_payload! == (long)other._payload!,
+            DataKind.UInt64 => (ulong)_payload! == (ulong)other._payload!,
+            DataKind.Float64 => (double)_payload! == (double)other._payload!,
             DataKind.String or DataKind.JsonValue => (string)_payload! == (string)other._payload!,
             DataKind.Vector => ((float[])_payload!).AsSpan().SequenceEqual((float[])other._payload!),
             DataKind.Matrix => _shape!.AsSpan().SequenceEqual(other._shape!)
@@ -473,8 +592,16 @@ public sealed class DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
-            DataKind.Scalar => HashCode.Combine(_kind, (float)_payload!),
+            DataKind.Float32 => HashCode.Combine(_kind, (float)_payload!),
             DataKind.UInt8 => HashCode.Combine(_kind, (byte)_payload!),
+            DataKind.Int8 => HashCode.Combine(_kind, (sbyte)_payload!),
+            DataKind.Int16 => HashCode.Combine(_kind, (short)_payload!),
+            DataKind.UInt16 => HashCode.Combine(_kind, (ushort)_payload!),
+            DataKind.Int32 => HashCode.Combine(_kind, (int)_payload!),
+            DataKind.UInt32 => HashCode.Combine(_kind, (uint)_payload!),
+            DataKind.Int64 => HashCode.Combine(_kind, (long)_payload!),
+            DataKind.UInt64 => HashCode.Combine(_kind, (ulong)_payload!),
+            DataKind.Float64 => HashCode.Combine(_kind, (double)_payload!),
             DataKind.String or DataKind.JsonValue => HashCode.Combine(_kind, (string)_payload!),
             DataKind.Date => HashCode.Combine(_kind, (DateOnly)_payload!),
             DataKind.DateTime => HashCode.Combine(_kind, (DateTimeOffset)_payload!),
@@ -580,8 +707,16 @@ public sealed class DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
-            DataKind.Scalar => ((float)_payload!).ToString("G"),
+            DataKind.Float32 => ((float)_payload!).ToString("G"),
             DataKind.UInt8 => ((byte)_payload!).ToString(),
+            DataKind.Int8 => ((sbyte)_payload!).ToString(),
+            DataKind.Int16 => ((short)_payload!).ToString(),
+            DataKind.UInt16 => ((ushort)_payload!).ToString(),
+            DataKind.Int32 => ((int)_payload!).ToString(),
+            DataKind.UInt32 => ((uint)_payload!).ToString(),
+            DataKind.Int64 => ((long)_payload!).ToString(),
+            DataKind.UInt64 => ((ulong)_payload!).ToString(),
+            DataKind.Float64 => ((double)_payload!).ToString("G"),
             DataKind.String => (string)_payload!,
             DataKind.Date => ((DateOnly)_payload!).ToString("yyyy-MM-dd"),
             DataKind.DateTime => ((DateTimeOffset)_payload!).ToString("O"),

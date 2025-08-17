@@ -95,7 +95,7 @@ public sealed class TablesampleExecutionTests
         Assert.Equal(first.Count, second.Count);
         for (int i = 0; i < first.Count; i++)
         {
-            Assert.Equal(first[i]["id"].AsScalar(), second[i]["id"].AsScalar());
+            Assert.Equal(first[i]["id"].AsFloat32(), second[i]["id"].AsFloat32());
         }
     }
 
@@ -122,7 +122,7 @@ public sealed class TablesampleExecutionTests
         if (!anyDifference && seed1.Count > 0)
         {
             anyDifference = Enumerable.Range(0, Math.Min(seed1.Count, seed2.Count))
-                .Any(i => seed1[i]["id"].AsScalar() != seed2[i]["id"].AsScalar());
+                .Any(i => seed1[i]["id"].AsFloat32() != seed2[i]["id"].AsFloat32());
         }
 
         Assert.True(anyDifference, "Different seeds should generally produce different row sets");
@@ -194,8 +194,8 @@ public sealed class TablesampleExecutionTests
         for (int i = 0; i < count; i++)
         {
             rows[i] = MakeRow(
-                ("id", DataValue.FromScalar(i)),
-                ("value", DataValue.FromScalar(i * 10f)));
+                ("id", DataValue.FromFloat32(i)),
+                ("value", DataValue.FromFloat32(i * 10f)));
         }
 
         return rows;

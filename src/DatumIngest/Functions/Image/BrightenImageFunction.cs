@@ -52,7 +52,7 @@ public sealed class BrightenImageFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float intensity = arguments[1].AsScalar();
+        float intensity = arguments[1].AsFloat32();
 
         string? formatOverride = arguments.Length == 3 ? arguments[2].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

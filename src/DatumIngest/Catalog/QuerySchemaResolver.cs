@@ -204,10 +204,10 @@ public sealed class QuerySchemaResolver
         {
             // Use an empty schema — function source arguments are typically
             // literals, not column references.
-            Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Scalar, nullable: false)]);
+            Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Float32, nullable: false)]);
             DataKind? kind = ExpressionTypeResolver.ResolveType(
                 functionSource.Arguments[index], emptySchema, _functionRegistry);
-            argumentKinds[index] = kind ?? DataKind.Scalar;
+            argumentKinds[index] = kind ?? DataKind.Float32;
         }
 
         // For element-kind-aware functions (e.g. UNNEST), also resolve any array
@@ -220,7 +220,7 @@ public sealed class QuerySchemaResolver
             {
                 if (argumentKinds[index] == DataKind.Array)
                 {
-                    Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Scalar, nullable: false)]);
+                    Schema emptySchema = new([new ColumnInfo("_placeholder", DataKind.Float32, nullable: false)]);
                     arrayElementKinds[index] = ExpressionTypeResolver.ResolveArrayElementKindFromExpression(
                         functionSource.Arguments[index], emptySchema, _functionRegistry);
                 }

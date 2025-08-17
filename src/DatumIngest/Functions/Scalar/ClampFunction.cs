@@ -20,7 +20,7 @@ public sealed class ClampFunction : IScalarFunction
         }
 
         DataKind inputKind = argumentKinds[0];
-        if (inputKind is not (DataKind.Scalar or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (inputKind is not (DataKind.Float32 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"clamp() does not support {inputKind}.");
         }
@@ -37,13 +37,13 @@ public sealed class ClampFunction : IScalarFunction
             return DataValue.Null(input.Kind);
         }
 
-        float min = arguments[1].AsScalar();
-        float max = arguments[2].AsScalar();
+        float min = arguments[1].AsFloat32();
+        float max = arguments[2].AsFloat32();
 
         switch (input.Kind)
         {
-            case DataKind.Scalar:
-                return DataValue.FromScalar(System.Math.Clamp(input.AsScalar(), min, max));
+            case DataKind.Float32:
+                return DataValue.FromFloat32(System.Math.Clamp(input.AsFloat32(), min, max));
 
             case DataKind.Vector:
             {

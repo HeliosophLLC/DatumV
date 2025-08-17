@@ -21,7 +21,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(10),
+            DataValue.FromFloat32(10),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
         Assert.Equal(DataKind.Date, result.Kind);
@@ -33,7 +33,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("month"),
-            DataValue.FromScalar(3),
+            DataValue.FromFloat32(3),
             DataValue.FromDate(new DateOnly(2024, 1, 15))
         ]);
         Assert.Equal(new DateOnly(2024, 4, 15), result.AsDate());
@@ -44,7 +44,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("year"),
-            DataValue.FromScalar(2),
+            DataValue.FromFloat32(2),
             DataValue.FromDate(new DateOnly(2024, 6, 15))
         ]);
         Assert.Equal(new DateOnly(2026, 6, 15), result.AsDate());
@@ -55,7 +55,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("hour"),
-            DataValue.FromScalar(5),
+            DataValue.FromFloat32(5),
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 0, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(DataKind.DateTime, result.Kind);
@@ -67,7 +67,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("minute"),
-            DataValue.FromScalar(90),
+            DataValue.FromFloat32(90),
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 10, 0, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(new DateTimeOffset(2024, 1, 1, 11, 30, 0, TimeSpan.Zero), result.AsDateTime());
@@ -78,7 +78,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(-5),
+            DataValue.FromFloat32(-5),
             DataValue.FromDate(new DateOnly(2024, 1, 10))
         ]);
         Assert.Equal(new DateOnly(2024, 1, 5), result.AsDate());
@@ -89,7 +89,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("week"),
-            DataValue.FromScalar(2),
+            DataValue.FromFloat32(2),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
         Assert.Equal(new DateOnly(2024, 1, 15), result.AsDate());
@@ -100,7 +100,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("quarter"),
-            DataValue.FromScalar(2),
+            DataValue.FromFloat32(2),
             DataValue.FromDate(new DateOnly(2024, 1, 15))
         ]);
         Assert.Equal(new DateOnly(2024, 7, 15), result.AsDate());
@@ -111,7 +111,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.Null(DataKind.Date)
         ]);
         Assert.True(result.IsNull);
@@ -123,7 +123,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.Null(DataKind.Scalar),
+            DataValue.Null(DataKind.Float32),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
         Assert.True(result.IsNull);
@@ -134,7 +134,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromDate(new DateOnly(2024, 1, 1))
         ]);
         Assert.Equal(DataKind.Date, result.Kind);
@@ -145,7 +145,7 @@ public class DateAddFunctionTests
     {
         DataValue result = _function.Execute([
             DataValue.FromString("day"),
-            DataValue.FromScalar(1),
+            DataValue.FromFloat32(1),
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero))
         ]);
         Assert.Equal(DataKind.DateTime, result.Kind);
@@ -154,17 +154,17 @@ public class DateAddFunctionTests
     [Fact]
     public void ValidateArguments_ReturnsInputKind()
     {
-        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.Date]);
+        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Date]);
         Assert.Equal(DataKind.Date, result);
 
-        result = _function.ValidateArguments([DataKind.String, DataKind.Scalar, DataKind.DateTime]);
+        result = _function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.DateTime]);
         Assert.Equal(DataKind.DateTime, result);
     }
 
     [Fact]
     public void ValidateArguments_RejectsWrongCount()
     {
-        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     [Fact]

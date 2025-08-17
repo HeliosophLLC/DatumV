@@ -4,7 +4,7 @@ using DatumIngest.Model;
 namespace DatumIngest.DatumFile.Encoding;
 
 /// <summary>
-/// Encodes a <see cref="DataKind.Scalar"/> column page using <see cref="DatumEncoding.FixedFloat32"/>
+/// Encodes a <see cref="DataKind.Float32"/> column page using <see cref="DatumEncoding.FixedFloat32"/>
 /// with a byte-shuffle pre-filter and Zstd compression.
 /// </summary>
 /// <remarks>
@@ -42,7 +42,7 @@ internal sealed class ScalarColumnEncoder : DatumColumnEncoder
             }
             else
             {
-                float scalar = value.AsScalar();
+                float scalar = value.AsFloat32();
                 floatData[rowIndex] = scalar;
 
                 // Skip NaN values in min/max so that intentionally-stored NaN user data
@@ -81,7 +81,7 @@ internal sealed class ScalarColumnEncoder : DatumColumnEncoder
             return new DatumZoneMap(nullCount, null, null);
         }
 
-        return new DatumZoneMap(nullCount, DataValue.FromScalar(minimum), DataValue.FromScalar(maximum));
+        return new DatumZoneMap(nullCount, DataValue.FromFloat32(minimum), DataValue.FromFloat32(maximum));
     }
 
     private static byte[] Combine(byte[] first, byte[] second)

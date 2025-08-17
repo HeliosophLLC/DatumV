@@ -11,8 +11,8 @@ public sealed class CountAccumulatorTests
     {
         CountAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromScalar(1.0f));
-        accumulator.Add(DataValue.FromScalar(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(2.0f));
         accumulator.Add(DataValue.FromString("hello"));
 
         CountResult result = (CountResult)accumulator.GetResult().Value!;
@@ -25,9 +25,9 @@ public sealed class CountAccumulatorTests
     {
         CountAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Scalar));
+        accumulator.Add(DataValue.Null(DataKind.Float32));
         accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromScalar(1.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f));
 
         CountResult result = (CountResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.NonNull);
@@ -62,13 +62,13 @@ public sealed class CountAccumulatorTests
     public void Merge_CombinesCounts()
     {
         CountAccumulator first = new();
-        first.Add(DataValue.FromScalar(1.0f));
-        first.Add(DataValue.Null(DataKind.Scalar));
+        first.Add(DataValue.FromFloat32(1.0f));
+        first.Add(DataValue.Null(DataKind.Float32));
 
         CountAccumulator second = new();
-        second.Add(DataValue.FromScalar(2.0f));
-        second.Add(DataValue.FromScalar(3.0f));
-        second.Add(DataValue.Null(DataKind.Scalar));
+        second.Add(DataValue.FromFloat32(2.0f));
+        second.Add(DataValue.FromFloat32(3.0f));
+        second.Add(DataValue.Null(DataKind.Float32));
 
         first.Merge(second);
 

@@ -47,13 +47,13 @@ public sealed class LastValueFunction : IWindowFunction
 
                 if (start > end)
                 {
-                    results[i] = DataValue.Null(DataKind.Scalar);
+                    results[i] = DataValue.Null(DataKind.Float32);
                     continue;
                 }
 
                 if (nullHandling == NullHandling.IgnoreNulls)
                 {
-                    DataValue found = DataValue.Null(DataKind.Scalar);
+                    DataValue found = DataValue.Null(DataKind.Float32);
                     for (int j = end; j >= start; j--)
                     {
                         DataValue candidate = evaluator.Evaluate(argumentExpressions[0], partitionRows[j]);

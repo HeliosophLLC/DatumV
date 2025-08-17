@@ -190,9 +190,9 @@ public sealed class QualifyTests
     public async Task Qualify_FiltersAfterWindowComputation()
     {
         MockOperator source = new(
-            MakeRow(("name", DataValue.FromString("a")), ("score", DataValue.FromScalar(10f))),
-            MakeRow(("name", DataValue.FromString("b")), ("score", DataValue.FromScalar(30f))),
-            MakeRow(("name", DataValue.FromString("c")), ("score", DataValue.FromScalar(20f))));
+            MakeRow(("name", DataValue.FromString("a")), ("score", DataValue.FromFloat32(10f))),
+            MakeRow(("name", DataValue.FromString("b")), ("score", DataValue.FromFloat32(30f))),
+            MakeRow(("name", DataValue.FromString("c")), ("score", DataValue.FromFloat32(20f))));
 
         WindowSpecification specification = new(
             PartitionBy: null,
@@ -205,7 +205,7 @@ public sealed class QualifyTests
         Expression qualifyPredicate = new BinaryExpression(
             new ColumnReference("rn"),
             BinaryOperator.LessThanOrEqual,
-            new LiteralExpression(DataValue.FromScalar(2f)));
+            new LiteralExpression(DataValue.FromFloat32(2f)));
 
         FilterOperator qualifyFilter = new(windowOperator, qualifyPredicate);
         List<Row> results = await CollectAsync(qualifyFilter);
@@ -223,12 +223,12 @@ public sealed class QualifyTests
     public async Task Qualify_TopNPerGroup()
     {
         MockOperator source = new(
-            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x1")), ("score", DataValue.FromScalar(10f))),
-            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x2")), ("score", DataValue.FromScalar(30f))),
-            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x3")), ("score", DataValue.FromScalar(20f))),
-            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y1")), ("score", DataValue.FromScalar(50f))),
-            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y2")), ("score", DataValue.FromScalar(40f))),
-            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y3")), ("score", DataValue.FromScalar(60f))));
+            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x1")), ("score", DataValue.FromFloat32(10f))),
+            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x2")), ("score", DataValue.FromFloat32(30f))),
+            MakeRow(("category", DataValue.FromString("X")), ("item", DataValue.FromString("x3")), ("score", DataValue.FromFloat32(20f))),
+            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y1")), ("score", DataValue.FromFloat32(50f))),
+            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y2")), ("score", DataValue.FromFloat32(40f))),
+            MakeRow(("category", DataValue.FromString("Y")), ("item", DataValue.FromString("y3")), ("score", DataValue.FromFloat32(60f))));
 
         WindowSpecification specification = new(
             PartitionBy: [new ColumnReference("category")],
@@ -241,7 +241,7 @@ public sealed class QualifyTests
         Expression qualifyPredicate = new BinaryExpression(
             new ColumnReference("rn"),
             BinaryOperator.LessThanOrEqual,
-            new LiteralExpression(DataValue.FromScalar(2f)));
+            new LiteralExpression(DataValue.FromFloat32(2f)));
 
         FilterOperator qualifyFilter = new(windowOperator, qualifyPredicate);
         List<Row> results = await CollectAsync(qualifyFilter);
@@ -266,8 +266,8 @@ public sealed class QualifyTests
     public async Task Qualify_NoMatchingRows_ReturnsEmpty()
     {
         MockOperator source = new(
-            MakeRow(("val", DataValue.FromScalar(1f))),
-            MakeRow(("val", DataValue.FromScalar(2f))));
+            MakeRow(("val", DataValue.FromFloat32(1f))),
+            MakeRow(("val", DataValue.FromFloat32(2f))));
 
         WindowSpecification specification = new(
             PartitionBy: null,
@@ -280,7 +280,7 @@ public sealed class QualifyTests
         Expression qualifyPredicate = new BinaryExpression(
             new ColumnReference("rn"),
             BinaryOperator.GreaterThan,
-            new LiteralExpression(DataValue.FromScalar(100f)));
+            new LiteralExpression(DataValue.FromFloat32(100f)));
 
         FilterOperator qualifyFilter = new(windowOperator, qualifyPredicate);
         List<Row> results = await CollectAsync(qualifyFilter);
@@ -299,11 +299,11 @@ public sealed class QualifyTests
     {
         Row[] data =
         [
-            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromScalar(10f))),
-            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromScalar(30f))),
-            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromScalar(20f))),
-            MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromScalar(50f))),
-            MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromScalar(40f))),
+            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromFloat32(10f))),
+            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromFloat32(30f))),
+            MakeRow(("category", DataValue.FromString("A")), ("score", DataValue.FromFloat32(20f))),
+            MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromFloat32(50f))),
+            MakeRow(("category", DataValue.FromString("B")), ("score", DataValue.FromFloat32(40f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data));
@@ -317,7 +317,7 @@ public sealed class QualifyTests
 
         List<Row> aRows = results.Where(row => row["category"].AsString() == "A").ToList();
         Assert.Equal(2, aRows.Count);
-        float[] aScores = aRows.Select(row => row["score"].AsScalar()).OrderDescending().ToArray();
+        float[] aScores = aRows.Select(row => row["score"].AsFloat32()).OrderDescending().ToArray();
         Assert.Equal(30f, aScores[0]);
         Assert.Equal(20f, aScores[1]);
 
@@ -335,10 +335,10 @@ public sealed class QualifyTests
     {
         Row[] data =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("score", DataValue.FromScalar(10f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("score", DataValue.FromScalar(30f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("score", DataValue.FromScalar(20f))),
-            MakeRow(("name", DataValue.FromString("dave")), ("score", DataValue.FromScalar(40f))),
+            MakeRow(("name", DataValue.FromString("alice")), ("score", DataValue.FromFloat32(10f))),
+            MakeRow(("name", DataValue.FromString("bob")), ("score", DataValue.FromFloat32(30f))),
+            MakeRow(("name", DataValue.FromString("carol")), ("score", DataValue.FromFloat32(20f))),
+            MakeRow(("name", DataValue.FromString("dave")), ("score", DataValue.FromFloat32(40f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data));
@@ -366,12 +366,12 @@ public sealed class QualifyTests
     {
         Row[] employees =
         [
-            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromScalar(100f))),
-            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromScalar(200f))),
-            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("inactive")), ("salary", DataValue.FromScalar(300f))),
-            MakeRow(("department", DataValue.FromString("sales")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromScalar(150f))),
-            MakeRow(("department", DataValue.FromString("sales")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromScalar(250f))),
-            MakeRow(("department", DataValue.FromString("hr")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromScalar(50f))),
+            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(100f))),
+            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(200f))),
+            MakeRow(("department", DataValue.FromString("eng")), ("status", DataValue.FromString("inactive")), ("salary", DataValue.FromFloat32(300f))),
+            MakeRow(("department", DataValue.FromString("sales")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(150f))),
+            MakeRow(("department", DataValue.FromString("sales")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(250f))),
+            MakeRow(("department", DataValue.FromString("hr")), ("status", DataValue.FromString("active")), ("salary", DataValue.FromFloat32(50f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("employees", employees));
@@ -394,7 +394,7 @@ public sealed class QualifyTests
         // QUALIFY rn = 1: only eng
         Assert.Single(results);
         Assert.Equal("eng", results[0]["department"].AsString());
-        Assert.Equal(300f, results[0]["total_salary"].AsScalar());
+        Assert.Equal(300f, results[0]["total_salary"].AsFloat32());
     }
 
     /// <summary>
@@ -406,10 +406,10 @@ public sealed class QualifyTests
     {
         Row[] data =
         [
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(1f))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(2f))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(3f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(1f))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(2f))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(3f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data));

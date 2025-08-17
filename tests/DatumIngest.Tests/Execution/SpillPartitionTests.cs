@@ -36,8 +36,8 @@ public sealed class SpillPartitionTests : IDisposable
     {
         using SpillPartition partition = new(_spillDirectory, 0);
 
-        Row row1 = CreateRow("id", DataValue.FromScalar(1.0f));
-        Row row2 = CreateRow("id", DataValue.FromScalar(2.0f));
+        Row row1 = CreateRow("id", DataValue.FromFloat32(1.0f));
+        Row row2 = CreateRow("id", DataValue.FromFloat32(2.0f));
         partition.AddBuildRow(row1);
         partition.AddBuildRow(row2);
 
@@ -47,8 +47,8 @@ public sealed class SpillPartitionTests : IDisposable
 
         IReadOnlyList<Row> rows = partition.GetInMemoryBuildRows();
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1.0f, rows[0]["id"].AsScalar());
-        Assert.Equal(2.0f, rows[1]["id"].AsScalar());
+        Assert.Equal(1.0f, rows[0]["id"].AsFloat32());
+        Assert.Equal(2.0f, rows[1]["id"].AsFloat32());
     }
 
     /// <summary>
@@ -79,8 +79,8 @@ public sealed class SpillPartitionTests : IDisposable
     {
         using SpillPartition partition = new(_spillDirectory, 0);
 
-        Row row1 = CreateRow("value", DataValue.FromScalar(10.0f));
-        Row row2 = CreateRow("value", DataValue.FromScalar(20.0f));
+        Row row1 = CreateRow("value", DataValue.FromFloat32(10.0f));
+        Row row2 = CreateRow("value", DataValue.FromFloat32(20.0f));
         partition.AddBuildRow(row1);
         partition.AddBuildRow(row2);
 
@@ -92,8 +92,8 @@ public sealed class SpillPartitionTests : IDisposable
 
         List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
         Assert.Equal(2, readBack.Count);
-        Assert.Equal(10.0f, readBack[0]["value"].AsScalar());
-        Assert.Equal(20.0f, readBack[1]["value"].AsScalar());
+        Assert.Equal(10.0f, readBack[0]["value"].AsFloat32());
+        Assert.Equal(20.0f, readBack[1]["value"].AsFloat32());
     }
 
     /// <summary>
@@ -104,19 +104,19 @@ public sealed class SpillPartitionTests : IDisposable
     {
         using SpillPartition partition = new(_spillDirectory, 0);
 
-        partition.AddBuildRow(CreateRow("id", DataValue.FromScalar(1.0f)));
+        partition.AddBuildRow(CreateRow("id", DataValue.FromFloat32(1.0f)));
         partition.SpillBuildToDisk();
 
         // This row should go directly to the spill file.
-        partition.AddBuildRow(CreateRow("id", DataValue.FromScalar(2.0f)));
+        partition.AddBuildRow(CreateRow("id", DataValue.FromFloat32(2.0f)));
 
         Assert.Equal(0, partition.InMemoryBuildRowCount);
         Assert.Equal(2, partition.TotalBuildRowCount);
 
         List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
         Assert.Equal(2, readBack.Count);
-        Assert.Equal(1.0f, readBack[0]["id"].AsScalar());
-        Assert.Equal(2.0f, readBack[1]["id"].AsScalar());
+        Assert.Equal(1.0f, readBack[0]["id"].AsFloat32());
+        Assert.Equal(2.0f, readBack[1]["id"].AsFloat32());
     }
 
     /// <summary>
@@ -150,7 +150,7 @@ public sealed class SpillPartitionTests : IDisposable
     {
         using SpillPartition partition = new(_spillDirectory, 0);
 
-        partition.AddBuildRow(CreateRow("x", DataValue.FromScalar(42.0f)));
+        partition.AddBuildRow(CreateRow("x", DataValue.FromFloat32(42.0f)));
         partition.SpillBuildToDisk();
         partition.SpillBuildToDisk();
 
@@ -158,7 +158,7 @@ public sealed class SpillPartitionTests : IDisposable
 
         List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
         Assert.Single(readBack);
-        Assert.Equal(42.0f, readBack[0]["x"].AsScalar());
+        Assert.Equal(42.0f, readBack[0]["x"].AsFloat32());
     }
 
     /// <summary>
@@ -169,9 +169,9 @@ public sealed class SpillPartitionTests : IDisposable
     {
         SpillPartition partition = new(_spillDirectory, 0);
 
-        partition.AddBuildRow(CreateRow("id", DataValue.FromScalar(1.0f)));
+        partition.AddBuildRow(CreateRow("id", DataValue.FromFloat32(1.0f)));
         partition.SpillBuildToDisk();
-        partition.AddProbeRow(CreateRow("id", DataValue.FromScalar(2.0f)));
+        partition.AddProbeRow(CreateRow("id", DataValue.FromFloat32(2.0f)));
         partition.SpillProbeToDisk();
 
         // Verify files exist before dispose.
@@ -231,14 +231,14 @@ public sealed class SpillPartitionTests : IDisposable
 
         Row row = new(
             ["id", "name", "active"],
-            [DataValue.FromScalar(42.0f), DataValue.FromString("hello"), DataValue.FromBoolean(true)]);
+            [DataValue.FromFloat32(42.0f), DataValue.FromString("hello"), DataValue.FromBoolean(true)]);
 
         partition.AddBuildRow(row);
         partition.SpillBuildToDisk();
 
         List<Row> readBack = partition.ReadSpilledBuildRows().ToList();
         Assert.Single(readBack);
-        Assert.Equal(42.0f, readBack[0]["id"].AsScalar());
+        Assert.Equal(42.0f, readBack[0]["id"].AsFloat32());
         Assert.Equal("hello", readBack[0]["name"].AsString());
         Assert.True(readBack[0]["active"].AsBoolean());
     }
@@ -253,7 +253,7 @@ public sealed class SpillPartitionTests : IDisposable
 
         Row row = new(
             ["value"],
-            [DataValue.Null(DataKind.Scalar)]);
+            [DataValue.Null(DataKind.Float32)]);
 
         partition.AddBuildRow(row);
         partition.SpillBuildToDisk();
@@ -272,8 +272,8 @@ public sealed class SpillPartitionTests : IDisposable
         using SpillPartition partition0 = new(_spillDirectory, 0);
         using SpillPartition partition1 = new(_spillDirectory, 1);
 
-        partition0.AddBuildRow(CreateRow("id", DataValue.FromScalar(1.0f)));
-        partition1.AddBuildRow(CreateRow("id", DataValue.FromScalar(2.0f)));
+        partition0.AddBuildRow(CreateRow("id", DataValue.FromFloat32(1.0f)));
+        partition1.AddBuildRow(CreateRow("id", DataValue.FromFloat32(2.0f)));
 
         partition0.SpillBuildToDisk();
         partition1.SpillBuildToDisk();
@@ -282,9 +282,9 @@ public sealed class SpillPartitionTests : IDisposable
         List<Row> rows1 = partition1.ReadSpilledBuildRows().ToList();
 
         Assert.Single(rows0);
-        Assert.Equal(1.0f, rows0[0]["id"].AsScalar());
+        Assert.Equal(1.0f, rows0[0]["id"].AsFloat32());
         Assert.Single(rows1);
-        Assert.Equal(2.0f, rows1[0]["id"].AsScalar());
+        Assert.Equal(2.0f, rows1[0]["id"].AsFloat32());
     }
 
     private static Row CreateRow(string columnName, DataValue value)

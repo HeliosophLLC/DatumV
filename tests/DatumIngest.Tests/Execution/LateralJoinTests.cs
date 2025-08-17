@@ -40,15 +40,15 @@ public sealed class LateralJoinTests
 
         Assert.Equal(5, results.Count);
         Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsScalar());
+        Assert.Equal(1f, results[0]["value"].AsFloat32());
         Assert.Equal("alice", results[1]["name"].AsString());
-        Assert.Equal(2f, results[1]["value"].AsScalar());
+        Assert.Equal(2f, results[1]["value"].AsFloat32());
         Assert.Equal("alice", results[2]["name"].AsString());
-        Assert.Equal(3f, results[2]["value"].AsScalar());
+        Assert.Equal(3f, results[2]["value"].AsFloat32());
         Assert.Equal("bob", results[3]["name"].AsString());
-        Assert.Equal(10f, results[3]["value"].AsScalar());
+        Assert.Equal(10f, results[3]["value"].AsFloat32());
         Assert.Equal("bob", results[4]["name"].AsString());
-        Assert.Equal(20f, results[4]["value"].AsScalar());
+        Assert.Equal(20f, results[4]["value"].AsFloat32());
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ public sealed class LateralJoinTests
 
         Assert.Equal(2, results.Count);
         Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsScalar());
+        Assert.Equal(1f, results[0]["value"].AsFloat32());
     }
 
     // ───────────────── LEFT JOIN LATERAL ─────────────────
@@ -96,16 +96,16 @@ public sealed class LateralJoinTests
         // alice: 2 rows, bob: 1 null-padded row, carol: 1 row → 4 total.
         Assert.Equal(4, results.Count);
         Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsScalar());
+        Assert.Equal(1f, results[0]["value"].AsFloat32());
         Assert.Equal("alice", results[1]["name"].AsString());
-        Assert.Equal(2f, results[1]["value"].AsScalar());
+        Assert.Equal(2f, results[1]["value"].AsFloat32());
 
         // Bob has empty vector → LEFT preserves with NULL value.
         Assert.Equal("bob", results[2]["name"].AsString());
         Assert.True(results[2]["value"].IsNull);
 
         Assert.Equal("carol", results[3]["name"].AsString());
-        Assert.Equal(5f, results[3]["value"].AsScalar());
+        Assert.Equal(5f, results[3]["value"].AsFloat32());
     }
 
     /// <summary>
@@ -127,7 +127,7 @@ public sealed class LateralJoinTests
 
         Assert.Equal(2, results.Count);
         Assert.Equal("alice", results[0]["name"].AsString());
-        Assert.Equal(1f, results[0]["value"].AsScalar());
+        Assert.Equal(1f, results[0]["value"].AsFloat32());
         Assert.Equal("bob", results[1]["name"].AsString());
         Assert.True(results[1]["value"].IsNull);
     }
@@ -143,16 +143,16 @@ public sealed class LateralJoinTests
     {
         Row[] orders =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("customer", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("customer", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("customer", DataValue.FromString("carol"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("customer", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("customer", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("customer", DataValue.FromString("carol"))),
         ];
 
         Row[] items =
         [
-            MakeRow(("order_id", DataValue.FromScalar(1f)), ("product", DataValue.FromString("widget"))),
-            MakeRow(("order_id", DataValue.FromScalar(1f)), ("product", DataValue.FromString("gadget"))),
-            MakeRow(("order_id", DataValue.FromScalar(3f)), ("product", DataValue.FromString("doohickey"))),
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("widget"))),
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("gadget"))),
+            MakeRow(("order_id", DataValue.FromFloat32(3f)), ("product", DataValue.FromString("doohickey"))),
         ];
 
         TableCatalog catalog = CreateCatalog(("orders", orders), ("items", items));
@@ -183,13 +183,13 @@ public sealed class LateralJoinTests
     {
         Row[] orders =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("customer", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("customer", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("customer", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("customer", DataValue.FromString("bob"))),
         ];
 
         Row[] items =
         [
-            MakeRow(("order_id", DataValue.FromScalar(1f)), ("product", DataValue.FromString("widget"))),
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product", DataValue.FromString("widget"))),
         ];
 
         TableCatalog catalog = CreateCatalog(("orders", orders), ("items", items));

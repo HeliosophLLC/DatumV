@@ -63,11 +63,11 @@ public sealed class IndexHintTests
 
         for (int i = 0; i < distinctCount; i++)
         {
-            collector.AddRow(MakeRow("id", DataValue.FromScalar(i)));
+            collector.AddRow(MakeRow("id", DataValue.FromFloat32(i)));
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
-        Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Scalar };
+        Dictionary<string, DataKind> kinds = new() { ["id"] = DataKind.Float32 };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(statistics, kinds, distinctCount);
 
@@ -99,17 +99,17 @@ public sealed class IndexHintTests
 
         // Low-cardinality string → Bitmap.
         collector.AddRow(MakeRow("status", DataValue.FromString("active"),
-                                 "count", DataValue.FromScalar(1.0f)));
+                                 "count", DataValue.FromFloat32(1.0f)));
         collector.AddRow(MakeRow("status", DataValue.FromString("inactive"),
-                                 "count", DataValue.FromScalar(2.0f)));
+                                 "count", DataValue.FromFloat32(2.0f)));
         collector.AddRow(MakeRow("status", DataValue.FromString("active"),
-                                 "count", DataValue.FromScalar(3.0f)));
+                                 "count", DataValue.FromFloat32(3.0f)));
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
         {
             ["status"] = DataKind.String,
-            ["count"] = DataKind.Scalar
+            ["count"] = DataKind.Float32
         };
 
         QueryResultsManifest manifest = ManifestBuilder.Build(statistics, kinds, 3);
@@ -149,7 +149,7 @@ public sealed class IndexHintTests
     public void CreateBitmapAccumulators_BitmapHint_IncludesColumn()
     {
         Schema schema = new([
-            new ColumnInfo("value", DataKind.Scalar, false),
+            new ColumnInfo("value", DataKind.Float32, false),
             new ColumnInfo("label", DataKind.String, false),
         ]);
 
@@ -172,7 +172,7 @@ public sealed class IndexHintTests
     public void CreateBitmapAccumulators_SortedHint_ExcludesColumn()
     {
         Schema schema = new([
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
         ]);
 
         List<ColumnIndexHint> hints =
@@ -191,7 +191,7 @@ public sealed class IndexHintTests
     public void CreateBitmapAccumulators_NoHints_FallsBackToAutoDetection()
     {
         Schema schema = new([
-            new ColumnInfo("value", DataKind.Scalar, false),
+            new ColumnInfo("value", DataKind.Float32, false),
             new ColumnInfo("embedding", DataKind.Vector, false),
         ]);
 

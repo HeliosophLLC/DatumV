@@ -38,7 +38,7 @@ public sealed class DateDiffFunction : IScalarFunction
             throw new ArgumentException($"date_diff() third argument must be Date or DateTime, got {argumentKinds[2]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -50,7 +50,7 @@ public sealed class DateDiffFunction : IScalarFunction
 
         if (startValue.IsNull || endValue.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         DatePartName part = DatePartParser.Parse(partValue.AsString());
@@ -71,6 +71,6 @@ public sealed class DateDiffFunction : IScalarFunction
             _ => throw new ArgumentException($"Unsupported date part for date_diff: {part}."),
         };
 
-        return DataValue.FromScalar(difference);
+        return DataValue.FromFloat32(difference);
     }
 }

@@ -49,9 +49,9 @@ public class StatisticalAggregateTests
     {
         // Values: {2, 4, 6} → mean = 4, sample variance = ((2-4)² + (4-4)² + (6-4)²) / (3-1) = 8/2 = 4.0
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(6f))));
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(6f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -67,7 +67,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(4.0f, results[0]["VARIANCE(x)"].AsScalar(), 0.001f);
+        Assert.Equal(4.0f, results[0]["VARIANCE(x)"].AsFloat32(), 0.001f);
     }
 
     [Fact]
@@ -75,9 +75,9 @@ public class StatisticalAggregateTests
     {
         // Values: {2, 4, 6} → mean = 4, pop variance = 8/3 ≈ 2.667
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(6f))));
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(6f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -93,14 +93,14 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(2.667f, results[0]["VAR_POP(x)"].AsScalar(), 0.01f);
+        Assert.Equal(2.667f, results[0]["VAR_POP(x)"].AsFloat32(), 0.01f);
     }
 
     [Fact]
     public async Task VarianceSample_SingleValue_ReturnsNull()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(5f))));
+            MakeRow(("x", DataValue.FromFloat32(5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -123,7 +123,7 @@ public class StatisticalAggregateTests
     public async Task VariancePopulation_SingleValue_ReturnsZero()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(5f))));
+            MakeRow(("x", DataValue.FromFloat32(5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -139,15 +139,15 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(0f, results[0]["VAR_POP(x)"].AsScalar());
+        Assert.Equal(0f, results[0]["VAR_POP(x)"].AsFloat32());
     }
 
     [Fact]
     public async Task Variance_AllNull_ReturnsNull()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))));
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))));
 
         GroupByOperator groupBy = new(
             source,
@@ -172,11 +172,11 @@ public class StatisticalAggregateTests
         // Group A: {1, 3, 5} → sample variance = 4.0
         // Group B: {10, 10} → sample variance = 0.0
         MockOperator source = new(
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(1f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(10f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(3f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(10f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(5f))));
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(1f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(10f))),
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(3f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(10f))),
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -196,8 +196,8 @@ public class StatisticalAggregateTests
         Row groupA = results.First(row => row["cat"].AsString() == "A");
         Row groupB = results.First(row => row["cat"].AsString() == "B");
 
-        Assert.Equal(4.0f, groupA["VARIANCE(x)"].AsScalar(), 0.001f);
-        Assert.Equal(0.0f, groupB["VARIANCE(x)"].AsScalar(), 0.001f);
+        Assert.Equal(4.0f, groupA["VARIANCE(x)"].AsFloat32(), 0.001f);
+        Assert.Equal(0.0f, groupB["VARIANCE(x)"].AsFloat32(), 0.001f);
     }
 
     // ─────────────── STDDEV / STDDEV_SAMP ───────────────
@@ -207,9 +207,9 @@ public class StatisticalAggregateTests
     {
         // Values: {2, 4, 6} → sample variance = 4.0, sample stddev = 2.0
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(6f))));
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(6f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -225,7 +225,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(2.0f, results[0]["STDDEV(x)"].AsScalar(), 0.001f);
+        Assert.Equal(2.0f, results[0]["STDDEV(x)"].AsFloat32(), 0.001f);
     }
 
     [Fact]
@@ -233,9 +233,9 @@ public class StatisticalAggregateTests
     {
         // Values: {2, 4, 6} → pop variance = 2.667, pop stddev ≈ 1.633
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(2f))),
-            MakeRow(("x", DataValue.FromScalar(4f))),
-            MakeRow(("x", DataValue.FromScalar(6f))));
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(6f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -251,14 +251,14 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(1.633f, results[0]["STDDEV_POP(x)"].AsScalar(), 0.01f);
+        Assert.Equal(1.633f, results[0]["STDDEV_POP(x)"].AsFloat32(), 0.01f);
     }
 
     [Fact]
     public async Task StdDevSample_SingleValue_ReturnsNull()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(42f))));
+            MakeRow(("x", DataValue.FromFloat32(42f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -281,8 +281,8 @@ public class StatisticalAggregateTests
     public async Task StdDev_AllNull_ReturnsNull()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))));
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))));
 
         GroupByOperator groupBy = new(
             source,
@@ -308,9 +308,9 @@ public class StatisticalAggregateTests
     {
         // {1, 3, 5} → median = 3
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(5f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(3f))));
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -326,7 +326,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["MEDIAN(x)"].AsScalar());
+        Assert.Equal(3f, results[0]["MEDIAN(x)"].AsFloat32());
     }
 
     [Fact]
@@ -334,10 +334,10 @@ public class StatisticalAggregateTests
     {
         // {1, 3, 5, 7} → median = (3 + 5) / 2 = 4
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(7f))),
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(5f))),
-            MakeRow(("x", DataValue.FromScalar(3f))));
+            MakeRow(("x", DataValue.FromFloat32(7f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -353,14 +353,14 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(4f, results[0]["MEDIAN(x)"].AsScalar());
+        Assert.Equal(4f, results[0]["MEDIAN(x)"].AsFloat32());
     }
 
     [Fact]
     public async Task Median_SingleValue()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(42f))));
+            MakeRow(("x", DataValue.FromFloat32(42f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -376,15 +376,15 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(42f, results[0]["MEDIAN(x)"].AsScalar());
+        Assert.Equal(42f, results[0]["MEDIAN(x)"].AsFloat32());
     }
 
     [Fact]
     public async Task Median_AllNull_ReturnsNull()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))));
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))));
 
         GroupByOperator groupBy = new(
             source,
@@ -409,13 +409,13 @@ public class StatisticalAggregateTests
         // Group A: {10, 20, 30} → median = 20
         // Group B: {1, 2, 3, 4} → median = 2.5
         MockOperator source = new(
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(30f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(4f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(10f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(1f))),
-            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromScalar(20f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(2f))),
-            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromScalar(3f))));
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(30f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(4f))),
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(10f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(1f))),
+            MakeRow(("cat", DataValue.FromString("A")), ("x", DataValue.FromFloat32(20f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(2f))),
+            MakeRow(("cat", DataValue.FromString("B")), ("x", DataValue.FromFloat32(3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -435,8 +435,8 @@ public class StatisticalAggregateTests
         Row groupA = results.First(row => row["cat"].AsString() == "A");
         Row groupB = results.First(row => row["cat"].AsString() == "B");
 
-        Assert.Equal(20f, groupA["MEDIAN(x)"].AsScalar());
-        Assert.Equal(2.5f, groupB["MEDIAN(x)"].AsScalar());
+        Assert.Equal(20f, groupA["MEDIAN(x)"].AsFloat32());
+        Assert.Equal(2.5f, groupB["MEDIAN(x)"].AsFloat32());
     }
 
     [Fact]
@@ -444,10 +444,10 @@ public class StatisticalAggregateTests
     {
         // Non-null values: {1, 5, 9} → median = 5
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar))),
-            MakeRow(("x", DataValue.FromScalar(9f))),
-            MakeRow(("x", DataValue.FromScalar(5f))));
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32))),
+            MakeRow(("x", DataValue.FromFloat32(9f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -463,7 +463,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(5f, results[0]["MEDIAN(x)"].AsScalar());
+        Assert.Equal(5f, results[0]["MEDIAN(x)"].AsFloat32());
     }
 
     // ─────────────── PERCENTILE_CONT ───────────────
@@ -473,11 +473,11 @@ public class StatisticalAggregateTests
     {
         // P50 of {1, 2, 3, 4, 5} → 3 (same as median for odd count)
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(3f)), ("p", DataValue.FromScalar(0.5f))),
-            MakeRow(("x", DataValue.FromScalar(1f)), ("p", DataValue.FromScalar(0.5f))),
-            MakeRow(("x", DataValue.FromScalar(5f)), ("p", DataValue.FromScalar(0.5f))),
-            MakeRow(("x", DataValue.FromScalar(2f)), ("p", DataValue.FromScalar(0.5f))),
-            MakeRow(("x", DataValue.FromScalar(4f)), ("p", DataValue.FromScalar(0.5f))));
+            MakeRow(("x", DataValue.FromFloat32(3f)), ("p", DataValue.FromFloat32(0.5f))),
+            MakeRow(("x", DataValue.FromFloat32(1f)), ("p", DataValue.FromFloat32(0.5f))),
+            MakeRow(("x", DataValue.FromFloat32(5f)), ("p", DataValue.FromFloat32(0.5f))),
+            MakeRow(("x", DataValue.FromFloat32(2f)), ("p", DataValue.FromFloat32(0.5f))),
+            MakeRow(("x", DataValue.FromFloat32(4f)), ("p", DataValue.FromFloat32(0.5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -493,7 +493,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["PERCENTILE_CONT(x, 0.5)"].AsScalar(), 0.001f);
+        Assert.Equal(3f, results[0]["PERCENTILE_CONT(x, 0.5)"].AsFloat32(), 0.001f);
     }
 
     [Fact]
@@ -501,9 +501,9 @@ public class StatisticalAggregateTests
     {
         // P0 of {10, 20, 30} → 10
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(30f)), ("p", DataValue.FromScalar(0f))),
-            MakeRow(("x", DataValue.FromScalar(10f)), ("p", DataValue.FromScalar(0f))),
-            MakeRow(("x", DataValue.FromScalar(20f)), ("p", DataValue.FromScalar(0f))));
+            MakeRow(("x", DataValue.FromFloat32(30f)), ("p", DataValue.FromFloat32(0f))),
+            MakeRow(("x", DataValue.FromFloat32(10f)), ("p", DataValue.FromFloat32(0f))),
+            MakeRow(("x", DataValue.FromFloat32(20f)), ("p", DataValue.FromFloat32(0f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -519,7 +519,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(10f, results[0]["P0"].AsScalar());
+        Assert.Equal(10f, results[0]["P0"].AsFloat32());
     }
 
     [Fact]
@@ -527,9 +527,9 @@ public class StatisticalAggregateTests
     {
         // P100 of {10, 20, 30} → 30
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(30f)), ("p", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(10f)), ("p", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(20f)), ("p", DataValue.FromScalar(1f))));
+            MakeRow(("x", DataValue.FromFloat32(30f)), ("p", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(10f)), ("p", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(20f)), ("p", DataValue.FromFloat32(1f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -545,7 +545,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(30f, results[0]["P100"].AsScalar());
+        Assert.Equal(30f, results[0]["P100"].AsFloat32());
     }
 
     [Fact]
@@ -554,10 +554,10 @@ public class StatisticalAggregateTests
         // P30 of {1, 2, 3, 4} → row = 0.3 * 3 = 0.9, lower=0(val=1), upper=1(val=2)
         // interpolated = 1 + (2 - 1) * 0.9 = 1.9
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(4f)), ("p", DataValue.FromScalar(0.3f))),
-            MakeRow(("x", DataValue.FromScalar(2f)), ("p", DataValue.FromScalar(0.3f))),
-            MakeRow(("x", DataValue.FromScalar(1f)), ("p", DataValue.FromScalar(0.3f))),
-            MakeRow(("x", DataValue.FromScalar(3f)), ("p", DataValue.FromScalar(0.3f))));
+            MakeRow(("x", DataValue.FromFloat32(4f)), ("p", DataValue.FromFloat32(0.3f))),
+            MakeRow(("x", DataValue.FromFloat32(2f)), ("p", DataValue.FromFloat32(0.3f))),
+            MakeRow(("x", DataValue.FromFloat32(1f)), ("p", DataValue.FromFloat32(0.3f))),
+            MakeRow(("x", DataValue.FromFloat32(3f)), ("p", DataValue.FromFloat32(0.3f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -573,7 +573,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(1.9f, results[0]["P30"].AsScalar(), 0.001f);
+        Assert.Equal(1.9f, results[0]["P30"].AsFloat32(), 0.001f);
     }
 
     [Fact]
@@ -581,11 +581,11 @@ public class StatisticalAggregateTests
     {
         // {1, 2, 3, 4, 5} → P25: row=1.0 → val=2, P75: row=3.0 → val=4
         MockOperator source = new(
-            MakeRow(("x", DataValue.FromScalar(1f)), ("p25", DataValue.FromScalar(0.25f)), ("p75", DataValue.FromScalar(0.75f))),
-            MakeRow(("x", DataValue.FromScalar(2f)), ("p25", DataValue.FromScalar(0.25f)), ("p75", DataValue.FromScalar(0.75f))),
-            MakeRow(("x", DataValue.FromScalar(3f)), ("p25", DataValue.FromScalar(0.25f)), ("p75", DataValue.FromScalar(0.75f))),
-            MakeRow(("x", DataValue.FromScalar(4f)), ("p25", DataValue.FromScalar(0.25f)), ("p75", DataValue.FromScalar(0.75f))),
-            MakeRow(("x", DataValue.FromScalar(5f)), ("p25", DataValue.FromScalar(0.25f)), ("p75", DataValue.FromScalar(0.75f))));
+            MakeRow(("x", DataValue.FromFloat32(1f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
+            MakeRow(("x", DataValue.FromFloat32(2f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
+            MakeRow(("x", DataValue.FromFloat32(3f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
+            MakeRow(("x", DataValue.FromFloat32(4f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))),
+            MakeRow(("x", DataValue.FromFloat32(5f)), ("p25", DataValue.FromFloat32(0.25f)), ("p75", DataValue.FromFloat32(0.75f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -605,16 +605,16 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(2f, results[0]["Q1"].AsScalar(), 0.001f);
-        Assert.Equal(4f, results[0]["Q3"].AsScalar(), 0.001f);
+        Assert.Equal(2f, results[0]["Q1"].AsFloat32(), 0.001f);
+        Assert.Equal(4f, results[0]["Q3"].AsFloat32(), 0.001f);
     }
 
     [Fact]
     public async Task PercentileCont_AllNull_ReturnsNull()
     {
         MockOperator source = new(
-            MakeRow(("x", DataValue.Null(DataKind.Scalar)), ("p", DataValue.FromScalar(0.5f))),
-            MakeRow(("x", DataValue.Null(DataKind.Scalar)), ("p", DataValue.FromScalar(0.5f))));
+            MakeRow(("x", DataValue.Null(DataKind.Float32)), ("p", DataValue.FromFloat32(0.5f))),
+            MakeRow(("x", DataValue.Null(DataKind.Float32)), ("p", DataValue.FromFloat32(0.5f))));
 
         GroupByOperator groupBy = new(
             source,
@@ -640,7 +640,7 @@ public class StatisticalAggregateTests
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         Assert.Throws<ArgumentException>(() =>
-            accumulator.Accumulate([DataValue.FromScalar(1f), DataValue.FromScalar(1.5f)]));
+            accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(1.5f)]));
     }
 
     [Fact]
@@ -650,7 +650,7 @@ public class StatisticalAggregateTests
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
         Assert.Throws<ArgumentException>(() =>
-            accumulator.Accumulate([DataValue.FromScalar(1f), DataValue.FromScalar(-0.1f)]));
+            accumulator.Accumulate([DataValue.FromFloat32(1f), DataValue.FromFloat32(-0.1f)]));
     }
 
     // ─────────────── Argument validation ───────────────
@@ -664,7 +664,7 @@ public class StatisticalAggregateTests
             function.ValidateArguments([]));
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -694,7 +694,7 @@ public class StatisticalAggregateTests
             function.ValidateArguments([]));
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -712,10 +712,10 @@ public class StatisticalAggregateTests
         PercentileContinuousFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -724,7 +724,7 @@ public class StatisticalAggregateTests
         PercentileContinuousFunction function = new();
 
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     // ─────────────── Registry integration ───────────────

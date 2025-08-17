@@ -106,8 +106,8 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("a", DataValue.FromScalar(10)), ("b", DataValue.FromScalar(3))),
-            MakeRow(("a", DataValue.FromScalar(20)), ("b", DataValue.FromScalar(7)))
+            MakeRow(("a", DataValue.FromFloat32(10)), ("b", DataValue.FromFloat32(3))),
+            MakeRow(("a", DataValue.FromFloat32(20)), ("b", DataValue.FromFloat32(7)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -115,8 +115,8 @@ public sealed class LetBindingTests
             "SELECT LET s = a + b, s AS result FROM t", catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(13f, results[0]["result"].AsScalar());
-        Assert.Equal(27f, results[1]["result"].AsScalar());
+        Assert.Equal(13f, results[0]["result"].AsFloat32());
+        Assert.Equal(27f, results[1]["result"].AsFloat32());
     }
 
     /// <summary>
@@ -127,7 +127,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("a", DataValue.FromScalar(5)), ("b", DataValue.FromScalar(2)))
+            MakeRow(("a", DataValue.FromFloat32(5)), ("b", DataValue.FromFloat32(2)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -136,7 +136,7 @@ public sealed class LetBindingTests
 
         Assert.Single(results);
         Assert.Equal(1, results[0].FieldCount);
-        Assert.Equal(14f, results[0]["doubled"].AsScalar());
+        Assert.Equal(14f, results[0]["doubled"].AsFloat32());
     }
 
     /// <summary>
@@ -147,7 +147,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("a", DataValue.FromScalar(10)), ("b", DataValue.FromScalar(3)))
+            MakeRow(("a", DataValue.FromFloat32(10)), ("b", DataValue.FromFloat32(3)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -156,8 +156,8 @@ public sealed class LetBindingTests
 
         Assert.Single(results);
         Assert.Equal(2, results[0].FieldCount);
-        Assert.Equal(13f, results[0]["sum"].AsScalar());
-        Assert.Equal(26f, results[0]["doubled"].AsScalar());
+        Assert.Equal(13f, results[0]["sum"].AsFloat32());
+        Assert.Equal(26f, results[0]["doubled"].AsFloat32());
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(4)))
+            MakeRow(("x", DataValue.FromFloat32(4)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -176,7 +176,7 @@ public sealed class LetBindingTests
             "SELECT LET a = x + 1, LET b = a * 3, b AS result FROM t", catalog);
 
         Assert.Single(results);
-        Assert.Equal(15f, results[0]["result"].AsScalar());
+        Assert.Equal(15f, results[0]["result"].AsFloat32());
     }
 
     /// <summary>
@@ -190,7 +190,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1)))
+            MakeRow(("x", DataValue.FromFloat32(1)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -213,7 +213,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("a", DataValue.FromScalar(1)), ("b", DataValue.FromScalar(2)))
+            MakeRow(("a", DataValue.FromFloat32(1)), ("b", DataValue.FromFloat32(2)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -224,9 +224,9 @@ public sealed class LetBindingTests
         // Output should be: sum, a, b (the aliased LET appears because of AS,
         // and * expands the source columns).
         Assert.Equal(3, results[0].FieldCount);
-        Assert.Equal(3f, results[0]["sum"].AsScalar());
-        Assert.Equal(1f, results[0]["a"].AsScalar());
-        Assert.Equal(2f, results[0]["b"].AsScalar());
+        Assert.Equal(3f, results[0]["sum"].AsFloat32());
+        Assert.Equal(1f, results[0]["a"].AsFloat32());
+        Assert.Equal(2f, results[0]["b"].AsFloat32());
     }
 
     /// <summary>
@@ -237,9 +237,9 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(10))),
-            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromScalar(20))),
-            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromScalar(30)))
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(10))),
+            MakeRow(("category", DataValue.FromString("A")), ("value", DataValue.FromFloat32(20))),
+            MakeRow(("category", DataValue.FromString("B")), ("value", DataValue.FromFloat32(30)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -250,8 +250,8 @@ public sealed class LetBindingTests
         Assert.Equal(2, results.Count);
         Row rowA = results.First(r => r["category"].AsString() == "A");
         Row rowB = results.First(r => r["category"].AsString() == "B");
-        Assert.Equal(30f, rowA["group_total"].AsScalar());
-        Assert.Equal(30f, rowB["group_total"].AsScalar());
+        Assert.Equal(30f, rowA["group_total"].AsFloat32());
+        Assert.Equal(30f, rowB["group_total"].AsFloat32());
     }
 
     /// <summary>
@@ -262,9 +262,9 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(3))),
-            MakeRow(("x", DataValue.FromScalar(1))),
-            MakeRow(("x", DataValue.FromScalar(2)))
+            MakeRow(("x", DataValue.FromFloat32(3))),
+            MakeRow(("x", DataValue.FromFloat32(1))),
+            MakeRow(("x", DataValue.FromFloat32(2)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -273,9 +273,9 @@ public sealed class LetBindingTests
             catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(2f, results[0]["doubled"].AsScalar());
-        Assert.Equal(4f, results[1]["doubled"].AsScalar());
-        Assert.Equal(6f, results[2]["doubled"].AsScalar());
+        Assert.Equal(2f, results[0]["doubled"].AsFloat32());
+        Assert.Equal(4f, results[1]["doubled"].AsFloat32());
+        Assert.Equal(6f, results[2]["doubled"].AsFloat32());
     }
 
     /// <summary>
@@ -286,7 +286,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(10)))
+            MakeRow(("x", DataValue.FromFloat32(10)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -296,8 +296,8 @@ public sealed class LetBindingTests
 
         Assert.Single(results);
         Assert.Equal(2, results[0].FieldCount);
-        Assert.Equal(15f, results[0]["visible"].AsScalar());
-        Assert.Equal(30f, results[0]["result"].AsScalar());
+        Assert.Equal(15f, results[0]["visible"].AsFloat32());
+        Assert.Equal(30f, results[0]["result"].AsFloat32());
     }
 
     /// <summary>
@@ -308,7 +308,7 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(-7)))
+            MakeRow(("x", DataValue.FromFloat32(-7)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -317,7 +317,7 @@ public sealed class LetBindingTests
             catalog);
 
         Assert.Single(results);
-        Assert.Equal(7f, results[0]["result"].AsScalar());
+        Assert.Equal(7f, results[0]["result"].AsFloat32());
     }
 
     /// <summary>
@@ -329,9 +329,9 @@ public sealed class LetBindingTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(2))),
-            MakeRow(("x", DataValue.FromScalar(5))),
-            MakeRow(("x", DataValue.FromScalar(10)))
+            MakeRow(("x", DataValue.FromFloat32(2))),
+            MakeRow(("x", DataValue.FromFloat32(5))),
+            MakeRow(("x", DataValue.FromFloat32(10)))
         ];
         TableCatalog catalog = CreateCatalog(("t", data));
 
@@ -339,9 +339,9 @@ public sealed class LetBindingTests
             "SELECT LET sq = x * x, sq AS squared FROM t", catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(4f, results[0]["squared"].AsScalar());
-        Assert.Equal(25f, results[1]["squared"].AsScalar());
-        Assert.Equal(100f, results[2]["squared"].AsScalar());
+        Assert.Equal(4f, results[0]["squared"].AsFloat32());
+        Assert.Equal(25f, results[1]["squared"].AsFloat32());
+        Assert.Equal(100f, results[2]["squared"].AsFloat32());
     }
 
     // ─────────────── Helpers ───────────────

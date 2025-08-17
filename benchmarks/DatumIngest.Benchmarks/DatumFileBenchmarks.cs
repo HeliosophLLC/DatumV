@@ -30,11 +30,11 @@ public class DatumFileBenchmarks
         _rows = SyntheticDataGenerator.GenerateRows(RowCount);
         _schema = new Schema(new ColumnInfo[]
         {
-            new("id", DataKind.Scalar, false),
+            new("id", DataKind.Float32, false),
             new("name", DataKind.String, false),
-            new("value", DataKind.Scalar, false),
+            new("value", DataKind.Float32, false),
             new("category", DataKind.String, false),
-            new("score", DataKind.Scalar, false)
+            new("score", DataKind.Float32, false)
         });
         _tempDirectory = Path.Combine(Path.GetTempPath(), "datum_bench_datumfile");
         Directory.CreateDirectory(_tempDirectory);

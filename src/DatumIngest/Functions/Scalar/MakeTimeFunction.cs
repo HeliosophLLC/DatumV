@@ -21,7 +21,7 @@ public sealed class MakeTimeFunction : IScalarFunction
 
         for (int index = 0; index < argumentKinds.Length; index++)
         {
-            if (argumentKinds[index] != DataKind.Scalar)
+            if (argumentKinds[index] != DataKind.Float32)
             {
                 throw new ArgumentException($"make_time() argument {index + 1} must be Scalar, got {argumentKinds[index]}.");
             }
@@ -38,9 +38,9 @@ public sealed class MakeTimeFunction : IScalarFunction
             return DataValue.Null(DataKind.Time);
         }
 
-        int hour = (int)arguments[0].AsScalar();
-        int minute = (int)arguments[1].AsScalar();
-        int second = (int)arguments[2].AsScalar();
+        int hour = (int)arguments[0].AsFloat32();
+        int minute = (int)arguments[1].AsFloat32();
+        int second = (int)arguments[2].AsFloat32();
 
         return DataValue.FromTime(new TimeOnly(hour, minute, second));
     }

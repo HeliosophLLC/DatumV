@@ -19,9 +19,9 @@ internal static class JsonTypeInference
     {
         return element.ValueKind switch
         {
-            JsonValueKind.Number => DataKind.Scalar,
+            JsonValueKind.Number => DataKind.Float32,
             JsonValueKind.String => InferStringKind(element.GetString()),
-            JsonValueKind.True or JsonValueKind.False => DataKind.Scalar,
+            JsonValueKind.True or JsonValueKind.False => DataKind.Float32,
             JsonValueKind.Null or JsonValueKind.Undefined => DataKind.String,
             JsonValueKind.Array or JsonValueKind.Object => DataKind.JsonValue,
             _ => DataKind.String
@@ -59,12 +59,12 @@ internal static class JsonTypeInference
 
         return targetKind switch
         {
-            DataKind.Scalar => element.ValueKind switch
+            DataKind.Float32 => element.ValueKind switch
             {
-                JsonValueKind.Number => DataValue.FromScalar((float)element.GetDouble()),
-                JsonValueKind.True => DataValue.FromScalar(1f),
-                JsonValueKind.False => DataValue.FromScalar(0f),
-                _ => DataValue.Null(DataKind.Scalar)
+                JsonValueKind.Number => DataValue.FromFloat32((float)element.GetDouble()),
+                JsonValueKind.True => DataValue.FromFloat32(1f),
+                JsonValueKind.False => DataValue.FromFloat32(0f),
+                _ => DataValue.Null(DataKind.Float32)
             },
             DataKind.Date when element.ValueKind == JsonValueKind.String =>
                 DateOnly.TryParse(element.GetString(), CultureInfo.InvariantCulture, out DateOnly date)

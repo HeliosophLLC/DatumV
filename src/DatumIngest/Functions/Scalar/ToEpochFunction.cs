@@ -27,7 +27,7 @@ public sealed class ToEpochFunction : IScalarFunction
             throw new ArgumentException($"to_epoch() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -37,13 +37,13 @@ public sealed class ToEpochFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         return input.Kind switch
         {
-            DataKind.Date => DataValue.FromScalar(input.AsDate().DayNumber - UnixEpochDayNumber),
-            DataKind.DateTime => DataValue.FromScalar(
+            DataKind.Date => DataValue.FromFloat32(input.AsDate().DayNumber - UnixEpochDayNumber),
+            DataKind.DateTime => DataValue.FromFloat32(
                 (float)(input.AsDateTime().ToUniversalTime() - DateTimeOffset.UnixEpoch).TotalSeconds),
             _ => throw new InvalidOperationException($"to_epoch() does not support {input.Kind}."),
         };

@@ -20,9 +20,9 @@ public class TimeFunctionTests
         MakeTimeFunction function = new();
         DataValue result = function.Execute(
         [
-            DataValue.FromScalar(14),
-            DataValue.FromScalar(30),
-            DataValue.FromScalar(45),
+            DataValue.FromFloat32(14),
+            DataValue.FromFloat32(30),
+            DataValue.FromFloat32(45),
         ]);
 
         Assert.Equal(DataKind.Time, result.Kind);
@@ -35,9 +35,9 @@ public class TimeFunctionTests
         MakeTimeFunction function = new();
         DataValue result = function.Execute(
         [
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
-            DataValue.FromScalar(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(0),
         ]);
 
         Assert.Equal(new TimeOnly(0, 0, 0), result.AsTime());
@@ -49,9 +49,9 @@ public class TimeFunctionTests
         MakeTimeFunction function = new();
         DataValue result = function.Execute(
         [
-            DataValue.FromScalar(10),
-            DataValue.Null(DataKind.Scalar),
-            DataValue.FromScalar(30),
+            DataValue.FromFloat32(10),
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(30),
         ]);
 
         Assert.True(result.IsNull);
@@ -62,7 +62,7 @@ public class TimeFunctionTests
     public void MakeTime_ValidateArguments_ReturnsTime()
     {
         MakeTimeFunction function = new();
-        DataKind result = function.ValidateArguments([DataKind.Scalar, DataKind.Scalar, DataKind.Scalar]);
+        DataKind result = function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32]);
         Assert.Equal(DataKind.Time, result);
     }
 
@@ -71,7 +71,7 @@ public class TimeFunctionTests
     {
         MakeTimeFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.Float32]));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class TimeFunctionTests
     {
         MakeTimeFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar, DataKind.String, DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32, DataKind.String, DataKind.Float32]));
     }
 
     // ───────────────── CurrentTimeFunction ─────────────────
@@ -107,7 +107,7 @@ public class TimeFunctionTests
     {
         CurrentTimeFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.Scalar]));
+            function.ValidateArguments([DataKind.Float32]));
     }
 
     // ───────────────── Hour/Minute/Second with Time input ─────────────────
@@ -117,7 +117,7 @@ public class TimeFunctionTests
     {
         HourFunction function = new();
         DataValue result = function.Execute([DataValue.FromTime(new TimeOnly(14, 30, 0))]);
-        Assert.Equal(14f, result.AsScalar());
+        Assert.Equal(14f, result.AsFloat32());
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class TimeFunctionTests
     {
         MinuteFunction function = new();
         DataValue result = function.Execute([DataValue.FromTime(new TimeOnly(14, 30, 0))]);
-        Assert.Equal(30f, result.AsScalar());
+        Assert.Equal(30f, result.AsFloat32());
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public class TimeFunctionTests
     {
         SecondFunction function = new();
         DataValue result = function.Execute([DataValue.FromTime(new TimeOnly(14, 30, 45))]);
-        Assert.Equal(45f, result.AsScalar());
+        Assert.Equal(45f, result.AsFloat32());
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class TimeFunctionTests
     {
         HourFunction function = new();
         DataKind kind = function.ValidateArguments([DataKind.Time]);
-        Assert.Equal(DataKind.Scalar, kind);
+        Assert.Equal(DataKind.Float32, kind);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class TimeFunctionTests
     {
         MinuteFunction function = new();
         DataKind kind = function.ValidateArguments([DataKind.Time]);
-        Assert.Equal(DataKind.Scalar, kind);
+        Assert.Equal(DataKind.Float32, kind);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class TimeFunctionTests
     {
         SecondFunction function = new();
         DataKind kind = function.ValidateArguments([DataKind.Time]);
-        Assert.Equal(DataKind.Scalar, kind);
+        Assert.Equal(DataKind.Float32, kind);
     }
 
     [Fact]
@@ -271,10 +271,10 @@ public class TimeFunctionTests
         DataValue result = cast.Execute(
         [
             DataValue.FromTime(new TimeOnly(1, 0, 0)),
-            DataValue.FromString("Scalar"),
+            DataValue.FromString("Float32"),
         ]);
 
-        Assert.Equal(3600f, result.AsScalar());
+        Assert.Equal(3600f, result.AsFloat32());
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class TimeFunctionTests
         CastFunction cast = new();
         DataValue result = cast.Execute(
         [
-            DataValue.FromScalar(3600f),
+            DataValue.FromFloat32(3600f),
             DataValue.FromString("time"),
         ]);
 

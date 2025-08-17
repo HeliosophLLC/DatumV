@@ -32,19 +32,19 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             throw new ArgumentException("PERCENTILE_CONT() requires exactly two arguments: expression and fraction.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Scalar or DataKind.UInt8))
+        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
         {
             throw new ArgumentException(
                 $"PERCENTILE_CONT() first argument must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not DataKind.Scalar)
+        if (argumentKinds[1] is not DataKind.Float32)
         {
             throw new ArgumentException(
                 $"PERCENTILE_CONT() second argument (fraction) must be Scalar, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc/>
@@ -65,7 +65,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             // Capture the fraction from the first non-null invocation.
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
-                _fraction = arguments[1].AsScalar();
+                _fraction = arguments[1].AsFloat32();
 
                 if (_fraction < 0f || _fraction > 1f)
                 {
@@ -78,7 +78,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
 
             if (arguments[0].IsNull) return;
 
-            _values.Add(arguments[0].AsScalar());
+            _values.Add(arguments[0].AsFloat32());
         }
 
         public DataValue Result
@@ -87,7 +87,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             {
                 if (_values.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Scalar);
+                    return DataValue.Null(DataKind.Float32);
                 }
 
                 _values.Sort();
@@ -99,11 +99,11 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
 
                 if (lower == upper)
                 {
-                    return DataValue.FromScalar(_values[lower]);
+                    return DataValue.FromFloat32(_values[lower]);
                 }
 
                 double interpolated = _values[lower] + (_values[upper] - _values[lower]) * (row - lower);
-                return DataValue.FromScalar((float)interpolated);
+                return DataValue.FromFloat32((float)interpolated);
             }
         }
     }

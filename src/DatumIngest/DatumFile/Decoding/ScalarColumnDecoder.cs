@@ -4,7 +4,7 @@ using DatumIngest.Model;
 namespace DatumIngest.DatumFile.Decoding;
 
 /// <summary>
-/// Decodes a <see cref="DataKind.Scalar"/> column page produced by <c>ScalarColumnEncoder</c>.
+/// Decodes a <see cref="DataKind.Float32"/> column page produced by <c>ScalarColumnEncoder</c>.
 /// </summary>
 /// <remarks>
 /// Uncompressed layout: <c>nullBitmap[ceil(N/8)] | shuffledFloat32[N*4]</c>.
@@ -35,8 +35,8 @@ internal sealed class ScalarColumnDecoder : DatumColumnDecoder
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             result[rowIndex] = nullBitmap.IsNull(rowIndex)
-                ? DataValue.Null(DataKind.Scalar)
-                : DataValue.FromScalar(floats[rowIndex]);
+                ? DataValue.Null(DataKind.Float32)
+                : DataValue.FromFloat32(floats[rowIndex]);
         }
 
         return result;

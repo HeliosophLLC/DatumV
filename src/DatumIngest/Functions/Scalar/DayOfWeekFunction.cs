@@ -24,7 +24,7 @@ public sealed class DayOfWeekFunction : IScalarFunction
             throw new ArgumentException($"dayofweek() requires a Date or DateTime argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class DayOfWeekFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         DayOfWeek dotnetDayOfWeek = input.Kind == DataKind.Date
@@ -43,6 +43,6 @@ public sealed class DayOfWeekFunction : IScalarFunction
 
         // Convert from .NET convention (0=Sunday) to ISO 8601 (1=Monday, 7=Sunday).
         int isoDayOfWeek = dotnetDayOfWeek == System.DayOfWeek.Sunday ? 7 : (int)dotnetDayOfWeek;
-        return DataValue.FromScalar(isoDayOfWeek);
+        return DataValue.FromFloat32(isoDayOfWeek);
     }
 }

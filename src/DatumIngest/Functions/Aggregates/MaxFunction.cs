@@ -21,7 +21,7 @@ public sealed class MaxFunction : IAggregateFunction
         }
 
         DataKind kind = argumentKinds[0];
-        if (kind is not (DataKind.Scalar or DataKind.UInt8 or DataKind.String
+        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.String
             or DataKind.Date or DataKind.DateTime or DataKind.Time))
         {
             throw new ArgumentException($"MAX() requires a comparable argument, got {kind}.");
@@ -48,13 +48,13 @@ public sealed class MaxFunction : IAggregateFunction
             }
         }
 
-        public DataValue Result => _maximum ?? DataValue.Null(DataKind.Scalar);
+        public DataValue Result => _maximum ?? DataValue.Null(DataKind.Float32);
 
         private static int CompareValues(DataValue left, DataValue right)
         {
             return left.Kind switch
             {
-                DataKind.Scalar or DataKind.UInt8 => left.AsScalar().CompareTo(right.AsScalar()),
+                DataKind.Float32 or DataKind.UInt8 => left.AsFloat32().CompareTo(right.AsFloat32()),
                 DataKind.String => string.Compare(left.AsString(), right.AsString(), StringComparison.Ordinal),
                 DataKind.Date => left.AsDate().CompareTo(right.AsDate()),
                 DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),

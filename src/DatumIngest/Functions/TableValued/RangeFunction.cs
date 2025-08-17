@@ -15,7 +15,7 @@ namespace DatumIngest.Functions.TableValued;
 public sealed class RangeFunction : ISchemaAwareTableFunction
 {
     private static readonly Schema OutputSchema = new(
-        [new ColumnInfo("Value", DataKind.Scalar, nullable: false)]);
+        [new ColumnInfo("Value", DataKind.Float32, nullable: false)]);
 
     /// <inheritdoc />
     public string Name => "range";
@@ -36,9 +36,9 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
             throw new ArgumentException("range() requires 2 or 3 arguments: range(start, end[, step]).");
         }
 
-        float start = arguments[0].AsScalar();
-        float end = arguments[1].AsScalar();
-        float step = arguments.Length == 3 ? arguments[2].AsScalar() : 1.0f;
+        float start = arguments[0].AsFloat32();
+        float end = arguments[1].AsFloat32();
+        float step = arguments.Length == 3 ? arguments[2].AsFloat32() : 1.0f;
 
         if (step == 0.0f)
         {
@@ -71,7 +71,7 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new Row(names, [DataValue.FromScalar(current)], nameIndex);
+                yield return new Row(names, [DataValue.FromFloat32(current)], nameIndex);
             }
         }
         else
@@ -85,7 +85,7 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new Row(names, [DataValue.FromScalar(current)], nameIndex);
+                yield return new Row(names, [DataValue.FromFloat32(current)], nameIndex);
             }
         }
 

@@ -456,8 +456,8 @@ public sealed class IndexWriter
 
         switch (value.Kind)
         {
-            case DataKind.Scalar:
-                writer.Write(value.AsScalar());
+            case DataKind.Float32:
+                writer.Write(value.AsFloat32());
                 break;
 
             case DataKind.UInt8:

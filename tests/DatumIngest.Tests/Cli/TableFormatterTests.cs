@@ -17,12 +17,12 @@ public sealed class TableFormatterTests
         Schema schema = new(new[]
         {
             new ColumnInfo("name", DataKind.String, false),
-            new ColumnInfo("score", DataKind.Scalar, false),
+            new ColumnInfo("score", DataKind.Float32, false),
         });
 
         Row row = new(
             new[] { "name", "score" },
-            new[] { DataValue.FromString("Alice"), DataValue.FromScalar(95.5f) });
+            new[] { DataValue.FromString("Alice"), DataValue.FromFloat32(95.5f) });
 
         TableFormatter formatter = new();
         StringWriter writer = new();
@@ -48,12 +48,12 @@ public sealed class TableFormatterTests
     {
         Schema schema = new(new[]
         {
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
         });
 
         Row row = new(
             new[] { "id" },
-            new[] { DataValue.FromScalar(42f) });
+            new[] { DataValue.FromFloat32(42f) });
 
         TableFormatter formatter = new();
         StringWriter writer = new();
@@ -95,11 +95,11 @@ public sealed class TableFormatterTests
     {
         Schema schema = new(new[]
         {
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
         });
 
-        Row row1 = new(new[] { "id" }, new[] { DataValue.FromScalar(1f) });
-        Row row2 = new(new[] { "id" }, new[] { DataValue.FromScalar(2f) });
+        Row row1 = new(new[] { "id" }, new[] { DataValue.FromFloat32(1f) });
+        Row row2 = new(new[] { "id" }, new[] { DataValue.FromFloat32(2f) });
 
         TableFormatter formatter = new();
         StringWriter writer = new();
@@ -116,7 +116,7 @@ public sealed class TableFormatterTests
     {
         Schema schema = new(new[]
         {
-            new ColumnInfo("id", DataKind.Scalar, false),
+            new ColumnInfo("id", DataKind.Float32, false),
         });
 
         TableFormatter formatter = new();
@@ -130,12 +130,12 @@ public sealed class TableFormatterTests
     /// FormatValue handles all numeric types without errors.
     /// </summary>
     [Theory]
-    [InlineData(DataKind.Scalar)]
+    [InlineData(DataKind.Float32)]
     [InlineData(DataKind.UInt8)]
     public void FormatValue_NumericTypes_ProducesString(DataKind kind)
     {
-        DataValue value = kind == DataKind.Scalar
-            ? DataValue.FromScalar(3.14f)
+        DataValue value = kind == DataKind.Float32
+            ? DataValue.FromFloat32(3.14f)
             : DataValue.FromUInt8(42);
 
         string formatted = TableFormatter.FormatValue(value);

@@ -58,7 +58,7 @@ internal sealed class ArrayColumnDecoder : DatumColumnDecoder
             }
 
             // Infer element kind from the first element; default to Scalar for empty arrays.
-            DataKind elementKind = elements.Count > 0 ? elements[0].Kind : DataKind.Scalar;
+            DataKind elementKind = elements.Count > 0 ? elements[0].Kind : DataKind.Float32;
             result[rowIndex] = DataValue.FromArray(elementKind, elements.ToArray());
         }
 

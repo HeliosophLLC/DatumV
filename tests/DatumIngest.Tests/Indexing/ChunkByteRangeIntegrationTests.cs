@@ -138,9 +138,9 @@ public sealed class ChunkByteRangeIntegrationTests : IDisposable
     {
         Row[] rows =
         [
-            MakeRow(("x", DataValue.FromScalar(1.0f))),
-            MakeRow(("x", DataValue.FromScalar(2.0f))),
-            MakeRow(("x", DataValue.FromScalar(3.0f))),
+            MakeRow(("x", DataValue.FromFloat32(1.0f))),
+            MakeRow(("x", DataValue.FromFloat32(2.0f))),
+            MakeRow(("x", DataValue.FromFloat32(3.0f))),
         ];
 
         PlainInMemoryProvider provider = new(rows);

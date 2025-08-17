@@ -456,11 +456,11 @@ internal static class SubqueryRewriter
 
         object literal = value.Kind switch
         {
-            DataKind.Scalar => value.AsScalar(),
+            DataKind.Float32 => value.AsFloat32(),
             DataKind.UInt8 => (float)value.AsUInt8(),
             DataKind.String => value.AsString(),
             DataKind.Boolean => value.AsBoolean(),
-            _ => value.AsScalar(),
+            _ => value.AsFloat32(),
         };
 
         return new LiteralExpression(literal);

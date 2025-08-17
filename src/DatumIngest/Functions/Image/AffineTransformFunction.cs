@@ -53,11 +53,11 @@ public sealed class AffineTransformFunction : IScalarFunction, ICostAwareFunctio
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float angleDegrees = arguments[1].AsScalar();
-        float scaleX = arguments[2].AsScalar();
-        float scaleY = arguments[3].AsScalar();
-        float shearX = arguments[4].AsScalar();
-        float shearY = arguments[5].AsScalar();
+        float angleDegrees = arguments[1].AsFloat32();
+        float scaleX = arguments[2].AsFloat32();
+        float scaleY = arguments[3].AsFloat32();
+        float shearX = arguments[4].AsFloat32();
+        float shearY = arguments[5].AsFloat32();
 
         string? formatOverride = arguments.Length == 7 ? arguments[6].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

@@ -24,7 +24,7 @@ public sealed class HourFunction : IScalarFunction
             throw new ArgumentException($"hour() requires a Date, DateTime, or Time argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Scalar;
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -34,7 +34,7 @@ public sealed class HourFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Scalar);
+            return DataValue.Null(DataKind.Float32);
         }
 
         int hour = input.Kind switch
@@ -44,6 +44,6 @@ public sealed class HourFunction : IScalarFunction
             _ => input.AsDateTime().Hour,
         };
 
-        return DataValue.FromScalar(hour);
+        return DataValue.FromFloat32(hour);
     }
 }

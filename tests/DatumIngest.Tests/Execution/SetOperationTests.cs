@@ -47,7 +47,7 @@ public sealed class SetOperationTests
 
     private static Row R(float value)
     {
-        return MakeRow(("x", DataValue.FromScalar(value)));
+        return MakeRow(("x", DataValue.FromFloat32(value)));
     }
 
     // ─────────────── Parsing ───────────────
@@ -184,10 +184,10 @@ public sealed class SetOperationTests
         List<Row> results = await CollectAsync(op);
 
         Assert.Equal(4, results.Count);
-        Assert.Equal(1f, results[0][0].AsScalar());
-        Assert.Equal(2f, results[1][0].AsScalar());
-        Assert.Equal(3f, results[2][0].AsScalar());
-        Assert.Equal(4f, results[3][0].AsScalar());
+        Assert.Equal(1f, results[0][0].AsFloat32());
+        Assert.Equal(2f, results[1][0].AsFloat32());
+        Assert.Equal(3f, results[2][0].AsFloat32());
+        Assert.Equal(4f, results[3][0].AsFloat32());
     }
 
     [Fact]
@@ -250,7 +250,7 @@ public sealed class SetOperationTests
         List<Row> results = await CollectAsync(op);
 
         Assert.Equal(3, results.Count);
-        float[] values = results.Select(row => row[0].AsScalar()).OrderBy(value => value).ToArray();
+        float[] values = results.Select(row => row[0].AsFloat32()).OrderBy(value => value).ToArray();
         Assert.Equal([1f, 2f, 3f], values);
     }
 
@@ -269,9 +269,9 @@ public sealed class SetOperationTests
     [Fact]
     public async Task UnionDistinct_MultiColumn()
     {
-        Row r1 = MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromString("x")));
-        Row r2 = MakeRow(("a", DataValue.FromScalar(2f)), ("b", DataValue.FromString("y")));
-        Row r1Dup = MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromString("x")));
+        Row r1 = MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x")));
+        Row r2 = MakeRow(("a", DataValue.FromFloat32(2f)), ("b", DataValue.FromString("y")));
+        Row r1Dup = MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromString("x")));
 
         MockOperator left = new(r1, r2);
         MockOperator right = new(r1Dup);
@@ -294,7 +294,7 @@ public sealed class SetOperationTests
         List<Row> results = await CollectAsync(op);
 
         Assert.Equal(2, results.Count);
-        float[] values = results.Select(row => row[0].AsScalar()).OrderBy(value => value).ToArray();
+        float[] values = results.Select(row => row[0].AsFloat32()).OrderBy(value => value).ToArray();
         Assert.Equal([2f, 3f], values);
     }
 
@@ -348,8 +348,8 @@ public sealed class SetOperationTests
         List<Row> results = await CollectAsync(op);
 
         Assert.Equal(3, results.Count);
-        int onesCount = results.Count(row => row[0].AsScalar() == 1f);
-        int twosCount = results.Count(row => row[0].AsScalar() == 2f);
+        int onesCount = results.Count(row => row[0].AsFloat32() == 1f);
+        int twosCount = results.Count(row => row[0].AsFloat32() == 2f);
         Assert.Equal(2, onesCount);
         Assert.Equal(1, twosCount);
     }
@@ -378,7 +378,7 @@ public sealed class SetOperationTests
         List<Row> results = await CollectAsync(op);
 
         Assert.Equal(2, results.Count);
-        float[] values = results.Select(row => row[0].AsScalar()).OrderBy(value => value).ToArray();
+        float[] values = results.Select(row => row[0].AsFloat32()).OrderBy(value => value).ToArray();
         Assert.Equal([1f, 3f], values);
     }
 
@@ -433,7 +433,7 @@ public sealed class SetOperationTests
         List<Row> results = await CollectAsync(op);
 
         Assert.Equal(3, results.Count);
-        int onesCount = results.Count(row => row[0].AsScalar() == 1f);
+        int onesCount = results.Count(row => row[0].AsFloat32() == 1f);
         Assert.Equal(2, onesCount);
     }
 
@@ -493,7 +493,7 @@ public sealed class SetOperationTests
         // 0..499 UNION 250..749 → 0..749 = 750 distinct values
         Assert.Equal(750, results.Count);
 
-        float[] values = results.Select(row => row[0].AsScalar()).OrderBy(value => value).ToArray();
+        float[] values = results.Select(row => row[0].AsFloat32()).OrderBy(value => value).ToArray();
         float[] expected = Enumerable.Range(0, 750).Select(index => (float)index).ToArray();
         Assert.Equal(expected, values);
 

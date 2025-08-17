@@ -12,7 +12,7 @@ public class TensorIntrospectionFunctionTests
     {
         RankFunction function = new();
         DataValue result = function.Execute([DataValue.FromVector([1f, 2f, 3f])]);
-        Assert.Equal(1f, result.AsScalar());
+        Assert.Equal(1f, result.AsFloat32());
     }
 
     [Fact]
@@ -20,7 +20,7 @@ public class TensorIntrospectionFunctionTests
     {
         RankFunction function = new();
         DataValue result = function.Execute([DataValue.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 2, 3)]);
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class TensorIntrospectionFunctionTests
     {
         RankFunction function = new();
         DataValue result = function.Execute([DataValue.FromTensor([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f], [2, 2, 2])]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class TensorIntrospectionFunctionTests
         RankFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Vector)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class TensorIntrospectionFunctionTests
     public void Rank_WrongArgumentCount_ThrowsOnValidation()
     {
         RankFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Vector, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Vector, DataKind.Float32]));
     }
 
     // ─────────────────────────── rdim() ───────────────────────────
@@ -62,9 +62,9 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromVector([1f, 2f, 3f, 4f, 5f]),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(0)
         ]);
-        Assert.Equal(5f, result.AsScalar());
+        Assert.Equal(5f, result.AsFloat32());
     }
 
     [Fact]
@@ -73,9 +73,9 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 2, 3),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(0)
         ]);
-        Assert.Equal(2f, result.AsScalar());
+        Assert.Equal(2f, result.AsFloat32());
     }
 
     [Fact]
@@ -84,9 +84,9 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 2, 3),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(1)
         ]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -95,9 +95,9 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromTensor(new float[24], [2, 3, 4]),
-            DataValue.FromScalar(2)
+            DataValue.FromFloat32(2)
         ]);
-        Assert.Equal(4f, result.AsScalar());
+        Assert.Equal(4f, result.AsFloat32());
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         Assert.Throws<InvalidOperationException>(() => function.Execute([
             DataValue.FromVector([1f, 2f]),
-            DataValue.FromScalar(1)
+            DataValue.FromFloat32(1)
         ]));
     }
 
@@ -116,7 +116,7 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         Assert.Throws<InvalidOperationException>(() => function.Execute([
             DataValue.FromMatrix([1f, 2f, 3f, 4f], 2, 2),
-            DataValue.FromScalar(2)
+            DataValue.FromFloat32(2)
         ]));
     }
 
@@ -126,7 +126,7 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         Assert.Throws<InvalidOperationException>(() => function.Execute([
             DataValue.FromTensor(new float[8], [2, 2, 2]),
-            DataValue.FromScalar(3)
+            DataValue.FromFloat32(3)
         ]));
     }
 
@@ -136,10 +136,10 @@ public class TensorIntrospectionFunctionTests
         RdimFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.Matrix),
-            DataValue.FromScalar(0)
+            DataValue.FromFloat32(0)
         ]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Scalar, result.Kind);
+        Assert.Equal(DataKind.Float32, result.Kind);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class TensorIntrospectionFunctionTests
             DataValue.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 2, 3),
             DataValue.FromUInt8(1)
         ]);
-        Assert.Equal(3f, result.AsScalar());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public class TensorIntrospectionFunctionTests
     public void Rdim_InvalidFirstArgument_ThrowsOnValidation()
     {
         RdimFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Float32]));
     }
 
     // ─────────────────────────── shape() ──────────────────────────
@@ -206,7 +206,7 @@ public class TensorIntrospectionFunctionTests
     public void Shape_InvalidKind_ThrowsOnValidation()
     {
         ShapeFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Scalar]));
+        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.Float32]));
     }
 
     [Fact]

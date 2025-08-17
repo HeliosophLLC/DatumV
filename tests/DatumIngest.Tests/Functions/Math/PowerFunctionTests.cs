@@ -8,93 +8,93 @@ public class PowerFunctionTests
     [Fact]
     public void Sqrt_Scalar()
     {
-        Assert.Equal(3f, new SqrtFunction().Execute([DataValue.FromScalar(9)]).AsScalar());
+        Assert.Equal(3f, new SqrtFunction().Execute([DataValue.FromFloat32(9)]).AsFloat32());
     }
 
     [Fact]
     public void Sqrt_NegativeReturnsNaN()
     {
-        Assert.True(float.IsNaN(new SqrtFunction().Execute([DataValue.FromScalar(-1)]).AsScalar()));
+        Assert.True(float.IsNaN(new SqrtFunction().Execute([DataValue.FromFloat32(-1)]).AsFloat32()));
     }
 
     [Fact]
     public void Cbrt_Positive()
     {
-        Assert.Equal(MathF.Cbrt(27), new CbrtFunction().Execute([DataValue.FromScalar(27)]).AsScalar());
+        Assert.Equal(MathF.Cbrt(27), new CbrtFunction().Execute([DataValue.FromFloat32(27)]).AsFloat32());
     }
 
     [Fact]
     public void Cbrt_Negative()
     {
-        Assert.Equal(MathF.Cbrt(-8), new CbrtFunction().Execute([DataValue.FromScalar(-8)]).AsScalar());
+        Assert.Equal(MathF.Cbrt(-8), new CbrtFunction().Execute([DataValue.FromFloat32(-8)]).AsFloat32());
     }
 
     [Fact]
     public void Square_Scalar()
     {
-        Assert.Equal(25f, new SquareFunction().Execute([DataValue.FromScalar(5)]).AsScalar());
+        Assert.Equal(25f, new SquareFunction().Execute([DataValue.FromFloat32(5)]).AsFloat32());
     }
 
     [Fact]
     public void Square_Negative()
     {
-        Assert.Equal(9f, new SquareFunction().Execute([DataValue.FromScalar(-3)]).AsScalar());
+        Assert.Equal(9f, new SquareFunction().Execute([DataValue.FromFloat32(-3)]).AsFloat32());
     }
 
     [Fact]
     public void Exp_Zero()
     {
-        Assert.Equal(1f, new ExpFunction().Execute([DataValue.FromScalar(0)]).AsScalar());
+        Assert.Equal(1f, new ExpFunction().Execute([DataValue.FromFloat32(0)]).AsFloat32());
     }
 
     [Fact]
     public void Exp_One()
     {
-        Assert.Equal(MathF.E, new ExpFunction().Execute([DataValue.FromScalar(1)]).AsScalar(), 1e-5f);
+        Assert.Equal(MathF.E, new ExpFunction().Execute([DataValue.FromFloat32(1)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Exp2_Three()
     {
-        Assert.Equal(8f, new Exp2Function().Execute([DataValue.FromScalar(3)]).AsScalar());
+        Assert.Equal(8f, new Exp2Function().Execute([DataValue.FromFloat32(3)]).AsFloat32());
     }
 
     [Fact]
     public void Ln_E()
     {
-        Assert.Equal(1f, new LnFunction().Execute([DataValue.FromScalar(MathF.E)]).AsScalar(), 1e-5f);
+        Assert.Equal(1f, new LnFunction().Execute([DataValue.FromFloat32(MathF.E)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Ln_One()
     {
-        Assert.Equal(0f, new LnFunction().Execute([DataValue.FromScalar(1)]).AsScalar());
+        Assert.Equal(0f, new LnFunction().Execute([DataValue.FromFloat32(1)]).AsFloat32());
     }
 
     [Fact]
     public void Log2_Eight()
     {
-        Assert.Equal(3f, new Log2Function().Execute([DataValue.FromScalar(8)]).AsScalar());
+        Assert.Equal(3f, new Log2Function().Execute([DataValue.FromFloat32(8)]).AsFloat32());
     }
 
     [Fact]
     public void Log10_Thousand()
     {
-        Assert.Equal(3f, new Log10Function().Execute([DataValue.FromScalar(1000)]).AsScalar(), 1e-5f);
+        Assert.Equal(3f, new Log10Function().Execute([DataValue.FromFloat32(1000)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
     public void Pow_TwoToThree()
     {
         PowFunction function = new();
-        Assert.Equal(8f, function.Execute([DataValue.FromScalar(2), DataValue.FromScalar(3)]).AsScalar());
+        Assert.Equal(8f, function.Execute([DataValue.FromFloat32(2), DataValue.FromFloat32(3)]).AsFloat32());
     }
 
     [Fact]
     public void Pow_Vector()
     {
         PowFunction function = new();
-        DataValue result = function.Execute([DataValue.FromVector([2f, 3f, 4f]), DataValue.FromScalar(2)]);
+        DataValue result = function.Execute([DataValue.FromVector([2f, 3f, 4f]), DataValue.FromFloat32(2)]);
         Assert.Equal([4f, 9f, 16f], result.AsVector());
     }
 
@@ -102,7 +102,7 @@ public class PowerFunctionTests
     public void Log_CustomBase()
     {
         LogFunction function = new();
-        Assert.Equal(3f, function.Execute([DataValue.FromScalar(8), DataValue.FromScalar(2)]).AsScalar(), 1e-5f);
+        Assert.Equal(3f, function.Execute([DataValue.FromFloat32(8), DataValue.FromFloat32(2)]).AsFloat32(), 1e-5f);
     }
 
     [Fact]
@@ -116,6 +116,6 @@ public class PowerFunctionTests
     [Fact]
     public void Sqrt_Null_ReturnsNull()
     {
-        Assert.True(new SqrtFunction().Execute([DataValue.Null(DataKind.Scalar)]).IsNull);
+        Assert.True(new SqrtFunction().Execute([DataValue.Null(DataKind.Float32)]).IsNull);
     }
 }

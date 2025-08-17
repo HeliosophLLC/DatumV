@@ -11,8 +11,8 @@ public class LazyDataValueTests
         LazyDataValue lazy = new(() =>
         {
             forceCount++;
-            return DataValue.FromScalar(1.0f);
-        }, DataKind.Scalar);
+            return DataValue.FromFloat32(1.0f);
+        }, DataKind.Float32);
 
         Assert.Equal(0, forceCount);
     }
@@ -24,13 +24,13 @@ public class LazyDataValueTests
         LazyDataValue lazy = new(() =>
         {
             forceCount++;
-            return DataValue.FromScalar(42.0f);
-        }, DataKind.Scalar);
+            return DataValue.FromFloat32(42.0f);
+        }, DataKind.Float32);
 
         DataValue result = lazy.Value;
 
         Assert.Equal(1, forceCount);
-        Assert.Equal(42.0f, result.AsScalar());
+        Assert.Equal(42.0f, result.AsFloat32());
     }
 
     [Fact]
@@ -40,8 +40,8 @@ public class LazyDataValueTests
         LazyDataValue lazy = new(() =>
         {
             forceCount++;
-            return DataValue.FromScalar(42.0f);
-        }, DataKind.Scalar);
+            return DataValue.FromFloat32(42.0f);
+        }, DataKind.Float32);
 
         DataValue first = lazy.Value;
         DataValue second = lazy.Value;
@@ -53,9 +53,9 @@ public class LazyDataValueTests
     [Fact]
     public void KindIsAvailableWithoutForcing()
     {
-        LazyDataValue lazy = new(() => DataValue.FromScalar(1.0f), DataKind.Scalar);
+        LazyDataValue lazy = new(() => DataValue.FromFloat32(1.0f), DataKind.Float32);
 
-        Assert.Equal(DataKind.Scalar, lazy.Kind);
+        Assert.Equal(DataKind.Float32, lazy.Kind);
     }
 
     [Fact]
@@ -65,15 +65,15 @@ public class LazyDataValueTests
         LazyDataValue lazy = new(() =>
         {
             Interlocked.Increment(ref forceCount);
-            return DataValue.FromScalar(99.0f);
-        }, DataKind.Scalar);
+            return DataValue.FromFloat32(99.0f);
+        }, DataKind.Float32);
 
         // Force from multiple threads simultaneously
         Task[] tasks = Enumerable.Range(0, 100)
             .Select(_ => Task.Run(() =>
             {
                 DataValue result = lazy.Value;
-                Assert.Equal(99.0f, result.AsScalar());
+                Assert.Equal(99.0f, result.AsFloat32());
             }))
             .ToArray();
 
@@ -121,7 +121,7 @@ public class LazyDataValueTests
     {
         LazyDataValue lazy = new(
             () => throw new InvalidOperationException("data unavailable"),
-            DataKind.Scalar);
+            DataKind.Float32);
 
         Assert.Throws<InvalidOperationException>(() => lazy.Value);
     }

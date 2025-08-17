@@ -331,7 +331,7 @@ public sealed class CrossManifestAnalyzerTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000,
             NullCount = 0,
             ValidCount = 1000,
@@ -362,7 +362,7 @@ public sealed class CrossManifestAnalyzerTests
         return new NumericFeatureManifest
         {
             Name = name,
-            Kind = DataKind.Scalar,
+            Kind = DataKind.Float32,
             Count = 1000,
             NullCount = 500,
             ValidCount = 500,

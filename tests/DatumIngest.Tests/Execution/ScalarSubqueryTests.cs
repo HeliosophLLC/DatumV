@@ -29,14 +29,14 @@ public sealed class ScalarSubqueryTests
     {
         Row[] employees =
         [
-            MakeRow(("name", DataValue.FromString("alice")), ("salary", DataValue.FromScalar(50_000f))),
-            MakeRow(("name", DataValue.FromString("bob")), ("salary", DataValue.FromScalar(80_000f))),
-            MakeRow(("name", DataValue.FromString("carol")), ("salary", DataValue.FromScalar(60_000f))),
+            MakeRow(("name", DataValue.FromString("alice")), ("salary", DataValue.FromFloat32(50_000f))),
+            MakeRow(("name", DataValue.FromString("bob")), ("salary", DataValue.FromFloat32(80_000f))),
+            MakeRow(("name", DataValue.FromString("carol")), ("salary", DataValue.FromFloat32(60_000f))),
         ];
 
         Row[] thresholds =
         [
-            MakeRow(("min_salary", DataValue.FromScalar(55_000f))),
+            MakeRow(("min_salary", DataValue.FromFloat32(55_000f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("employees", employees), ("thresholds", thresholds));
@@ -58,13 +58,13 @@ public sealed class ScalarSubqueryTests
     {
         Row[] items =
         [
-            MakeRow(("name", DataValue.FromString("widget")), ("price", DataValue.FromScalar(10f))),
-            MakeRow(("name", DataValue.FromString("gadget")), ("price", DataValue.FromScalar(20f))),
+            MakeRow(("name", DataValue.FromString("widget")), ("price", DataValue.FromFloat32(10f))),
+            MakeRow(("name", DataValue.FromString("gadget")), ("price", DataValue.FromFloat32(20f))),
         ];
 
         Row[] settings =
         [
-            MakeRow(("tax_rate", DataValue.FromScalar(0.1f))),
+            MakeRow(("tax_rate", DataValue.FromFloat32(0.1f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("items", items), ("settings", settings));
@@ -73,8 +73,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(1f, results[0]["tax"].AsScalar(), 0.001f);
-        Assert.Equal(2f, results[1]["tax"].AsScalar(), 0.001f);
+        Assert.Equal(1f, results[0]["tax"].AsFloat32(), 0.001f);
+        Assert.Equal(2f, results[1]["tax"].AsFloat32(), 0.001f);
     }
 
     /// <summary>
@@ -85,7 +85,7 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
         ];
 
         Row[] empty = [];
@@ -108,13 +108,13 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
         ];
 
         Row[] multi =
         [
-            MakeRow(("val", DataValue.FromScalar(10f))),
-            MakeRow(("val", DataValue.FromScalar(20f))),
+            MakeRow(("val", DataValue.FromFloat32(10f))),
+            MakeRow(("val", DataValue.FromFloat32(20f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("multi", multi));
@@ -135,12 +135,12 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
         ];
 
         Row[] wide =
         [
-            MakeRow(("a", DataValue.FromScalar(1f)), ("b", DataValue.FromScalar(2f))),
+            MakeRow(("a", DataValue.FromFloat32(1f)), ("b", DataValue.FromFloat32(2f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("wide", wide));
@@ -162,13 +162,13 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(5f))),
-            MakeRow(("x", DataValue.FromScalar(15f))),
-            MakeRow(("x", DataValue.FromScalar(25f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+            MakeRow(("x", DataValue.FromFloat32(15f))),
+            MakeRow(("x", DataValue.FromFloat32(25f))),
         ];
 
-        Row[] lo = [MakeRow(("val", DataValue.FromScalar(10f)))];
-        Row[] hi = [MakeRow(("val", DataValue.FromScalar(20f)))];
+        Row[] lo = [MakeRow(("val", DataValue.FromFloat32(10f)))];
+        Row[] hi = [MakeRow(("val", DataValue.FromFloat32(20f)))];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("lo", lo), ("hi", hi));
         List<Row> results = await ExecuteQueryAsync(
@@ -176,7 +176,7 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Single(results);
-        Assert.Equal(15f, results[0]["x"].AsScalar());
+        Assert.Equal(15f, results[0]["x"].AsFloat32());
     }
 
     // ─────────────── Correlated scalar subqueries ───────────────
@@ -190,16 +190,16 @@ public sealed class ScalarSubqueryTests
     {
         Row[] orders =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("total", DataValue.FromScalar(100f))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("total", DataValue.FromScalar(200f))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("total", DataValue.FromScalar(50f))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("total", DataValue.FromFloat32(100f))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("total", DataValue.FromFloat32(200f))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("total", DataValue.FromFloat32(50f))),
         ];
 
         Row[] thresholds =
         [
-            MakeRow(("order_id", DataValue.FromScalar(1f)), ("min_total", DataValue.FromScalar(150f))),
-            MakeRow(("order_id", DataValue.FromScalar(2f)), ("min_total", DataValue.FromScalar(150f))),
-            MakeRow(("order_id", DataValue.FromScalar(3f)), ("min_total", DataValue.FromScalar(150f))),
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("min_total", DataValue.FromFloat32(150f))),
+            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("min_total", DataValue.FromFloat32(150f))),
+            MakeRow(("order_id", DataValue.FromFloat32(3f)), ("min_total", DataValue.FromFloat32(150f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("orders", orders), ("thresholds", thresholds));
@@ -212,7 +212,7 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Single(results);
-        Assert.Equal(2f, results[0]["id"].AsScalar());
+        Assert.Equal(2f, results[0]["id"].AsFloat32());
     }
 
     /// <summary>
@@ -224,14 +224,14 @@ public sealed class ScalarSubqueryTests
     {
         Row[] products =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("widget"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("gadget"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("widget"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("gadget"))),
         ];
 
         Row[] prices =
         [
-            MakeRow(("product_id", DataValue.FromScalar(1f)), ("price", DataValue.FromScalar(9.99f))),
-            MakeRow(("product_id", DataValue.FromScalar(2f)), ("price", DataValue.FromScalar(19.99f))),
+            MakeRow(("product_id", DataValue.FromFloat32(1f)), ("price", DataValue.FromFloat32(9.99f))),
+            MakeRow(("product_id", DataValue.FromFloat32(2f)), ("price", DataValue.FromFloat32(19.99f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("products", products), ("prices", prices));
@@ -243,9 +243,9 @@ public sealed class ScalarSubqueryTests
 
         Assert.Equal(2, results.Count);
         Assert.Equal("widget", results[0]["name"].AsString());
-        Assert.Equal(9.99f, results[0]["price"].AsScalar(), 0.01f);
+        Assert.Equal(9.99f, results[0]["price"].AsFloat32(), 0.01f);
         Assert.Equal("gadget", results[1]["name"].AsString());
-        Assert.Equal(19.99f, results[1]["price"].AsScalar(), 0.01f);
+        Assert.Equal(19.99f, results[1]["price"].AsFloat32(), 0.01f);
     }
 
     /// <summary>
@@ -257,13 +257,13 @@ public sealed class ScalarSubqueryTests
     {
         Row[] outer =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
-            MakeRow(("id", DataValue.FromScalar(99f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
+            MakeRow(("id", DataValue.FromFloat32(99f))),
         ];
 
         Row[] inner =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(42f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(42f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
@@ -274,7 +274,7 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(42f, results[0]["lookup"].AsScalar());
+        Assert.Equal(42f, results[0]["lookup"].AsFloat32());
         Assert.True(results[1]["lookup"].IsNull);
     }
 
@@ -286,13 +286,13 @@ public sealed class ScalarSubqueryTests
     {
         Row[] outer =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
         ];
 
         Row[] inner =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(10f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(20f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(20f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
@@ -318,18 +318,18 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
-            MakeRow(("id", DataValue.FromScalar(3f)), ("name", DataValue.FromString("carol"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("carol"))),
         ];
 
         Row[] lookup =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("weight", DataValue.FromScalar(10f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("weight", DataValue.FromScalar(30f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("weight", DataValue.FromScalar(20f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("weight", DataValue.FromScalar(50f))),
-            MakeRow(("ref_id", DataValue.FromScalar(3f)), ("weight", DataValue.FromScalar(5f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("weight", DataValue.FromFloat32(10f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("weight", DataValue.FromFloat32(30f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("weight", DataValue.FromFloat32(20f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("weight", DataValue.FromFloat32(50f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(3f)), ("weight", DataValue.FromFloat32(5f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("lookup", lookup));
@@ -340,9 +340,9 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(30f, results[0]["max_weight"].AsScalar());
-        Assert.Equal(50f, results[1]["max_weight"].AsScalar());
-        Assert.Equal(5f, results[2]["max_weight"].AsScalar());
+        Assert.Equal(30f, results[0]["max_weight"].AsFloat32());
+        Assert.Equal(50f, results[1]["max_weight"].AsFloat32());
+        Assert.Equal(5f, results[2]["max_weight"].AsFloat32());
     }
 
     /// <summary>
@@ -353,16 +353,16 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
         ];
 
         Row[] scores =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(90f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(70f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("score", DataValue.FromScalar(85f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("score", DataValue.FromScalar(60f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(90f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(70f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(85f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(60f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("scores", scores));
@@ -373,8 +373,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(70f, results[0]["min_score"].AsScalar());
-        Assert.Equal(60f, results[1]["min_score"].AsScalar());
+        Assert.Equal(70f, results[0]["min_score"].AsFloat32());
+        Assert.Equal(60f, results[1]["min_score"].AsFloat32());
     }
 
     /// <summary>
@@ -385,15 +385,15 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
         ];
 
         Row[] amounts =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("amount", DataValue.FromScalar(100f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("amount", DataValue.FromScalar(200f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("amount", DataValue.FromScalar(50f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(100f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("amount", DataValue.FromFloat32(200f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("amount", DataValue.FromFloat32(50f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("amounts", amounts));
@@ -404,8 +404,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(300f, results[0]["total"].AsScalar());
-        Assert.Equal(50f, results[1]["total"].AsScalar());
+        Assert.Equal(300f, results[0]["total"].AsFloat32());
+        Assert.Equal(50f, results[1]["total"].AsFloat32());
     }
 
     /// <summary>
@@ -416,16 +416,16 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
         ];
 
         Row[] scores =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(80f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(100f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("score", DataValue.FromScalar(60f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("score", DataValue.FromScalar(40f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(80f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(100f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(60f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(40f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("scores", scores));
@@ -436,8 +436,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(90f, results[0]["avg_score"].AsScalar(), 0.01f);
-        Assert.Equal(50f, results[1]["avg_score"].AsScalar(), 0.01f);
+        Assert.Equal(90f, results[0]["avg_score"].AsFloat32(), 0.01f);
+        Assert.Equal(50f, results[1]["avg_score"].AsFloat32(), 0.01f);
     }
 
     /// <summary>
@@ -449,16 +449,16 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
-            MakeRow(("id", DataValue.FromScalar(2f))),
-            MakeRow(("id", DataValue.FromScalar(99f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
+            MakeRow(("id", DataValue.FromFloat32(2f))),
+            MakeRow(("id", DataValue.FromFloat32(99f))),
         ];
 
         Row[] items =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(10f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(20f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("val", DataValue.FromScalar(30f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(10f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(20f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("val", DataValue.FromFloat32(30f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
@@ -469,9 +469,9 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(2f, results[0]["item_count"].AsScalar());
-        Assert.Equal(1f, results[1]["item_count"].AsScalar());
-        Assert.Equal(0f, results[2]["item_count"].AsScalar());
+        Assert.Equal(2f, results[0]["item_count"].AsFloat32());
+        Assert.Equal(1f, results[1]["item_count"].AsFloat32());
+        Assert.Equal(0f, results[2]["item_count"].AsFloat32());
     }
 
     /// <summary>
@@ -483,13 +483,13 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
-            MakeRow(("id", DataValue.FromScalar(99f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
+            MakeRow(("id", DataValue.FromFloat32(99f))),
         ];
 
         Row[] items =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(42f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(42f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
@@ -500,7 +500,7 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(42f, results[0]["max_val"].AsScalar());
+        Assert.Equal(42f, results[0]["max_val"].AsFloat32());
         Assert.True(results[1]["max_val"].IsNull);
     }
 
@@ -513,21 +513,21 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("region", DataValue.FromString("east"))),
-            MakeRow(("id", DataValue.FromScalar(1f)), ("region", DataValue.FromString("west"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("region", DataValue.FromString("east"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("east"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("region", DataValue.FromString("west"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("region", DataValue.FromString("east"))),
         ];
 
         Row[] metrics =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("ref_region", DataValue.FromString("east")),
-                ("value", DataValue.FromScalar(10f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("ref_region", DataValue.FromString("east")),
-                ("value", DataValue.FromScalar(20f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("ref_region", DataValue.FromString("west")),
-                ("value", DataValue.FromScalar(5f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("ref_region", DataValue.FromString("east")),
-                ("value", DataValue.FromScalar(100f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("ref_region", DataValue.FromString("east")),
+                ("value", DataValue.FromFloat32(10f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("ref_region", DataValue.FromString("east")),
+                ("value", DataValue.FromFloat32(20f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("ref_region", DataValue.FromString("west")),
+                ("value", DataValue.FromFloat32(5f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("ref_region", DataValue.FromString("east")),
+                ("value", DataValue.FromFloat32(100f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("metrics", metrics));
@@ -539,9 +539,9 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(30f, results[0]["total"].AsScalar());   // id=1, east: 10+20
-        Assert.Equal(5f, results[1]["total"].AsScalar());    // id=1, west: 5
-        Assert.Equal(100f, results[2]["total"].AsScalar());  // id=2, east: 100
+        Assert.Equal(30f, results[0]["total"].AsFloat32());   // id=1, east: 10+20
+        Assert.Equal(5f, results[1]["total"].AsFloat32());    // id=1, west: 5
+        Assert.Equal(100f, results[2]["total"].AsFloat32());  // id=2, east: 100
     }
 
     /// <summary>
@@ -553,15 +553,15 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(10f))),
-            MakeRow(("id", DataValue.FromScalar(20f))),
+            MakeRow(("id", DataValue.FromFloat32(10f))),
+            MakeRow(("id", DataValue.FromFloat32(20f))),
         ];
 
         Row[] items =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(5f)), ("val", DataValue.FromScalar(1f))),
-            MakeRow(("ref_id", DataValue.FromScalar(15f)), ("val", DataValue.FromScalar(2f))),
-            MakeRow(("ref_id", DataValue.FromScalar(25f)), ("val", DataValue.FromScalar(3f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(5f)), ("val", DataValue.FromFloat32(1f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(15f)), ("val", DataValue.FromFloat32(2f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(25f)), ("val", DataValue.FromFloat32(3f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
@@ -574,8 +574,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(1f, results[0]["cnt"].AsScalar());
-        Assert.Equal(2f, results[1]["cnt"].AsScalar());
+        Assert.Equal(1f, results[0]["cnt"].AsFloat32());
+        Assert.Equal(2f, results[1]["cnt"].AsFloat32());
     }
 
     /// <summary>
@@ -587,12 +587,12 @@ public sealed class ScalarSubqueryTests
     {
         Row[] outer =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
         ];
 
         Row[] inner =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("val", DataValue.FromScalar(42f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("val", DataValue.FromFloat32(42f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
@@ -603,7 +603,7 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Single(results);
-        Assert.Equal(42f, results[0]["lookup"].AsScalar());
+        Assert.Equal(42f, results[0]["lookup"].AsFloat32());
     }
 
     /// <summary>
@@ -615,15 +615,15 @@ public sealed class ScalarSubqueryTests
     {
         Row[] outer =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
         ];
 
         Row[] inner =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("category", DataValue.FromString("a")),
-                ("val", DataValue.FromScalar(10f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("category", DataValue.FromString("a")),
-                ("val", DataValue.FromScalar(20f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("category", DataValue.FromString("a")),
+                ("val", DataValue.FromFloat32(10f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("category", DataValue.FromString("a")),
+                ("val", DataValue.FromFloat32(20f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("outer_table", outer), ("inner_table", inner));
@@ -638,7 +638,7 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Single(results);
-        Assert.Equal(30f, results[0]["total"].AsScalar());
+        Assert.Equal(30f, results[0]["total"].AsFloat32());
     }
 
     /// <summary>
@@ -650,21 +650,21 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f)), ("name", DataValue.FromString("alice"))),
-            MakeRow(("id", DataValue.FromScalar(2f)), ("name", DataValue.FromString("bob"))),
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("bob"))),
         ];
 
         Row[] scores =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(80f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("score", DataValue.FromScalar(95f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("score", DataValue.FromScalar(60f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(80f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("score", DataValue.FromFloat32(95f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("score", DataValue.FromFloat32(60f))),
         ];
 
         Row[] labels =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("label", DataValue.FromString("senior"))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("label", DataValue.FromString("junior"))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("label", DataValue.FromString("senior"))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("label", DataValue.FromString("junior"))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("scores", scores), ("labels", labels));
@@ -676,9 +676,9 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(95f, results[0]["best"].AsScalar());
+        Assert.Equal(95f, results[0]["best"].AsFloat32());
         Assert.Equal("senior", results[0]["title"].AsString());
-        Assert.Equal(60f, results[1]["best"].AsScalar());
+        Assert.Equal(60f, results[1]["best"].AsFloat32());
         Assert.Equal("junior", results[1]["title"].AsString());
     }
 
@@ -691,18 +691,18 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("id", DataValue.FromScalar(1f))),
-            MakeRow(("id", DataValue.FromScalar(2f))),
+            MakeRow(("id", DataValue.FromFloat32(1f))),
+            MakeRow(("id", DataValue.FromFloat32(2f))),
         ];
 
         Row[] items =
         [
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("active", DataValue.FromScalar(1f)),
-                ("val", DataValue.FromScalar(10f))),
-            MakeRow(("ref_id", DataValue.FromScalar(1f)), ("active", DataValue.FromScalar(0f)),
-                ("val", DataValue.FromScalar(999f))),
-            MakeRow(("ref_id", DataValue.FromScalar(2f)), ("active", DataValue.FromScalar(1f)),
-                ("val", DataValue.FromScalar(20f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(1f)),
+                ("val", DataValue.FromFloat32(10f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(1f)), ("active", DataValue.FromFloat32(0f)),
+                ("val", DataValue.FromFloat32(999f))),
+            MakeRow(("ref_id", DataValue.FromFloat32(2f)), ("active", DataValue.FromFloat32(1f)),
+                ("val", DataValue.FromFloat32(20f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data), ("items", items));
@@ -713,8 +713,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(10f, results[0]["active_total"].AsScalar());  // active=0 row excluded
-        Assert.Equal(20f, results[1]["active_total"].AsScalar());
+        Assert.Equal(10f, results[0]["active_total"].AsFloat32());  // active=0 row excluded
+        Assert.Equal(20f, results[1]["active_total"].AsFloat32());
     }
 
     // ─────────────── Statement without subqueries (regression) ───────────────
@@ -728,15 +728,15 @@ public sealed class ScalarSubqueryTests
     {
         Row[] data =
         [
-            MakeRow(("x", DataValue.FromScalar(1f))),
-            MakeRow(("x", DataValue.FromScalar(2f))),
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
         ];
 
         TableCatalog catalog = CreateCatalog(("data", data));
         List<Row> results = await ExecuteQueryAsync("SELECT x FROM data WHERE x > 1", catalog);
 
         Assert.Single(results);
-        Assert.Equal(2f, results[0]["x"].AsScalar());
+        Assert.Equal(2f, results[0]["x"].AsFloat32());
     }
 
     // ─────────────── Helper infrastructure ───────────────

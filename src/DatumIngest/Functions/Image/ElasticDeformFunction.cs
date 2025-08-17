@@ -53,8 +53,8 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
         }
 
         ImageHandle inputHandle = input.GetImageHandle();
-        float alpha = arguments[1].AsScalar();
-        float sigma = arguments[2].AsScalar();
+        float alpha = arguments[1].AsFloat32();
+        float sigma = arguments[2].AsFloat32();
 
         string? formatOverride = arguments.Length == 4 ? arguments[3].AsString() : null;
         SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);

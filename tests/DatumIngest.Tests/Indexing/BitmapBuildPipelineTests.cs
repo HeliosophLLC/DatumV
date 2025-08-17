@@ -66,7 +66,7 @@ public sealed class BitmapBuildPipelineTests
         SourceIndexBuilder builder = new(chunkSize: count);
         TestTableProvider provider = new(
             ["id"],
-            Enumerable.Range(0, count).Select(i => new DataValue[] { DataValue.FromScalar((float)i) }));
+            Enumerable.Range(0, count).Select(i => new DataValue[] { DataValue.FromFloat32((float)i) }));
 
         SourceIndex index = await builder.BuildAsync(
             TestTableDescriptor.Default, provider, sourceStream: null, fingerprint, CancellationToken.None);
@@ -250,7 +250,7 @@ public sealed class BitmapBuildPipelineTests
         for (int i = 0; i < count; i++)
         {
             string[] names = ["id"];
-            DataValue[] values = [DataValue.FromScalar((float)i)];
+            DataValue[] values = [DataValue.FromFloat32((float)i)];
             incremental.AddRow(new Row(names, values));
         }
 

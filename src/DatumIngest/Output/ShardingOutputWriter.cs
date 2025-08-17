@@ -195,7 +195,7 @@ public sealed class ShardingOutputWriter : IOutputWriter
 
             size += value.Kind switch
             {
-                DataKind.Scalar => 4,
+                DataKind.Float32 => 4,
                 DataKind.UInt8 => 1,
                 DataKind.String => value.AsString().Length * 2,
                 DataKind.Vector => value.AsVector().Length * 4,

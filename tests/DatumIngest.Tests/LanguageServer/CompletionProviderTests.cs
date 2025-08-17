@@ -19,7 +19,7 @@ public sealed class CompletionProviderTests
                     Name = "users",
                     Columns =
                     [
-                        new TableColumnEntry { Name = "id", Kind = "Scalar", Nullable = false },
+                        new TableColumnEntry { Name = "id", Kind = "Float32", Nullable = false },
                         new TableColumnEntry { Name = "name", Kind = "String", Nullable = false },
                         new TableColumnEntry { Name = "email", Kind = "String", Nullable = true },
                     ],
@@ -29,9 +29,9 @@ public sealed class CompletionProviderTests
                     Name = "orders",
                     Columns =
                     [
-                        new TableColumnEntry { Name = "order_id", Kind = "Scalar", Nullable = false },
-                        new TableColumnEntry { Name = "user_id", Kind = "Scalar", Nullable = false },
-                        new TableColumnEntry { Name = "total", Kind = "Scalar", Nullable = false },
+                        new TableColumnEntry { Name = "order_id", Kind = "Float32", Nullable = false },
+                        new TableColumnEntry { Name = "user_id", Kind = "Float32", Nullable = false },
+                        new TableColumnEntry { Name = "total", Kind = "Float32", Nullable = false },
                     ],
                 },
             ],
@@ -40,15 +40,15 @@ public sealed class CompletionProviderTests
                 new FunctionSignature
                 {
                     Name = "abs",
-                    Parameters = [new ParameterSignature { Name = "value", Kind = "Scalar" }],
-                    ReturnType = "Scalar",
+                    Parameters = [new ParameterSignature { Name = "value", Kind = "Float32" }],
+                    ReturnType = "Float32",
                     Description = "Absolute value.",
                 },
                 new FunctionSignature
                 {
                     Name = "unnest",
                     Parameters = [new ParameterSignature { Name = "array_column", Kind = "Vector" }],
-                    ReturnType = "Scalar",
+                    ReturnType = "Float32",
                     Description = "Expands a vector column.",
                     IsTableValued = true,
                 },
@@ -260,7 +260,7 @@ public sealed class CompletionProviderTests
                 new TableSchemaEntry
                 {
                     Name = "adult.data",
-                    Columns = [new TableColumnEntry { Name = "age", Kind = "Scalar", Nullable = false }],
+                    Columns = [new TableColumnEntry { Name = "age", Kind = "Float32", Nullable = false }],
                 },
             ],
             Functions = [],
