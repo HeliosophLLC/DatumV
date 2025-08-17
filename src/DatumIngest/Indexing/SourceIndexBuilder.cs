@@ -1,6 +1,7 @@
 using CardinalityEstimation;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
+using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
@@ -141,10 +142,13 @@ public sealed class SourceIndexBuilder
         int rowsInCurrentChunk = 0;
         int currentChunkIndex = 0;
 
+        Dictionary<string, BitmapChunkAccumulator>? bitmapAccumulators = null;
+
         string[]? resolvedColumnNames = null;
         ChunkAccumulator?[]? ordinalAccumulators = null;
         BloomFilter?[]? ordinalBloomFilters = null;
         List<ValueIndexEntry>?[]? ordinalSpillEntries = null;
+        BitmapChunkAccumulator?[]? ordinalBitmapAccumulators = null;
 
         try
         {
@@ -170,6 +174,20 @@ public sealed class SourceIndexBuilder
                     ordinalBloomFilters = currentBloomFilters is not null ? new BloomFilter?[columnCount] : null;
                     ordinalSpillEntries = spillWriter is not null ? new List<ValueIndexEntry>?[columnCount] : null;
 
+                    bitmapAccumulators = CreateBitmapAccumulators(schema);
+                    ordinalBitmapAccumulators = bitmapAccumulators is not null
+                        ? new BitmapChunkAccumulator?[columnCount]
+                        : null;
+
+                    // Begin the first chunk for bitmap accumulators.
+                    if (bitmapAccumulators is not null)
+                    {
+                        foreach (BitmapChunkAccumulator bitmapAccumulator in bitmapAccumulators.Values)
+                        {
+                            bitmapAccumulator.BeginChunk(_chunkSize);
+                        }
+                    }
+
                     for (int ordinal = 0; ordinal < columnCount; ordinal++)
                     {
                         string name = row.ColumnNames[ordinal];
@@ -186,6 +204,12 @@ public sealed class SourceIndexBuilder
                         if (ordinalSpillEntries is not null && spillWriter is not null)
                         {
                             ordinalSpillEntries[ordinal] = spillWriter.GetEntryListOrNull(name);
+                        }
+
+                        if (ordinalBitmapAccumulators is not null && bitmapAccumulators is not null)
+                        {
+                            bitmapAccumulators.TryGetValue(name, out BitmapChunkAccumulator? bitmapAcc);
+                            ordinalBitmapAccumulators[ordinal] = bitmapAcc;
                         }
                     }
                 }
@@ -228,6 +252,15 @@ public sealed class SourceIndexBuilder
                             }
                         }
                     }
+
+                    if (ordinalBitmapAccumulators is not null)
+                    {
+                        BitmapChunkAccumulator? bitmapAcc = ordinalBitmapAccumulators[ordinal];
+                        if (bitmapAcc is not null)
+                        {
+                            bitmapAcc.Add(value, rowsInCurrentChunk);
+                        }
+                    }
                 }
 
                 rowsInCurrentChunk++;
@@ -244,11 +277,29 @@ public sealed class SourceIndexBuilder
 
                     spillWriter?.FlushChunk();
 
+                    // Finalize bitmap accumulators for this chunk and begin the next.
+                    if (bitmapAccumulators is not null)
+                    {
+                        foreach (BitmapChunkAccumulator bitmapAcc in bitmapAccumulators.Values)
+                        {
+                            bitmapAcc.FinalizeChunk(rowsInCurrentChunk);
+                        }
+                    }
+
                     currentChunkRowOffset = totalRowCount;
                     rowsInCurrentChunk = 0;
                     currentChunkIndex++;
                     currentAccumulators = CreateAccumulators(schema);
                     currentBloomFilters = CreateBloomFilters(effectiveBloomColumns, _chunkSize);
+
+                    // Begin the next chunk for bitmap accumulators.
+                    if (bitmapAccumulators is not null)
+                    {
+                        foreach (BitmapChunkAccumulator bitmapAcc in bitmapAccumulators.Values)
+                        {
+                            bitmapAcc.BeginChunk(_chunkSize);
+                        }
+                    }
 
                     // Rebuild ordinal arrays to point at the new chunk's accumulators/blooms.
                     int columnCount = resolvedColumnNames!.Length;
@@ -279,6 +330,14 @@ public sealed class SourceIndexBuilder
                 {
                     allChunkBloomFilters.Add(currentBloomFilters);
                 }
+
+                if (bitmapAccumulators is not null)
+                {
+                    foreach (BitmapChunkAccumulator bitmapAcc in bitmapAccumulators.Values)
+                    {
+                        bitmapAcc.FinalizeChunk(rowsInCurrentChunk);
+                    }
+                }
             }
 
             schema ??= new Schema(new[] { new ColumnInfo("empty", DataKind.String, nullable: true) });
@@ -287,10 +346,15 @@ public sealed class SourceIndexBuilder
                 ? BuildBloomFilterSet(allChunkBloomFilters, chunks.Count)
                 : null;
 
+            BitmapIndexSet? bitmapIndexSet = bitmapAccumulators is not null
+                ? BuildBitmapIndexSet(bitmapAccumulators)
+                : null;
+
             SortedValueIndexSet? sortedIndexSet = spillWriter?.BuildSortedValueIndexSet();
 
             IndexSchema indexSchema = new(schema, totalRowCount);
-            return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet);
+            return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet,
+                zipDirectory: null, bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
         }
         finally
         {
@@ -646,6 +710,50 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
+    /// Creates a <see cref="BitmapChunkAccumulator"/> for each auto-indexable column
+    /// in the schema. Returns <c>null</c> if no columns are eligible.
+    /// </summary>
+    internal static Dictionary<string, BitmapChunkAccumulator>? CreateBitmapAccumulators(Schema schema)
+    {
+        Dictionary<string, BitmapChunkAccumulator>? accumulators = null;
+
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            if (IsAutoIndexableKind(column.Kind))
+            {
+                accumulators ??= new Dictionary<string, BitmapChunkAccumulator>(StringComparer.OrdinalIgnoreCase);
+                accumulators[column.Name] = new BitmapChunkAccumulator();
+            }
+        }
+
+        return accumulators;
+    }
+
+    /// <summary>
+    /// Builds a <see cref="BitmapIndexSet"/> from per-column accumulators, keeping only
+    /// columns whose cardinality stayed within the bitmap threshold (i.e. not abandoned).
+    /// Returns <c>null</c> if no columns qualify.
+    /// </summary>
+    internal static BitmapIndexSet? BuildBitmapIndexSet(
+        Dictionary<string, BitmapChunkAccumulator> accumulators)
+    {
+        Dictionary<string, BitmapColumnIndex>? indexes = null;
+
+        foreach (KeyValuePair<string, BitmapChunkAccumulator> entry in accumulators)
+        {
+            BitmapColumnIndex? columnIndex = entry.Value.Build();
+
+            if (columnIndex is not null)
+            {
+                indexes ??= new Dictionary<string, BitmapColumnIndex>(StringComparer.OrdinalIgnoreCase);
+                indexes[entry.Key] = columnIndex;
+            }
+        }
+
+        return indexes is not null ? new BitmapIndexSet(indexes) : null;
+    }
+
+    /// <summary>
     /// Lightweight per-column accumulator that tracks min, max, null count, and
     /// estimated cardinality for a single chunk. Much lighter than the full
     /// <see cref="Statistics.StatisticsCollector"/> — no histograms, percentiles,
@@ -781,6 +889,12 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// </summary>
     private List<ValueIndexEntry>?[]? _ordinalSpillEntries;
 
+    /// <summary>Per-column bitmap accumulators, created on first schema discovery.</summary>
+    private Dictionary<string, BitmapChunkAccumulator>? _bitmapAccumulators;
+
+    /// <summary>Ordinal-indexed bitmap accumulators, resolved once from the first row's schema.</summary>
+    private BitmapChunkAccumulator?[]? _ordinalBitmapAccumulators;
+
     private int _rowsInCurrentChunk;
     private long _totalRowCount;
     private long _currentChunkRowOffset;
@@ -831,6 +945,16 @@ public sealed class IncrementalIndexBuilder : IDisposable
                 _spillWriter.Initialize(effectiveIndexColumns);
             }
 
+            _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema);
+
+            if (_bitmapAccumulators is not null)
+            {
+                foreach (BitmapChunkAccumulator bitmapAccumulator in _bitmapAccumulators.Values)
+                {
+                    bitmapAccumulator.BeginChunk(_chunkSize);
+                }
+            }
+
             BuildOrdinalLookups(row);
         }
 
@@ -838,6 +962,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         SourceIndexBuilder_ChunkAccumulatorProxy?[] accumulators = _ordinalAccumulators!;
         BloomFilter?[]? bloomFilters = _ordinalBloomFilters;
         List<ValueIndexEntry>?[]? spillEntries = _ordinalSpillEntries;
+        BitmapChunkAccumulator?[]? bitmapAccs = _ordinalBitmapAccumulators;
 
         for (int ordinal = 0; ordinal < fieldCount; ordinal++)
         {
@@ -873,6 +998,15 @@ public sealed class IncrementalIndexBuilder : IDisposable
                     {
                         entries.Add(new ValueIndexEntry(value, _currentChunkIndex, _rowsInCurrentChunk));
                     }
+                }
+            }
+
+            if (bitmapAccs is not null)
+            {
+                BitmapChunkAccumulator? bitmapAcc = bitmapAccs[ordinal];
+                if (bitmapAcc is not null)
+                {
+                    bitmapAcc.Add(value, _rowsInCurrentChunk);
                 }
             }
         }
@@ -921,10 +1055,15 @@ public sealed class IncrementalIndexBuilder : IDisposable
             ? SourceIndexBuilder.BuildBloomFilterSet(_allChunkBloomFilters, _chunks.Count)
             : null;
 
+        BitmapIndexSet? bitmapIndexSet = _bitmapAccumulators is not null
+            ? SourceIndexBuilder.BuildBitmapIndexSet(_bitmapAccumulators)
+            : null;
+
         _spillWriter?.PrepareForReading();
 
         IndexSchema indexSchema = new(schema, _totalRowCount);
-        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet, sortedIndexes: null);
+        return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet, sortedIndexes: null,
+            zipDirectory: null, bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
     }
 
     /// <inheritdoc />
@@ -962,6 +1101,15 @@ public sealed class IncrementalIndexBuilder : IDisposable
         }
 
         _spillWriter?.FlushChunk();
+
+        if (_bitmapAccumulators is not null)
+        {
+            foreach (BitmapChunkAccumulator bitmapAcc in _bitmapAccumulators.Values)
+            {
+                bitmapAcc.FinalizeChunk(_rowsInCurrentChunk);
+            }
+        }
+
         OnChunkFlushed?.Invoke(_currentChunkIndex, _totalRowCount);
 
         _currentChunkRowOffset = _totalRowCount;
@@ -972,6 +1120,15 @@ public sealed class IncrementalIndexBuilder : IDisposable
         {
             InitializeAccumulatorsFromSchema();
             _currentBloomFilters = SourceIndexBuilder.CreateBloomFilters(_effectiveBloomColumns, _chunkSize);
+
+            if (_bitmapAccumulators is not null)
+            {
+                foreach (BitmapChunkAccumulator bitmapAcc in _bitmapAccumulators.Values)
+                {
+                    bitmapAcc.BeginChunk(_chunkSize);
+                }
+            }
+
             RebuildOrdinalAccumulatorsAndBlooms();
         }
     }
@@ -1018,6 +1175,17 @@ public sealed class IncrementalIndexBuilder : IDisposable
             for (int ordinal = 0; ordinal < columnCount; ordinal++)
             {
                 _ordinalSpillEntries[ordinal] = _spillWriter.GetEntryListOrNull(_resolvedColumnNames[ordinal]);
+            }
+        }
+
+        if (_bitmapAccumulators is not null)
+        {
+            _ordinalBitmapAccumulators = new BitmapChunkAccumulator?[columnCount];
+
+            for (int ordinal = 0; ordinal < columnCount; ordinal++)
+            {
+                _bitmapAccumulators.TryGetValue(_resolvedColumnNames[ordinal], out BitmapChunkAccumulator? bitmapAcc);
+                _ordinalBitmapAccumulators[ordinal] = bitmapAcc;
             }
         }
 
