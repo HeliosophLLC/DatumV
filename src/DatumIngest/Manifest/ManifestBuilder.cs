@@ -1,5 +1,6 @@
 namespace DatumIngest.Manifest;
 
+using DatumIngest.Indexing;
 using DatumIngest.Manifest.Insights;
 using DatumIngest.Model;
 using DatumIngest.Statistics;
@@ -66,7 +67,8 @@ public static class ManifestBuilder
             RowCount = rowCount,
             GeneratedAtUtc = DateTime.UtcNow,
             Features = features,
-            Interactions = mappedInteractions
+            Interactions = mappedInteractions,
+            IndexHints = GenerateIndexHints(features, columnKinds)
         };
 
         if (insightThresholds is not null)
@@ -89,6 +91,7 @@ public static class ManifestBuilder
                 GeneratedAtUtc = manifest.GeneratedAtUtc,
                 Features = manifest.Features,
                 Interactions = manifest.Interactions,
+                IndexHints = manifest.IndexHints,
                 Insights = insights.Count > 0 ? insights : null,
                 RecommendedQuery = QuerySynthesizer.SynthesizeRecommended(insights, originalColumns, synthesisOptions),
                 FullSuggestedQuery = QuerySynthesizer.SynthesizeFull(insights, originalColumns, synthesisOptions),
@@ -417,5 +420,50 @@ public static class ManifestBuilder
         return new NumericSummaryData(
             summary.Count, summary.Min, summary.Max,
             summary.Mean, summary.Variance, summary.StandardDeviation);
+    }
+
+    /// <summary>
+    /// Generates per-column index type hints from feature statistics.
+    /// Boolean and low-cardinality columns (≤ <see cref="IndexConstants.BitmapAutoThreshold"/>)
+    /// receive <see cref="IndexHintType.Bitmap"/>, very high cardinality columns
+    /// (> <see cref="IndexConstants.BPlusTreeAutoThreshold"/>) receive <see cref="IndexHintType.BTree"/>,
+    /// and remaining auto-indexable columns receive <see cref="IndexHintType.Sorted"/>.
+    /// Columns whose kind is not auto-indexable receive no hint.
+    /// </summary>
+    private static IReadOnlyList<ColumnIndexHint>? GenerateIndexHints(
+        IReadOnlyList<FeatureManifest> features,
+        IReadOnlyDictionary<string, DataKind> columnKinds)
+    {
+        List<ColumnIndexHint>? hints = null;
+
+        foreach (FeatureManifest feature in features)
+        {
+            DataKind kind = columnKinds.TryGetValue(feature.Name, out DataKind k) ? k : DataKind.String;
+
+            if (!SourceIndexBuilder.IsAutoIndexableKind(kind))
+            {
+                continue;
+            }
+
+            IndexHintType hintType;
+
+            if (kind is DataKind.Boolean || feature.EstimatedDistinctCount <= IndexConstants.BitmapAutoThreshold)
+            {
+                hintType = IndexHintType.Bitmap;
+            }
+            else if (feature.EstimatedDistinctCount > IndexConstants.BPlusTreeAutoThreshold)
+            {
+                hintType = IndexHintType.BTree;
+            }
+            else
+            {
+                hintType = IndexHintType.Sorted;
+            }
+
+            hints ??= new List<ColumnIndexHint>();
+            hints.Add(new ColumnIndexHint(feature.Name, hintType));
+        }
+
+        return hints is { Count: > 0 } ? hints : null;
     }
 }

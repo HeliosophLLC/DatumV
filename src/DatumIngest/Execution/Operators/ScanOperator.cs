@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
+using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -170,6 +171,12 @@ public sealed class ScanOperator : IQueryOperator
                 PruningTechnique.SortedIndexPruning, [.. sortedIndexes.ColumnNames], pendingRuntime: false));
         }
 
+        if (_sourceIndex?.BitmapIndexes is { Count: > 0 } bitmapIndexes)
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.BitmapPruning, [.. bitmapIndexes.ColumnNames], pendingRuntime: false));
+        }
+
         AccessStrategyDescription accessStrategy = new(
             AccessMethod.TableScan,
             pruningCapabilities.Count > 0 ? pruningCapabilities : null);
@@ -189,12 +196,14 @@ public sealed class ScanOperator : IQueryOperator
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
 
         // When a source index is available and either a filter hint, bloom pruning
-        // keys, sorted index pruning keys, or column indexes are present, apply chunk-level pruning.
+        // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
+        // apply chunk-level pruning.
         bool hasIndexPruning = _sourceIndex is not null
             && (_filterHint is not null || _bloomPruningKeys is not null
                 || _sortedIndexPruningKeys is not null
                 || _sourceIndex.SortedIndexes is not null
-                || _sourceIndex.BPlusTreeIndexes is not null);
+                || _sourceIndex.BPlusTreeIndexes is not null
+                || _sourceIndex.BitmapIndexes is not null);
 
         if (hasIndexPruning)
         {
@@ -237,7 +246,7 @@ public sealed class ScanOperator : IQueryOperator
         ExactSeekRowsFetched = null;
 
         // Build a set of non-pruned chunk row ranges and track active chunk indexes.
-        List<(long Start, long End)> activeRanges = new();
+        List<(long Start, long End, int ChunkIndex)> activeRanges = new();
         HashSet<int> activeChunkIndexes = new();
 
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
@@ -324,13 +333,20 @@ public sealed class ScanOperator : IQueryOperator
                 pruned = ShouldPruneWithColumnIndexes(_filterHint, _sourceIndex, chunkIndex);
             }
 
+            // Bitmap-index-based pruning: for equality predicates on columns with
+            // bitmap indexes, check whether the value appears in this chunk.
+            if (!pruned && _filterHint is not null && _sourceIndex.BitmapIndexes is not null)
+            {
+                pruned = ShouldPruneWithBitmapIndexes(_filterHint, _sourceIndex.BitmapIndexes, chunkIndex);
+            }
+
             if (pruned)
             {
                 PrunedIndexChunks++;
             }
             else
             {
-                activeRanges.Add((chunk.RowOffset, chunk.RowOffset + chunk.RowCount));
+                activeRanges.Add((chunk.RowOffset, chunk.RowOffset + chunk.RowCount, chunkIndex));
                 activeChunkIndexes.Add(chunkIndex);
             }
         }
@@ -376,8 +392,12 @@ public sealed class ScanOperator : IQueryOperator
             return provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
         }
 
-        // If no chunks were pruned, stream all rows without overhead.
-        if (PrunedIndexChunks == 0)
+        // If no chunks were pruned and no bitmap row filtering is needed, stream all rows.
+        bool hasBitmapRowFilter = _filterHint is not null
+            && _sourceIndex.BitmapIndexes is not null
+            && _sourceIndex.BitmapIndexes.Count > 0;
+
+        if (PrunedIndexChunks == 0 && !hasBitmapRowFilter)
         {
             rows = OpenStream();
 
@@ -393,15 +413,36 @@ public sealed class ScanOperator : IQueryOperator
         // instead of streaming all rows and discarding pruned ones.
         if (provider is ISeekableTableProvider chunkSeekable)
         {
-            foreach ((long start, long end) in activeRanges)
+            foreach ((long start, long end, int activeChunkIndex) in activeRanges)
             {
                 int count = (int)(end - start);
+                byte[]? bitmapMask = EvaluateBitmapFilter(
+                    _filterHint, _sourceIndex.BitmapIndexes, activeChunkIndex, count);
 
-                await foreach (Row row in chunkSeekable.ReadRowRangeAsync(
-                    _descriptor, _requiredColumns, start, count,
-                    cancellationToken).ConfigureAwait(false))
+                if (bitmapMask is not null)
                 {
-                    yield return row;
+                    int rowInChunk = 0;
+
+                    await foreach (Row row in chunkSeekable.ReadRowRangeAsync(
+                        _descriptor, _requiredColumns, start, count,
+                        cancellationToken).ConfigureAwait(false))
+                    {
+                        if (IsBitmapBitSet(bitmapMask, rowInChunk))
+                        {
+                            yield return row;
+                        }
+
+                        rowInChunk++;
+                    }
+                }
+                else
+                {
+                    await foreach (Row row in chunkSeekable.ReadRowRangeAsync(
+                        _descriptor, _requiredColumns, start, count,
+                        cancellationToken).ConfigureAwait(false))
+                    {
+                        yield return row;
+                    }
                 }
             }
 
@@ -409,9 +450,21 @@ public sealed class ScanOperator : IQueryOperator
         }
 
         // Fallback: stream all rows and skip those in pruned chunks by row index.
+        // When bitmap row filters apply, also skip non-matching rows within active chunks.
         rows = OpenStream();
         long rowIndex = 0;
         int rangeIndex = 0;
+        byte[]? fallbackBitmapMask = null;
+        int fallbackRowInChunk = 0;
+
+        // Pre-compute bitmap mask for the first active chunk.
+        if (rangeIndex < activeRanges.Count)
+        {
+            fallbackBitmapMask = EvaluateBitmapFilter(
+                _filterHint, _sourceIndex.BitmapIndexes,
+                activeRanges[rangeIndex].ChunkIndex,
+                (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
+        }
 
         await foreach (Row row in rows.ConfigureAwait(false))
         {
@@ -419,13 +472,27 @@ public sealed class ScanOperator : IQueryOperator
             while (rangeIndex < activeRanges.Count && rowIndex >= activeRanges[rangeIndex].End)
             {
                 rangeIndex++;
+                fallbackRowInChunk = 0;
+
+                if (rangeIndex < activeRanges.Count)
+                {
+                    fallbackBitmapMask = EvaluateBitmapFilter(
+                        _filterHint, _sourceIndex.BitmapIndexes,
+                        activeRanges[rangeIndex].ChunkIndex,
+                        (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
+                }
             }
 
             if (rangeIndex < activeRanges.Count
                 && rowIndex >= activeRanges[rangeIndex].Start
                 && rowIndex < activeRanges[rangeIndex].End)
             {
-                yield return row;
+                if (fallbackBitmapMask is null || IsBitmapBitSet(fallbackBitmapMask, fallbackRowInChunk))
+                {
+                    yield return row;
+                }
+
+                fallbackRowInChunk++;
             }
 
             rowIndex++;
@@ -444,6 +511,274 @@ public sealed class ScanOperator : IQueryOperator
         // column = literal. Each such predicate can rule out chunks that do not
         // contain the literal in their sorted index.
         return CheckExpressionForPruning(filterHint, sourceIndex, chunkIndex);
+    }
+
+    /// <summary>
+    /// Checks whether a chunk can be pruned based on bitmap indexes.
+    /// Walks the filter expression tree extracting equality predicates
+    /// (<c>column = literal</c>) and IN predicates against bitmap-indexed columns.
+    /// AND chains prune when any branch proves the chunk empty; OR chains
+    /// require all branches to prove the chunk empty.
+    /// </summary>
+    private static bool ShouldPruneWithBitmapIndexes(
+        Expression filterHint, BitmapIndexSet bitmapIndexes, int chunkIndex)
+    {
+        return CheckExpressionForBitmapPruning(filterHint, bitmapIndexes, chunkIndex);
+    }
+
+    private static bool CheckExpressionForBitmapPruning(
+        Expression expression, BitmapIndexSet bitmapIndexes, int chunkIndex)
+    {
+        if (expression is BinaryExpression binary)
+        {
+            if (binary.Operator == BinaryOperator.And)
+            {
+                // AND: prune if either side proves the chunk empty.
+                return CheckExpressionForBitmapPruning(binary.Left, bitmapIndexes, chunkIndex)
+                    || CheckExpressionForBitmapPruning(binary.Right, bitmapIndexes, chunkIndex);
+            }
+
+            if (binary.Operator == BinaryOperator.Equal)
+            {
+                return CheckEqualityForBitmapPruning(binary.Left, binary.Right, bitmapIndexes, chunkIndex);
+            }
+        }
+
+        if (expression is InExpression inExpression && !inExpression.Negated)
+        {
+            return CheckInForBitmapPruning(inExpression, bitmapIndexes, chunkIndex);
+        }
+
+        return false;
+    }
+
+    private static bool CheckEqualityForBitmapPruning(
+        Expression left, Expression right, BitmapIndexSet bitmapIndexes, int chunkIndex)
+    {
+        string? columnName = null;
+        object? rawLiteral = null;
+
+        if (left is ColumnReference columnRef && right is LiteralExpression literal)
+        {
+            columnName = columnRef.ColumnName;
+            rawLiteral = literal.Value;
+        }
+        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
+        {
+            columnName = columnRight.ColumnName;
+            rawLiteral = literalLeft.Value;
+        }
+
+        if (columnName is null || rawLiteral is null)
+        {
+            return false;
+        }
+
+        if (!bitmapIndexes.TryGetIndex(columnName, out BitmapColumnIndex? bitmapIndex))
+        {
+            return false;
+        }
+
+        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        return !bitmapIndex.ChunkContainsValue(literalValue, chunkIndex);
+    }
+
+    private static bool CheckInForBitmapPruning(
+        InExpression inExpression, BitmapIndexSet bitmapIndexes, int chunkIndex)
+    {
+        if (inExpression.Expression is not ColumnReference columnRef)
+        {
+            return false;
+        }
+
+        if (!bitmapIndexes.TryGetIndex(columnRef.ColumnName, out BitmapColumnIndex? bitmapIndex))
+        {
+            return false;
+        }
+
+        // If any IN value exists in this chunk, the chunk cannot be pruned.
+        foreach (Expression valueExpression in inExpression.Values)
+        {
+            if (valueExpression is not LiteralExpression { Value: not null } literal)
+            {
+                return false;
+            }
+
+            DataValue value = ConvertLiteralToDataValue(literal.Value);
+
+            if (bitmapIndex.ChunkContainsValue(value, chunkIndex))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds a combined bitmap row-inclusion mask for a single chunk by evaluating
+    /// bitmap-eligible sub-expressions in the filter hint. Returns <c>null</c> when
+    /// no bitmap-eligible predicates exist (all rows should pass through).
+    /// </summary>
+    private static byte[]? EvaluateBitmapFilter(
+        Expression? filterHint, BitmapIndexSet? bitmapIndexes,
+        int chunkIndex, int rowCount)
+    {
+        if (filterHint is null || bitmapIndexes is null || bitmapIndexes.Count == 0)
+        {
+            return null;
+        }
+
+        return EvaluateBitmapExpression(filterHint, bitmapIndexes, chunkIndex, rowCount);
+    }
+
+    /// <summary>
+    /// Recursively evaluates a filter expression against bitmap indexes, composing
+    /// per-value bitmaps with AND/OR/NOT to produce a row-inclusion bitset.
+    /// Returns <c>null</c> when the sub-expression has no bitmap-eligible predicates.
+    /// </summary>
+    private static byte[]? EvaluateBitmapExpression(
+        Expression expression, BitmapIndexSet bitmapIndexes,
+        int chunkIndex, int rowCount)
+    {
+        if (expression is BinaryExpression binary)
+        {
+            if (binary.Operator == BinaryOperator.And)
+            {
+                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount);
+                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount);
+
+                if (leftBits is not null && rightBits is not null)
+                {
+                    return BitmapComposer.And(leftBits, rightBits);
+                }
+
+                // Return whichever side produced a bitmap (AND with unknown = keep the known constraint).
+                return leftBits ?? rightBits;
+            }
+
+            if (binary.Operator == BinaryOperator.Or)
+            {
+                byte[]? leftBits = EvaluateBitmapExpression(binary.Left, bitmapIndexes, chunkIndex, rowCount);
+                byte[]? rightBits = EvaluateBitmapExpression(binary.Right, bitmapIndexes, chunkIndex, rowCount);
+
+                if (leftBits is not null && rightBits is not null)
+                {
+                    return BitmapComposer.Or(leftBits, rightBits);
+                }
+
+                // OR with an unknown side: cannot constrain (either side might match any row).
+                return null;
+            }
+
+            if (binary.Operator == BinaryOperator.Equal)
+            {
+                return EvaluateBitmapEquality(binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount);
+            }
+
+            if (binary.Operator == BinaryOperator.NotEqual)
+            {
+                byte[]? equalBits = EvaluateBitmapEquality(
+                    binary.Left, binary.Right, bitmapIndexes, chunkIndex, rowCount);
+
+                if (equalBits is not null)
+                {
+                    return BitmapComposer.Not(equalBits, rowCount);
+                }
+
+                return null;
+            }
+        }
+
+        if (expression is InExpression inExpression && !inExpression.Negated)
+        {
+            return EvaluateBitmapIn(inExpression, bitmapIndexes, chunkIndex, rowCount);
+        }
+
+        return null;
+    }
+
+    private static byte[]? EvaluateBitmapEquality(
+        Expression left, Expression right, BitmapIndexSet bitmapIndexes,
+        int chunkIndex, int rowCount)
+    {
+        string? columnName = null;
+        object? rawLiteral = null;
+
+        if (left is ColumnReference columnRef && right is LiteralExpression literal)
+        {
+            columnName = columnRef.ColumnName;
+            rawLiteral = literal.Value;
+        }
+        else if (left is LiteralExpression literalLeft && right is ColumnReference columnRight)
+        {
+            columnName = columnRight.ColumnName;
+            rawLiteral = literalLeft.Value;
+        }
+
+        if (columnName is null || rawLiteral is null)
+        {
+            return null;
+        }
+
+        if (!bitmapIndexes.TryGetIndex(columnName, out BitmapColumnIndex? bitmapIndex))
+        {
+            return null;
+        }
+
+        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(literalValue, chunkIndex);
+        return bitmap.Bits.ToArray();
+    }
+
+    private static byte[]? EvaluateBitmapIn(
+        InExpression inExpression, BitmapIndexSet bitmapIndexes,
+        int chunkIndex, int rowCount)
+    {
+        if (inExpression.Expression is not ColumnReference columnRef)
+        {
+            return null;
+        }
+
+        if (!bitmapIndexes.TryGetIndex(columnRef.ColumnName, out BitmapColumnIndex? bitmapIndex))
+        {
+            return null;
+        }
+
+        byte[]? result = null;
+
+        foreach (Expression valueExpression in inExpression.Values)
+        {
+            if (valueExpression is not LiteralExpression { Value: not null } literal)
+            {
+                return null;
+            }
+
+            DataValue value = ConvertLiteralToDataValue(literal.Value);
+            ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(value, chunkIndex);
+
+            if (result is null)
+            {
+                result = bitmap.Bits.ToArray();
+            }
+            else
+            {
+                BitmapComposer.Or(bitmap.Bits, result, result);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns whether the bit at the given row offset is set in a bitmap mask.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsBitmapBitSet(byte[] mask, int rowOffset)
+    {
+        int byteIndex = rowOffset >> 3;
+        int bitIndex = rowOffset & 7;
+        return (mask[byteIndex] & (1 << bitIndex)) != 0;
     }
 
     private static bool CheckExpressionForPruning(

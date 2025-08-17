@@ -66,6 +66,22 @@ public sealed class DatumIndexerOptions
     public int? MaxIndexedColumns { get; init; }
 
     /// <summary>
+    /// When <c>true</c>, builds bitmap indexes for all auto-indexable columns whose
+    /// observed cardinality stays within <see cref="IndexConstants.BitmapAutoThreshold"/>.
+    /// Defaults to <c>false</c> (bitmap indexes are still auto-generated for eligible
+    /// columns when <see cref="AutoIndexColumns"/> is set).
+    /// </summary>
+    public bool BitmapAllColumns { get; init; } = false;
+
+    /// <summary>
+    /// Explicit column names to build bitmap indexes for during index creation.
+    /// Overrides auto-detection for these columns — bitmaps are attempted regardless
+    /// of data kind, though columns exceeding the cardinality threshold will still
+    /// be abandoned. <see langword="null"/> means no explicit bitmap columns.
+    /// </summary>
+    public IReadOnlySet<string>? BitmapColumns { get; init; }
+
+    /// <summary>
     /// Optional diagnostic callback invoked at key lifecycle points during index building:
     /// chunk flushes, scan completion, and index writing. When <c>null</c> (default),
     /// no diagnostic events are emitted and there is no overhead on hot paths.

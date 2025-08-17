@@ -16,4 +16,7 @@ public enum PruningTechnique
 
     /// <summary>Exact row seek via sorted index (no full-chunk read).</summary>
     ExactSeek,
+
+    /// <summary>Bitmap index value presence test per chunk.</summary>
+    BitmapPruning,
 }

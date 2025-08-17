@@ -252,6 +252,52 @@ B+Tree indexes are designed for bounded memory usage regardless of dataset size:
 
 The streaming build path peaks at approximately 300–900 MB for a 32-million-row dataset (depending on column count and whether bloom filters are enabled), compared to multiple gigabytes for the flat sorted array approach.
 
+## Bitmap indexes
+
+Bitmap indexes target low-cardinality columns — those with at most 256 distinct values (configurable via `IndexConstants.BitmapAutoThreshold`). Unlike sorted or B+Tree indexes that map values to row positions, bitmap indexes store one bitset per distinct value per chunk: bit *i* is set when the row at offset *i* within the chunk equals that value.
+
+### When bitmaps are used
+
+During index building, every auto-indexable column gets a bitmap accumulator. If the column's observed cardinality stays within the threshold (≤ 256) for every chunk, a `BitmapColumnIndex` is written to the index file. Columns that exceed the threshold are abandoned — their sorted or B+Tree indexes still apply.
+
+Bitmaps do not replace sorted or B+Tree indexes. Both coexist: sorted/B+Tree serve range queries and exact-seek, bitmaps serve equality composition and row-level filtering.
+
+### Composition
+
+Bitmap indexes support bitwise composition across multiple columns:
+
+| Expression | Composition |
+|-----------|-------------|
+| `col = value` | Single-value bitmap lookup |
+| `col != value` | NOT of equality bitmap |
+| `col IN (v1, v2, ...)` | OR union of each value's bitmap |
+| `a = 'x' AND b = 'y'` | AND of per-column bitmaps |
+| `a = 'x' OR b = 'y'` | OR of per-column bitmaps |
+
+### Chunk-level pruning
+
+Before reading any rows, `ScanOperator` checks `BitmapColumnIndex.ChunkContainsValue()` for each equality predicate on a bitmap-indexed column. If a value is absent from the chunk's value set, the entire chunk is skipped.
+
+### Row-level filtering
+
+Within surviving chunks, the engine builds a combined bitmap mask by evaluating the filter expression tree against the chunk's per-value bitsets. Rows where the corresponding bit is 0 are skipped without being materialized. This is precise (no false negatives or false positives) unlike statistics-based pruning which is conservative.
+
+### Request bitmap indexes
+
+Bitmap columns are auto-detected during index building for all auto-indexable kinds. To force specific columns:
+
+```
+datum-ingest index --source data.csv --auto-index --bitmap-columns color,status
+```
+
+### Storage format
+
+Each bitmap is Zstd-compressed and stored under `IndexSectionType.BitmapIndexes` (section type 9). At a chunk size of 10,000 rows, each uncompressed bitmap is 1.25 KB; Zstd typically achieves 5–20× compression for sparse bitmaps.
+
+### Manifest index hints
+
+When a manifest is generated (via `ManifestBuilder`), per-column `ColumnIndexHint` records are included. These hints record whether a column was observed to be bitmap-eligible (≤ 256 distinct values), sort-eligible, or B+Tree-eligible. On subsequent ingestion runs, `SourceIndexBuilder` can consult these hints to override auto-detection.
+
 ## ZIP directory cache
 
 For ZIP archive sources, the index caches the central directory — file names, compressed/uncompressed sizes, CRC-32 checksums, and local header offsets. This avoids re-parsing the ZIP central directory structure on every query.
@@ -311,7 +357,11 @@ Predicate expressions with literal values are checked against sorted value index
 
 Reversed operand order (e.g., `5 > col`) is handled by flipping the comparison operator. NOT BETWEEN and NOT IN are not eligible — they are exclusions, not point/range lookups.
 
-All three levels are applied in sequence; each subsequent level can only reduce the set of active chunks further. EXPLAIN ANALYZE reports the total and pruned chunk counts.
+### Level 4: Bitmap index pruning
+
+For equality and IN predicates on bitmap-indexed columns, `ScanOperator` checks whether the target value exists in the chunk's bitmap value set. A chunk is skipped if the value is absent — this is exact (no false positives), unlike statistics-based pruning. Within surviving chunks, bitmap row-level filtering further eliminates individual rows by composing per-value bitsets.
+
+All four levels are applied in sequence; each subsequent level can only reduce the set of active chunks further. EXPLAIN ANALYZE reports the total and pruned chunk counts.
 
 ### Chunk-level seeking
 

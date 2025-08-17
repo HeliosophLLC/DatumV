@@ -50,7 +50,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
-- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, sorted value indexes for equality/range predicates, B+Tree indexes for large columns (≥5M entries, demand-paged 8 KiB pages with Zstd-compressed leaves), ORDER BY elimination via index scan, automatic column selection for compact types, per-column Zstd compression (5–10× size reduction), configurable index strategy (`auto`/`sorted`/`btree`), and configurable column caps
+- **Source indexes** — `.datum-index` sidecar files with chunk-level statistics pruning, bloom filter join acceleration, sorted value indexes for equality/range predicates, B+Tree indexes for large columns (≥5M entries, demand-paged 8 KiB pages with Zstd-compressed leaves), bitmap indexes for low-cardinality columns (≤256 distinct values, bitwise AND/OR/NOT composition), ORDER BY elimination via index scan, automatic column selection for compact types, per-column Zstd compression (5–10× size reduction), and configurable column caps
 - **Memory-bounded execution** — configurable memory budget with spill-to-disk for datasets larger than available memory (hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT); index nested-loop join for LIMIT-bounded queries with sorted indexes
 - **Schema sidecars** — `.datum-schema` files cache column metadata, eliminating schema inference I/O on subsequent loads
 - **Checkpointing** — resumable sharded writes via `--checkpoint`
@@ -170,6 +170,8 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `--chunk-size <n>` | Rows per index chunk (default: 10,000). |
 | `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
 | `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
+| `--bitmap-columns <cols>` | Comma-separated column names to force bitmap indexes for (low-cardinality, ≤ 256 distinct values). |
+| `--bitmap-all` | Build bitmap indexes for all auto-indexable columns. |
 | `--memory-budget <bytes>` | Memory budget in bytes for spill-to-disk operators (default: 2 GB; 0 disables). |
 
 ### Source definition format
@@ -204,7 +206,7 @@ datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/m
 | [docs/providers.md](docs/providers.md) | Data provider details, options, catalog file format |
 | [docs/statistics.md](docs/statistics.md) | Statistics accumulators, manifest schema, column interactions |
 | [docs/datum-format.md](docs/datum-format.md) | `.datum` binary columnar format: physical layout, encoding strategies, zone maps, compression |
-| [docs/indexes.md](docs/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, CLI usage |
+| [docs/indexes.md](docs/indexes.md) | Source indexes: `.datum-index` format, bloom filters, sorted values, bitmap indexes, CLI usage |
 | [docs/architecture.md](docs/architecture.md) | Execution model, lazy evaluation, pushdown, project structure |
 | [docs/language-server.md](docs/language-server.md) | SQL language server: autocomplete, diagnostics, hover, WASM integration |
 | [docs/api.md](docs/api.md) | Programmatic C# API: manifest, EXPLAIN, schema, checkpointing, streaming output |

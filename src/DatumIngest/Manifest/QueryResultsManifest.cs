@@ -42,4 +42,11 @@ public sealed class QueryResultsManifest
     /// the insight that produced it. Null when no queries are synthesized.
     /// </summary>
     public IReadOnlyList<QueryAnnotation>? QueryAnnotations { get; init; }
+
+    /// <summary>
+    /// Gets per-column index type hints derived from manifest statistics.
+    /// Consumed by <see cref="Indexing.SourceIndexBuilder"/> to guide index-type selection
+    /// on subsequent ingestion runs. Null when no hints are available.
+    /// </summary>
+    public IReadOnlyList<ColumnIndexHint>? IndexHints { get; init; }
 }

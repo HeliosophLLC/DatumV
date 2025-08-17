@@ -58,6 +58,12 @@ internal sealed class CliOptions
     /// </summary>
     public bool AutoIndexColumns { get; set; }
 
+    /// <summary>Gets or sets the column names to build bitmap indexes for during index creation.</summary>
+    public HashSet<string> BitmapColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Gets or sets whether to build bitmap indexes for all auto-indexable columns during index creation.</summary>
+    public bool BitmapAllColumns { get; set; }
+
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
 
@@ -204,6 +210,21 @@ internal sealed class CliOptions
 
                 case "--auto-index":
                     options.AutoIndexColumns = true;
+                    break;
+
+                case "--bitmap-columns":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--bitmap-columns requires a comma-separated list of column names");
+                    }
+                    foreach (string column in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        options.BitmapColumns.Add(column);
+                    }
+                    break;
+
+                case "--bitmap-all":
+                    options.BitmapAllColumns = true;
                     break;
 
                 case "--memory-budget":

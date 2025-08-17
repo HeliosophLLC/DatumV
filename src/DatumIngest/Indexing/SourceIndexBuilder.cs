@@ -2,6 +2,7 @@ using CardinalityEstimation;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Indexing.Bitmap;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
@@ -21,6 +22,7 @@ public sealed class SourceIndexBuilder
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
     private readonly int? _maxIndexedColumns;
+    private readonly IReadOnlyList<ColumnIndexHint>? _indexHints;
 
     /// <summary>
     /// Creates a builder with the specified chunk size and optional column-specific indexes.
@@ -55,12 +57,17 @@ public sealed class SourceIndexBuilder
     /// Maximum number of columns to include in the sorted index. When not <c>null</c>, only
     /// the first N eligible columns (in schema order) are indexed. <c>null</c> means no limit.
     /// </param>
+    /// <param name="indexHints">
+    /// Per-column index type hints from a previous manifest. When provided, override the
+    /// automatic index-type cascade for the hinted columns.
+    /// </param>
     public SourceIndexBuilder(
         bool bloomAllColumns,
         bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
         bool autoIndexColumns = false,
-        int? maxIndexedColumns = null)
+        int? maxIndexedColumns = null,
+        IReadOnlyList<ColumnIndexHint>? indexHints = null)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
@@ -69,6 +76,7 @@ public sealed class SourceIndexBuilder
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
         _maxIndexedColumns = maxIndexedColumns;
+        _indexHints = indexHints;
     }
 
     /// <summary>
@@ -174,7 +182,7 @@ public sealed class SourceIndexBuilder
                     ordinalBloomFilters = currentBloomFilters is not null ? new BloomFilter?[columnCount] : null;
                     ordinalSpillEntries = spillWriter is not null ? new List<ValueIndexEntry>?[columnCount] : null;
 
-                    bitmapAccumulators = CreateBitmapAccumulators(schema);
+                    bitmapAccumulators = CreateBitmapAccumulators(schema, _indexHints);
                     ordinalBitmapAccumulators = bitmapAccumulators is not null
                         ? new BitmapChunkAccumulator?[columnCount]
                         : null;
@@ -477,7 +485,9 @@ public sealed class SourceIndexBuilder
 
     /// <summary>
     /// Resolves the effective index column set considering explicit columns,
-    /// all-columns mode, and auto-index mode (in priority order).
+    /// all-columns mode, auto-index mode, and manifest hints (in priority order).
+    /// Manifest hints augment auto-index results by including columns hinted as
+    /// <see cref="IndexHintType.Sorted"/> or <see cref="IndexHintType.BTree"/>.
     /// </summary>
     private IReadOnlySet<string>? ResolveEffectiveIndexColumns(Schema schema)
     {
@@ -503,7 +513,46 @@ public sealed class SourceIndexBuilder
             return null;
         }
 
+        result = AugmentWithIndexHints(result, schema);
+
         return ApplyMaxIndexedColumns(result);
+    }
+
+    /// <summary>
+    /// Augments the resolved index column set with columns from manifest hints
+    /// that recommend <see cref="IndexHintType.Sorted"/> or <see cref="IndexHintType.BTree"/>.
+    /// Returns the original set unchanged when no hints apply.
+    /// </summary>
+    private IReadOnlySet<string>? AugmentWithIndexHints(IReadOnlySet<string>? columns, Schema schema)
+    {
+        if (_indexHints is null || _indexHints.Count == 0)
+        {
+            return columns;
+        }
+
+        HashSet<string> schemaColumns = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            schemaColumns.Add(column.Name);
+        }
+
+        HashSet<string>? augmented = null;
+
+        foreach (ColumnIndexHint hint in _indexHints)
+        {
+            if (hint.PreferredType is IndexHintType.Sorted or IndexHintType.BTree or IndexHintType.Auto
+                && schemaColumns.Contains(hint.ColumnName)
+                && (columns is null || !columns.Contains(hint.ColumnName)))
+            {
+                augmented ??= columns is not null
+                    ? new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                augmented.Add(hint.ColumnName);
+            }
+        }
+
+        return augmented ?? columns;
     }
 
     /// <summary>
@@ -710,16 +759,47 @@ public sealed class SourceIndexBuilder
     }
 
     /// <summary>
-    /// Creates a <see cref="BitmapChunkAccumulator"/> for each auto-indexable column
-    /// in the schema. Returns <c>null</c> if no columns are eligible.
+    /// Creates a <see cref="BitmapChunkAccumulator"/> for each bitmap-eligible column
+    /// in the schema. When manifest hints are provided, columns hinted as
+    /// <see cref="IndexHintType.Bitmap"/> are always included, and columns hinted as
+    /// <see cref="IndexHintType.Sorted"/>, <see cref="IndexHintType.BTree"/>, or
+    /// <see cref="IndexHintType.None"/> are excluded. Returns <c>null</c> if no columns are eligible.
     /// </summary>
-    internal static Dictionary<string, BitmapChunkAccumulator>? CreateBitmapAccumulators(Schema schema)
+    internal static Dictionary<string, BitmapChunkAccumulator>? CreateBitmapAccumulators(
+        Schema schema,
+        IReadOnlyList<ColumnIndexHint>? indexHints = null)
     {
+        Dictionary<string, IndexHintType>? hintLookup = null;
+
+        if (indexHints is { Count: > 0 })
+        {
+            hintLookup = new Dictionary<string, IndexHintType>(
+                indexHints.Count, StringComparer.OrdinalIgnoreCase);
+
+            foreach (ColumnIndexHint hint in indexHints)
+            {
+                hintLookup[hint.ColumnName] = hint.PreferredType;
+            }
+        }
+
         Dictionary<string, BitmapChunkAccumulator>? accumulators = null;
 
         foreach (ColumnInfo column in schema.Columns)
         {
-            if (IsAutoIndexableKind(column.Kind))
+            bool include;
+
+            if (hintLookup is not null && hintLookup.TryGetValue(column.Name, out IndexHintType hintType))
+            {
+                // Explicit hint overrides auto-detection.
+                include = hintType is IndexHintType.Bitmap;
+            }
+            else
+            {
+                // No hint — fall back to auto-indexable kind check.
+                include = IsAutoIndexableKind(column.Kind);
+            }
+
+            if (include)
             {
                 accumulators ??= new Dictionary<string, BitmapChunkAccumulator>(StringComparer.OrdinalIgnoreCase);
                 accumulators[column.Name] = new BitmapChunkAccumulator();
@@ -945,7 +1025,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
                 _spillWriter.Initialize(effectiveIndexColumns);
             }
 
-            _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema);
+            _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema);  // Incremental path has no manifest hints.
 
             if (_bitmapAccumulators is not null)
             {
