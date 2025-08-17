@@ -88,6 +88,63 @@ public sealed class CrossManifestThresholds
     /// <summary>Weight for unique key score in composite confidence. Default: 0.05.</summary>
     public double WeightUniqueKeyScore { get; init; } = 0.05;
 
+    // ── Edge Caps ──
+
+    /// <summary>
+    /// Maximum number of join edges retained between any single pair of tables.
+    /// After scoring, only the top-N edges (by confidence) survive per table pair.
+    /// Default: 3.
+    /// </summary>
+    public int MaxEdgesPerTablePair { get; init; } = 3;
+
+    /// <summary>
+    /// Maximum number of join edges in which a single column may participate
+    /// across all table pairs. Prevents a popular column (e.g. "id") from
+    /// creating edges to every other table.
+    /// Default: 1.
+    /// </summary>
+    public int MaxEdgesPerColumn { get; init; } = 1;
+
+    /// <summary>
+    /// Minimum confidence margin the top edge within a table pair must have
+    /// over the next-best edge for the next-best to be retained. Eliminates
+    /// near-duplicate edges that add noise without information.
+    /// Default: 0.05.
+    /// </summary>
+    public double MinMarginOverNextBest { get; init; } = 0.05;
+
+    /// <summary>
+    /// Maximum number of transitive join chains to retain. Chains are sorted
+    /// by descending minimum confidence and truncated at this limit.
+    /// Default: 1000.
+    /// </summary>
+    public int MaxTransitiveChains { get; init; } = 1000;
+
+    // ── Gated Scoring Floors ──
+
+    /// <summary>
+    /// Minimum joinability prior (role compatibility + name hints) for a candidate
+    /// to survive evidence scoring. Candidates below this floor receive a hard-zero
+    /// composite confidence.
+    /// Default: 0.3.
+    /// </summary>
+    public double JoinabilityPriorFloor { get; init; } = 0.3;
+
+    /// <summary>
+    /// Minimum identity evidence (TopK overlap + unique-key signal + cardinality
+    /// agreement) for a candidate to survive scoring. Below floor → hard zero.
+    /// Default: 0.1 (set conservatively to accommodate partition pairs with
+    /// zero TopK overlap and low unique-key scores).
+    /// </summary>
+    public double IdentityEvidenceFloor { get; init; } = 0.1;
+
+    /// <summary>
+    /// Minimum structural compatibility (type coercion + range agreement) for a
+    /// candidate to survive scoring. Below floor → hard zero.
+    /// Default: 0.2.
+    /// </summary>
+    public double StructuralCompatibilityFloor { get; init; } = 0.2;
+
     // ── Insight Thresholds ──
 
     /// <summary>

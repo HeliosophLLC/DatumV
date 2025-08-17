@@ -126,6 +126,7 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(JoinGraphEdge))]
 [JsonSerializable(typeof(InheritedEdgeOrigin))]
 [JsonSerializable(typeof(JoinChain))]
+[JsonSerializable(typeof(GraphComplexity))]
 [JsonSerializable(typeof(CrossManifestThresholds))]
 [JsonSerializable(typeof(CrossManifestQueryOptions))]
 [JsonSourceGenerationOptions(

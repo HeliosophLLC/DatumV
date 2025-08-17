@@ -310,11 +310,12 @@ internal static class JoinEvidenceScorer
     }
 
     /// <summary>
-    /// Computes the weighted composite confidence from all evidence signals.
-    /// When range overlap is null (non-numeric), its weight is redistributed
-    /// proportionally across other signals. After the weighted average, multiplicative
-    /// penalties are applied for type incompatibility, cardinality mismatch,
-    /// zero value overlap, and weak name similarity.
+    /// Computes the weighted composite confidence from all evidence signals using
+    /// three-tier gated scoring. Each tier — joinability prior, identity evidence,
+    /// and structural compatibility — must reach its configured floor before the
+    /// candidate can score. A single sub-floor tier kills the candidate (hard zero).
+    /// After gating, the weighted average is computed from all signals and
+    /// multiplicative penalties are applied.
     /// </summary>
     private static double ComputeCompositeConfidence(
         double nameSimilarity,
@@ -326,6 +327,31 @@ internal static class JoinEvidenceScorer
         bool bothSidesUniqueKey,
         CrossManifestThresholds thresholds)
     {
+        // Tier 1: Joinability Prior — role + name structural hints.
+        double joinabilityPrior = nameSimilarity;
+
+        if (joinabilityPrior < thresholds.JoinabilityPriorFloor)
+        {
+            return 0.0;
+        }
+
+        // Tier 2: Identity Evidence — value-level signals that prove same domain.
+        double identityEvidence = ComputeIdentityEvidence(topKJaccard, uniqueKeyScore, cardinalityRatio);
+
+        if (identityEvidence < thresholds.IdentityEvidenceFloor)
+        {
+            return 0.0;
+        }
+
+        // Tier 3: Structural Compatibility — schema-level agreement.
+        double structuralCompatibility = ComputeStructuralCompatibility(typeCompatibility, rangeOverlap);
+
+        if (structuralCompatibility < thresholds.StructuralCompatibilityFloor)
+        {
+            return 0.0;
+        }
+
+        // All tiers passed — compute weighted average from individual signals.
         double totalWeight;
         double weightedSum;
 
@@ -368,6 +394,37 @@ internal static class JoinEvidenceScorer
             bothSidesUniqueKey);
 
         return confidence;
+    }
+
+    /// <summary>
+    /// Computes identity evidence: a weighted combination of value-level signals
+    /// that prove two columns share the same domain. TopK overlap is the strongest
+    /// signal, but cardinality agreement and unique-key presence provide substantial
+    /// support — especially for partition pairs where TopK overlap is naturally zero.
+    /// </summary>
+    private static double ComputeIdentityEvidence(
+        double topKJaccard,
+        double uniqueKeyScore,
+        double cardinalityRatio)
+    {
+        return (topKJaccard * 0.4) + (uniqueKeyScore * 0.3) + (cardinalityRatio * 0.3);
+    }
+
+    /// <summary>
+    /// Computes structural compatibility: schema-level agreement between the
+    /// two columns. Type coercion is the primary signal; range overlap (when numeric)
+    /// provides additional confirmation.
+    /// </summary>
+    private static double ComputeStructuralCompatibility(
+        double typeCompatibility,
+        double? rangeOverlap)
+    {
+        if (rangeOverlap.HasValue)
+        {
+            return (typeCompatibility * 0.7) + (rangeOverlap.Value * 0.3);
+        }
+
+        return typeCompatibility;
     }
 
     /// <summary>

@@ -22,6 +22,13 @@ internal static class ColumnMatcher
         ["_id", "id", "_key", "key", "_code", "code"];
 
     /// <summary>
+    /// Minimum cardinality ratio (min NDV / max NDV) for two Categorical columns
+    /// to be considered a candidate pair. Categoricals with very different domain
+    /// sizes are unlikely to be join keys.
+    /// </summary>
+    private const double CategoricalNdvRatioThreshold = 0.5;
+
+    /// <summary>
     /// Finds candidate column pairs between two manifests that pass the name similarity
     /// and type compatibility thresholds.
     /// </summary>
@@ -40,6 +47,13 @@ internal static class ColumnMatcher
         {
             foreach (FeatureManifest rightFeature in right.Manifest.Features)
             {
+                // Role-based gate: when both sides have roles assigned, reject
+                // structurally implausible join pairs early.
+                if (!IsRolePairJoinable(leftFeature, rightFeature))
+                {
+                    continue;
+                }
+
                 double nameSimilarity = ComputeNameSimilarity(leftFeature.Name, rightFeature.Name);
                 double typeCompatibility = ComputeTypeCompatibility(leftFeature.Kind, rightFeature.Kind);
 
@@ -185,6 +199,75 @@ internal static class ColumnMatcher
 
     private static bool IsFloatingPoint(DataKind kind) =>
         kind is DataKind.Float32 or DataKind.Float64;
+
+    /// <summary>
+    /// Determines whether a pair of columns is structurally plausible as a join
+    /// based on their classified <see cref="ColumnRole"/> values. When either side
+    /// has no role assigned (null), the pair is allowed through to preserve backward
+    /// compatibility with manifests that predate role classification.
+    /// </summary>
+    /// <remarks>
+    /// Rules:
+    /// <list type="bullet">
+    ///   <item>Both sides <see cref="ColumnRole.Measure"/> → blocked (continuous values never join).</item>
+    ///   <item>Both sides <see cref="ColumnRole.Structural"/> → blocked (vectors/tensors never join).</item>
+    ///   <item>At least one side must be <see cref="ColumnRole.Identifier"/> or <see cref="ColumnRole.ForeignKey"/>,
+    ///         unless both sides are <see cref="ColumnRole.Categorical"/> with similar NDV.</item>
+    /// </list>
+    /// </remarks>
+    internal static bool IsRolePairJoinable(FeatureManifest left, FeatureManifest right)
+    {
+        ColumnRole? leftRole = left.Role;
+        ColumnRole? rightRole = right.Role;
+
+        // When either side lacks a role, allow the pair through.
+        if (leftRole is null || rightRole is null)
+        {
+            return true;
+        }
+
+        ColumnRole leftValue = leftRole.Value;
+        ColumnRole rightValue = rightRole.Value;
+
+        // Both Measure → never a join key.
+        if (leftValue is ColumnRole.Measure && rightValue is ColumnRole.Measure)
+        {
+            return false;
+        }
+
+        // Both Structural → vectors/tensors never join.
+        if (leftValue is ColumnRole.Structural && rightValue is ColumnRole.Structural)
+        {
+            return false;
+        }
+
+        // At least one side is Identifier or ForeignKey → always allowed.
+        if (leftValue is ColumnRole.Identifier or ColumnRole.ForeignKey ||
+            rightValue is ColumnRole.Identifier or ColumnRole.ForeignKey)
+        {
+            return true;
+        }
+
+        // Both Categorical → allowed only when NDV is close enough.
+        if (leftValue is ColumnRole.Categorical && rightValue is ColumnRole.Categorical)
+        {
+            long leftNdv = left.EstimatedDistinctCount;
+            long rightNdv = right.EstimatedDistinctCount;
+
+            if (leftNdv <= 0 || rightNdv <= 0)
+            {
+                return false;
+            }
+
+            double ratio = (double)Math.Min(leftNdv, rightNdv) / Math.Max(leftNdv, rightNdv);
+
+            return ratio >= CategoricalNdvRatioThreshold;
+        }
+
+        // All other combinations (e.g. Temporal↔Measure, Text↔Categorical) are rejected
+        // unless one side is Identifier/ForeignKey (already handled above).
+        return false;
+    }
 
     /// <summary>
     /// Computes the Levenshtein edit distance between two strings.

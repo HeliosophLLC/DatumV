@@ -48,7 +48,166 @@ internal static class JoinGraphBuilder
                 candidate.Confidence));
         }
 
+        edges = ApplyEdgeCaps(edges, candidates, thresholds);
+
         return edges;
+    }
+
+    /// <summary>
+    /// Applies edge caps to enforce per-table-pair limits, per-column limits, and
+    /// minimum margin requirements. Edges are processed in descending confidence order
+    /// so the strongest edges survive.
+    /// </summary>
+    private static List<JoinGraphEdge> ApplyEdgeCaps(
+        List<JoinGraphEdge> edges,
+        IReadOnlyList<JoinCandidate> candidates,
+        CrossManifestThresholds thresholds)
+    {
+        if (edges.Count <= 1)
+        {
+            return edges;
+        }
+
+        // Sort descending by confidence for greedy selection.
+        edges.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
+
+        // Phase 1: Per-table-pair cap with margin filtering.
+        edges = ApplyTablePairCaps(edges, thresholds);
+
+        // Phase 2: Per-column cap — each column participates in at most N graph edges.
+        edges = ApplyColumnCaps(edges, candidates, thresholds);
+
+        return edges;
+    }
+
+    /// <summary>
+    /// Retains at most <see cref="CrossManifestThresholds.MaxEdgesPerTablePair"/> edges
+    /// per ordered table pair. Within each pair, the next-best edge must exceed the
+    /// <see cref="CrossManifestThresholds.MinMarginOverNextBest"/> margin relative to the
+    /// top edge to survive.
+    /// </summary>
+    private static List<JoinGraphEdge> ApplyTablePairCaps(
+        List<JoinGraphEdge> edges,
+        CrossManifestThresholds thresholds)
+    {
+        // Group by unordered table pair.
+        Dictionary<(string, string), List<JoinGraphEdge>> byPair = new();
+
+        foreach (JoinGraphEdge edge in edges)
+        {
+            // Normalize to ordered pair to treat (A,B) and (B,A) the same.
+            (string, string) key = string.Compare(edge.LeftTable, edge.RightTable, StringComparison.OrdinalIgnoreCase) < 0
+                ? (edge.LeftTable, edge.RightTable)
+                : (edge.RightTable, edge.LeftTable);
+
+            if (!byPair.TryGetValue(key, out List<JoinGraphEdge>? group))
+            {
+                group = new List<JoinGraphEdge>();
+                byPair[key] = group;
+            }
+
+            group.Add(edge);
+        }
+
+        List<JoinGraphEdge> result = new();
+
+        foreach (List<JoinGraphEdge> group in byPair.Values)
+        {
+            // Already sorted descending by confidence from the caller.
+            double topConfidence = group[0].Confidence;
+            result.Add(group[0]);
+
+            for (int i = 1; i < group.Count && i < thresholds.MaxEdgesPerTablePair; i++)
+            {
+                // Drop near-duplicate edges: the next-best must differ from the top
+                // by at least MinMarginOverNextBest to justify its own edge.
+                if (topConfidence - group[i].Confidence < thresholds.MinMarginOverNextBest)
+                {
+                    continue;
+                }
+
+                result.Add(group[i]);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Enforces a per-column-per-target-table participation limit. A single column name
+    /// may participate in at most <see cref="CrossManifestThresholds.MaxEdgesPerColumn"/>
+    /// edges toward any single other table. When a column has already reached its limit
+    /// for a given target table, lower-confidence edges referencing it are dropped.
+    /// </summary>
+    private static List<JoinGraphEdge> ApplyColumnCaps(
+        List<JoinGraphEdge> edges,
+        IReadOnlyList<JoinCandidate> candidates,
+        CrossManifestThresholds thresholds)
+    {
+        // Track how many edges each (table, column, otherTable) participates in.
+        Dictionary<(string Table, string Column, string OtherTable), int> columnEdgeCount = new();
+        List<JoinGraphEdge> result = new();
+
+        // Edges are already sorted descending by confidence.
+        foreach (JoinGraphEdge edge in edges)
+        {
+            JoinCandidate candidate = candidates[edge.CandidateIndex];
+
+            bool anyColumnExceeded = false;
+
+            // Check left-side columns against the right table.
+            foreach (string column in candidate.LeftColumns)
+            {
+                (string, string, string) key = (edge.LeftTable, column, edge.RightTable);
+                columnEdgeCount.TryGetValue(key, out int count);
+
+                if (count >= thresholds.MaxEdgesPerColumn)
+                {
+                    anyColumnExceeded = true;
+                    break;
+                }
+            }
+
+            if (!anyColumnExceeded)
+            {
+                // Check right-side columns against the left table.
+                foreach (string column in candidate.RightColumns)
+                {
+                    (string, string, string) key = (edge.RightTable, column, edge.LeftTable);
+                    columnEdgeCount.TryGetValue(key, out int count);
+
+                    if (count >= thresholds.MaxEdgesPerColumn)
+                    {
+                        anyColumnExceeded = true;
+                        break;
+                    }
+                }
+            }
+
+            if (anyColumnExceeded)
+            {
+                continue;
+            }
+
+            result.Add(edge);
+
+            // Update counts for all participating columns.
+            foreach (string column in candidate.LeftColumns)
+            {
+                (string, string, string) key = (edge.LeftTable, column, edge.RightTable);
+                columnEdgeCount.TryGetValue(key, out int count);
+                columnEdgeCount[key] = count + 1;
+            }
+
+            foreach (string column in candidate.RightColumns)
+            {
+                (string, string, string) key = (edge.RightTable, column, edge.LeftTable);
+                columnEdgeCount.TryGetValue(key, out int count);
+                columnEdgeCount[key] = count + 1;
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -128,6 +287,12 @@ internal static class JoinGraphBuilder
         // Sort by descending minimum confidence.
         chains.Sort((a, b) => b.MinConfidence.CompareTo(a.MinConfidence));
 
+        // Truncate to configured maximum.
+        if (chains.Count > thresholds.MaxTransitiveChains)
+        {
+            chains.RemoveRange(thresholds.MaxTransitiveChains, chains.Count - thresholds.MaxTransitiveChains);
+        }
+
         return chains;
     }
 
@@ -148,5 +313,50 @@ internal static class JoinGraphBuilder
         }
 
         neighbors.Add((to, edgeIndex, confidence));
+    }
+
+    /// <summary>
+    /// Computes structural complexity metrics for a set of graph edges.
+    /// Returns null when there are no edges.
+    /// </summary>
+    internal static GraphComplexity? ComputeComplexity(IReadOnlyList<JoinGraphEdge> edges)
+    {
+        if (edges.Count == 0)
+        {
+            return null;
+        }
+
+        HashSet<string> tables = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<(string, string), int> pairCounts = new();
+
+        foreach (JoinGraphEdge edge in edges)
+        {
+            tables.Add(edge.LeftTable);
+            tables.Add(edge.RightTable);
+
+            (string, string) key = string.Compare(edge.LeftTable, edge.RightTable, StringComparison.OrdinalIgnoreCase) < 0
+                ? (edge.LeftTable, edge.RightTable)
+                : (edge.RightTable, edge.LeftTable);
+
+            pairCounts.TryGetValue(key, out int count);
+            pairCounts[key] = count + 1;
+        }
+
+        int tableCount = tables.Count;
+        int maxEdgesPerPair = 0;
+
+        foreach (int count in pairCounts.Values)
+        {
+            if (count > maxEdgesPerPair)
+            {
+                maxEdgesPerPair = count;
+            }
+        }
+
+        // Maximum possible edges for N tables = N × (N−1) / 2.
+        double maxPossible = tableCount * (tableCount - 1) / 2.0;
+        double ambiguityRatio = maxPossible > 0.0 ? edges.Count / maxPossible : 0.0;
+
+        return new GraphComplexity(edges.Count, tableCount, maxEdgesPerPair, ambiguityRatio);
     }
 }

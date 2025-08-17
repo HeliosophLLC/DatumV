@@ -2,6 +2,7 @@ namespace DatumIngest.Manifest.CrossManifest;
 
 using DatumIngest.Manifest.CrossManifest.Rules;
 using DatumIngest.Manifest.Insights;
+using DatumIngest.Manifest.Insights.Rules;
 
 /// <summary>
 /// Top-level orchestrator for cross-manifest join analysis. Takes N named manifests,
@@ -123,6 +124,9 @@ public static class CrossManifestAnalyzer
                 findings.Add(finding);
             }
         }
+
+        // Check primary graph for structural complexity.
+        EmitDenseGraphInsight(joinGraphs[0], findings);
 
         // Convert findings to DatasetInsight — cross-manifest findings don't need
         // syndrome detection (that's single-manifest), so we convert directly.
@@ -289,6 +293,53 @@ public static class CrossManifestAnalyzer
     }
 
     /// <summary>
+    /// Ambiguity ratio threshold above which a <see cref="InsightKind.DenseJoinGraph"/>
+    /// insight is emitted. A ratio of 0.75 means the graph has at least 75% of the
+    /// maximum possible edges for the table count — approaching a clique.
+    /// </summary>
+    private const double DenseGraphAmbiguityThreshold = 0.75;
+
+    /// <summary>
+    /// Emits a <see cref="InsightKind.DenseJoinGraph"/> finding when the primary graph's
+    /// complexity exceeds the ambiguity threshold, signaling that automated join
+    /// path selection is unreliable.
+    /// </summary>
+    private static void EmitDenseGraphInsight(JoinGraph graph, List<RawFinding> findings)
+    {
+        GraphComplexity? complexity = graph.Complexity;
+
+        if (complexity is null || complexity.AmbiguityRatio < DenseGraphAmbiguityThreshold)
+        {
+            return;
+        }
+
+        EvidenceBuilder evidence = new EvidenceBuilder()
+            .Add("graph", "edgeCount", complexity.EdgeCount)
+            .Add("graph", "tableCount", complexity.TableCount)
+            .Add("graph", "maxEdgesPerTablePair", complexity.MaxEdgesPerTablePair)
+            .Add("graph", "ambiguityRatio", complexity.AmbiguityRatio);
+
+        findings.Add(new RawFinding(
+            InsightKind.DenseJoinGraph,
+            InsightCategory.JoinQuality,
+            InsightSeverity.Warning,
+            complexity.AmbiguityRatio,
+            InsightScope.CrossManifest,
+            $"Dense join graph detected: {complexity.EdgeCount} edges across {complexity.TableCount} tables " +
+                $"(ambiguity ratio {complexity.AmbiguityRatio:P0}).",
+            "High graph density means many plausible join paths exist. Automated join selection " +
+                "may choose suboptimal paths, producing unexpected Cartesian products or row duplication.",
+            "Review the join candidates and specify explicit join paths. Consider dropping low-confidence " +
+                "edges or excluding tables that are only loosely related.",
+            Rationale: null,
+            Alternatives: null,
+            [],
+            [],
+            ConflictGroup: null,
+            evidence.Build()));
+    }
+
+    /// <summary>
     /// Filters candidates to exclude any that involve a table in the exclusion set.
     /// </summary>
     private static IReadOnlyList<JoinCandidate> FilterCandidates(
@@ -367,6 +418,7 @@ public static class CrossManifestAnalyzer
                 RecommendedQuery = primaryQuery,
                 QueryAnnotations = primaryAnnotations.Count > 0 ? primaryAnnotations : null,
                 EstimatedRowCount = primaryRowCount,
+                Complexity = JoinGraphBuilder.ComputeComplexity(primaryEdges),
             },
         ];
 
@@ -422,6 +474,7 @@ public static class CrossManifestAnalyzer
                     RecommendedQuery = alternateQuery,
                     QueryAnnotations = alternateAnnotations.Count > 0 ? alternateAnnotations : null,
                     EstimatedRowCount = alternateRows > 0 ? alternateRows : null,
+                    Complexity = JoinGraphBuilder.ComputeComplexity(alternateEdges),
                 });
             }
         }

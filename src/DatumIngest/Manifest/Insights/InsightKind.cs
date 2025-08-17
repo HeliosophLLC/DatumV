@@ -148,4 +148,11 @@ public enum InsightKind
     /// indicating partitions of the same entity (e.g., train/test splits).
     /// </summary>
     EquivalentTablePartition,
+
+    /// <summary>
+    /// The join graph has high structural complexity — many edges relative to
+    /// the number of tables, indicating ambiguous join paths. Consider manual
+    /// join specification.
+    /// </summary>
+    DenseJoinGraph,
 }

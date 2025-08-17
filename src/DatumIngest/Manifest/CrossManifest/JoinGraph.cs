@@ -45,4 +45,10 @@ public sealed class JoinGraph
     /// Useful for inferring train/test split sizes. Null when not applicable.
     /// </summary>
     public long? EstimatedRowCount { get; init; }
+
+    /// <summary>
+    /// Gets the structural complexity metrics for this graph.
+    /// Null when the graph has no edges.
+    /// </summary>
+    public GraphComplexity? Complexity { get; init; }
 }
