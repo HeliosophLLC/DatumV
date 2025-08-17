@@ -134,18 +134,6 @@ Auto-indexing is controlled by the `AutoIndexColumns` option (default: `true`). 
 
 To cap how many columns are indexed (useful in multi-tenant environments where index size must be bounded), set `MaxIndexedColumns` to the desired limit. Only the first N eligible columns in schema order are indexed.
 
-### Index strategy
-
-The `IndexStrategy` setting controls whether a column is stored as a sorted value index or a B+Tree index:
-
-| Strategy | Behavior |
-|----------|----------|
-| `Auto` (default) | Columns with fewer than 5,000,000 entries use sorted value indexes; columns at or above this threshold use B+Tree indexes |
-| `Sorted` | Forces flat sorted value indexes for all columns |
-| `BTree` | Forces B+Tree indexes for all columns (useful for testing the B+Tree path on small datasets) |
-
-When `Auto` is selected, the engine inspects each column's total entry count after scanning all rows and chooses the most efficient representation per column. A single index file may contain both sorted value index sections and B+Tree sections for different columns.
-
 ### Sorted index compression
 
 As of format version 3, sorted indexes are compressed per-column using Zstd. This typically achieves 5–10× size reduction with negligible read latency impact (decompression is sub-millisecond).
@@ -168,7 +156,7 @@ For columns with millions of entries, flat sorted value indexes require loading 
 
 ### When B+Trees are used
 
-B+Tree indexes are selected automatically when a column exceeds 5,000,000 entries (`IndexStrategy.Auto`, the default). Override this with `--index-strategy btree` to force B+Trees for all columns, or `--index-strategy sorted` to force flat sorted arrays. See [Index strategy](#index-strategy) above.
+B+Tree indexes are selected automatically when a column exceeds 5,000,000 entries. The engine inspects each column's total entry count after scanning all rows and chooses the most efficient representation per column. A single index file may contain both sorted value index sections and B+Tree sections for different columns.
 
 ### On-disk format
 
@@ -376,16 +364,6 @@ datum-ingest index --source "csv:data=./large_dataset.csv" \
 
 This creates `large_dataset.csv.datum-index` alongside the source file.
 
-### Force B+Tree indexes
-
-```bash
-datum-ingest index --source "csv:data=./large_dataset.csv" \
-  --index-columns "user_id,timestamp" \
-  --index-strategy btree
-```
-
-Forcing `btree` is useful for testing or when all indexed columns are known to be large. With the default `auto` strategy, columns exceeding 5 million entries are automatically promoted to B+Tree.
-
 ### Co-generate an index and manifest
 
 ```bash
@@ -429,7 +407,6 @@ The engine validates the index fingerprint against the source, applies chunk-lev
 | `--chunk-size <n>` | Rows per index chunk (default: 10,000). |
 | `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
 | `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
-| `--index-strategy <strategy>` | Index implementation strategy: `auto` (default), `sorted`, or `btree`. |
 
 ## Programmatic API
 
@@ -476,7 +453,6 @@ DatumIndexerOptions options = new()
 {
     AutoIndexColumns = true,
     CompressIndexes = true,
-    IndexStrategy = IndexStrategy.BTree,
 };
 
 await using DatumIndexResult result = await DatumIngester.BuildIndexAsync("data.csv.datum", options);
@@ -526,7 +502,6 @@ DatumIndexerOptions options = new()
     AutoIndexColumns = true,
     CompressIndexes = true,
     MaxIndexedColumns = 8,
-    IndexStrategy = IndexStrategy.Auto, // Auto-promotes columns with ≥5M entries to B+Tree
 };
 
 await using DatumIndexResult index = await DatumIngester.BuildIndexAsync("data.csv.datum", options);

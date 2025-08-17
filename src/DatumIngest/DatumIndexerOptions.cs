@@ -66,17 +66,6 @@ public sealed class DatumIndexerOptions
     public int? MaxIndexedColumns { get; init; }
 
     /// <summary>
-    /// Controls which index implementation is used for each column.
-    /// <see cref="Indexing.IndexStrategy.Auto"/> selects the implementation per column
-    /// based on entry count: small columns use flat sorted arrays, large columns use
-    /// disk-resident B+Trees. <see cref="Indexing.IndexStrategy.Sorted"/> forces sorted
-    /// arrays for all columns. <see cref="Indexing.IndexStrategy.BTree"/> forces B+Trees
-    /// for all columns, which is useful for testing the B+Tree path on small datasets.
-    /// Defaults to <see cref="Indexing.IndexStrategy.Auto"/>.
-    /// </summary>
-    public IndexStrategy IndexStrategy { get; init; } = IndexStrategy.Auto;
-
-    /// <summary>
     /// Optional diagnostic callback invoked at key lifecycle points during index building:
     /// chunk flushes, scan completion, and index writing. When <c>null</c> (default),
     /// no diagnostic events are emitted and there is no overhead on hot paths.

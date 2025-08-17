@@ -394,8 +394,7 @@ public static class DatumIngester
                 indexAllColumns: options.IndexAllColumns,
                 chunkSize: options.ChunkSize,
                 autoIndexColumns: options.AutoIndexColumns,
-                maxIndexedColumns: options.MaxIndexedColumns,
-                indexStrategy: options.IndexStrategy)
+                maxIndexedColumns: options.MaxIndexedColumns)
             .CreateIncrementalBuilder(fingerprint);
 
         Action<IndexingDiagnosticEvent>? diagnostics = options.Diagnostics;
@@ -472,8 +471,7 @@ public static class DatumIngester
             SourceIndexSet.Create(sidecarTableName, index),
             indexStream,
             indexBuilder.SpillWriter,
-            compressIndexes: options.CompressIndexes,
-            indexStrategy: options.IndexStrategy);
+            compressIndexes: options.CompressIndexes);
 
         diagnostics?.Invoke(new IndexingDiagnosticEvent
         {

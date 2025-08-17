@@ -171,7 +171,6 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `--bloom-columns <cols>` | Comma-separated column names to build bloom filters for. |
 | `--index-columns <cols>` | Comma-separated column names to build sorted value indexes for. |
 | `--memory-budget <bytes>` | Memory budget in bytes for spill-to-disk operators (default: 2 GB; 0 disables). |
-| `--index-strategy <strategy>` | Index implementation strategy: `auto` (default), `sorted`, or `btree`. See [Source Indexes](docs/indexes.md#index-strategy). |
 
 ### Source definition format
 

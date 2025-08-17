@@ -36,9 +36,8 @@ public static class IndexConstants
     public const int DefaultChunkSize = 10_000;
 
     /// <summary>
-    /// Entry count threshold for automatic B+Tree strategy selection. Columns with more
-    /// entries than this value use a B+Tree index instead of a sorted value index when
-    /// the index strategy is <see cref="IndexStrategy.Auto"/>.
+    /// Entry count threshold for automatic B+Tree promotion. Columns with more
+    /// entries than this value use a B+Tree index instead of a sorted value index.
     /// </summary>
     public const long BPlusTreeAutoThreshold = 5_000_000;
 }

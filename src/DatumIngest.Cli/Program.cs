@@ -182,12 +182,12 @@ static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
                 "Cannot combine --bloom-all/--index-all/--auto-index with --bloom-columns/--index-columns. Use one approach or the other.");
         }
 
-        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns, indexStrategy: options.IndexStrategy);
+        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns);
     }
 
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
     HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
-    return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns, indexStrategy: options.IndexStrategy);
+    return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns);
 }
 
 static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
@@ -233,7 +233,7 @@ static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)
     foreach (IGrouping<string, TableDescriptor> group in descriptors
         .GroupBy(d => d.FilePath, StringComparer.OrdinalIgnoreCase))
     {
-        await BuildGroupedIndexAsync(group, catalog, builder, options.ChunkSize, options.IndexStrategy);
+        await BuildGroupedIndexAsync(group, catalog, builder, options.ChunkSize);
     }
 
     return 0;
@@ -243,8 +243,7 @@ static async Task BuildGroupedIndexAsync(
     IGrouping<string, TableDescriptor> group,
     TableCatalog catalog,
     SourceIndexBuilder builder,
-    int chunkSize,
-    IndexStrategy indexStrategy)
+    int chunkSize)
 {
     string filePath = group.Key;
     Stream? sourceStream = null;
@@ -291,7 +290,7 @@ static async Task BuildGroupedIndexAsync(
             using FileStream outputStream = File.Create(indexPath);
             IndexWriter writer = new();
             writer.Write(indexSet, outputStream, indexBuilder.SpillWriter,
-                compressIndexes: true, indexStrategy: indexStrategy);
+                compressIndexes: true);
 
             indexBuilder.Dispose();
 

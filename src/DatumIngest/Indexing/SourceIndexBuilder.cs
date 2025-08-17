@@ -20,7 +20,6 @@ public sealed class SourceIndexBuilder
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
     private readonly int? _maxIndexedColumns;
-    private readonly IndexStrategy _indexStrategy;
 
     /// <summary>
     /// Creates a builder with the specified chunk size and optional column-specific indexes.
@@ -28,12 +27,10 @@ public sealed class SourceIndexBuilder
     /// <param name="chunkSize">Number of rows per index chunk (default: 10,000).</param>
     /// <param name="bloomColumns">Column names to build bloom filters for, or <c>null</c> for no bloom filters.</param>
     /// <param name="indexColumns">Column names to build sorted value indexes for, or <c>null</c> for no sorted indexes.</param>
-    /// <param name="indexStrategy">Controls which index implementation is used per column.</param>
     public SourceIndexBuilder(
         int chunkSize = IndexConstants.DefaultChunkSize,
         IReadOnlySet<string>? bloomColumns = null,
-        IReadOnlySet<string>? indexColumns = null,
-        IndexStrategy indexStrategy = IndexStrategy.Auto)
+        IReadOnlySet<string>? indexColumns = null)
     {
         _chunkSize = chunkSize;
         _bloomColumns = bloomColumns;
@@ -41,7 +38,6 @@ public sealed class SourceIndexBuilder
         _bloomAllColumns = false;
         _indexAllColumns = false;
         _autoIndexColumns = false;
-        _indexStrategy = indexStrategy;
     }
 
     /// <summary>
@@ -58,14 +54,12 @@ public sealed class SourceIndexBuilder
     /// Maximum number of columns to include in the sorted index. When not <c>null</c>, only
     /// the first N eligible columns (in schema order) are indexed. <c>null</c> means no limit.
     /// </param>
-    /// <param name="indexStrategy">Controls which index implementation is used per column.</param>
     public SourceIndexBuilder(
         bool bloomAllColumns,
         bool indexAllColumns,
         int chunkSize = IndexConstants.DefaultChunkSize,
         bool autoIndexColumns = false,
-        int? maxIndexedColumns = null,
-        IndexStrategy indexStrategy = IndexStrategy.Auto)
+        int? maxIndexedColumns = null)
     {
         _chunkSize = chunkSize;
         _bloomColumns = null;
@@ -74,7 +68,6 @@ public sealed class SourceIndexBuilder
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
         _maxIndexedColumns = maxIndexedColumns;
-        _indexStrategy = indexStrategy;
     }
 
     /// <summary>
@@ -910,7 +903,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// Finalizes the index after all rows have been observed.
     /// The spill writer is prepared for reading but not materialized or disposed —
     /// callers that need to serialize sorted indexes should pass <see cref="SpillWriter"/>
-    /// to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?, bool, IndexStrategy)"/>.
+    /// to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?, bool)"/>.
     /// The spill writer is cleaned up when this builder is disposed.
     /// </summary>
     /// <returns>The completed source index (with <see cref="SourceIndex.SortedIndexes"/>

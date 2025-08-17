@@ -58,9 +58,6 @@ internal sealed class CliOptions
     /// </summary>
     public bool AutoIndexColumns { get; set; }
 
-    /// <summary>Gets or sets the index implementation strategy (auto, sorted, or btree).</summary>
-    public IndexStrategy IndexStrategy { get; set; } = IndexStrategy.Auto;
-
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
 
@@ -207,21 +204,6 @@ internal sealed class CliOptions
 
                 case "--auto-index":
                     options.AutoIndexColumns = true;
-                    break;
-
-                case "--index-strategy":
-                    if (i + 1 >= args.Length)
-                    {
-                        throw new ArgumentException("--index-strategy requires a value: auto, sorted, or btree");
-                    }
-                    options.IndexStrategy = args[++i].ToLowerInvariant() switch
-                    {
-                        "auto" => IndexStrategy.Auto,
-                        "sorted" => IndexStrategy.Sorted,
-                        "btree" => IndexStrategy.BTree,
-                        _ => throw new ArgumentException(
-                            $"Unknown index strategy '{args[i]}'. Valid values: auto, sorted, btree"),
-                    };
                     break;
 
                 case "--memory-budget":

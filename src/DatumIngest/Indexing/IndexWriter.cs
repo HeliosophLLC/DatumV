@@ -42,19 +42,11 @@ public sealed class IndexWriter
     /// When <c>true</c>, the sorted indexes section is Zstd-compressed per column.
     /// This typically achieves 5–10× size reduction for large sorted index sections.
     /// </param>
-    /// <param name="indexStrategy">
-    /// Controls which index implementation is used when streaming from a spill writer.
-    /// When <see cref="IndexStrategy.Auto"/>, columns exceeding
-    /// <see cref="IndexConstants.BPlusTreeAutoThreshold"/> use B+Tree; smaller columns
-    /// use sorted value indexes. Ignored when <paramref name="sortedIndexSpillWriter"/>
-    /// is <c>null</c>.
-    /// </param>
     internal void Write(
         SourceIndexSet indexSet,
         Stream output,
         SortedIndexSpillWriter? sortedIndexSpillWriter,
-        bool compressIndexes = false,
-        IndexStrategy indexStrategy = IndexStrategy.Sorted)
+        bool compressIndexes = false)
     {
         using BinaryWriter writer = new(output, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -94,9 +86,9 @@ public sealed class IndexWriter
 
             if (sortedIndexSpillWriter is not null && sortedIndexSpillWriter.HasSortedIndexes)
             {
-                // Categorize columns into sorted vs. B+Tree based on the index strategy.
+                // Categorize columns into sorted vs. B+Tree based on entry count.
                 HashSet<string>? bTreeColumns = CategorizeBPlusTreeColumns(
-                    sortedIndexSpillWriter, indexStrategy);
+                    sortedIndexSpillWriter);
 
                 bool hasSortedColumns = bTreeColumns is null
                     || bTreeColumns.Count < CountColumnsWithEntries(sortedIndexSpillWriter);
@@ -505,35 +497,22 @@ public sealed class IndexWriter
     }
 
     /// <summary>
-    /// Determines which columns from the spill writer should be written as B+Tree indexes
-    /// based on the <paramref name="strategy"/>.
+    /// Determines which columns from the spill writer should be written as B+Tree indexes.
+    /// Columns whose total entry count exceeds <see cref="IndexConstants.BPlusTreeAutoThreshold"/>
+    /// are promoted to B+Tree; all others remain as sorted value indexes.
     /// </summary>
     /// <returns>
     /// A set of column names that should use B+Tree, or <c>null</c> if no columns qualify
     /// (i.e. all columns should use sorted value indexes).
     /// </returns>
     private static HashSet<string>? CategorizeBPlusTreeColumns(
-        SortedIndexSpillWriter spillWriter,
-        IndexStrategy strategy)
+        SortedIndexSpillWriter spillWriter)
     {
-        if (strategy == IndexStrategy.Sorted)
-        {
-            return null;
-        }
-
         HashSet<string> bTreeColumns = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (string columnName in spillWriter.IndexedColumnNames)
         {
-            bool useBTree = strategy switch
-            {
-                IndexStrategy.BTree => true,
-                IndexStrategy.Auto =>
-                    spillWriter.GetTotalEntryCount(columnName) > IndexConstants.BPlusTreeAutoThreshold,
-                _ => false,
-            };
-
-            if (useBTree)
+            if (spillWriter.GetTotalEntryCount(columnName) > IndexConstants.BPlusTreeAutoThreshold)
             {
                 bTreeColumns.Add(columnName);
             }
