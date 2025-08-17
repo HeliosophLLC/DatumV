@@ -12,9 +12,10 @@ using DatumIngest.Model;
 /// the total but not tracked individually, and the result is flagged as approximate.
 /// </summary>
 /// <remarks>
-/// For <see cref="DataKind.Float32"/> and <see cref="DataKind.UInt8"/> columns, frequencies
-/// are tracked using integer keys (float bit patterns or byte values) to avoid per-row
-/// string allocations on the hot path.
+/// For <see cref="DataKind.Float32"/>, <see cref="DataKind.UInt8"/>, and other fixed-width
+/// numeric columns, frequencies are tracked using integer keys (bit patterns or raw values)
+/// to avoid per-row string allocations on the hot path. Types wider than 32 bits use
+/// 64-bit integer keys.
 /// </remarks>
 public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
 {
@@ -33,6 +34,7 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
     private readonly DataKind _kind;
     private readonly Dictionary<string, long>? _stringFrequencies;
     private readonly Dictionary<int, long>? _numericFrequencies;
+    private readonly Dictionary<long, long>? _wideNumericFrequencies;
     private long _totalCount;
     private long _untrackedCount;
     private bool _capped;
@@ -61,7 +63,13 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
         _k = k;
         _kind = kind;
 
-        if (kind is DataKind.Float32 or DataKind.UInt8)
+        if (kind is DataKind.Int64 or DataKind.UInt64 or DataKind.Float64)
+        {
+            _wideNumericFrequencies = new();
+        }
+        else if (kind is DataKind.Float32 or DataKind.UInt8
+            or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32)
         {
             _numericFrequencies = new();
         }
@@ -81,11 +89,45 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
 
         _totalCount++;
 
-        if (_numericFrequencies is not null)
+        if (_wideNumericFrequencies is not null)
         {
-            int key = _kind == DataKind.UInt8
-                ? value.AsUInt8()
-                : BitConverter.SingleToInt32Bits(value.AsFloat32());
+            long key = _kind switch
+            {
+                DataKind.Int64 => value.AsInt64(),
+                DataKind.UInt64 => unchecked((long)value.AsUInt64()),
+                _ => BitConverter.DoubleToInt64Bits(value.AsFloat64())
+            };
+
+            if (_wideNumericFrequencies.TryGetValue(key, out long currentCount))
+            {
+                _wideNumericFrequencies[key] = currentCount + 1;
+            }
+            else if (!_capped)
+            {
+                _wideNumericFrequencies[key] = 1;
+
+                if (_wideNumericFrequencies.Count >= MaxDistinctValues)
+                {
+                    _capped = true;
+                }
+            }
+            else
+            {
+                _untrackedCount++;
+            }
+        }
+        else if (_numericFrequencies is not null)
+        {
+            int key = _kind switch
+            {
+                DataKind.UInt8 => value.AsUInt8(),
+                DataKind.Int8 => value.AsInt8(),
+                DataKind.Int16 => value.AsInt16(),
+                DataKind.UInt16 => value.AsUInt16(),
+                DataKind.Int32 => value.AsInt32(),
+                DataKind.UInt32 => unchecked((int)value.AsUInt32()),
+                _ => BitConverter.SingleToInt32Bits(value.AsFloat32())
+            };
 
             if (_numericFrequencies.TryGetValue(key, out long currentCount))
             {
@@ -140,7 +182,31 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
         _totalCount += otherDiagnostics._totalCount;
         _untrackedCount += otherDiagnostics._untrackedCount;
 
-        if (_numericFrequencies is not null && otherDiagnostics._numericFrequencies is not null)
+        if (_wideNumericFrequencies is not null && otherDiagnostics._wideNumericFrequencies is not null)
+        {
+            foreach (KeyValuePair<long, long> entry in otherDiagnostics._wideNumericFrequencies)
+            {
+                if (_wideNumericFrequencies.TryGetValue(entry.Key, out long currentCount))
+                {
+                    _wideNumericFrequencies[entry.Key] = currentCount + entry.Value;
+                }
+                else if (_wideNumericFrequencies.Count < MaxDistinctValues)
+                {
+                    _wideNumericFrequencies[entry.Key] = entry.Value;
+                }
+                else
+                {
+                    _untrackedCount += entry.Value;
+                    _capped = true;
+                }
+            }
+
+            if (_wideNumericFrequencies.Count >= MaxDistinctValues)
+            {
+                _capped = true;
+            }
+        }
+        else if (_numericFrequencies is not null && otherDiagnostics._numericFrequencies is not null)
         {
             foreach (KeyValuePair<int, long> entry in otherDiagnostics._numericFrequencies)
             {
@@ -201,7 +267,11 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
         // Coverage: sum of top-K category counts / total non-null count
         List<long> counts;
 
-        if (_numericFrequencies is not null)
+        if (_wideNumericFrequencies is not null)
+        {
+            counts = [.. _wideNumericFrequencies.Values];
+        }
+        else if (_numericFrequencies is not null)
         {
             counts = [.. _numericFrequencies.Values];
         }

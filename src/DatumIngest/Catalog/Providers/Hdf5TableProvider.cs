@@ -286,16 +286,23 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
         if (type.Class == H5DataTypeClass.FixedPoint)
         {
-            if (type.Size == 1 && !type.FixedPoint.IsSigned)
+            return (type.Size, type.FixedPoint.IsSigned) switch
             {
-                return DataKind.UInt8;
-            }
-            return DataKind.Float32;
+                (1, false) => DataKind.UInt8,
+                (1, true) => DataKind.Int8,
+                (2, false) => DataKind.UInt16,
+                (2, true) => DataKind.Int16,
+                (4, false) => DataKind.UInt32,
+                (4, true) => DataKind.Int32,
+                (8, false) => DataKind.UInt64,
+                (8, true) => DataKind.Int64,
+                _ => DataKind.Int64,
+            };
         }
 
         if (type.Class == H5DataTypeClass.FloatingPoint)
         {
-            return DataKind.Float32;
+            return type.Size >= 8 ? DataKind.Float64 : DataKind.Float32;
         }
 
         return DataKind.String;
@@ -458,6 +465,76 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
     }
 
     /// <summary>
+    /// Holds pre-read columnar data for a typed 1-D numeric HDF5 dataset, yielding one
+    /// <see cref="DataValue"/> per row via a converter function.
+    /// </summary>
+    private sealed class TypedNumericColumnData<T> : ColumnData where T : struct
+    {
+        private readonly T[] _data;
+        private readonly Func<T, DataValue> _converter;
+
+        public TypedNumericColumnData(string name, T[] data, Func<T, DataValue> converter)
+            : base(name, data.Length)
+        {
+            _data = data;
+            _converter = converter;
+        }
+
+        public override DataValue GetValue(long rowIndex) => _converter(_data[rowIndex]);
+    }
+
+    /// <summary>
+    /// Holds pre-read columnar data for a double-precision 1-D HDF5 dataset.
+    /// </summary>
+    private sealed class Float64ColumnData : ColumnData
+    {
+        private readonly double[] _data;
+
+        public Float64ColumnData(string name, double[] data)
+            : base(name, data.Length)
+        {
+            _data = data;
+        }
+
+        public override DataValue GetValue(long rowIndex) =>
+            DataValue.FromFloat64(_data[rowIndex]);
+    }
+
+    /// <summary>
+    /// Holds pre-read columnar data for a 32-bit signed integer 1-D HDF5 dataset.
+    /// </summary>
+    private sealed class Int32ColumnData : ColumnData
+    {
+        private readonly int[] _data;
+
+        public Int32ColumnData(string name, int[] data)
+            : base(name, data.Length)
+        {
+            _data = data;
+        }
+
+        public override DataValue GetValue(long rowIndex) =>
+            DataValue.FromInt32(_data[rowIndex]);
+    }
+
+    /// <summary>
+    /// Holds pre-read columnar data for a 64-bit signed integer 1-D HDF5 dataset.
+    /// </summary>
+    private sealed class Int64ColumnData : ColumnData
+    {
+        private readonly long[] _data;
+
+        public Int64ColumnData(string name, long[] data)
+            : base(name, data.Length)
+        {
+            _data = data;
+        }
+
+        public override DataValue GetValue(long rowIndex) =>
+            DataValue.FromInt64(_data[rowIndex]);
+    }
+
+    /// <summary>
     /// Reads an entire dataset into the appropriate <see cref="ColumnData"/> subclass.
     /// </summary>
     private static ColumnData ReadDatasetColumn(DatasetEntry entry)
@@ -506,11 +583,23 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
             return new UInt8ColumnData(entry.Path, data);
         }
 
-        // 1-D numeric datasets (integer or float) → Scalar column.
-        if (type.Class == H5DataTypeClass.FixedPoint || type.Class == H5DataTypeClass.FloatingPoint)
+        // 1-D integer datasets — read in native type and produce typed DataValues.
+        if (type.Class == H5DataTypeClass.FixedPoint)
         {
-            float[] data = ReadAsFloatArray(dataset, type);
-            return new ScalarColumnData(entry.Path, data);
+            return ReadTypedIntegerColumn(entry.Path, dataset, type);
+        }
+
+        // 1-D floating-point datasets.
+        if (type.Class == H5DataTypeClass.FloatingPoint)
+        {
+            if (type.Size >= 8)
+            {
+                double[] doubleData = dataset.Read<double[]>();
+                return new Float64ColumnData(entry.Path, doubleData);
+            }
+
+            float[] floatData = dataset.Read<float[]>();
+            return new ScalarColumnData(entry.Path, floatData);
         }
 
         // Unsupported type fallback.
@@ -584,10 +673,21 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
             return new UInt8ColumnData(entry.Path, data);
         }
 
-        if (type.Class == H5DataTypeClass.FixedPoint || type.Class == H5DataTypeClass.FloatingPoint)
+        if (type.Class == H5DataTypeClass.FixedPoint)
         {
-            float[] data = ReadAsFloatArraySlice(dataset, type, selection);
-            return new ScalarColumnData(entry.Path, data);
+            return ReadTypedIntegerColumnSlice(entry.Path, dataset, type, selection);
+        }
+
+        if (type.Class == H5DataTypeClass.FloatingPoint)
+        {
+            if (type.Size >= 8)
+            {
+                double[] doubleData = dataset.Read<double[]>(fileSelection: selection);
+                return new Float64ColumnData(entry.Path, doubleData);
+            }
+
+            float[] floatData = dataset.Read<float[]>(fileSelection: selection);
+            return new ScalarColumnData(entry.Path, floatData);
         }
 
         string[] fallback = new string[sliceRowCount];
@@ -597,6 +697,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
     /// <summary>
     /// Reads a numeric dataset as a float[] array, converting from the native type.
+    /// Used only for multi-dimensional datasets that remain as Vector/Matrix/Tensor.
     /// </summary>
     private static float[] ReadAsFloatArray(IH5Dataset dataset, IH5DataType type)
     {
@@ -644,6 +745,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
     /// <summary>
     /// Reads a slice of a numeric dataset as a float[] array using a file selection.
+    /// Used only for multi-dimensional datasets that remain as Vector/Matrix/Tensor.
     /// </summary>
     private static float[] ReadAsFloatArraySlice(
         IH5Dataset dataset,
@@ -689,5 +791,43 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         }
 
         return [];
+    }
+
+    /// <summary>
+    /// Reads a 1-D integer dataset into a typed <see cref="ColumnData"/> based on size and signedness.
+    /// </summary>
+    private static ColumnData ReadTypedIntegerColumn(string path, IH5Dataset dataset, IH5DataType type)
+    {
+        return (type.Size, type.FixedPoint.IsSigned) switch
+        {
+            (1, true) => new TypedNumericColumnData<sbyte>(path, dataset.Read<sbyte[]>(), DataValue.FromInt8),
+            (2, false) => new TypedNumericColumnData<ushort>(path, dataset.Read<ushort[]>(), DataValue.FromUInt16),
+            (2, true) => new TypedNumericColumnData<short>(path, dataset.Read<short[]>(), DataValue.FromInt16),
+            (4, false) => new TypedNumericColumnData<uint>(path, dataset.Read<uint[]>(), DataValue.FromUInt32),
+            (4, true) => new Int32ColumnData(path, dataset.Read<int[]>()),
+            (8, false) => new TypedNumericColumnData<ulong>(path, dataset.Read<ulong[]>(), DataValue.FromUInt64),
+            _ => new Int64ColumnData(path, dataset.Read<long[]>()),
+        };
+    }
+
+    /// <summary>
+    /// Reads a slice of a 1-D integer dataset into a typed <see cref="ColumnData"/>.
+    /// </summary>
+    private static ColumnData ReadTypedIntegerColumnSlice(
+        string path,
+        IH5Dataset dataset,
+        IH5DataType type,
+        HyperslabSelection selection)
+    {
+        return (type.Size, type.FixedPoint.IsSigned) switch
+        {
+            (1, true) => new TypedNumericColumnData<sbyte>(path, dataset.Read<sbyte[]>(fileSelection: selection), DataValue.FromInt8),
+            (2, false) => new TypedNumericColumnData<ushort>(path, dataset.Read<ushort[]>(fileSelection: selection), DataValue.FromUInt16),
+            (2, true) => new TypedNumericColumnData<short>(path, dataset.Read<short[]>(fileSelection: selection), DataValue.FromInt16),
+            (4, false) => new TypedNumericColumnData<uint>(path, dataset.Read<uint[]>(fileSelection: selection), DataValue.FromUInt32),
+            (4, true) => new Int32ColumnData(path, dataset.Read<int[]>(fileSelection: selection)),
+            (8, false) => new TypedNumericColumnData<ulong>(path, dataset.Read<ulong[]>(fileSelection: selection), DataValue.FromUInt64),
+            _ => new Int64ColumnData(path, dataset.Read<long[]>(fileSelection: selection)),
+        };
     }
 }

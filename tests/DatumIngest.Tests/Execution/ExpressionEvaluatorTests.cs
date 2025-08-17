@@ -24,16 +24,16 @@ public class ExpressionEvaluatorTests
     public void Literal_Integer()
     {
         DataValue result = _evaluator.Evaluate(new LiteralExpression(42), MakeRow());
-        Assert.Equal(DataKind.Float32, result.Kind);
-        Assert.Equal(42f, result.AsFloat32());
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(42, result.AsInt32());
     }
 
     [Fact]
     public void Literal_Float()
     {
         DataValue result = _evaluator.Evaluate(new LiteralExpression(3.14), MakeRow());
-        Assert.Equal(DataKind.Float32, result.Kind);
-        Assert.Equal(3.14f, result.AsFloat32(), 0.001f);
+        Assert.Equal(DataKind.Float64, result.Kind);
+        Assert.Equal(3.14, result.AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -1200,29 +1200,29 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Case_MixedStringAndScalar_CoercesStringToScalar()
     {
-        // CASE WHEN true THEN '42' ELSE 1 END → '42' is coerced to 42f
+        // CASE WHEN true THEN '42' ELSE 1 END → '42' is coerced to Int32(42)
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression("42"))],
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(DataKind.Float32, result.Kind);
-        Assert.Equal(42f, result.AsFloat32());
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(42, result.AsInt32());
     }
 
     [Fact]
     public void Case_MixedStringAndScalar_ElseBranchPreservesScalar()
     {
-        // CASE WHEN false THEN '0' ELSE 1 END → 1 stays Scalar
+        // CASE WHEN false THEN '0' ELSE 1 END → 1 stays Int32
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
                 [new WhenClause(new LiteralExpression(false), new LiteralExpression("0"))],
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(DataKind.Float32, result.Kind);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(1, result.AsInt32());
     }
 
     [Fact]
@@ -1236,21 +1236,21 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1)),
             MakeRow());
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(DataKind.Int32, result.Kind);
     }
 
     [Fact]
     public void Case_MixedBooleanAndFloat32_CoercesBooleanToFloat64()
     {
-        // CASE WHEN true THEN false ELSE 1 END → common kind is Float64
+        // CASE WHEN true THEN false ELSE 1 END → common kind (Boolean → Int32) is Int32
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
                 null,
                 [new WhenClause(new LiteralExpression(true), new LiteralExpression(false))],
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(DataKind.Float64, result.Kind);
-        Assert.Equal(0.0, result.AsFloat64());
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]

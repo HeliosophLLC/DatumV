@@ -255,7 +255,15 @@ public sealed class ParquetOutputWriter : IOutputWriter
             fields[i] = column.Kind switch
             {
                 DataKind.Float32 => new DataField<float>(column.Name),
+                DataKind.Float64 => new DataField<double>(column.Name),
                 DataKind.UInt8 => new DataField<int>(column.Name),
+                DataKind.Int8 => new DataField<int>(column.Name),
+                DataKind.Int16 => new DataField<short>(column.Name),
+                DataKind.UInt16 => new DataField<int>(column.Name),
+                DataKind.Int32 => new DataField<int>(column.Name),
+                DataKind.UInt32 => new DataField<long>(column.Name),
+                DataKind.Int64 => new DataField<long>(column.Name),
+                DataKind.UInt64 => new DataField<long>(column.Name),
                 DataKind.UInt8Array or DataKind.Image when embedBinary => new DataField<byte[]>(column.Name),
                 DataKind.UInt8Array or DataKind.Image => new DataField<string>(column.Name),
                 DataKind.String => new DataField<string>(column.Name),
@@ -283,7 +291,15 @@ public sealed class ParquetOutputWriter : IOutputWriter
         return column.Kind switch
         {
             DataKind.Float32 => BuildFloatColumn(field, column.Name, rowCount),
+            DataKind.Float64 => BuildDoubleColumn(field, column.Name, rowCount),
             DataKind.UInt8 => BuildIntColumn(field, column.Name, rowCount),
+            DataKind.Int8 => BuildIntColumn(field, column.Name, rowCount),
+            DataKind.Int16 => BuildShortColumn(field, column.Name, rowCount),
+            DataKind.UInt16 => BuildIntColumn(field, column.Name, rowCount),
+            DataKind.Int32 => BuildIntColumn(field, column.Name, rowCount),
+            DataKind.UInt32 => BuildLongColumn(field, column.Name, rowCount),
+            DataKind.Int64 => BuildLongColumn(field, column.Name, rowCount),
+            DataKind.UInt64 => BuildLongColumn(field, column.Name, rowCount),
             DataKind.UInt8Array or DataKind.Image when embedBinary => BuildBinaryColumn(field, column, rowCount),
             DataKind.UInt8Array or DataKind.Image => BuildExternalizedPathColumn(field, column.Name, rowCount),
             DataKind.String => BuildStringColumn(field, column),
@@ -311,13 +327,49 @@ public sealed class ParquetOutputWriter : IOutputWriter
         return new DataColumn(field, data);
     }
 
+    private DataColumn BuildDoubleColumn(DataField field, string columnName, int rowCount)
+    {
+        double[] data = new double[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? double.NaN : value.AsFloat64();
+        }
+
+        return new DataColumn(field, data);
+    }
+
     private DataColumn BuildIntColumn(DataField field, string columnName, int rowCount)
     {
         int[] data = new int[rowCount];
         for (int i = 0; i < rowCount; i++)
         {
             DataValue value = _rows[i][columnName];
-            data[i] = value.IsNull ? 0 : value.AsUInt8();
+            data[i] = value.IsNull ? 0 : (int)ToFloat(value);
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildShortColumn(DataField field, string columnName, int rowCount)
+    {
+        short[] data = new short[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? (short)0 : value.AsInt16();
+        }
+
+        return new DataColumn(field, data);
+    }
+
+    private DataColumn BuildLongColumn(DataField field, string columnName, int rowCount)
+    {
+        long[] data = new long[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? 0L : (long)ToDouble(value);
         }
 
         return new DataColumn(field, data);
@@ -334,6 +386,48 @@ public sealed class ParquetOutputWriter : IOutputWriter
         }
 
         return new DataColumn(field, data);
+    }
+
+    /// <summary>
+    /// Converts any numeric <see cref="DataValue"/> to a float for Parquet int/short column output.
+    /// </summary>
+    private static float ToFloat(DataValue value)
+    {
+        return value.Kind switch
+        {
+            DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => (float)value.AsFloat64(),
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
+            _ => 0f,
+        };
+    }
+
+    /// <summary>
+    /// Converts any numeric <see cref="DataValue"/> to a double for Parquet long column output.
+    /// </summary>
+    private static double ToDouble(DataValue value)
+    {
+        return value.Kind switch
+        {
+            DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
+            _ => 0.0,
+        };
     }
 
     /// <summary>

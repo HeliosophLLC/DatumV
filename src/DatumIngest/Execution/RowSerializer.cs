@@ -118,8 +118,40 @@ internal static class RowSerializer
                 writer.Write(value.AsFloat32());
                 break;
 
+            case DataKind.Float64:
+                writer.Write(value.AsFloat64());
+                break;
+
             case DataKind.UInt8:
                 writer.Write(value.AsUInt8());
+                break;
+
+            case DataKind.Int8:
+                writer.Write(value.AsInt8());
+                break;
+
+            case DataKind.Int16:
+                writer.Write(value.AsInt16());
+                break;
+
+            case DataKind.UInt16:
+                writer.Write(value.AsUInt16());
+                break;
+
+            case DataKind.Int32:
+                writer.Write(value.AsInt32());
+                break;
+
+            case DataKind.UInt32:
+                writer.Write(value.AsUInt32());
+                break;
+
+            case DataKind.Int64:
+                writer.Write(value.AsInt64());
+                break;
+
+            case DataKind.UInt64:
+                writer.Write(value.AsUInt64());
                 break;
 
             case DataKind.String:
@@ -241,7 +273,15 @@ internal static class RowSerializer
         return kind switch
         {
             DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
+            DataKind.Float64 => DataValue.FromFloat64(reader.ReadDouble()),
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),
+            DataKind.Int8 => DataValue.FromInt8(reader.ReadSByte()),
+            DataKind.Int16 => DataValue.FromInt16(reader.ReadInt16()),
+            DataKind.UInt16 => DataValue.FromUInt16(reader.ReadUInt16()),
+            DataKind.Int32 => DataValue.FromInt32(reader.ReadInt32()),
+            DataKind.UInt32 => DataValue.FromUInt32(reader.ReadUInt32()),
+            DataKind.Int64 => DataValue.FromInt64(reader.ReadInt64()),
+            DataKind.UInt64 => DataValue.FromUInt64(reader.ReadUInt64()),
             DataKind.String => DataValue.FromString(reader.ReadString()),
             DataKind.Date => DataValue.FromDate(DateOnly.FromDayNumber(reader.ReadInt32())),
             DataKind.DateTime => DataValue.FromDateTime(

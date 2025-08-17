@@ -16,6 +16,7 @@ public static class DatumEncoderFactory
 {
     private static readonly ScalarColumnEncoder ScalarEncoder = new();
     private static readonly UInt8ColumnEncoder UInt8Encoder = new();
+    private static readonly FixedNumericColumnEncoder FixedNumericEncoder = new();
     private static readonly BooleanColumnEncoder BooleanEncoder = new();
     private static readonly DateColumnEncoder DateEncoder = new();
     private static readonly DateTimeColumnEncoder DateTimeEncoder = new();
@@ -49,6 +50,14 @@ public static class DatumEncoderFactory
         {
             DataKind.Float32 => ScalarEncoder,
             DataKind.UInt8 => UInt8Encoder,
+            DataKind.Int8 => FixedNumericEncoder,
+            DataKind.Int16 => FixedNumericEncoder,
+            DataKind.UInt16 => FixedNumericEncoder,
+            DataKind.Int32 => FixedNumericEncoder,
+            DataKind.UInt32 => FixedNumericEncoder,
+            DataKind.Int64 => FixedNumericEncoder,
+            DataKind.UInt64 => FixedNumericEncoder,
+            DataKind.Float64 => FixedNumericEncoder,
             DataKind.Boolean => BooleanEncoder,
             DataKind.Date => DateEncoder,
             DataKind.DateTime => DateTimeEncoder,

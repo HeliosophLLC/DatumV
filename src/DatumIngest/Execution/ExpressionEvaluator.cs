@@ -121,7 +121,15 @@ public sealed class ExpressionEvaluator
         {
             DataKind.Boolean => result.AsBoolean(),
             DataKind.Float32 => result.AsFloat32() != 0f,
+            DataKind.Float64 => result.AsFloat64() != 0.0,
             DataKind.UInt8 => result.AsUInt8() != 0,
+            DataKind.Int8 => result.AsInt8() != 0,
+            DataKind.Int16 => result.AsInt16() != 0,
+            DataKind.UInt16 => result.AsUInt16() != 0,
+            DataKind.Int32 => result.AsInt32() != 0,
+            DataKind.UInt32 => result.AsUInt32() != 0,
+            DataKind.Int64 => result.AsInt64() != 0,
+            DataKind.UInt64 => result.AsUInt64() != 0,
             DataKind.String => !string.IsNullOrEmpty(result.AsString()),
             _ => true,
         };
@@ -137,10 +145,10 @@ public sealed class ExpressionEvaluator
         return literal.Value switch
         {
             DataValue dataValue => dataValue,
-            int intValue => DataValue.FromFloat32(intValue),
-            long longValue => DataValue.FromFloat32(longValue),
+            int intValue => DataValue.FromInt32(intValue),
+            long longValue => DataValue.FromInt64(longValue),
             float floatValue => DataValue.FromFloat32(floatValue),
-            double doubleValue => DataValue.FromFloat32((float)doubleValue),
+            double doubleValue => DataValue.FromFloat64(doubleValue),
             string stringValue => DataValue.FromString(stringValue),
             bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(
@@ -191,14 +199,12 @@ public sealed class ExpressionEvaluator
         // Short-circuit for AND/OR.
         if (binary.Operator == BinaryOperator.And)
         {
-            DataValue left = Evaluate(binary.Left, row);
-            if (left.IsNull || (left.Kind == DataKind.Float32 && left.AsFloat32() == 0f))
+            if (!EvaluateAsBoolean(binary.Left, row))
             {
                 return DataValue.FromFloat32(0f);
             }
 
-            DataValue right = Evaluate(binary.Right, row);
-            if (right.IsNull || (right.Kind == DataKind.Float32 && right.AsFloat32() == 0f))
+            if (!EvaluateAsBoolean(binary.Right, row))
             {
                 return DataValue.FromFloat32(0f);
             }
@@ -208,14 +214,12 @@ public sealed class ExpressionEvaluator
 
         if (binary.Operator == BinaryOperator.Or)
         {
-            DataValue left = Evaluate(binary.Left, row);
-            if (!left.IsNull && left.Kind == DataKind.Float32 && left.AsFloat32() != 0f)
+            if (EvaluateAsBoolean(binary.Left, row))
             {
                 return DataValue.FromFloat32(1f);
             }
 
-            DataValue right = Evaluate(binary.Right, row);
-            if (!right.IsNull && right.Kind == DataKind.Float32 && right.AsFloat32() != 0f)
+            if (EvaluateAsBoolean(binary.Right, row))
             {
                 return DataValue.FromFloat32(1f);
             }
@@ -272,7 +276,7 @@ public sealed class ExpressionEvaluator
         return unary.Operator switch
         {
             UnaryOperator.Not => DataValue.FromFloat32(
-                operand.Kind == DataKind.Float32 && operand.AsFloat32() == 0f ? 1f : 0f),
+                EvaluateAsBoolean(unary.Operand, row) ? 0f : 1f),
             UnaryOperator.Negate => DataValue.FromFloat32(-ToFloat(operand)),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
@@ -399,6 +403,21 @@ public sealed class ExpressionEvaluator
         {
             bool found = valueSet.Contains(target);
 
+            // When types differ (e.g. Float64 column vs Int32 literals), HashSet
+            // uses strict DataValue equality which is kind-sensitive. Fall back to
+            // numeric comparison for cross-type matches.
+            if (!found)
+            {
+                foreach (DataValue candidate in valueSet)
+                {
+                    if (CompareDataValues(target, candidate) == 0)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
             if (found)
             {
                 return DataValue.FromFloat32(inExpr.Negated ? 0f : 1f);
@@ -478,7 +497,7 @@ public sealed class ExpressionEvaluator
                 continue;
             }
 
-            if (target.Equals(candidate))
+            if (CompareDataValues(target, candidate) == 0)
             {
                 return DataValue.FromFloat32(inExpr.Negated ? 0f : 1f);
             }
@@ -616,7 +635,7 @@ public sealed class ExpressionEvaluator
             foreach (WhenClause whenClause in caseExpression.WhenClauses)
             {
                 DataValue whenValue = Evaluate(whenClause.Condition, row);
-                if (!operand.IsNull && !whenValue.IsNull && operand.Equals(whenValue))
+                if (!operand.IsNull && !whenValue.IsNull && CompareDataValues(operand, whenValue) == 0)
                 {
                     return Evaluate(whenClause.Result, row);
                 }
@@ -728,7 +747,10 @@ public sealed class ExpressionEvaluator
         return expression switch
         {
             LiteralExpression { Value: string } => DataKind.String,
-            LiteralExpression { Value: int or long or float or double } => DataKind.Float32,
+            LiteralExpression { Value: int } => DataKind.Int32,
+            LiteralExpression { Value: long } => DataKind.Int64,
+            LiteralExpression { Value: float } => DataKind.Float32,
+            LiteralExpression { Value: double } => DataKind.Float64,
             LiteralExpression { Value: bool } => DataKind.Boolean,
             LiteralExpression { Value: null } => DataKind.Float32,
             CastExpression cast => ExpressionTypeResolver.ResolveCastTargetKind(cast.TargetType),
@@ -756,7 +778,15 @@ public sealed class ExpressionEvaluator
         return value.Kind switch
         {
             DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => (float)value.AsFloat64(),
             DataKind.UInt8 => value.AsUInt8(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
             DataKind.Boolean => value.AsBoolean() ? 1f : 0f,
             DataKind.Duration => (float)value.AsDuration().TotalSeconds,
             DataKind.Time => (float)(value.AsTime().Hour * 3600 + value.AsTime().Minute * 60 + value.AsTime().Second + value.AsTime().Millisecond / 1000.0),

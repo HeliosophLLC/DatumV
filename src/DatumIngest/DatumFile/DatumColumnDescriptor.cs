@@ -78,7 +78,10 @@ public sealed record DatumColumnDescriptor
     /// </summary>
     public int ElementsPerRow()
     {
-        if (Kind == DataKind.Float32 || Kind == DataKind.UInt8)
+        if (Kind is DataKind.Float32 or DataKind.UInt8
+            or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32
+            or DataKind.Int64 or DataKind.UInt64 or DataKind.Float64)
         {
             return 1;
         }

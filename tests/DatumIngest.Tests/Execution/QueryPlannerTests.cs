@@ -394,10 +394,10 @@ public class QueryPlannerTests
             }
 
             Assert.Equal(3, rows.Count);
-            // CSV auto-detects numeric values as Scalar.
-            Assert.Equal(1f, rows[0]["val"].AsFloat32());
-            Assert.Equal(2f, rows[1]["val"].AsFloat32());
-            Assert.Equal(3f, rows[2]["val"].AsFloat32());
+            // CSV auto-detects small integer values as Int8.
+            Assert.Equal((sbyte)1, rows[0]["val"].AsInt8());
+            Assert.Equal((sbyte)2, rows[1]["val"].AsInt8());
+            Assert.Equal((sbyte)3, rows[2]["val"].AsInt8());
         }
         finally
         {

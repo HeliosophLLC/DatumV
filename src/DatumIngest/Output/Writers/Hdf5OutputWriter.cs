@@ -120,7 +120,15 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         return column.Kind switch
         {
             DataKind.Float32 => BuildScalarDataset(column.Name, rowCount),
+            DataKind.Float64 => BuildFloat64Dataset(column.Name, rowCount),
             DataKind.UInt8 => BuildUInt8Dataset(column.Name, rowCount),
+            DataKind.Int8 => BuildInt8Dataset(column.Name, rowCount),
+            DataKind.Int16 => BuildInt16Dataset(column.Name, rowCount),
+            DataKind.UInt16 => BuildUInt16Dataset(column.Name, rowCount),
+            DataKind.Int32 => BuildInt32Dataset(column.Name, rowCount),
+            DataKind.UInt32 => BuildUInt32Dataset(column.Name, rowCount),
+            DataKind.Int64 => BuildInt64Dataset(column.Name, rowCount),
+            DataKind.UInt64 => BuildUInt64Dataset(column.Name, rowCount),
             DataKind.String or DataKind.JsonValue => BuildStringDataset(column),
             DataKind.Vector => BuildVectorDataset(column.Name, rowCount),
             DataKind.Matrix => BuildMatrixDataset(column.Name, rowCount),
@@ -155,6 +163,102 @@ public sealed class Hdf5OutputWriter : IOutputWriter
         {
             DataValue value = _rows[i][columnName];
             data[i] = value.IsNull ? (byte)0 : value.AsUInt8();
+        }
+
+        return data;
+    }
+
+    private double[] BuildFloat64Dataset(string columnName, int rowCount)
+    {
+        double[] data = new double[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? double.NaN : value.AsFloat64();
+        }
+
+        return data;
+    }
+
+    private sbyte[] BuildInt8Dataset(string columnName, int rowCount)
+    {
+        sbyte[] data = new sbyte[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? (sbyte)0 : value.AsInt8();
+        }
+
+        return data;
+    }
+
+    private short[] BuildInt16Dataset(string columnName, int rowCount)
+    {
+        short[] data = new short[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? (short)0 : value.AsInt16();
+        }
+
+        return data;
+    }
+
+    private ushort[] BuildUInt16Dataset(string columnName, int rowCount)
+    {
+        ushort[] data = new ushort[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? (ushort)0 : value.AsUInt16();
+        }
+
+        return data;
+    }
+
+    private int[] BuildInt32Dataset(string columnName, int rowCount)
+    {
+        int[] data = new int[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? 0 : value.AsInt32();
+        }
+
+        return data;
+    }
+
+    private uint[] BuildUInt32Dataset(string columnName, int rowCount)
+    {
+        uint[] data = new uint[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? 0u : value.AsUInt32();
+        }
+
+        return data;
+    }
+
+    private long[] BuildInt64Dataset(string columnName, int rowCount)
+    {
+        long[] data = new long[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? 0L : value.AsInt64();
+        }
+
+        return data;
+    }
+
+    private ulong[] BuildUInt64Dataset(string columnName, int rowCount)
+    {
+        ulong[] data = new ulong[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue value = _rows[i][columnName];
+            data[i] = value.IsNull ? 0UL : value.AsUInt64();
         }
 
         return data;

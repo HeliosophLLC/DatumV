@@ -15,7 +15,7 @@ public class JsonTypeInferenceTests
     public void InferKind_Number_ReturnsScalar()
     {
         JsonElement element = JsonDocument.Parse("42").RootElement;
-        Assert.Equal(DataKind.Float32, JsonTypeInference.InferKind(element));
+        Assert.Equal(DataKind.Int64, JsonTypeInference.InferKind(element));
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class JsonTypeInferenceTests
     public void InferKind_Boolean_ReturnsScalar()
     {
         JsonElement element = JsonDocument.Parse("true").RootElement;
-        Assert.Equal(DataKind.Float32, JsonTypeInference.InferKind(element));
+        Assert.Equal(DataKind.Boolean, JsonTypeInference.InferKind(element));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class JsonTypeInferenceTests
     [Fact]
     public void WidenKind_SameKind_ReturnsSame()
     {
-        Assert.Equal(DataKind.Float32, JsonTypeInference.WidenKind(DataKind.Float32, DataKind.Float32));
+        Assert.Equal(DataKind.Int64, JsonTypeInference.WidenKind(DataKind.Int64, DataKind.Int64));
         Assert.Equal(DataKind.String, JsonTypeInference.WidenKind(DataKind.String, DataKind.String));
         Assert.Equal(DataKind.Date, JsonTypeInference.WidenKind(DataKind.Date, DataKind.Date));
         Assert.Equal(DataKind.DateTime, JsonTypeInference.WidenKind(DataKind.DateTime, DataKind.DateTime));
@@ -95,8 +95,8 @@ public class JsonTypeInferenceTests
     [Fact]
     public void WidenKind_DifferentKinds_WidensToString()
     {
-        Assert.Equal(DataKind.String, JsonTypeInference.WidenKind(DataKind.Float32, DataKind.String));
-        Assert.Equal(DataKind.String, JsonTypeInference.WidenKind(DataKind.Date, DataKind.Float32));
+        Assert.Equal(DataKind.String, JsonTypeInference.WidenKind(DataKind.Int64, DataKind.String));
+        Assert.Equal(DataKind.String, JsonTypeInference.WidenKind(DataKind.Date, DataKind.Int64));
         Assert.Equal(DataKind.String, JsonTypeInference.WidenKind(DataKind.DateTime, DataKind.String));
     }
 
@@ -104,7 +104,7 @@ public class JsonTypeInferenceTests
     public void WidenKind_JsonValue_DominatesOtherKinds()
     {
         Assert.Equal(DataKind.JsonValue, JsonTypeInference.WidenKind(DataKind.JsonValue, DataKind.String));
-        Assert.Equal(DataKind.JsonValue, JsonTypeInference.WidenKind(DataKind.Float32, DataKind.JsonValue));
+        Assert.Equal(DataKind.JsonValue, JsonTypeInference.WidenKind(DataKind.Int64, DataKind.JsonValue));
         Assert.Equal(DataKind.JsonValue, JsonTypeInference.WidenKind(DataKind.JsonValue, DataKind.Date));
     }
 

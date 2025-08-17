@@ -55,7 +55,7 @@ public sealed class NthValueFunction : IWindowFunction
 
             // Evaluate n (1-based) from the first row — it is a constant expression.
             DataValue nValue = evaluator.Evaluate(argumentExpressions[1], partitionRows[0]);
-            int n = (int)nValue.AsFloat32();
+            int n = WindowFunctionHelper.ToInt(nValue);
 
             if (n <= 0)
             {

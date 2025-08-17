@@ -490,6 +490,14 @@ public sealed class IndexReader
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(TimeSpan.FromTicks(reader.ReadInt64())),
             DataKind.Uuid => DataValue.FromUuid(new Guid(reader.ReadBytes(16))),
+            DataKind.Float64 => DataValue.FromFloat64(reader.ReadDouble()),
+            DataKind.Int8 => DataValue.FromInt8(reader.ReadSByte()),
+            DataKind.Int16 => DataValue.FromInt16(reader.ReadInt16()),
+            DataKind.UInt16 => DataValue.FromUInt16(reader.ReadUInt16()),
+            DataKind.Int32 => DataValue.FromInt32(reader.ReadInt32()),
+            DataKind.UInt32 => DataValue.FromUInt32(reader.ReadUInt32()),
+            DataKind.Int64 => DataValue.FromInt64(reader.ReadInt64()),
+            DataKind.UInt64 => DataValue.FromUInt64(reader.ReadUInt64()),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
     }

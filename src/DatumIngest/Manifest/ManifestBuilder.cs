@@ -121,7 +121,11 @@ public static class ManifestBuilder
 
         return kind switch
         {
-            DataKind.Float32 or DataKind.UInt8 => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Float32 or DataKind.UInt8
+                or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+                or DataKind.Int32 or DataKind.UInt32
+                or DataKind.Int64 or DataKind.UInt64 or DataKind.Float64
+                => BuildNumericManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.String or DataKind.JsonValue => BuildStringManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
             DataKind.Vector => BuildVectorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Matrix or DataKind.Tensor => BuildTensorManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),

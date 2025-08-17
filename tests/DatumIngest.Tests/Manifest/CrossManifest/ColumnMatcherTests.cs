@@ -91,11 +91,11 @@ public sealed class ColumnMatcherTests
     }
 
     [Fact]
-    public void ComputeTypeCompatibility_ScalarAndUInt8_Returns0Point8()
+    public void ComputeTypeCompatibility_Float32AndUInt8_Returns0Point7()
     {
         double compatibility = ColumnMatcher.ComputeTypeCompatibility(DataKind.Float32, DataKind.UInt8);
 
-        Assert.Equal(0.8, compatibility);
+        Assert.Equal(0.7, compatibility);
     }
 
     [Fact]

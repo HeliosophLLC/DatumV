@@ -130,7 +130,15 @@ public sealed class CsvOutputWriter : IOutputWriter
         return value.Kind switch
         {
             DataKind.Float32 => value.AsFloat32().ToString("G"),
+            DataKind.Float64 => value.AsFloat64().ToString("G"),
             DataKind.UInt8 => value.AsUInt8().ToString(),
+            DataKind.Int8 => value.AsInt8().ToString(),
+            DataKind.Int16 => value.AsInt16().ToString(),
+            DataKind.UInt16 => value.AsUInt16().ToString(),
+            DataKind.Int32 => value.AsInt32().ToString(),
+            DataKind.UInt32 => value.AsUInt32().ToString(),
+            DataKind.Int64 => value.AsInt64().ToString(),
+            DataKind.UInt64 => value.AsUInt64().ToString(),
             DataKind.String => value.AsString(),
             DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
             DataKind.DateTime => value.AsDateTime().ToString("O"),

@@ -226,8 +226,8 @@ public sealed class Hdf5TableProviderTests : IDisposable
         ColumnInfo scoreColumn = schema.Columns.Single(c => c.Name == "score");
         ColumnInfo nameColumn = schema.Columns.Single(c => c.Name == "name");
 
-        Assert.Equal(DataKind.Float32, idColumn.Kind);
-        Assert.Equal(DataKind.Float32, scoreColumn.Kind);
+        Assert.Equal(DataKind.Int32, idColumn.Kind);
+        Assert.Equal(DataKind.Float64, scoreColumn.Kind);
         Assert.Equal(DataKind.String, nameColumn.Kind);
     }
 
@@ -310,9 +310,9 @@ public sealed class Hdf5TableProviderTests : IDisposable
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
-        Assert.Equal(1.0f, rows[0]["id"].AsFloat32());
-        Assert.Equal(2.0f, rows[1]["id"].AsFloat32());
-        Assert.Equal(3.0f, rows[2]["id"].AsFloat32());
+        Assert.Equal(1, rows[0]["id"].AsInt32());
+        Assert.Equal(2, rows[1]["id"].AsInt32());
+        Assert.Equal(3, rows[2]["id"].AsInt32());
     }
 
     [Fact]
@@ -323,9 +323,9 @@ public sealed class Hdf5TableProviderTests : IDisposable
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor(path), null, CancellationToken.None));
 
-        Assert.Equal(95.5f, rows[0]["score"].AsFloat32());
-        Assert.Equal(87.3f, rows[1]["score"].AsFloat32(), 0.05f);
-        Assert.Equal(91.0f, rows[2]["score"].AsFloat32());
+        Assert.Equal(95.5, rows[0]["score"].AsFloat64());
+        Assert.Equal(87.3, rows[1]["score"].AsFloat64(), 0.05);
+        Assert.Equal(91.0, rows[2]["score"].AsFloat64());
     }
 
     [Fact]
@@ -461,10 +461,10 @@ public sealed class Hdf5TableProviderTests : IDisposable
             provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 3, count: 4, CancellationToken.None));
 
         Assert.Equal(4, rows.Count);
-        Assert.Equal(3.0f, rows[0]["id"].AsFloat32());
-        Assert.Equal(4.0f, rows[1]["id"].AsFloat32());
-        Assert.Equal(5.0f, rows[2]["id"].AsFloat32());
-        Assert.Equal(6.0f, rows[3]["id"].AsFloat32());
+        Assert.Equal(3, rows[0]["id"].AsInt32());
+        Assert.Equal(4, rows[1]["id"].AsInt32());
+        Assert.Equal(5, rows[2]["id"].AsInt32());
+        Assert.Equal(6, rows[3]["id"].AsInt32());
     }
 
     [Fact]
@@ -476,8 +476,8 @@ public sealed class Hdf5TableProviderTests : IDisposable
             provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 0, count: 2, CancellationToken.None));
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(0.0f, rows[0]["id"].AsFloat32());
-        Assert.Equal(1.0f, rows[1]["id"].AsFloat32());
+        Assert.Equal(0, rows[0]["id"].AsInt32());
+        Assert.Equal(1, rows[1]["id"].AsInt32());
     }
 
     [Fact]
@@ -490,8 +490,8 @@ public sealed class Hdf5TableProviderTests : IDisposable
 
         // Only 2 rows remain (indices 8 and 9), so clamped.
         Assert.Equal(2, rows.Count);
-        Assert.Equal(8.0f, rows[0]["id"].AsFloat32());
-        Assert.Equal(9.0f, rows[1]["id"].AsFloat32());
+        Assert.Equal(8, rows[0]["id"].AsInt32());
+        Assert.Equal(9, rows[1]["id"].AsInt32());
     }
 
     [Fact]
@@ -531,8 +531,8 @@ public sealed class Hdf5TableProviderTests : IDisposable
             provider.ReadRowRangeAsync(Descriptor(path), null, startRow: 5, count: 2, CancellationToken.None));
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(7.5f, rows[0]["value"].AsFloat32());
-        Assert.Equal(9.0f, rows[1]["value"].AsFloat32());
+        Assert.Equal(7.5, rows[0]["value"].AsFloat64());
+        Assert.Equal(9.0, rows[1]["value"].AsFloat64());
     }
 
     [Fact]

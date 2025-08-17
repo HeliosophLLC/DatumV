@@ -122,11 +122,35 @@ internal static class ColumnMatcher
             return 1.0;
         }
 
-        // Numeric coercion: Scalar ↔ UInt8.
-        if ((left is DataKind.Float32 && right is DataKind.UInt8) ||
-            (left is DataKind.UInt8 && right is DataKind.Float32))
+        // All numeric types are coercible with varying compatibility.
+        if (IsNumericKind(left) && IsNumericKind(right))
         {
-            return 0.8;
+            // Same sign family, different width (e.g. Int16 ↔ Int32)
+            if (IsSignedInteger(left) && IsSignedInteger(right))
+            {
+                return 0.9;
+            }
+
+            if (IsUnsignedInteger(left) && IsUnsignedInteger(right))
+            {
+                return 0.9;
+            }
+
+            // Float ↔ Float (e.g. Float32 ↔ Float64)
+            if (IsFloatingPoint(left) && IsFloatingPoint(right))
+            {
+                return 0.9;
+            }
+
+            // Signed ↔ unsigned integer
+            if ((IsSignedInteger(left) && IsUnsignedInteger(right)) ||
+                (IsUnsignedInteger(left) && IsSignedInteger(right)))
+            {
+                return 0.85;
+            }
+
+            // Integer ↔ float
+            return 0.7;
         }
 
         // Temporal coercion: Date ↔ DateTime.
@@ -145,6 +169,22 @@ internal static class ColumnMatcher
 
         return 0.0;
     }
+
+    private static bool IsNumericKind(DataKind kind) =>
+        kind is DataKind.Float32 or DataKind.Float64
+            or DataKind.UInt8 or DataKind.Int8
+            or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32
+            or DataKind.Int64 or DataKind.UInt64;
+
+    private static bool IsSignedInteger(DataKind kind) =>
+        kind is DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64;
+
+    private static bool IsUnsignedInteger(DataKind kind) =>
+        kind is DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64;
+
+    private static bool IsFloatingPoint(DataKind kind) =>
+        kind is DataKind.Float32 or DataKind.Float64;
 
     /// <summary>
     /// Computes the Levenshtein edit distance between two strings.

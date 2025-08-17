@@ -12,7 +12,7 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
     /// <summary>Maximum samples retained in the reservoir.</summary>
     public const int MaxSamples = 100_000;
 
-    private readonly List<float> _samples = new();
+    private readonly List<double> _samples = new();
     private readonly Random _random = new(42);
     private long _totalCount;
 
@@ -30,14 +30,23 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
             return;
         }
 
-        float numericValue = value.Kind switch
+        double numericValue = value.Kind switch
         {
             DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
             DataKind.UInt8 => value.AsUInt8(),
-            _ => float.NaN
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Duration => value.AsDuration().TotalSeconds,
+            _ => double.NaN
         };
 
-        if (float.IsNaN(numericValue))
+        if (double.IsNaN(numericValue))
         {
             return;
         }
@@ -103,8 +112,8 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
         double upperFence = p75 + 1.5 * iqr;
 
         // Count outliers using binary search on the sorted reservoir
-        int belowCount = LowerBound((float)lowerFence);
-        int aboveCount = _samples.Count - UpperBound((float)upperFence);
+        int belowCount = LowerBound(lowerFence);
+        int aboveCount = _samples.Count - UpperBound(upperFence);
         long outlierCount = belowCount + aboveCount;
         double outlierRatio = (double)outlierCount / _samples.Count;
 
@@ -146,7 +155,7 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
     /// <summary>
     /// Returns the index of the first element that is not less than <paramref name="value"/>.
     /// </summary>
-    private int LowerBound(float value)
+    private int LowerBound(double value)
     {
         int lo = 0, hi = _samples.Count;
 
@@ -170,7 +179,7 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
     /// <summary>
     /// Returns the index of the first element that is greater than <paramref name="value"/>.
     /// </summary>
-    private int UpperBound(float value)
+    private int UpperBound(double value)
     {
         int lo = 0, hi = _samples.Count;
 

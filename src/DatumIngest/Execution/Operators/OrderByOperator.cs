@@ -298,7 +298,15 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         return left.Kind switch
         {
             DataKind.Float32 => left.AsFloat32().CompareTo(right.AsFloat32()),
+            DataKind.Float64 => left.AsFloat64().CompareTo(right.AsFloat64()),
             DataKind.UInt8 => left.AsUInt8().CompareTo(right.AsUInt8()),
+            DataKind.Int8 => left.AsInt8().CompareTo(right.AsInt8()),
+            DataKind.Int16 => left.AsInt16().CompareTo(right.AsInt16()),
+            DataKind.UInt16 => left.AsUInt16().CompareTo(right.AsUInt16()),
+            DataKind.Int32 => left.AsInt32().CompareTo(right.AsInt32()),
+            DataKind.UInt32 => left.AsUInt32().CompareTo(right.AsUInt32()),
+            DataKind.Int64 => left.AsInt64().CompareTo(right.AsInt64()),
+            DataKind.UInt64 => left.AsUInt64().CompareTo(right.AsUInt64()),
             DataKind.String => string.Compare(
                 left.AsString(), right.AsString(), StringComparison.Ordinal),
             DataKind.Date => left.AsDate().CompareTo(right.AsDate()),

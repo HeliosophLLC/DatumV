@@ -304,7 +304,7 @@ public class WindowFunctionTests
 
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(-1f, results[0].AsFloat32());
+        Assert.Equal(-1, results[0].AsInt32());
         Assert.Equal(10f, results[1].AsFloat32());
     }
 
@@ -377,7 +377,7 @@ public class WindowFunctionTests
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
         Assert.Equal(20f, results[0].AsFloat32());
-        Assert.Equal(999f, results[1].AsFloat32());
+        Assert.Equal(999, results[1].AsInt32());
     }
 
     // ─────────────── AggregateWindowAdapter ───────────────

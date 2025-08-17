@@ -18,7 +18,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     public const int DefaultBinCount = 50;
 
     private readonly int _binCount;
-    private readonly List<float> _samples = new();
+    private readonly List<double> _samples = new();
     private readonly Random _random = new(42); // deterministic seed for reproducibility
     private long _totalCount;
 
@@ -45,14 +45,23 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
             return;
         }
 
-        float numericValue = value.Kind switch
+        double numericValue = value.Kind switch
         {
             DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
             DataKind.UInt8 => value.AsUInt8(),
-            _ => float.NaN
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Duration => value.AsDuration().TotalSeconds,
+            _ => double.NaN
         };
 
-        if (float.IsNaN(numericValue))
+        if (double.IsNaN(numericValue))
         {
             return;
         }
@@ -110,13 +119,13 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 
         _samples.Sort();
 
-        float min = _samples[0];
-        float max = _samples[^1];
+        double min = _samples[0];
+        double max = _samples[^1];
 
-        if (Math.Abs(max - min) < float.Epsilon)
+        if (Math.Abs(max - min) < double.Epsilon)
         {
             // All values are the same — single bin
-            bool singleValueInteger = min == MathF.Floor(min);
+            bool singleValueInteger = min == Math.Floor(min);
             return new StatisticResult("histogram", new HistogramResult(
                 [min, max],
                 [_samples.Count],
@@ -144,11 +153,11 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     /// <summary>
     /// Determines whether all samples in the reservoir are integers (no fractional part).
     /// </summary>
-    private static bool IsIntegerData(List<float> samples)
+    private static bool IsIntegerData(List<double> samples)
     {
-        foreach (float sample in samples)
+        foreach (double sample in samples)
         {
-            if (sample != MathF.Floor(sample))
+            if (sample != Math.Floor(sample))
             {
                 return false;
             }
@@ -163,7 +172,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     /// is rounded up to the nearest integer so edges land on whole numbers.
     /// </summary>
     private void BuildIntegerAlignedBins(
-        float min, float max, int requestedBinCount,
+        double min, double max, int requestedBinCount,
         out double[] binEdges, out long[] counts)
     {
         long intMin = (long)min;
@@ -195,7 +204,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 
         counts = new long[effectiveBinCount];
 
-        foreach (float sample in _samples)
+        foreach (double sample in _samples)
         {
             int bin = (int)((long)sample - intMin) / (int)binWidth;
 
@@ -212,10 +221,10 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
     /// Builds equal-width bins for continuous (non-integer) data.
     /// </summary>
     private void BuildEqualWidthBins(
-        float min, float max, int effectiveBinCount,
+        double min, double max, int effectiveBinCount,
         out double[] binEdges, out long[] counts)
     {
-        double binWidth = (double)(max - min) / effectiveBinCount;
+        double binWidth = (max - min) / effectiveBinCount;
 
         binEdges = new double[effectiveBinCount + 1];
 
@@ -229,7 +238,7 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 
         counts = new long[effectiveBinCount];
 
-        foreach (float sample in _samples)
+        foreach (double sample in _samples)
         {
             int bin = (int)((sample - min) / binWidth);
 

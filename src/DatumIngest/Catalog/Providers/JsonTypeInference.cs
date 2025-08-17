@@ -13,15 +13,18 @@ internal static class JsonTypeInference
 {
     /// <summary>
     /// Infers the <see cref="DataKind"/> for a JSON element value.
+    /// Number values that represent integers are inferred as <see cref="DataKind.Int64"/>;
+    /// numbers with fractional parts are inferred as <see cref="DataKind.Float64"/>.
+    /// Boolean values are inferred as <see cref="DataKind.Boolean"/>.
     /// String values that parse as ISO 8601 dates are inferred as Date or DateTime.
     /// </summary>
     internal static DataKind InferKind(JsonElement element)
     {
         return element.ValueKind switch
         {
-            JsonValueKind.Number => DataKind.Float32,
+            JsonValueKind.Number => element.TryGetInt64(out _) ? DataKind.Int64 : DataKind.Float64,
             JsonValueKind.String => InferStringKind(element.GetString()),
-            JsonValueKind.True or JsonValueKind.False => DataKind.Float32,
+            JsonValueKind.True or JsonValueKind.False => DataKind.Boolean,
             JsonValueKind.Null or JsonValueKind.Undefined => DataKind.String,
             JsonValueKind.Array or JsonValueKind.Object => DataKind.JsonValue,
             _ => DataKind.String
@@ -66,6 +69,29 @@ internal static class JsonTypeInference
                 JsonValueKind.False => DataValue.FromFloat32(0f),
                 _ => DataValue.Null(DataKind.Float32)
             },
+            DataKind.Float64 => element.ValueKind switch
+            {
+                JsonValueKind.Number => DataValue.FromFloat64(element.GetDouble()),
+                JsonValueKind.True => DataValue.FromFloat64(1.0),
+                JsonValueKind.False => DataValue.FromFloat64(0.0),
+                _ => DataValue.Null(DataKind.Float64)
+            },
+            DataKind.Int64 => element.ValueKind switch
+            {
+                JsonValueKind.Number => element.TryGetInt64(out long int64Value)
+                    ? DataValue.FromInt64(int64Value)
+                    : DataValue.FromInt64((long)element.GetDouble()),
+                JsonValueKind.True => DataValue.FromInt64(1),
+                JsonValueKind.False => DataValue.FromInt64(0),
+                _ => DataValue.Null(DataKind.Int64)
+            },
+            DataKind.Boolean => element.ValueKind switch
+            {
+                JsonValueKind.True => DataValue.FromBoolean(true),
+                JsonValueKind.False => DataValue.FromBoolean(false),
+                JsonValueKind.Number => DataValue.FromBoolean(element.GetDouble() != 0),
+                _ => DataValue.Null(DataKind.Boolean)
+            },
             DataKind.Date when element.ValueKind == JsonValueKind.String =>
                 DateOnly.TryParse(element.GetString(), CultureInfo.InvariantCulture, out DateOnly date)
                     ? DataValue.FromDate(date)
@@ -83,7 +109,8 @@ internal static class JsonTypeInference
 
     /// <summary>
     /// Resolves a type conflict between two <see cref="DataKind"/> values during
-    /// schema inference. Date + DateTime widens to DateTime. If either kind is
+    /// schema inference. Numeric kinds widen: Int64 + Float64 → Float64, Boolean + numeric → numeric.
+    /// Date + DateTime widens to DateTime. If either kind is
     /// <see cref="DataKind.JsonValue"/>, the result is <see cref="DataKind.JsonValue"/>;
     /// otherwise, widens to <see cref="DataKind.String"/>.
     /// </summary>
@@ -92,6 +119,23 @@ internal static class JsonTypeInference
         if (existingKind == detectedKind)
         {
             return existingKind;
+        }
+
+        // Numeric widening: Int64 + Float64 → Float64, Boolean + numeric → numeric.
+        if (IsNumericOrBoolean(existingKind) && IsNumericOrBoolean(detectedKind))
+        {
+            if (existingKind is DataKind.Float64 || detectedKind is DataKind.Float64)
+            {
+                return DataKind.Float64;
+            }
+
+            if (existingKind is DataKind.Float32 || detectedKind is DataKind.Float32)
+            {
+                return DataKind.Float64;
+            }
+
+            // Boolean + Int64 → Int64, Int64 + Int64 already handled above.
+            return DataKind.Int64;
         }
 
         // Date + DateTime → DateTime (widen to include time component).
@@ -107,5 +151,13 @@ internal static class JsonTypeInference
         }
 
         return DataKind.String;
+    }
+
+    /// <summary>
+    /// Returns whether the kind is a numeric type or boolean (which can widen to numeric).
+    /// </summary>
+    private static bool IsNumericOrBoolean(DataKind kind)
+    {
+        return kind is DataKind.Boolean or DataKind.Int64 or DataKind.Float32 or DataKind.Float64;
     }
 }

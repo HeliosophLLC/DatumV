@@ -390,19 +390,27 @@ public static class StatisticsPredicateEvaluator
             return left.AsDateTime().CompareTo(right.AsDateTime());
         }
 
-        // Numeric comparison via float coercion.
-        float leftFloat = ToFloat(left);
-        float rightFloat = ToFloat(right);
-        return leftFloat.CompareTo(rightFloat);
+        // Numeric comparison via double coercion.
+        double leftDouble = ToDouble(left);
+        double rightDouble = ToDouble(right);
+        return leftDouble.CompareTo(rightDouble);
     }
 
-    private static float ToFloat(DataValue value)
+    private static double ToDouble(DataValue value)
     {
         return value.Kind switch
         {
             DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
             DataKind.UInt8 => value.AsUInt8(),
-            _ => 0f,
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => value.AsUInt64(),
+            _ => 0d,
         };
     }
 }

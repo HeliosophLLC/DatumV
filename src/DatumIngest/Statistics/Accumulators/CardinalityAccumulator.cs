@@ -27,7 +27,15 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
         string representation = value.Kind switch
         {
             DataKind.Float32 => BitConverter.SingleToInt32Bits(value.AsFloat32()).ToString(),
+            DataKind.Float64 => BitConverter.DoubleToInt64Bits(value.AsFloat64()).ToString(),
             DataKind.UInt8 => value.AsUInt8().ToString(),
+            DataKind.Int8 => value.AsInt8().ToString(),
+            DataKind.Int16 => value.AsInt16().ToString(),
+            DataKind.UInt16 => value.AsUInt16().ToString(),
+            DataKind.Int32 => value.AsInt32().ToString(),
+            DataKind.UInt32 => value.AsUInt32().ToString(),
+            DataKind.Int64 => value.AsInt64().ToString(),
+            DataKind.UInt64 => value.AsUInt64().ToString(),
             DataKind.String => value.AsString(),
             DataKind.Date => value.AsDate().ToString("O"),
             DataKind.DateTime => value.AsDateTime().ToString("O"),

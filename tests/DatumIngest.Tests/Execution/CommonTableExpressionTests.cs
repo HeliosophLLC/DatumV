@@ -281,7 +281,15 @@ public sealed class CommonTableExpressionTests
         Assert.Equal(5, results.Count);
         for (int index = 0; index < 5; index++)
         {
-            Assert.Equal(index + 1, (int)results[index]["n"].AsFloat32());
+            DataValue n = results[index]["n"];
+            int actual = n.Kind switch
+            {
+                DataKind.Int32 => n.AsInt32(),
+                DataKind.Float32 => (int)n.AsFloat32(),
+                DataKind.Float64 => (int)n.AsFloat64(),
+                _ => throw new InvalidOperationException($"Unexpected kind: {n.Kind}")
+            };
+            Assert.Equal(index + 1, actual);
         }
     }
 

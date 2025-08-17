@@ -29,7 +29,7 @@ public sealed class TableCatalogSchemaTests
         Assert.Equal("name", schema.Columns[0].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
         Assert.Equal("age", schema.Columns[1].Name);
-        Assert.Equal(DataKind.Float32, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.Int8, schema.Columns[1].Kind);
     }
 
     [Fact]

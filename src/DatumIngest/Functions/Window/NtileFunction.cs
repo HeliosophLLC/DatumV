@@ -53,7 +53,7 @@ public sealed class NtileFunction : IWindowFunction
 
             // Evaluate the bucket count from the first row (constant expression).
             DataValue bucketValue = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
-            int bucketCount = (int)bucketValue.AsFloat32();
+            int bucketCount = WindowFunctionHelper.ToInt(bucketValue);
 
             if (bucketCount <= 0)
             {

@@ -51,7 +51,7 @@ public sealed class LagFunction : IWindowFunction
             if (argumentExpressions.Count >= 2)
             {
                 DataValue offsetValue = evaluator.Evaluate(argumentExpressions[1], partitionRows[0]);
-                offset = (int)offsetValue.AsFloat32();
+                offset = WindowFunctionHelper.ToInt(offsetValue);
             }
 
             // Determine default value (default NULL).

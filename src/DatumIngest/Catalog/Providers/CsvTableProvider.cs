@@ -110,35 +110,93 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         }
 
         // Infer column types from data rows.
+        // Numeric detection: try long (integer) first, then double (float).
+        // Per-column tracking: whether any value failed integer parse, whether any value
+        // has a fractional part, and integer min/max for narrowing.
         DataKind[] kinds = new DataKind[headers.Length];
-        Array.Fill(kinds, DataKind.Float32);
         bool[] hasData = new bool[headers.Length];
+        bool[] numericFailed = new bool[headers.Length];
+        bool[] integerFailed = new bool[headers.Length];
+        bool[] hasFractionalValues = new bool[headers.Length];
+        long[] integerMinimum = new long[headers.Length];
+        long[] integerMaximum = new long[headers.Length];
+        Array.Fill(integerMinimum, long.MaxValue);
+        Array.Fill(integerMaximum, long.MinValue);
 
         foreach (string[] fields in dataRows)
         {
             for (int columnIndex = 0; columnIndex < Math.Min(fields.Length, headers.Length); columnIndex++)
             {
                 string field = fields[columnIndex].Trim();
-                if (field.Length == 0)
+                if (field.Length == 0 || numericFailed[columnIndex])
                 {
                     continue;
                 }
 
                 hasData[columnIndex] = true;
-                if (kinds[columnIndex] == DataKind.Float32 &&
-                    !float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+
+                if (long.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out long longValue))
                 {
-                    kinds[columnIndex] = DataKind.String;
+                    if (longValue < integerMinimum[columnIndex])
+                    {
+                        integerMinimum[columnIndex] = longValue;
+                    }
+
+                    if (longValue > integerMaximum[columnIndex])
+                    {
+                        integerMaximum[columnIndex] = longValue;
+                    }
+
+                    continue;
                 }
+
+                if (double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleValue))
+                {
+                    integerFailed[columnIndex] = true;
+                    if (doubleValue != Math.Floor(doubleValue) || double.IsInfinity(doubleValue))
+                    {
+                        hasFractionalValues[columnIndex] = true;
+                    }
+
+                    continue;
+                }
+
+                numericFailed[columnIndex] = true;
             }
         }
 
-        // Columns with no data default to String
+        // Determine numeric types from observation state.
         for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
         {
             if (!hasData[columnIndex])
             {
                 kinds[columnIndex] = DataKind.String;
+            }
+            else if (numericFailed[columnIndex])
+            {
+                kinds[columnIndex] = DataKind.String;
+            }
+            else if (!integerFailed[columnIndex])
+            {
+                // Pure integer column with only 0 and 1 values → Boolean.
+                if (integerMinimum[columnIndex] >= 0 && integerMaximum[columnIndex] <= 1)
+                {
+                    kinds[columnIndex] = DataKind.Boolean;
+                }
+                else
+                {
+                    // Select the narrowest signed kind that covers the range.
+                    kinds[columnIndex] = NarrowestIntegerKind(integerMinimum[columnIndex], integerMaximum[columnIndex]);
+                }
+            }
+            else if (!hasFractionalValues[columnIndex])
+            {
+                // Float-encoded integer (e.g. pandas NaN-poisoned columns like CGID=16929.0).
+                kinds[columnIndex] = DataKind.Int64;
+            }
+            else
+            {
+                kinds[columnIndex] = DataKind.Float64;
             }
         }
 
@@ -185,7 +243,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             }
         }
 
-        // Third pass: detect hyphenated UUIDs (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) in String columns.
+        // Third pass: detect UUIDs (hyphenated and dashless) in String columns.
         for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
         {
             if (kinds[columnIndex] != DataKind.String || !hasData[columnIndex])
@@ -218,6 +276,43 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             if (allUuids)
             {
                 kinds[columnIndex] = DataKind.Uuid;
+            }
+        }
+
+        // Fourth pass: detect boolean text ("true"/"false") in String columns.
+        for (int columnIndex = 0; columnIndex < headers.Length; columnIndex++)
+        {
+            if (kinds[columnIndex] != DataKind.String || !hasData[columnIndex])
+            {
+                continue;
+            }
+
+            bool allBoolean = true;
+
+            foreach (string[] fields in dataRows)
+            {
+                if (columnIndex >= fields.Length)
+                {
+                    continue;
+                }
+
+                string field = fields[columnIndex].Trim();
+                if (field.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!field.Equals("true", StringComparison.OrdinalIgnoreCase) &&
+                    !field.Equals("false", StringComparison.OrdinalIgnoreCase))
+                {
+                    allBoolean = false;
+                    break;
+                }
+            }
+
+            if (allBoolean)
+            {
+                kinds[columnIndex] = DataKind.Boolean;
             }
         }
 
@@ -571,9 +666,27 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
 
         return kind switch
         {
-            DataKind.Float32 when float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
-                => DataValue.FromFloat32(number),
+            DataKind.Float32 when float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatNumber)
+                => DataValue.FromFloat32(floatNumber),
             DataKind.Float32 => DataValue.Null(DataKind.Float32),
+            DataKind.Float64 when double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleNumber)
+                => DataValue.FromFloat64(doubleNumber),
+            DataKind.Float64 => DataValue.Null(DataKind.Float64),
+            DataKind.Int8 when sbyte.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out sbyte int8Value)
+                => DataValue.FromInt8(int8Value),
+            DataKind.Int8 => DataValue.Null(DataKind.Int8),
+            DataKind.Int16 when short.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out short int16Value)
+                => DataValue.FromInt16(int16Value),
+            DataKind.Int16 => DataValue.Null(DataKind.Int16),
+            DataKind.Int32 when int.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out int int32Value)
+                => DataValue.FromInt32(int32Value),
+            DataKind.Int32 => DataValue.Null(DataKind.Int32),
+            DataKind.Int64 when long.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out long int64Value)
+                => DataValue.FromInt64(int64Value),
+            // Float-encoded integer: parse as double, truncate to long (handles "16929.0" etc.)
+            DataKind.Int64 when double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double floatEncodedValue)
+                => DataValue.FromInt64((long)floatEncodedValue),
+            DataKind.Int64 => DataValue.Null(DataKind.Int64),
             DataKind.Date when DateOnly.TryParse(field, CultureInfo.InvariantCulture, out DateOnly date)
                 => DataValue.FromDate(date),
             DataKind.Date when DateTimeOffset.TryParse(field, CultureInfo.InvariantCulture,
@@ -587,13 +700,18 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             DataKind.Uuid when Guid.TryParse(field, out Guid uuid)
                 => DataValue.FromUuid(uuid),
             DataKind.Uuid => DataValue.Null(DataKind.Uuid),
+            DataKind.Boolean when field is "1" || field.Equals("true", StringComparison.OrdinalIgnoreCase)
+                => DataValue.FromBoolean(true),
+            DataKind.Boolean when field is "0" || field.Equals("false", StringComparison.OrdinalIgnoreCase)
+                => DataValue.FromBoolean(false),
+            DataKind.Boolean => DataValue.Null(DataKind.Boolean),
             _ => DataValue.FromString(field)
         };
     }
 
     /// <summary>
-    /// Span-based overload that parses scalar fields directly from a <see cref="ReadOnlySpan{T}"/>
-    /// without allocating a substring. Falls back to the string-based overload for non-scalar types
+    /// Span-based overload that parses numeric fields directly from a <see cref="ReadOnlySpan{T}"/>
+    /// without allocating a substring. Falls back to the string-based overload for non-numeric types
     /// that require materialized strings (dates, UUIDs, strings).
     /// </summary>
     private static DataValue ParseFieldSpan(ReadOnlySpan<char> field, DataKind kind)
@@ -603,14 +721,65 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             return DataValue.Null(kind);
         }
 
-        if (kind == DataKind.Float32)
+        switch (kind)
         {
-            return float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float number)
-                ? DataValue.FromFloat32(number)
-                : DataValue.Null(DataKind.Float32);
+            case DataKind.Float32:
+                return float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatNumber)
+                    ? DataValue.FromFloat32(floatNumber)
+                    : DataValue.Null(DataKind.Float32);
+            case DataKind.Float64:
+                return double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleNumber)
+                    ? DataValue.FromFloat64(doubleNumber)
+                    : DataValue.Null(DataKind.Float64);
+            case DataKind.Int8:
+                return sbyte.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out sbyte int8Value)
+                    ? DataValue.FromInt8(int8Value)
+                    : DataValue.Null(DataKind.Int8);
+            case DataKind.Int16:
+                return short.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out short int16Value)
+                    ? DataValue.FromInt16(int16Value)
+                    : DataValue.Null(DataKind.Int16);
+            case DataKind.Int32:
+                return int.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out int int32Value)
+                    ? DataValue.FromInt32(int32Value)
+                    : DataValue.Null(DataKind.Int32);
+            case DataKind.Int64:
+                if (long.TryParse(field, NumberStyles.Integer, CultureInfo.InvariantCulture, out long int64Value))
+                {
+                    return DataValue.FromInt64(int64Value);
+                }
+
+                // Float-encoded integer: parse as double, truncate to long.
+                return double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double floatEncodedValue)
+                    ? DataValue.FromInt64((long)floatEncodedValue)
+                    : DataValue.Null(DataKind.Int64);
+            default:
+                return ParseField(field.ToString(), kind);
+        }
+    }
+
+    /// <summary>
+    /// Selects the narrowest signed integer <see cref="DataKind"/> whose range covers
+    /// both <paramref name="minimum"/> and <paramref name="maximum"/>.
+    /// </summary>
+    private static DataKind NarrowestIntegerKind(long minimum, long maximum)
+    {
+        if (minimum >= sbyte.MinValue && maximum <= sbyte.MaxValue)
+        {
+            return DataKind.Int8;
         }
 
-        return ParseField(field.ToString(), kind);
+        if (minimum >= short.MinValue && maximum <= short.MaxValue)
+        {
+            return DataKind.Int16;
+        }
+
+        if (minimum >= int.MinValue && maximum <= int.MaxValue)
+        {
+            return DataKind.Int32;
+        }
+
+        return DataKind.Int64;
     }
 
     /// <summary>
@@ -702,7 +871,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
         {
             string firstValue = firstRowFields[columnIndex].Trim();
             bool firstIsNumeric = firstValue.Length > 0 &&
-                float.TryParse(firstValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+                double.TryParse(firstValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
 
             // Count how many data rows have a numeric value in this column.
             int numericCount = 0;
@@ -722,7 +891,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
                 }
 
                 nonEmptyCount++;
-                if (float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+                if (double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
                 {
                     numericCount++;
                 }

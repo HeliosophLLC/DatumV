@@ -7,9 +7,10 @@ using DatumIngest.Model;
 /// When more than K distinct values are observed, the least frequent are evicted.
 /// </summary>
 /// <remarks>
-/// For <see cref="DataKind.Float32"/> and <see cref="DataKind.UInt8"/> columns, frequencies
-/// are tracked using integer keys (float bit patterns or byte values) to avoid per-row
-/// string allocations on the hot path. String keys are produced on demand for results.
+/// For <see cref="DataKind.Float32"/>, <see cref="DataKind.UInt8"/>, and other fixed-width
+/// numeric columns, frequencies are tracked using integer keys (bit patterns or raw values)
+/// to avoid per-row string allocations on the hot path. Types wider than 32 bits use
+/// 64-bit integer keys. String keys are produced on demand for results.
 /// </remarks>
 public sealed class TopKAccumulator : IStatisticAccumulator
 {
@@ -17,6 +18,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     private readonly DataKind _kind;
     private readonly Dictionary<string, long>? _stringFrequencies;
     private readonly Dictionary<int, long>? _numericFrequencies;
+    private readonly Dictionary<long, long>? _wideNumericFrequencies;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TopKAccumulator"/> class
@@ -33,16 +35,22 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     /// </summary>
     /// <param name="k">Maximum number of top values to track.</param>
     /// <param name="kind">
-    /// The <see cref="DataKind"/> of the column. <see cref="DataKind.Float32"/> and
-    /// <see cref="DataKind.UInt8"/> use integer-keyed dictionaries to avoid per-row
-    /// string allocations.
+    /// The <see cref="DataKind"/> of the column. <see cref="DataKind.Float32"/>,
+    /// <see cref="DataKind.UInt8"/>, and other fixed-width numeric types use
+    /// integer-keyed dictionaries to avoid per-row string allocations.
     /// </param>
     public TopKAccumulator(int k, DataKind kind)
     {
         _k = k;
         _kind = kind;
 
-        if (kind is DataKind.Float32 or DataKind.UInt8)
+        if (kind is DataKind.Int64 or DataKind.UInt64 or DataKind.Float64)
+        {
+            _wideNumericFrequencies = new();
+        }
+        else if (kind is DataKind.Float32 or DataKind.UInt8
+            or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32)
         {
             _numericFrequencies = new();
         }
@@ -62,14 +70,25 @@ public sealed class TopKAccumulator : IStatisticAccumulator
                 return _stringFrequencies;
             }
 
-            // Convert numeric keys to strings on demand (not on the hot path).
-            Dictionary<string, long> result = new(_numericFrequencies!.Count);
-            foreach (KeyValuePair<int, long> entry in _numericFrequencies)
+            if (_wideNumericFrequencies is not null)
             {
-                result[NumericKeyToString(entry.Key)] = entry.Value;
+                Dictionary<string, long> result = new(_wideNumericFrequencies.Count);
+                foreach (KeyValuePair<long, long> entry in _wideNumericFrequencies)
+                {
+                    result[WideNumericKeyToString(entry.Key)] = entry.Value;
+                }
+
+                return result;
             }
 
-            return result;
+            // Convert numeric keys to strings on demand (not on the hot path).
+            Dictionary<string, long> narrowResult = new(_numericFrequencies!.Count);
+            foreach (KeyValuePair<int, long> entry in _numericFrequencies)
+            {
+                narrowResult[NumericKeyToString(entry.Key)] = entry.Value;
+            }
+
+            return narrowResult;
         }
     }
 
@@ -81,11 +100,27 @@ public sealed class TopKAccumulator : IStatisticAccumulator
             return;
         }
 
-        if (_numericFrequencies is not null)
+        if (_wideNumericFrequencies is not null)
         {
-            int key = _kind == DataKind.UInt8
-                ? value.AsUInt8()
-                : BitConverter.SingleToInt32Bits(value.AsFloat32());
+            long key = ToWideNumericKey(value);
+
+            if (_wideNumericFrequencies.TryGetValue(key, out long currentCount))
+            {
+                _wideNumericFrequencies[key] = currentCount + 1;
+            }
+            else
+            {
+                _wideNumericFrequencies[key] = 1;
+
+                if (_wideNumericFrequencies.Count > _k * 2)
+                {
+                    TrimWideNumeric();
+                }
+            }
+        }
+        else if (_numericFrequencies is not null)
+        {
+            int key = ToNumericKey(value);
 
             if (_numericFrequencies.TryGetValue(key, out long currentCount))
             {
@@ -129,7 +164,20 @@ public sealed class TopKAccumulator : IStatisticAccumulator
             return;
         }
 
-        if (_numericFrequencies is not null && otherTopK._numericFrequencies is not null)
+        if (_wideNumericFrequencies is not null && otherTopK._wideNumericFrequencies is not null)
+        {
+            foreach (KeyValuePair<long, long> entry in otherTopK._wideNumericFrequencies)
+            {
+                _wideNumericFrequencies.TryGetValue(entry.Key, out long currentCount);
+                _wideNumericFrequencies[entry.Key] = currentCount + entry.Value;
+            }
+
+            if (_wideNumericFrequencies.Count > _k * 2)
+            {
+                TrimWideNumeric();
+            }
+        }
+        else if (_numericFrequencies is not null && otherTopK._numericFrequencies is not null)
         {
             foreach (KeyValuePair<int, long> entry in otherTopK._numericFrequencies)
             {
@@ -152,12 +200,22 @@ public sealed class TopKAccumulator : IStatisticAccumulator
                     _stringFrequencies[entry.Key] = currentCount + entry.Value;
                 }
             }
-            else
+            else if (otherTopK._numericFrequencies is not null)
             {
                 // Cross-mode merge: convert other's numeric keys to strings.
-                foreach (KeyValuePair<int, long> entry in otherTopK._numericFrequencies!)
+                foreach (KeyValuePair<int, long> entry in otherTopK._numericFrequencies)
                 {
                     string key = otherTopK.NumericKeyToString(entry.Key);
+                    _stringFrequencies.TryGetValue(key, out long currentCount);
+                    _stringFrequencies[key] = currentCount + entry.Value;
+                }
+            }
+            else if (otherTopK._wideNumericFrequencies is not null)
+            {
+                // Cross-mode merge: convert other's wide numeric keys to strings.
+                foreach (KeyValuePair<long, long> entry in otherTopK._wideNumericFrequencies)
+                {
+                    string key = otherTopK.WideNumericKeyToString(entry.Key);
                     _stringFrequencies.TryGetValue(key, out long currentCount);
                     _stringFrequencies[key] = currentCount + entry.Value;
                 }
@@ -175,7 +233,16 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     {
         List<KeyValuePair<string, long>> sorted;
 
-        if (_numericFrequencies is not null)
+        if (_wideNumericFrequencies is not null)
+        {
+            TrimWideNumeric();
+            sorted = new(_wideNumericFrequencies.Count);
+            foreach (KeyValuePair<long, long> entry in _wideNumericFrequencies)
+            {
+                sorted.Add(new KeyValuePair<string, long>(WideNumericKeyToString(entry.Key), entry.Value));
+            }
+        }
+        else if (_numericFrequencies is not null)
         {
             TrimNumeric();
             sorted = new(_numericFrequencies.Count);
@@ -236,8 +303,66 @@ public sealed class TopKAccumulator : IStatisticAccumulator
         {
             DataKind.Float32 => BitConverter.Int32BitsToSingle(key).ToString("G"),
             DataKind.UInt8 => ((byte)key).ToString(),
+            DataKind.Int8 => ((sbyte)key).ToString(),
+            DataKind.Int16 => ((short)key).ToString(),
+            DataKind.UInt16 => ((ushort)key).ToString(),
+            DataKind.Int32 => key.ToString(),
+            DataKind.UInt32 => ((uint)key).ToString(),
             _ => key.ToString()
         };
+    }
+
+    private string WideNumericKeyToString(long key)
+    {
+        return _kind switch
+        {
+            DataKind.Int64 => key.ToString(),
+            DataKind.UInt64 => ((ulong)key).ToString(),
+            DataKind.Float64 => BitConverter.Int64BitsToDouble(key).ToString("G"),
+            _ => key.ToString()
+        };
+    }
+
+    private int ToNumericKey(DataValue value)
+    {
+        return _kind switch
+        {
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.UInt32 => unchecked((int)value.AsUInt32()),
+            _ => BitConverter.SingleToInt32Bits(value.AsFloat32())
+        };
+    }
+
+    private long ToWideNumericKey(DataValue value)
+    {
+        return _kind switch
+        {
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt64 => unchecked((long)value.AsUInt64()),
+            _ => BitConverter.DoubleToInt64Bits(value.AsFloat64())
+        };
+    }
+
+    private void TrimWideNumeric()
+    {
+        if (_wideNumericFrequencies!.Count <= _k)
+        {
+            return;
+        }
+
+        List<KeyValuePair<long, long>> sorted = [.. _wideNumericFrequencies];
+        sorted.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+        _wideNumericFrequencies.Clear();
+        int keepCount = Math.Min(_k, sorted.Count);
+        for (int i = 0; i < keepCount; i++)
+        {
+            _wideNumericFrequencies[sorted[i].Key] = sorted[i].Value;
+        }
     }
 
     private static string ValueToString(DataValue value)

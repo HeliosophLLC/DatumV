@@ -284,9 +284,17 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
 
         return kind switch
         {
-            DataKind.Float32 => ConvertToScalar(value),
-            DataKind.String => DataValue.FromString(value.ToString() ?? string.Empty),
+            DataKind.Float32 => DataValue.FromFloat32(Convert.ToSingle(value)),
+            DataKind.Float64 => DataValue.FromFloat64(Convert.ToDouble(value)),
+            DataKind.Int8 => DataValue.FromInt8(Convert.ToSByte(value)),
+            DataKind.Int16 => DataValue.FromInt16(Convert.ToInt16(value)),
+            DataKind.Int32 => DataValue.FromInt32(Convert.ToInt32(value)),
+            DataKind.Int64 => DataValue.FromInt64(Convert.ToInt64(value)),
             DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(value)),
+            DataKind.UInt16 => DataValue.FromUInt16(Convert.ToUInt16(value)),
+            DataKind.UInt32 => DataValue.FromUInt32(Convert.ToUInt32(value)),
+            DataKind.UInt64 => DataValue.FromUInt64(Convert.ToUInt64(value)),
+            DataKind.String => DataValue.FromString(value.ToString() ?? string.Empty),
             DataKind.DateTime => DataValue.FromDateTime(ConvertToDateTimeOffset(value)),
             DataKind.Date => value is DateOnly dateOnly
                 ? DataValue.FromDate(dateOnly)
@@ -420,14 +428,49 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         // Unwrap Nullable<T> to get the underlying type
         Type underlyingType = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
-        if (underlyingType == typeof(float) ||
-            underlyingType == typeof(double) ||
-            underlyingType == typeof(int) ||
-            underlyingType == typeof(long) ||
-            underlyingType == typeof(short) ||
-            underlyingType == typeof(decimal))
+        if (underlyingType == typeof(float))
         {
             return DataKind.Float32;
+        }
+
+        if (underlyingType == typeof(double) || underlyingType == typeof(decimal))
+        {
+            return DataKind.Float64;
+        }
+
+        if (underlyingType == typeof(int))
+        {
+            return DataKind.Int32;
+        }
+
+        if (underlyingType == typeof(long))
+        {
+            return DataKind.Int64;
+        }
+
+        if (underlyingType == typeof(short))
+        {
+            return DataKind.Int16;
+        }
+
+        if (underlyingType == typeof(ushort))
+        {
+            return DataKind.UInt16;
+        }
+
+        if (underlyingType == typeof(uint))
+        {
+            return DataKind.UInt32;
+        }
+
+        if (underlyingType == typeof(ulong))
+        {
+            return DataKind.UInt64;
+        }
+
+        if (underlyingType == typeof(sbyte))
+        {
+            return DataKind.Int8;
         }
 
         if (underlyingType == typeof(byte))
@@ -482,8 +525,16 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
 
         return kind switch
         {
-            DataKind.Float32 => ConvertToScalar(element),
+            DataKind.Float32 => DataValue.FromFloat32(Convert.ToSingle(element)),
+            DataKind.Float64 => DataValue.FromFloat64(Convert.ToDouble(element)),
+            DataKind.Int8 => DataValue.FromInt8(Convert.ToSByte(element)),
+            DataKind.Int16 => DataValue.FromInt16(Convert.ToInt16(element)),
+            DataKind.Int32 => DataValue.FromInt32(Convert.ToInt32(element)),
+            DataKind.Int64 => DataValue.FromInt64(Convert.ToInt64(element)),
             DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(element)),
+            DataKind.UInt16 => DataValue.FromUInt16(Convert.ToUInt16(element)),
+            DataKind.UInt32 => DataValue.FromUInt32(Convert.ToUInt32(element)),
+            DataKind.UInt64 => DataValue.FromUInt64(Convert.ToUInt64(element)),
             DataKind.String => DataValue.FromString(element.ToString() ?? string.Empty),
             DataKind.UInt8Array => DataValue.FromUInt8Array((byte[])element),
             DataKind.DateTime => DataValue.FromDateTime(ConvertToDateTimeOffset(element)),
@@ -508,23 +559,4 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         };
     }
 
-    /// <summary>
-    /// Converts a numeric value to a <see cref="DataValue"/> scalar (float32).
-    /// </summary>
-    private static DataValue ConvertToScalar(object value)
-    {
-        float floatValue = value switch
-        {
-            float floatVal => floatVal,
-            double doubleVal => (float)doubleVal,
-            int intVal => intVal,
-            long longVal => longVal,
-            short shortVal => shortVal,
-            byte byteVal => byteVal,
-            decimal decimalVal => (float)decimalVal,
-            _ => Convert.ToSingle(value)
-        };
-
-        return DataValue.FromFloat32(floatValue);
-    }
 }

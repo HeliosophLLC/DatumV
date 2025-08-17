@@ -545,6 +545,38 @@ public sealed class IndexWriter
                 writer.Write(value.AsUuid().ToByteArray());
                 break;
 
+            case DataKind.Float64:
+                writer.Write(value.AsFloat64());
+                break;
+
+            case DataKind.Int8:
+                writer.Write(value.AsInt8());
+                break;
+
+            case DataKind.Int16:
+                writer.Write(value.AsInt16());
+                break;
+
+            case DataKind.UInt16:
+                writer.Write(value.AsUInt16());
+                break;
+
+            case DataKind.Int32:
+                writer.Write(value.AsInt32());
+                break;
+
+            case DataKind.UInt32:
+                writer.Write(value.AsUInt32());
+                break;
+
+            case DataKind.Int64:
+                writer.Write(value.AsInt64());
+                break;
+
+            case DataKind.UInt64:
+                writer.Write(value.AsUInt64());
+                break;
+
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }

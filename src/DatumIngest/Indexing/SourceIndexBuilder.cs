@@ -902,8 +902,32 @@ public sealed class SourceIndexBuilder
                 case DataKind.Float32:
                     _cardinality.Add(value.AsFloat32());
                     break;
+                case DataKind.Float64:
+                    _cardinality.Add(value.AsFloat64());
+                    break;
                 case DataKind.UInt8:
                     _cardinality.Add((int)value.AsUInt8());
+                    break;
+                case DataKind.Int8:
+                    _cardinality.Add((int)value.AsInt8());
+                    break;
+                case DataKind.Int16:
+                    _cardinality.Add((int)value.AsInt16());
+                    break;
+                case DataKind.UInt16:
+                    _cardinality.Add((int)value.AsUInt16());
+                    break;
+                case DataKind.Int32:
+                    _cardinality.Add(value.AsInt32());
+                    break;
+                case DataKind.UInt32:
+                    _cardinality.Add((long)value.AsUInt32());
+                    break;
+                case DataKind.Int64:
+                    _cardinality.Add(value.AsInt64());
+                    break;
+                case DataKind.UInt64:
+                    _cardinality.Add((long)value.AsUInt64());
                     break;
                 case DataKind.String:
                     _cardinality.Add(value.AsString());
@@ -925,8 +949,12 @@ public sealed class SourceIndexBuilder
 
         private static bool IsComparableKind(DataKind kind)
         {
-            return kind is DataKind.Float32 or DataKind.UInt8 or DataKind.String
-                or DataKind.Date or DataKind.DateTime;
+            return kind is DataKind.Float32 or DataKind.Float64
+                or DataKind.UInt8 or DataKind.Int8
+                or DataKind.Int16 or DataKind.UInt16
+                or DataKind.Int32 or DataKind.UInt32
+                or DataKind.Int64 or DataKind.UInt64
+                or DataKind.String or DataKind.Date or DataKind.DateTime;
         }
 
         /// <summary>
@@ -1437,8 +1465,32 @@ internal sealed class SourceIndexBuilder_ChunkAccumulatorProxy
             case DataKind.Float32:
                 _cardinality.Add(value.AsFloat32());
                 break;
+            case DataKind.Float64:
+                _cardinality.Add(value.AsFloat64());
+                break;
             case DataKind.UInt8:
                 _cardinality.Add((int)value.AsUInt8());
+                break;
+            case DataKind.Int8:
+                _cardinality.Add((int)value.AsInt8());
+                break;
+            case DataKind.Int16:
+                _cardinality.Add((int)value.AsInt16());
+                break;
+            case DataKind.UInt16:
+                _cardinality.Add((int)value.AsUInt16());
+                break;
+            case DataKind.Int32:
+                _cardinality.Add(value.AsInt32());
+                break;
+            case DataKind.UInt32:
+                _cardinality.Add((long)value.AsUInt32());
+                break;
+            case DataKind.Int64:
+                _cardinality.Add(value.AsInt64());
+                break;
+            case DataKind.UInt64:
+                _cardinality.Add((long)value.AsUInt64());
                 break;
             case DataKind.String:
                 _cardinality.Add(value.AsString());
@@ -1460,7 +1512,11 @@ internal sealed class SourceIndexBuilder_ChunkAccumulatorProxy
 
     private static bool IsComparableKind(DataKind kind)
     {
-        return kind is DataKind.Float32 or DataKind.UInt8 or DataKind.String
-            or DataKind.Date or DataKind.DateTime;
+        return kind is DataKind.Float32 or DataKind.Float64
+            or DataKind.UInt8 or DataKind.Int8
+            or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32
+            or DataKind.Int64 or DataKind.UInt64
+            or DataKind.String or DataKind.Date or DataKind.DateTime;
     }
 }
