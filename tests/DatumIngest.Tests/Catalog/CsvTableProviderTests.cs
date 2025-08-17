@@ -276,7 +276,7 @@ public sealed class CsvTableProviderTests
         Assert.Equal(DataKind.Int32, schema.Columns[1].Kind);   // col_1: 77516..338409
         Assert.Equal(DataKind.Int8, schema.Columns[2].Kind);    // col_2: 13,9,12,5,13
         Assert.Equal(DataKind.Int16, schema.Columns[3].Kind);   // col_3: 2174,0,0,0,0
-        Assert.Equal(DataKind.Int8, schema.Columns[4].Kind);    // col_4: 0,0,0,0,0
+        Assert.Equal(DataKind.Boolean, schema.Columns[4].Kind); // col_4: 0,0,0,0,0
     }
 
     [Fact]
@@ -585,5 +585,54 @@ public sealed class CsvTableProviderTests
         Assert.Equal(5, rows.Count);
         Assert.Equal("Alice", rows[0]["col_0"].AsString());
         Assert.Equal("New York", rows[0]["col_1"].AsString());
+    }
+
+    // ───────────────────── Boolean detection ─────────────────────
+
+    [Fact]
+    public async Task GetSchema_ZeroOneColumn_DetectsBoolean()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("boolean_01.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.Boolean, schema.Columns[1].Kind); // reordered: 1,0,1,0,1
+    }
+
+    [Fact]
+    public async Task Open_ZeroOneColumn_ReturnsDataValueBoolean()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("boolean_01.csv"), null, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count);
+        Assert.True(rows[0]["reordered"].AsBoolean());
+        Assert.False(rows[1]["reordered"].AsBoolean());
+        Assert.True(rows[2]["reordered"].AsBoolean());
+    }
+
+    [Fact]
+    public async Task GetSchema_TrueFalseStrings_DetectsBoolean()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("boolean_text.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.Boolean, schema.Columns[1].Kind); // active: true,false,TRUE,False
+    }
+
+    [Fact]
+    public async Task Open_TrueFalseStrings_ReturnsDataValueBoolean()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("boolean_text.csv"), null, CancellationToken.None));
+
+        Assert.Equal(4, rows.Count);
+        Assert.True(rows[0]["active"].AsBoolean());
+        Assert.False(rows[1]["active"].AsBoolean());
+        Assert.True(rows[2]["active"].AsBoolean());
+        Assert.False(rows[3]["active"].AsBoolean());
     }
 }

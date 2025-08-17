@@ -291,4 +291,44 @@ public sealed class ManifestSerializerTests
         Assert.Contains("\"outlierCount\":", json);
         Assert.Contains("\"outlierRatio\":", json);
     }
+
+    [Fact]
+    public void Serialize_BooleanManifest_ContainsTrueRatio()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]));
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(false)]));
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(stats, kinds, 3);
+        string json = ManifestSerializer.Serialize("test", manifest);
+
+        Assert.Contains("\"type\": \"boolean\"", json);
+        Assert.Contains("\"trueRatio\":", json);
+    }
+
+    [Fact]
+    public void Deserialize_BooleanManifest_RoundTrips()
+    {
+        StatisticsCollector collector = new();
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]));
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(false)]));
+
+        IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+        Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
+
+        QueryResultsManifest original = ManifestBuilder.Build(stats, kinds, 2);
+        string json = ManifestSerializer.Serialize("test", original);
+        SourceManifest? deserialized = ManifestSerializer.Deserialize(json);
+
+        Assert.NotNull(deserialized);
+        QueryResultsManifest roundTripped = deserialized.Tables["test"];
+        BooleanFeatureManifest booleanFeature = Assert.IsType<BooleanFeatureManifest>(roundTripped.Features[0]);
+        Assert.Equal("flag", booleanFeature.Name);
+        Assert.Equal(DataKind.Boolean, booleanFeature.Kind);
+        Assert.Equal(0.5, booleanFeature.TrueRatio);
+    }
 }

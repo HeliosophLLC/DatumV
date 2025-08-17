@@ -35,6 +35,7 @@ public static class ManifestBuilder
         {
             DataKind kind = columnKinds.TryGetValue(entry.Key, out DataKind k) ? k : DataKind.String;
             FeatureManifest featureManifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
+            featureManifest = WithRole(featureManifest, rowCount);
             features.Add(featureManifest);
         }
 
@@ -102,6 +103,16 @@ public static class ManifestBuilder
         return manifest;
     }
 
+    /// <summary>
+    /// Sets the <see cref="FeatureManifest.Role"/> on a fully-constructed manifest
+    /// by running the <see cref="ColumnRoleClassifier"/>.
+    /// </summary>
+    private static FeatureManifest WithRole(FeatureManifest manifest, long rowCount)
+    {
+        manifest.Role = ColumnRoleClassifier.Classify(manifest, rowCount);
+        return manifest;
+    }
+
     private static FeatureManifest BuildFeature(string name, DataKind kind, ColumnStatistics stats, long rowCount)
     {
         // Extract common fields
@@ -132,6 +143,7 @@ public static class ManifestBuilder
             DataKind.Image => BuildImageManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.UInt8Array => BuildBinaryManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, stats),
             DataKind.Date or DataKind.DateTime => BuildTemporalManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult, stats),
+            DataKind.Boolean => BuildBooleanManifest(name, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK, entropyResult),
             _ => BuildFallbackManifest(name, kind, count, nullCount, nullRatio, dominantValueRatio, missingRuns, distinctCount, topK)
         };
     }
@@ -368,6 +380,46 @@ public static class ManifestBuilder
             Latest = temporalResult.Latest,
             Entropy = entropyResult?.Value,
             EntropyApproximate = entropyResult?.Approximate
+        };
+    }
+
+    /// <summary>
+    /// Builds a <see cref="BooleanFeatureManifest"/> for native boolean columns.
+    /// Computes <see cref="BooleanFeatureManifest.TrueRatio"/> from top-K frequencies.
+    /// </summary>
+    private static BooleanFeatureManifest BuildBooleanManifest(
+        string name, long count, long nullCount, double? nullRatio, double? dominantValueRatio, long? missingRuns, long distinctCount,
+        IReadOnlyList<FrequencyEntry> topK, EntropyResult? entropyResult)
+    {
+        double trueRatio = 0.0;
+
+        if (count > 0)
+        {
+            foreach (FrequencyEntry entry in topK)
+            {
+                if (entry.Value is "true" or "True" or "1")
+                {
+                    trueRatio = (double)entry.Frequency / count;
+                    break;
+                }
+            }
+        }
+
+        return new BooleanFeatureManifest
+        {
+            Name = name,
+            Kind = DataKind.Boolean,
+            Count = count,
+            NullCount = nullCount,
+            ValidCount = count,
+            NullRatio = nullRatio,
+            DominantValueRatio = dominantValueRatio,
+            MissingRuns = missingRuns,
+            EstimatedDistinctCount = distinctCount,
+            TopKValues = topK,
+            Entropy = entropyResult?.Value,
+            EntropyApproximate = entropyResult?.Approximate,
+            TrueRatio = trueRatio
         };
     }
 

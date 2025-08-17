@@ -23,6 +23,7 @@ public sealed record FrequencyEntry(string Value, long Frequency);
 [JsonDerivedType(typeof(ImageFeatureManifest), "image")]
 [JsonDerivedType(typeof(BinaryFeatureManifest), "binary")]
 [JsonDerivedType(typeof(TemporalFeatureManifest), "temporal")]
+[JsonDerivedType(typeof(BooleanFeatureManifest), "boolean")]
 public abstract class FeatureManifest
 {
     /// <summary>Gets the column name.</summary>
@@ -72,6 +73,13 @@ public abstract class FeatureManifest
 
     /// <summary>Gets whether the entropy value is an approximate lower bound due to frequency map capping.</summary>
     public bool? EntropyApproximate { get; init; }
+
+    /// <summary>
+    /// Gets or sets the inferred semantic role of this column, or <c>null</c> for manifests
+    /// created before column role classification was introduced.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<ColumnRole>))]
+    public ColumnRole? Role { get; set; }
 
 
 }
@@ -327,4 +335,19 @@ public sealed class TemporalFeatureManifest : FeatureManifest
 
     /// <summary>Gets the latest value as an ISO 8601 string.</summary>
     public required string? Latest { get; init; }
+}
+
+/// <summary>
+/// Feature manifest for boolean columns (<see cref="DataKind.Boolean"/>).
+/// Applies to native booleans and to integer columns in untyped formats (CSV)
+/// where all values are 0 or 1. The base class carries count, null, cardinality,
+/// and top-K statistics; this subclass adds only the meaningful derived metric.
+/// </summary>
+public sealed class BooleanFeatureManifest : FeatureManifest
+{
+    /// <summary>
+    /// Gets the ratio of <c>true</c> (or <c>1</c>) values to total valid (non-null) values.
+    /// A value of 0.0 means all false; 1.0 means all true.
+    /// </summary>
+    public required double TrueRatio { get; init; }
 }

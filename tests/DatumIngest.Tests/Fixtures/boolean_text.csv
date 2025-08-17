@@ -1,0 +1,5 @@
+user,active,score
+alice,true,85.2
+bob,false,92.1
+carol,TRUE,77.5
+dave,False,88.0
