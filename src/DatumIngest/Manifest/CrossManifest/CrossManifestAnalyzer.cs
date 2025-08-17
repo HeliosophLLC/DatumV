@@ -66,7 +66,7 @@ public static class CrossManifestAnalyzer
 
         // Phase 2: Detect composite keys from single-column candidates.
         IReadOnlyList<JoinCandidate> compositeKeys = CompositeKeyDetector.DetectCompositeKeys(
-            allCandidates, effectiveThresholds);
+            allCandidates, effectiveThresholds, manifests);
 
         foreach (JoinCandidate composite in compositeKeys)
         {

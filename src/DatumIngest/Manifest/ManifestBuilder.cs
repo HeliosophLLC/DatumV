@@ -36,6 +36,7 @@ public static class ManifestBuilder
             DataKind kind = columnKinds.TryGetValue(entry.Key, out DataKind k) ? k : DataKind.String;
             FeatureManifest featureManifest = BuildFeature(entry.Key, kind, entry.Value, rowCount);
             featureManifest = WithRole(featureManifest, rowCount);
+            featureManifest = WithVocabulary(featureManifest, entry.Value);
             features.Add(featureManifest);
         }
 
@@ -110,6 +111,29 @@ public static class ManifestBuilder
     private static FeatureManifest WithRole(FeatureManifest manifest, long rowCount)
     {
         manifest.Role = ColumnRoleClassifier.Classify(manifest, rowCount);
+        return manifest;
+    }
+
+    /// <summary>
+    /// Attaches a <see cref="ColumnVocabulary"/> to the manifest when the column is
+    /// classified as <see cref="ColumnRole.Identifier"/> or <see cref="ColumnRole.ForeignKey"/>
+    /// and the vocabulary accumulator collected all distinct values without capping.
+    /// </summary>
+    private static FeatureManifest WithVocabulary(FeatureManifest manifest, ColumnStatistics stats)
+    {
+        if (manifest.Role is not (ColumnRole.Identifier or ColumnRole.ForeignKey))
+        {
+            return manifest;
+        }
+
+        VocabularyResult? vocabularyResult = GetResultValue<VocabularyResult>(stats, "vocabulary");
+
+        if (vocabularyResult is null || vocabularyResult.Capped)
+        {
+            return manifest;
+        }
+
+        manifest.Vocabulary = new ColumnVocabulary { Values = vocabularyResult.SortedValues };
         return manifest;
     }
 

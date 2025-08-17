@@ -191,6 +191,16 @@ public sealed class StatisticsCollector
             accumulators.Add(new CategoricalDiagnosticsAccumulator(_topK, kind));
         }
 
+        // Vocabulary collection for potential identifier/foreign-key columns.
+        // Only integer and string types can serve as join keys.
+        if (kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32
+            or DataKind.Int64 or DataKind.UInt64
+            or DataKind.UInt8 or DataKind.String or DataKind.Uuid)
+        {
+            accumulators.Add(new VocabularyAccumulator(kind));
+        }
+
         return accumulators;
     }
 }

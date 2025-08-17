@@ -18,6 +18,27 @@ public sealed class JoinEvidence
     /// <summary>Gets the Jaccard similarity of the TopK value sets (0 = disjoint, 1 = identical).</summary>
     public required double TopKJaccard { get; init; }
 
+    /// <summary>
+    /// Gets the exact Jaccard similarity computed from column vocabularies, or <c>null</c>
+    /// when one or both columns lack a vocabulary. When present, this value is more
+    /// accurate than <see cref="TopKJaccard"/> and should be preferred in scoring.
+    /// </summary>
+    public double? ExactJaccard { get; init; }
+
+    /// <summary>
+    /// Gets the containment ratio of the left column in the right column:
+    /// |left ∩ right| / |left|. A value of 1.0 means every left value exists in
+    /// the right column, typical of a foreign key fully contained in its primary key.
+    /// Null when vocabularies are not available.
+    /// </summary>
+    public double? ContainmentLeftInRight { get; init; }
+
+    /// <summary>
+    /// Gets the containment ratio of the right column in the left column:
+    /// |left ∩ right| / |right|. Null when vocabularies are not available.
+    /// </summary>
+    public double? ContainmentRightInLeft { get; init; }
+
     /// <summary>Gets the cardinality ratio: min(leftNDV, rightNDV) / max(leftNDV, rightNDV). Close to 1.0 suggests same domain.</summary>
     public required double CardinalityRatio { get; init; }
 

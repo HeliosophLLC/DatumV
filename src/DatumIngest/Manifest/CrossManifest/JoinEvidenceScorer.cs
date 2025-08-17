@@ -91,10 +91,25 @@ internal static class JoinEvidenceScorer
         double uniqueKeyScore = ComputeUniqueKeyScore(left, leftRowCount, right, rightRowCount);
         bool bothSidesUniqueKey = IsUniqueKey(left, leftRowCount) && IsUniqueKey(right, rightRowCount);
 
+        // When both columns have an exhaustive vocabulary, compute exact set metrics.
+        double? exactJaccard = null;
+        double? containmentLeftInRight = null;
+        double? containmentRightInLeft = null;
+
+        if (left.Vocabulary is not null && right.Vocabulary is not null)
+        {
+            exactJaccard = ColumnVocabulary.ComputeJaccard(left.Vocabulary, right.Vocabulary);
+            containmentLeftInRight = ColumnVocabulary.ComputeContainment(left.Vocabulary, right.Vocabulary);
+            containmentRightInLeft = ColumnVocabulary.ComputeContainment(right.Vocabulary, left.Vocabulary);
+        }
+
+        // Prefer exact Jaccard over TopK Jaccard for composite confidence.
+        double jaccardForScoring = exactJaccard ?? topKJaccard;
+
         double compositeConfidence = ComputeCompositeConfidence(
             matchCandidate.NameSimilarity,
             matchCandidate.TypeCompatibility,
-            topKJaccard,
+            jaccardForScoring,
             cardinalityRatio,
             rangeOverlap,
             uniqueKeyScore,
@@ -106,6 +121,9 @@ internal static class JoinEvidenceScorer
             NameSimilarity = matchCandidate.NameSimilarity,
             TypeCompatibility = matchCandidate.TypeCompatibility,
             TopKJaccard = topKJaccard,
+            ExactJaccard = exactJaccard,
+            ContainmentLeftInRight = containmentLeftInRight,
+            ContainmentRightInLeft = containmentRightInLeft,
             CardinalityRatio = cardinalityRatio,
             RangeOverlap = rangeOverlap,
             NullKeyRatio = nullKeyRatio,

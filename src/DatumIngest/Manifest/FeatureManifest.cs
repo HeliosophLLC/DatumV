@@ -81,7 +81,14 @@ public abstract class FeatureManifest
     [JsonConverter(typeof(JsonStringEnumConverter<ColumnRole>))]
     public ColumnRole? Role { get; set; }
 
-
+    /// <summary>
+    /// Gets or sets the exhaustive vocabulary of distinct values for this column, or <c>null</c>
+    /// when the column is not an identifier/foreign key or the distinct count exceeded the
+    /// vocabulary accumulator cap. Not serialized — vocabularies are ephemeral in-memory
+    /// structures used during cross-manifest analysis.
+    /// </summary>
+    [JsonIgnore]
+    public ColumnVocabulary? Vocabulary { get; set; }
 }
 
 /// <summary>
