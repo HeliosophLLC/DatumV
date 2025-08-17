@@ -275,7 +275,7 @@ public sealed class QuerySchemaResolverTests
 
         ResolvedColumn? column = schema.FindColumn("age");
         Assert.NotNull(column);
-        Assert.Equal(DataKind.Int8, column.Kind);
+        Assert.Equal(DataKind.Int32, column.Kind);
     }
 
     [Fact]

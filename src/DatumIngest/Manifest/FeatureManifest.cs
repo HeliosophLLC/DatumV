@@ -169,6 +169,13 @@ public sealed class StringFeatureManifest : FeatureManifest
 
     /// <summary>Gets the maximum string length.</summary>
     public required int MaxLength { get; init; }
+
+    /// <summary>
+    /// Gets the dominant character repertoire of the column values, inferred by
+    /// sampling the top-K entries. Used to detect synthetic identifier strings.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<CharacterClass>))]
+    public CharacterClass CharacterClass { get; init; }
 }
 
 /// <summary>

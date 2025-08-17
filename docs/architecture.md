@@ -1,6 +1,6 @@
 # Architecture
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest executes queries as streaming `IAsyncEnumerable<Row>` pipelines with lazy evaluation and projection pushdown.
 
@@ -97,7 +97,7 @@ DatumIngest/
       Execution/                  # Query planner, operators, expression evaluator
       Functions/                  # Scalar and table-valued functions
       Indexing/                   # Source indexes, bloom filters, sorted indexes, B+Tree indexes, binary I/O
-      Manifest/                   # Manifest model, serialization, cross-manifest analysis
+      Manifest/                   # Manifest model, serialization, schema matching
       Statistics/                 # Column statistics with pluggable accumulators
       Analysis/                   # SourceAnalyzer: single-pass co-generation of schema, index, manifest
       Output/                     # Output writers (CSV, HDF5, Parquet) with sharding

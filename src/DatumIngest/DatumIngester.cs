@@ -228,6 +228,11 @@ public static class DatumIngester
         string schemaJson = SchemaSerializer.Serialize(sourceSchema);
         string manifestJson = ManifestSerializer.Serialize(sourceManifest);
 
+        SourceVocabularySet? vocabularySet = SourceVocabularySet.ExtractFrom(sourceManifest);
+        string? vocabularyJson = vocabularySet is not null
+            ? ManifestSerializer.SerializeVocabulary(vocabularySet)
+            : null;
+
         Dictionary<string, SamplePreview> samples = new(StringComparer.OrdinalIgnoreCase);
         foreach ((string tableName, DatumIngestionTableResult tableResult) in tables)
         {
@@ -245,6 +250,8 @@ public static class DatumIngester
             SourceManifest = sourceManifest,
             SchemaJson = schemaJson,
             ManifestJson = manifestJson,
+            SourceVocabularySet = vocabularySet,
+            VocabularyJson = vocabularyJson,
             Samples = samples,
         };
     }
@@ -315,6 +322,11 @@ public static class DatumIngester
         string schemaJson = SchemaSerializer.Serialize(descriptor.Name, schema);
         string manifestJson = ManifestSerializer.Serialize(manifest);
 
+        SourceVocabularySet? vocabularySet = SourceVocabularySet.ExtractFrom(manifest);
+        string? vocabularyJson = vocabularySet is not null
+            ? ManifestSerializer.SerializeVocabulary(vocabularySet)
+            : null;
+
         await datumWriter.DisposeAsync().ConfigureAwait(false);
 
         datumStream.Position = 0;
@@ -326,11 +338,15 @@ public static class DatumIngester
             TableName = descriptor.Name,
             FileName = $"{descriptor.Name}.datum",
             ManifestFileName = $"{descriptor.Name}.datum-manifest",
+            VocabularyFileName = vocabularySet is not null
+                ? $"{descriptor.Name}.datum-vocabulary"
+                : null,
             Schema = schema,
             Manifest = manifest,
             DatumStream = datumStream,
             SchemaJson = schemaJson,
             ManifestJson = manifestJson,
+            VocabularyJson = vocabularyJson,
             RowCount = rowCount,
             FeatureCount = queryManifest.Features.Count,
             SamplePreview = samplePreview,

@@ -1,6 +1,6 @@
 # Compute Backend (gRPC)
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
 
 DatumIngest.Compute is a gRPC service library that exposes the DatumIngest query engine over the network. It wraps the same `SessionManager` and `CommandDispatcher` used by the interactive shell, enabling remote session management, SQL query streaming, and administrative operations. Embed it in any ASP.NET application with two method calls.
 

@@ -47,7 +47,7 @@ public sealed class CsvTableProviderTests
         Schema schema = await provider.GetSchemaAsync(Descriptor("simple.csv"), CancellationToken.None);
 
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
-        Assert.Equal(DataKind.Int8, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.Int32, schema.Columns[1].Kind);
         Assert.Equal(DataKind.Float64, schema.Columns[2].Kind);
     }
 
@@ -96,7 +96,7 @@ public sealed class CsvTableProviderTests
         List<Row> rows = await ReadAllAsync(
             provider.OpenAsync(Descriptor("simple.csv"), null, CancellationToken.None));
 
-        Assert.Equal((sbyte)30, rows[0]["age"].AsInt8());
+        Assert.Equal(30, rows[0]["age"].AsInt32());
         Assert.Equal(95.5, rows[0]["score"].AsFloat64());
     }
 
@@ -111,7 +111,7 @@ public sealed class CsvTableProviderTests
                 CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal((sbyte)1, rows[0]["id"].AsInt8());
+        Assert.Equal(1, rows[0]["id"].AsInt32());
         Assert.Equal("cat", rows[0]["label"].AsString());
     }
 
@@ -142,16 +142,16 @@ public sealed class CsvTableProviderTests
         Assert.Equal(3, rows.Count);
 
         // First row: x=1, y=null
-        Assert.Equal((sbyte)1, rows[0]["x"].AsInt8());
+        Assert.Equal(1, rows[0]["x"].AsInt32());
         Assert.True(rows[0]["y"].IsNull);
 
         // Second row: x=null, y=3
         Assert.True(rows[1]["x"].IsNull);
-        Assert.Equal((sbyte)3, rows[1]["y"].AsInt8());
+        Assert.Equal(3, rows[1]["y"].AsInt32());
 
         // Third row: x=4, y=5
-        Assert.Equal((sbyte)4, rows[2]["x"].AsInt8());
-        Assert.Equal((sbyte)5, rows[2]["y"].AsInt8());
+        Assert.Equal(4, rows[2]["x"].AsInt32());
+        Assert.Equal(5, rows[2]["y"].AsInt32());
     }
 
     // ───────────────────── Empty file (header only) ─────────────────────
@@ -230,7 +230,7 @@ public sealed class CsvTableProviderTests
             provider.OpenAsync(Descriptor("semicolon.csv"), null, CancellationToken.None));
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal((sbyte)1, rows[0]["id"].AsInt8());
+        Assert.Equal(1, rows[0]["id"].AsInt32());
         Assert.Equal("cat", rows[0]["label"].AsString());
     }
 
@@ -272,10 +272,10 @@ public sealed class CsvTableProviderTests
         Schema schema = await provider.GetSchemaAsync(
             Descriptor("headerless_numeric.csv"), CancellationToken.None);
 
-        Assert.Equal(DataKind.Int8, schema.Columns[0].Kind);    // col_0: 39,50,38,53,28
+        Assert.Equal(DataKind.Int32, schema.Columns[0].Kind);   // col_0: 39,50,38,53,28
         Assert.Equal(DataKind.Int32, schema.Columns[1].Kind);   // col_1: 77516..338409
-        Assert.Equal(DataKind.Int8, schema.Columns[2].Kind);    // col_2: 13,9,12,5,13
-        Assert.Equal(DataKind.Int16, schema.Columns[3].Kind);   // col_3: 2174,0,0,0,0
+        Assert.Equal(DataKind.Int32, schema.Columns[2].Kind);   // col_2: 13,9,12,5,13
+        Assert.Equal(DataKind.Int32, schema.Columns[3].Kind);   // col_3: 2174,0,0,0,0
         Assert.Equal(DataKind.Boolean, schema.Columns[4].Kind); // col_4: 0,0,0,0,0
     }
 
@@ -288,7 +288,7 @@ public sealed class CsvTableProviderTests
 
         // 5 data rows — first row (39,77516,13,...) should be data, not skipped.
         Assert.Equal(5, rows.Count);
-        Assert.Equal((sbyte)39, rows[0]["col_0"].AsInt8());
+        Assert.Equal(39, rows[0]["col_0"].AsInt32());
         Assert.Equal(77516, rows[0]["col_1"].AsInt32());
     }
 
@@ -359,7 +359,7 @@ public sealed class CsvTableProviderTests
 
         // 5 rows in file, header=true skips row 1 → 4 data rows.
         Assert.Equal(4, rows.Count);
-        Assert.Equal((sbyte)50, rows[0]["39"].AsInt8());
+        Assert.Equal(50, rows[0]["39"].AsInt32());
     }
 
     [Fact]
@@ -373,8 +373,8 @@ public sealed class CsvTableProviderTests
 
         Assert.Equal(5, rows.Count);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal((sbyte)39, rows[0]["col_0"].AsInt8());
-        Assert.Equal((sbyte)13, rows[0]["col_2"].AsInt8());
+        Assert.Equal(39, rows[0]["col_0"].AsInt32());
+        Assert.Equal(13, rows[0]["col_2"].AsInt32());
     }
 
     // ───────────────────── ISO 8601 date auto-detection ─────────────────────
@@ -385,7 +385,7 @@ public sealed class CsvTableProviderTests
         CsvTableProvider provider = new();
         Schema schema = await provider.GetSchemaAsync(Descriptor("dates.csv"), CancellationToken.None);
 
-        Assert.Equal(DataKind.Int8, schema.Columns[0].Kind);     // id
+        Assert.Equal(DataKind.Int32, schema.Columns[0].Kind);    // id
         Assert.Equal(DataKind.Date, schema.Columns[1].Kind);     // event_date (no time component)
         Assert.Equal(DataKind.DateTime, schema.Columns[2].Kind); // event_time (has time component)
         Assert.Equal(DataKind.String, schema.Columns[3].Kind);   // label
@@ -534,7 +534,7 @@ public sealed class CsvTableProviderTests
         Assert.Equal(3, rows.Count);
         Assert.Equal(3, rows[0].FieldCount);
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal((sbyte)91, rows[2]["score"].AsInt8());
+        Assert.Equal(91, rows[2]["score"].AsInt32());
     }
 
     // ───────── All-string header detection (value disjointness) ─────────
@@ -585,6 +585,45 @@ public sealed class CsvTableProviderTests
         Assert.Equal(5, rows.Count);
         Assert.Equal("Alice", rows[0]["col_0"].AsString());
         Assert.Equal("New York", rows[0]["col_1"].AsString());
+    }
+
+    // ───────────────────── Integer width safety ─────────────────────
+
+    /// <summary>
+    /// Verifies that integer columns whose sample rows contain only small values
+    /// (fitting in Int8) are still inferred as Int32, preventing silent null
+    /// conversion when later rows contain values exceeding Int8/Int16 range.
+    /// </summary>
+    [Fact]
+    public async Task GetSchema_WideRangeIds_InfersInt32NotInt8()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(
+            Descriptor("wide_range_ids.csv"), CancellationToken.None);
+
+        Assert.Equal(DataKind.Int32, schema.Columns[0].Kind); // order_id: 1..100000
+        Assert.Equal(DataKind.Int32, schema.Columns[1].Kind); // product_id: 10..49688
+        Assert.Equal(DataKind.Int32, schema.Columns[2].Kind); // quantity: 1..7
+    }
+
+    /// <summary>
+    /// Confirms that values exceeding the old Int8 boundary (127) are correctly
+    /// parsed as non-null Int32 values during the full read pass.
+    /// </summary>
+    [Fact]
+    public async Task Open_WideRangeIds_LargeValuesNotNull()
+    {
+        CsvTableProvider provider = new();
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("wide_range_ids.csv"), null, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count);
+
+        // Values that would have been silently nullified under Int8 inference.
+        Assert.Equal(500, rows[3]["order_id"].AsInt32());
+        Assert.Equal(40000, rows[3]["product_id"].AsInt32());
+        Assert.Equal(100000, rows[4]["order_id"].AsInt32());
+        Assert.Equal(49688, rows[4]["product_id"].AsInt32());
     }
 
     // ───────────────────── Boolean detection ─────────────────────

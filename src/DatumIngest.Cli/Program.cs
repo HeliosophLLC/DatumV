@@ -11,6 +11,7 @@ using DatumIngest.Output;
 using DatumIngest.Output.Checkpoint;
 using CheckpointFingerprint = DatumIngest.Output.Checkpoint.SourceFingerprint;
 using DatumIngest.Manifest;
+using DatumIngest.Manifest.SchemaMatching;
 using DatumIngest.Output.Writers;
 using DatumIngest.Cli.Shell;
 using DatumIngest.Parsing;
@@ -46,15 +47,15 @@ try
         return await RunManifestSchemaAsync(catalog, options.OutputPath);
     }
 
+    if (options.Command == "star-schema")
+    {
+        return await RunStarSchemaAsync(catalog, options);
+    }
+
     if (options.Command == "shell")
     {
         InteractiveShell shell = new(catalog);
         return await shell.RunAsync(CancellationToken.None);
-    }
-
-    if (options.Command == "cross-manifest")
-    {
-        return await RunCrossManifestAsync(catalog, options);
     }
 
     QueryExpression query = SqlParser.Parse(options.Sql);
@@ -79,7 +80,7 @@ try
         "explain" => await RunExplainAsync(query, catalog, options.Analyze, options.MemoryBudgetBytes),
         "manifest" => await RunManifestAsync(query, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(query, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'cross-manifest'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'star-schema'.")
     };
 }
 catch (ArgumentException ex)
@@ -453,6 +454,18 @@ static async Task BuildGroupedIndexAndManifestAsync(
         await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
 
         Console.WriteLine($"Manifest created: {manifestPath}");
+
+        // Write grouped vocabulary sidecar when any columns have attached vocabularies.
+        SourceVocabularySet? vocabularySet = SourceVocabularySet.ExtractFrom(sourceManifest);
+
+        if (vocabularySet is not null)
+        {
+            string vocabularyPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-vocabulary";
+            await ManifestSerializer.WriteVocabularyToFileAsync(vocabularySet, vocabularyPath).ConfigureAwait(false);
+
+            int columnCount = vocabularySet.Tables.Values.Sum(table => table.Columns.Count);
+            Console.WriteLine($"Vocabulary created: {vocabularyPath} ({columnCount} column(s))");
+        }
     }
     finally
     {
@@ -461,6 +474,89 @@ static async Task BuildGroupedIndexAndManifestAsync(
             await sourceStream.DisposeAsync();
         }
     }
+}
+
+static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions options)
+{
+    List<TableDescriptor> descriptors = new();
+
+    foreach (string source in options.Sources)
+    {
+        if (Directory.Exists(source))
+        {
+            continue;
+        }
+
+        TableDescriptor descriptor = ParseSourceDefinition(source);
+
+        if (!catalog.TryResolve(descriptor.Name, out _))
+        {
+            catalog.Register(descriptor);
+        }
+
+        descriptors.Add(descriptor);
+    }
+
+    if (descriptors.Count == 0)
+    {
+        foreach (string tableName in catalog.TableNames)
+        {
+            descriptors.Add(catalog.Resolve(tableName));
+        }
+    }
+
+    if (descriptors.Count == 0)
+    {
+        throw new ArgumentException("The 'star-schema' command requires at least one --source definition or a --catalog with tables.");
+    }
+
+    List<ManifestWithName> manifests = new();
+
+    foreach (TableDescriptor descriptor in descriptors)
+    {
+        ITableProvider provider = catalog.CreateProvider(descriptor);
+        StatisticsCollector statisticsCollector = new();
+        Dictionary<string, DataKind> columnKinds = new();
+        long rowCount = 0;
+
+        await foreach (Row row in provider.OpenAsync(
+            descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
+        {
+            if (rowCount == 0)
+            {
+                foreach (string columnName in row.ColumnNames)
+                {
+                    columnKinds[columnName] = row[columnName].Kind;
+                }
+            }
+
+            statisticsCollector.AddRow(row);
+            rowCount++;
+        }
+
+        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount);
+        string tableName = GetSidecarTableName(descriptor);
+        manifests.Add(new ManifestWithName(tableName, manifest));
+
+        Console.WriteLine($"  {tableName}: {rowCount:N0} rows, {columnKinds.Count} columns");
+    }
+
+    StarSchemaResult result = StarSchemaDetector.Detect(manifests);
+
+    string json = ManifestSerializer.SerializeStarSchema(result);
+
+    if (options.OutputPath is not null)
+    {
+        await File.WriteAllTextAsync(options.OutputPath, json).ConfigureAwait(false);
+        Console.WriteLine($"Star schema written: {options.OutputPath}");
+    }
+    else
+    {
+        Console.WriteLine(json);
+    }
+
+    return 0;
 }
 
 static string GetSidecarTableName(TableDescriptor descriptor)
@@ -917,63 +1013,6 @@ static async Task<int> RunSchemaAsync(QueryExpression query, TableCatalog catalo
     }
 
     Console.WriteLine($"\n({schema.Columns.Count} column(s) from {schema.TableNames.Count()} source(s))");
-    return 0;
-}
-
-static async Task<int> RunCrossManifestAsync(TableCatalog catalog, CliOptions options)
-{
-    // Load manifest files directly when --manifest paths are provided.
-    foreach (string manifestPath in options.ManifestPaths)
-    {
-        string json = await File.ReadAllTextAsync(manifestPath);
-        DatumIngest.Manifest.SourceManifest? sourceManifest = ManifestSerializer.Deserialize(json);
-
-        if (sourceManifest is null)
-        {
-            Console.Error.WriteLine($"Warning: could not parse manifest file: {manifestPath}");
-            continue;
-        }
-
-        // Use the file name (without extension) as the table name if the manifest
-        // contains a single anonymous table.
-        string baseName = Path.GetFileNameWithoutExtension(manifestPath);
-
-        foreach (System.Collections.Generic.KeyValuePair<string, QueryResultsManifest> entry in sourceManifest.Tables)
-        {
-            string tableName = string.IsNullOrEmpty(entry.Key) ? baseName : entry.Key;
-            catalog.RegisterManifest(tableName, entry.Value);
-        }
-    }
-
-    if (!catalog.HasJoinSuggestions)
-    {
-        Console.Error.WriteLine("Error: at least two tables with manifests are required for cross-manifest analysis.");
-        return 1;
-    }
-
-    DatumIngest.Manifest.CrossManifest.CrossManifestResult? result =
-        catalog.GetOrComputeCrossManifest(forceCompute: true);
-
-    if (result is null)
-    {
-        Console.Error.WriteLine("Error: could not compute cross-manifest analysis.");
-        return 1;
-    }
-
-    string resultJson = ManifestSerializer.SerializeCrossManifest(result);
-
-    if (options.OutputPath is not null)
-    {
-        await File.WriteAllTextAsync(options.OutputPath, resultJson);
-        Console.Error.WriteLine($"Cross-manifest result written to: {options.OutputPath}");
-    }
-    else
-    {
-        Console.WriteLine(resultJson);
-    }
-
-    int totalEdges = result.JoinGraphs.Sum(g => g.Edges.Count);
-    Console.Error.WriteLine($"({result.Tables.Count} table(s), {result.Candidates.Count} candidate(s), {result.JoinGraphs.Count} graph(s), {totalEdges} edge(s))");
     return 0;
 }
 

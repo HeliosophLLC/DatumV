@@ -247,6 +247,7 @@ public static class ManifestBuilder
             TopKValues = topK,
             MinLength = stringResult.MinLength,
             MaxLength = stringResult.MaxLength,
+            CharacterClass = ClassifyCharacterClass(topK),
             Entropy = entropyResult?.Value,
             EntropyApproximate = entropyResult?.Approximate
         };
@@ -476,6 +477,77 @@ public static class ManifestBuilder
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Classifies the dominant character repertoire of a string column by inspecting
+    /// its top-K values. Returns <see cref="CharacterClass.Mixed"/> when there are
+    /// no samples or the values contain characters outside the restricted sets.
+    /// </summary>
+    internal static CharacterClass ClassifyCharacterClass(IReadOnlyList<FrequencyEntry> topKValues)
+    {
+        if (topKValues.Count == 0)
+        {
+            return CharacterClass.Mixed;
+        }
+
+        bool allHex = true;
+        bool allBase64 = true;
+        bool allAlphanumeric = true;
+
+        foreach (FrequencyEntry entry in topKValues)
+        {
+            if (entry.Value.Length == 0)
+            {
+                continue;
+            }
+
+            foreach (char character in entry.Value)
+            {
+                bool isDigit = character is >= '0' and <= '9';
+                bool isLower = character is >= 'a' and <= 'z';
+                bool isUpper = character is >= 'A' and <= 'Z';
+                bool isHexLower = character is >= 'a' and <= 'f';
+                bool isHexUpper = character is >= 'A' and <= 'F';
+
+                if (!isDigit && !isLower && !isUpper)
+                {
+                    allAlphanumeric = false;
+
+                    if (character is not '+' and not '/' and not '=')
+                    {
+                        allBase64 = false;
+                    }
+                }
+
+                if (!isDigit && !isHexLower && !isHexUpper)
+                {
+                    allHex = false;
+                }
+
+                if (!allHex && !allBase64 && !allAlphanumeric)
+                {
+                    return CharacterClass.Mixed;
+                }
+            }
+        }
+
+        if (allHex)
+        {
+            return CharacterClass.Hexadecimal;
+        }
+
+        if (allAlphanumeric)
+        {
+            return CharacterClass.Alphanumeric;
+        }
+
+        if (allBase64)
+        {
+            return CharacterClass.Base64;
+        }
+
+        return CharacterClass.Mixed;
     }
 
     private static IReadOnlyList<FrequencyEntry> MapTopK(TopKResult? topKResult)

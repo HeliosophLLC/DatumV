@@ -150,6 +150,24 @@ public enum InsightKind
     EquivalentTablePartition,
 
     /// <summary>
+    /// Two or more tables share the same schema with a temporal column whose date ranges
+    /// are disjoint, indicating time-based partitions suitable for UNION ALL.
+    /// </summary>
+    TemporalPartition,
+
+    /// <summary>
+    /// Two or more tables have near-identical schemas and overlapping values, suggesting
+    /// redundant copies of the same data. One copy should be dropped.
+    /// </summary>
+    DuplicateRepresentation,
+
+    /// <summary>
+    /// Two or more tables share most column names but have type differences on some columns,
+    /// suggesting schema evolution or incompatible data sources.
+    /// </summary>
+    NearDuplicateSchema,
+
+    /// <summary>
     /// The join graph has high structural complexity — many edges relative to
     /// the number of tables, indicating ambiguous join paths. Consider manual
     /// join specification.

@@ -2,7 +2,6 @@ using System.IO.Compression;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
-using DatumIngest.Manifest.CrossManifest;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog;
@@ -37,11 +36,6 @@ public sealed class TableCatalog : IDisposable
     private readonly Dictionary<string, QueryResultsManifest> _manifests = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Schema> _schemas = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _tempFiles = new();
-
-    /// <summary>
-    /// Cached cross-manifest analysis result. Invalidated when a new manifest is registered.
-    /// </summary>
-    private CrossManifestResult? _crossManifestCache;
 
     /// <summary>
     /// Initializes a new <see cref="TableCatalog"/> with all built-in provider factories
@@ -317,7 +311,6 @@ public sealed class TableCatalog : IDisposable
     public void RegisterManifest(string tableName, QueryResultsManifest manifest)
     {
         _manifests[tableName] = manifest;
-        _crossManifestCache = null; // Invalidate — new manifest changes the analysis.
     }
 
     /// <summary>
@@ -354,9 +347,10 @@ public sealed class TableCatalog : IDisposable
     }
 
     /// <summary>
-    /// Auto-discovers <c>.datum-index</c>, <c>.datum-manifest</c>, and <c>.datum-schema</c>
-    /// sidecar files for all registered tables. Each sidecar is loaded at most once per
-    /// unique source file path, and tables that already have a registered artifact are skipped.
+    /// Auto-discovers <c>.datum-index</c>, <c>.datum-manifest</c>, <c>.datum-vocabulary</c>,
+    /// and <c>.datum-schema</c> sidecar files for all registered tables. Each sidecar is
+    /// loaded at most once per unique source file path, and tables that already have a
+    /// registered artifact are skipped.
     /// </summary>
     /// <remarks>
     /// This is the single entry point for sidecar discovery, replacing the per-site
@@ -367,6 +361,7 @@ public sealed class TableCatalog : IDisposable
     {
         HashSet<string> loadedIndexPaths = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> loadedManifestPaths = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> loadedVocabularyPaths = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> loadedSchemaPaths = new(StringComparer.OrdinalIgnoreCase);
 
         // Snapshot table names to avoid issues if the set is mutated.
@@ -378,6 +373,7 @@ public sealed class TableCatalog : IDisposable
 
             DiscoverSidecarIndex(descriptor, tableNames, loadedIndexPaths);
             DiscoverSidecarManifest(descriptor, tableNames, loadedManifestPaths);
+            DiscoverSidecarVocabulary(descriptor, tableNames, loadedVocabularyPaths);
             DiscoverSidecarSchema(descriptor, tableNames, loadedSchemaPaths);
         }
     }
@@ -430,6 +426,68 @@ public sealed class TableCatalog : IDisposable
             descriptor.FilePath,
             tableNames,
             (name, manifest) => { if (!_manifests.ContainsKey(name)) RegisterManifest(name, manifest); });
+    }
+
+    private void DiscoverSidecarVocabulary(
+        TableDescriptor descriptor,
+        List<string> tableNames,
+        HashSet<string> loadedPaths)
+    {
+        string sidecarPath = FileFormatDetector.GetSidecarBasePath(descriptor.FilePath) + ".datum-vocabulary";
+
+        if (!File.Exists(sidecarPath) || !loadedPaths.Add(sidecarPath))
+        {
+            return;
+        }
+
+        string json = File.ReadAllText(sidecarPath);
+        SourceVocabularySet? vocabularySet = ManifestSerializer.DeserializeVocabulary(json);
+
+        if (vocabularySet is null)
+        {
+            return;
+        }
+
+        // Attach vocabularies to already-registered manifests rather than registering
+        // a separate artifact. Each table's vocabulary set is applied to its manifest,
+        // enabling exact Jaccard/containment scoring during schema matching analysis.
+        foreach (string name in tableNames)
+        {
+            if (!_descriptors.TryGetValue(name, out TableDescriptor? d)
+                || !string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string? resolvedName = ResolveVocabularyTableName(vocabularySet, name, d.FilePath);
+
+            if (resolvedName is not null
+                && vocabularySet.Tables.TryGetValue(resolvedName, out TableVocabularySet? tableVocabularySet)
+                && _manifests.TryGetValue(name, out QueryResultsManifest? manifest))
+            {
+                tableVocabularySet.ApplyTo(manifest);
+            }
+        }
+    }
+
+    private static string? ResolveVocabularyTableName(
+        SourceVocabularySet vocabularySet,
+        string tableName,
+        string sourceFilePath)
+    {
+        if (vocabularySet.Tables.ContainsKey(tableName))
+        {
+            return tableName;
+        }
+
+        string derivedTableName = FileFormatDetector.DeriveTableName(sourceFilePath);
+
+        if (vocabularySet.Tables.ContainsKey(derivedTableName))
+        {
+            return derivedTableName;
+        }
+
+        return null;
     }
 
     private void DiscoverSidecarSchema(
@@ -508,73 +566,6 @@ public sealed class TableCatalog : IDisposable
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Maximum pairwise candidate count (N × M features) before automatic cross-manifest
-    /// analysis is skipped. Callers must explicitly invoke
-    /// <see cref="GetOrComputeCrossManifest"/> when this threshold is exceeded.
-    /// </summary>
-    private const int AutoAnalysisMaxPairwiseColumns = 1000;
-
-    /// <summary>
-    /// Returns <see langword="true"/> when cross-manifest join suggestions are available,
-    /// meaning at least two manifests are registered.
-    /// </summary>
-    public bool HasJoinSuggestions => _manifests.Count >= 2;
-
-    /// <summary>
-    /// Gets or computes the cached cross-manifest analysis result.
-    /// Returns <see langword="null"/> when fewer than two manifests are registered or
-    /// when the pairwise column product exceeds the automatic analysis threshold
-    /// and <paramref name="forceCompute"/> is <see langword="false"/>.
-    /// </summary>
-    /// <param name="thresholds">
-    /// Optional thresholds. When <see langword="null"/>, defaults are used.
-    /// </param>
-    /// <param name="forceCompute">
-    /// When <see langword="true"/>, bypass the pairwise column threshold check.
-    /// </param>
-    /// <returns>The cross-manifest result, or <see langword="null"/> if analysis is not applicable.</returns>
-    public CrossManifestResult? GetOrComputeCrossManifest(
-        CrossManifestThresholds? thresholds = null,
-        bool forceCompute = false)
-    {
-        if (_manifests.Count < 2)
-        {
-            return null;
-        }
-
-        if (_crossManifestCache is not null)
-        {
-            return _crossManifestCache;
-        }
-
-        // Check pairwise column product to avoid expensive analysis on very large catalogs.
-        if (!forceCompute)
-        {
-            long totalColumns = 0;
-
-            foreach (QueryResultsManifest manifest in _manifests.Values)
-            {
-                totalColumns += manifest.Features.Count;
-            }
-
-            if (totalColumns * totalColumns > AutoAnalysisMaxPairwiseColumns)
-            {
-                return null;
-            }
-        }
-
-        List<ManifestWithName> manifests = new(_manifests.Count);
-
-        foreach (KeyValuePair<string, QueryResultsManifest> entry in _manifests)
-        {
-            manifests.Add(new ManifestWithName(entry.Key, entry.Value));
-        }
-
-        _crossManifestCache = CrossManifestAnalyzer.Analyze(manifests, thresholds);
-        return _crossManifestCache;
     }
 
     /// <summary>

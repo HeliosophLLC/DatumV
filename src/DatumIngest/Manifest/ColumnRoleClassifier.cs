@@ -34,6 +34,33 @@ public static class ColumnRoleClassifier
     private const double IdentifierMaxNullRatio = 0.01;
 
     /// <summary>
+    /// Minimum absolute NDV for an integer column to be classified as <see cref="ColumnRole.ForeignKey"/>
+    /// regardless of its NDV-to-row-count ratio. Columns with thousands of distinct integer
+    /// values are never practical categoricals — they are join keys with high fan-out.
+    /// </summary>
+    private const long ForeignKeyMinDistinctCount = 1000;
+
+    /// <summary>
+    /// Minimum absolute NDV for a contiguous integer range to be classified as a measure
+    /// instead of categorical. Below this threshold, contiguous ranges like day-of-week (0–6)
+    /// and month (1–12) remain categorical.
+    /// </summary>
+    private const long MinContiguousMeasureDistinctCount = 25;
+
+    /// <summary>
+    /// Maximum absolute NDV for the contiguous measure classification. Above this threshold,
+    /// contiguous integer ranges are more likely sequential FK/ID values than bounded measures.
+    /// </summary>
+    private const long MaxContiguousMeasureDistinctCount = 500;
+
+    /// <summary>
+    /// Fraction of the theoretical range (max − min + 1) that must be covered by estimated
+    /// distinct count for a column to be considered a contiguous integer range.
+    /// Allows for HyperLogLog estimation error.
+    /// </summary>
+    private const double ContiguousRangeCoverage = 0.9;
+
+    /// <summary>
     /// Classifies a column's semantic role from its manifest statistics.
     /// </summary>
     /// <param name="manifest">The feature manifest for the column.</param>
@@ -117,10 +144,25 @@ public static class ColumnRoleClassifier
             return ColumnRole.Identifier;
         }
 
+        // Contiguous integer range with moderate NDV → Measure.
+        // Columns covering every integer in [min, max] are bounded numeric measures
+        // (e.g. days_since_prior_order 0–30, age 0–99), not categorical dimensions.
+        if (IsContiguousIntegerMeasure(manifest))
+        {
+            return ColumnRole.Measure;
+        }
+
         // Trivially small vocabulary → Categorical.
         if (manifest.EstimatedDistinctCount <= TrivialVocabularySize)
         {
             return ColumnRole.Categorical;
+        }
+
+        // High absolute NDV → ForeignKey regardless of ratio.
+        // Columns with thousands of distinct integer values are join keys, not categoricals.
+        if (manifest.EstimatedDistinctCount > ForeignKeyMinDistinctCount)
+        {
+            return ColumnRole.ForeignKey;
         }
 
         // Strong repetition → Categorical.
@@ -177,13 +219,30 @@ public static class ColumnRoleClassifier
         return ColumnRole.Measure;
     }
 
+    /// <summary>Minimum fixed string length to qualify as a synthetic identifier.
+    /// Below this threshold, fixed-length alphanumeric strings are more likely to be
+    /// abbreviation codes (state codes, currency codes) than synthetic identifiers.</summary>
+    private const int MinSyntheticIdentifierLength = 8;
+
     /// <summary>
-    /// Classifies a string or JSON column. Strings never classify as Identifier or
-    /// ForeignKey — prefer omitting a join over generating false positives from
-    /// string matching.
+    /// Classifies a string or JSON column. Fixed-length strings with restricted character
+    /// repertoire (hexadecimal, base-64, alphanumeric) are classified as synthetic identity
+    /// columns (Identifier or ForeignKey depending on cardinality); long high-cardinality
+    /// strings as text; all others as categorical.
     /// </summary>
     private static ColumnRole ClassifyStringColumn(FeatureManifest manifest, double distinctRatio)
     {
+        // Fixed-length + restricted character set + sufficient length → synthetic identity column.
+        if (manifest is StringFeatureManifest
+            {
+                MinLength: >= MinSyntheticIdentifierLength, CharacterClass: not CharacterClass.Mixed
+            } stringManifest
+            && stringManifest.MinLength == stringManifest.MaxLength)
+        {
+            double nullRatio = manifest.NullRatio ?? 0.0;
+            return ClassifyIdentityColumn(distinctRatio, nullRatio);
+        }
+
         // High distinct ratio + long values → Text.
         if (distinctRatio > TextDistinctRatio && manifest is StringFeatureManifest { MaxLength: > TextMaxLengthThreshold })
         {
@@ -224,6 +283,38 @@ public static class ColumnRoleClassifier
         }
 
         return (double)topKTotal / rowCount;
+    }
+
+    /// <summary>
+    /// Detects bounded numeric measures that happen to have small NDV because their domain
+    /// is a contiguous integer range. Distinguished from trivial categoricals (day_of_week,
+    /// month) by requiring NDV above <see cref="MinContiguousMeasureDistinctCount"/>, and from
+    /// sequential FK/ID columns by capping at <see cref="MaxContiguousMeasureDistinctCount"/>.
+    /// </summary>
+    private static bool IsContiguousIntegerMeasure(FeatureManifest manifest)
+    {
+        if (manifest is not NumericFeatureManifest { IntegerValued: true } numeric)
+        {
+            return false;
+        }
+
+        long ndv = manifest.EstimatedDistinctCount;
+
+        if (ndv <= MinContiguousMeasureDistinctCount || ndv > MaxContiguousMeasureDistinctCount)
+        {
+            return false;
+        }
+
+        double rangeSpan = numeric.Max - numeric.Min + 1;
+
+        if (rangeSpan <= 0)
+        {
+            return false;
+        }
+
+        double coverage = ndv / rangeSpan;
+
+        return coverage >= ContiguousRangeCoverage;
     }
 
     private static bool IsIntegerKind(DataKind kind)

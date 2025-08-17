@@ -560,4 +560,98 @@ public sealed class ManifestBuilderTests
         data[11] = (byte)channels;
         return data;
     }
+
+    // ─────────────── CharacterClass ───────────────
+
+    [Fact]
+    public void ClassifyCharacterClass_EmptyTopK_ReturnsMixed()
+    {
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass([]);
+
+        Assert.Equal(CharacterClass.Mixed, result);
+    }
+
+    [Fact]
+    public void ClassifyCharacterClass_HexValues_ReturnsHexadecimal()
+    {
+        List<FrequencyEntry> topK =
+        [
+            new("06b8999e2fba1a1fbc88172c00ba8bc7", 1),
+            new("18955e83d337fd6b2def6b18a428ac77", 1),
+            new("AABB0011ccDD2233eeff4455", 1),
+        ];
+
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass(topK);
+
+        Assert.Equal(CharacterClass.Hexadecimal, result);
+    }
+
+    [Fact]
+    public void ClassifyCharacterClass_Base64Values_ReturnsBase64()
+    {
+        List<FrequencyEntry> topK =
+        [
+            new("dGhpcyBpcyBhIHRlc3Q=", 1),
+            new("SGVsbG8gV29ybGQ/Kw==", 1),
+        ];
+
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass(topK);
+
+        Assert.Equal(CharacterClass.Base64, result);
+    }
+
+    [Fact]
+    public void ClassifyCharacterClass_AlphanumericValues_ReturnsAlphanumeric()
+    {
+        List<FrequencyEntry> topK =
+        [
+            new("SKU12345XYZ", 1),
+            new("PROD9876ABC", 1),
+        ];
+
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass(topK);
+
+        Assert.Equal(CharacterClass.Alphanumeric, result);
+    }
+
+    [Fact]
+    public void ClassifyCharacterClass_MixedValues_ReturnsMixed()
+    {
+        List<FrequencyEntry> topK =
+        [
+            new("Hello, world!", 1),
+            new("São Paulo", 1),
+        ];
+
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass(topK);
+
+        Assert.Equal(CharacterClass.Mixed, result);
+    }
+
+    [Fact]
+    public void ClassifyCharacterClass_HexWithSpaces_ReturnsMixed()
+    {
+        List<FrequencyEntry> topK =
+        [
+            new("06b8999e 2fba1a1f", 1),
+        ];
+
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass(topK);
+
+        Assert.Equal(CharacterClass.Mixed, result);
+    }
+
+    [Fact]
+    public void ClassifyCharacterClass_PureDigits_ReturnsHexadecimal()
+    {
+        List<FrequencyEntry> topK =
+        [
+            new("12345678", 1),
+            new("99887766", 1),
+        ];
+
+        CharacterClass result = ManifestBuilder.ClassifyCharacterClass(topK);
+
+        Assert.Equal(CharacterClass.Hexadecimal, result);
+    }
 }

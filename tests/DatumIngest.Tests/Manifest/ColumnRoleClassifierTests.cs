@@ -95,10 +95,10 @@ public sealed class ColumnRoleClassifierTests
     public void Classify_ModerateRepetitionWithConcentratedTopK_ReturnsCategorical()
     {
         NumericFeatureManifest manifest = MakeNumericManifest(
-            DataKind.Int32, estimatedDistinctCount: 2000, nullRatio: 0.0,
-            topKValues: [new FrequencyEntry("1", 3000), new FrequencyEntry("2", 2500), new FrequencyEntry("3", 1000)]);
+            DataKind.Int32, estimatedDistinctCount: 500, nullRatio: 0.0,
+            topKValues: [new FrequencyEntry("1", 600), new FrequencyEntry("2", 500), new FrequencyEntry("3", 200)]);
 
-        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 2000);
 
         Assert.Equal(ColumnRole.Categorical, role);
     }
@@ -123,6 +123,58 @@ public sealed class ColumnRoleClassifierTests
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
 
         Assert.Equal(ColumnRole.Categorical, role);
+    }
+
+    [Fact]
+    public void Classify_SmallContiguousRange_ReturnsCategorical()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int32, estimatedDistinctCount: 7, nullRatio: 0.0,
+            min: 0, max: 6);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 100000);
+
+        Assert.Equal(ColumnRole.Categorical, role);
+    }
+
+    // ─────────────── ForeignKey (NDV floor) ───────────────
+
+    [Fact]
+    public void Classify_HighAbsoluteNdvInteger_ReturnsForeignKey()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int32, estimatedDistinctCount: 5000, nullRatio: 0.0,
+            min: 1, max: 206209);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000000);
+
+        Assert.Equal(ColumnRole.ForeignKey, role);
+    }
+
+    // ─────────────── Measure (contiguous range) ───────────────
+
+    [Fact]
+    public void Classify_ContiguousIntegerRange_ReturnsMeasure()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int64, estimatedDistinctCount: 31, nullRatio: 0.06,
+            min: 0, max: 30);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 3421083);
+
+        Assert.Equal(ColumnRole.Measure, role);
+    }
+
+    [Fact]
+    public void Classify_LargeContiguousRange_ReturnsForeignKey()
+    {
+        NumericFeatureManifest manifest = MakeNumericManifest(
+            DataKind.Int32, estimatedDistinctCount: 10000, nullRatio: 0.0,
+            min: 1, max: 10000);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 1000000);
+
+        Assert.Equal(ColumnRole.ForeignKey, role);
     }
 
     // ─────────────── Measure ───────────────
@@ -237,6 +289,92 @@ public sealed class ColumnRoleClassifierTests
     {
         StringFeatureManifest manifest = MakeStringManifest(
             estimatedDistinctCount: 8000, nullRatio: 0.0, maxLength: 30);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.Categorical, role);
+    }
+
+    // ─────────────── String Identifier (CharacterClass) ───────────────
+
+    [Fact]
+    public void Classify_FixedLengthHexHighCardinality_ReturnsIdentifier()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 9500, nullRatio: 0.0, minLength: 32, maxLength: 32,
+            characterClass: CharacterClass.Hexadecimal);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.Identifier, role);
+    }
+
+    [Fact]
+    public void Classify_FixedLengthBase64HighCardinality_ReturnsIdentifier()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 9500, nullRatio: 0.0, minLength: 24, maxLength: 24,
+            characterClass: CharacterClass.Base64);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.Identifier, role);
+    }
+
+    [Fact]
+    public void Classify_FixedLengthAlphanumericHighCardinality_ReturnsIdentifier()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 9500, nullRatio: 0.0, minLength: 20, maxLength: 20,
+            characterClass: CharacterClass.Alphanumeric);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.Identifier, role);
+    }
+
+    [Fact]
+    public void Classify_FixedLengthHexLowCardinality_ReturnsForeignKey()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 500, nullRatio: 0.0, minLength: 32, maxLength: 32,
+            characterClass: CharacterClass.Hexadecimal);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.ForeignKey, role);
+    }
+
+    [Fact]
+    public void Classify_VariableLengthHexHighCardinality_ReturnsCategorical()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 9500, nullRatio: 0.0, minLength: 16, maxLength: 32,
+            characterClass: CharacterClass.Hexadecimal);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.Categorical, role);
+    }
+
+    [Fact]
+    public void Classify_FixedLengthMixedHighCardinality_ReturnsCategorical()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 9500, nullRatio: 0.0, minLength: 32, maxLength: 32,
+            characterClass: CharacterClass.Mixed);
+
+        ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
+
+        Assert.Equal(ColumnRole.Categorical, role);
+    }
+
+    [Fact]
+    public void Classify_ShortFixedLengthAlphanumeric_ReturnsCategorical()
+    {
+        StringFeatureManifest manifest = MakeStringManifest(
+            estimatedDistinctCount: 27, nullRatio: 0.0, minLength: 2, maxLength: 2,
+            characterClass: CharacterClass.Alphanumeric);
 
         ColumnRole role = ColumnRoleClassifier.Classify(manifest, rowCount: 10000);
 
@@ -368,7 +506,9 @@ public sealed class ColumnRoleClassifierTests
         long estimatedDistinctCount,
         double nullRatio,
         bool integerValued = true,
-        IReadOnlyList<FrequencyEntry>? topKValues = null)
+        IReadOnlyList<FrequencyEntry>? topKValues = null,
+        double min = 0.0,
+        double max = 10000.0)
     {
         return new NumericFeatureManifest
         {
@@ -381,8 +521,8 @@ public sealed class ColumnRoleClassifierTests
             TopKValues = topKValues ?? [],
             NullRatio = nullRatio,
             DominantValueRatio = null,
-            Min = 0.0,
-            Max = 10000.0,
+            Min = min,
+            Max = max,
             Mean = 5000.0,
             Variance = 1000.0,
             StandardDeviation = 31.62,
@@ -404,7 +544,9 @@ public sealed class ColumnRoleClassifierTests
     private static StringFeatureManifest MakeStringManifest(
         long estimatedDistinctCount,
         double nullRatio,
-        int maxLength)
+        int maxLength,
+        int minLength = 1,
+        CharacterClass characterClass = CharacterClass.Mixed)
     {
         return new StringFeatureManifest
         {
@@ -417,8 +559,9 @@ public sealed class ColumnRoleClassifierTests
             TopKValues = [],
             NullRatio = nullRatio,
             DominantValueRatio = null,
-            MinLength = 1,
-            MaxLength = maxLength
+            MinLength = minLength,
+            MaxLength = maxLength,
+            CharacterClass = characterClass
         };
     }
 

@@ -402,7 +402,6 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         return new AddSourceResponse
         {
             Message = result.Message ?? "Source added.",
-            HasJoinSuggestions = session.Catalog.HasJoinSuggestions,
         };
     }
 
@@ -514,30 +513,6 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             : "";
 
         return Task.FromResult(new GetStatsResponse { ManifestJson = manifestJson });
-    }
-
-    /// <inheritdoc />
-    public override Task<GetJoinSuggestionsResponse> GetJoinSuggestions(
-        GetJoinSuggestionsRequest request, ServerCallContext context)
-    {
-        Session session = ResolveSession(request.SessionId);
-
-        if (!session.Catalog.HasJoinSuggestions)
-        {
-            return Task.FromResult(new GetJoinSuggestionsResponse());
-        }
-
-        Manifest.CrossManifest.CrossManifestResult? result =
-            session.Catalog.GetOrComputeCrossManifest(forceCompute: true);
-
-        if (result is null)
-        {
-            return Task.FromResult(new GetJoinSuggestionsResponse());
-        }
-
-        string resultJson = ManifestSerializer.SerializeCrossManifest(result);
-
-        return Task.FromResult(new GetJoinSuggestionsResponse { ResultJson = resultJson });
     }
 
     /// <summary>

@@ -51,6 +51,18 @@ public sealed class DatumIngestionTableResult
     /// <summary>Serialized single-table manifest JSON.</summary>
     public required string ManifestJson { get; init; }
 
+    /// <summary>
+    /// The destination file name for this table's <c>.datum-vocabulary</c> file,
+    /// or <c>null</c> when no columns have attached vocabularies.
+    /// </summary>
+    public string? VocabularyFileName { get; init; }
+
+    /// <summary>
+    /// Serialized vocabulary JSON for this table, or <c>null</c> when no columns
+    /// have attached vocabularies.
+    /// </summary>
+    public string? VocabularyJson { get; init; }
+
     /// <summary>Total number of rows ingested for this table.</summary>
     public required long RowCount { get; init; }
 

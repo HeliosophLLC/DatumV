@@ -1,6 +1,6 @@
 # SQL Reference
 
-[← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), QUALIFY, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), and set operations (UNION, INTERSECT, EXCEPT).
 

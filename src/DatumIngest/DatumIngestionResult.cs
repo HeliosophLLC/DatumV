@@ -43,6 +43,18 @@ public sealed class DatumIngestionResult : IAsyncDisposable
     /// <summary>Serialized <c>SourceManifest</c> JSON containing column statistics.</summary>
     public string ManifestJson { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets the combined source vocabulary set covering all ingested tables,
+    /// or <c>null</c> when no columns have attached vocabularies.
+    /// </summary>
+    public SourceVocabularySet? SourceVocabularySet { get; init; }
+
+    /// <summary>
+    /// Serialized <c>SourceVocabularySet</c> JSON, or <c>null</c> when no columns
+    /// have attached vocabularies.
+    /// </summary>
+    public string? VocabularyJson { get; init; }
+
     /// <summary>Total number of rows ingested across all tables.</summary>
     public long RowCount => Tables.Values.Sum(table => table.RowCount);
 

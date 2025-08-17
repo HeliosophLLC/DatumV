@@ -49,9 +49,6 @@ service DatumCompute {
 
   // Returns a unified manifest combining all registered tables.
   rpc GetStats (GetStatsRequest) returns (GetStatsResponse);
-
-  // Returns cross-manifest join suggestions across all tables with manifests.
-  rpc GetJoinSuggestions (GetJoinSuggestionsRequest) returns (GetJoinSuggestionsResponse);
 }
 
 // ───────────────────── Session Management ─────────────────────
@@ -300,9 +297,6 @@ message AddSourceRequest {
 
 message AddSourceResponse {
   string message = 1;
-
-  // True when at least two tables have manifests, enabling cross-manifest join analysis.
-  bool has_join_suggestions = 2;
 }
 
 // ───────────────────── Admin Operations ─────────────────────
@@ -421,15 +415,6 @@ message GetStatsRequest {
 message GetStatsResponse {
   // JSON-serialized SourceManifest containing all tables with available manifests.
   string manifest_json = 1;
-}
-
-message GetJoinSuggestionsRequest {
-  string session_id = 1;
-}
-
-message GetJoinSuggestionsResponse {
-  // JSON-serialized CrossManifestResult.
-  string result_json = 1;
 }
 
 message SessionInfoMessage {

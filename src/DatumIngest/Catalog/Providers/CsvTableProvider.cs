@@ -762,18 +762,15 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
     /// Selects the narrowest signed integer <see cref="DataKind"/> whose range covers
     /// both <paramref name="minimum"/> and <paramref name="maximum"/>.
     /// </summary>
+    /// <remarks>
+    /// Floors at <see cref="DataKind.Int32"/> because CSV type inference is based on a
+    /// small sample of rows. Choosing Int8 or Int16 from a sample causes silent data loss
+    /// when later rows contain values outside the narrower range — the parse fails and the
+    /// value becomes null. Int8/Int16 remain valid for typed sources (Parquet, HDF5, .datum)
+    /// where the schema is authoritative.
+    /// </remarks>
     private static DataKind NarrowestIntegerKind(long minimum, long maximum)
     {
-        if (minimum >= sbyte.MinValue && maximum <= sbyte.MaxValue)
-        {
-            return DataKind.Int8;
-        }
-
-        if (minimum >= short.MinValue && maximum <= short.MaxValue)
-        {
-            return DataKind.Int16;
-        }
-
         if (minimum >= int.MinValue && maximum <= int.MaxValue)
         {
             return DataKind.Int32;

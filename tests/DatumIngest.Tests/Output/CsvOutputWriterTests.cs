@@ -125,9 +125,9 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         }
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal((sbyte)1, rows[0]["id"].AsInt8());
+        Assert.Equal(1, rows[0]["id"].AsInt32());
         Assert.Equal("Alice", rows[0]["name"].AsString());
-        Assert.Equal((sbyte)2, rows[1]["id"].AsInt8());
+        Assert.Equal(2, rows[1]["id"].AsInt32());
         Assert.Equal("Bob", rows[1]["name"].AsString());
     }
 

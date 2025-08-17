@@ -235,19 +235,14 @@ Separate file recording *how* the output was produced — source query, encoding
 
 ---
 
-## Cross-Manifest Analysis ✅
+## Schema Matching ✅
 
-**Status**: Shipped. Multi-signal evidence pipeline discovers join candidates across tables using only manifest statistics.
+**Status**: Shipped. Lightweight schema matching discovers star-schema hubs across tables using only manifest statistics.
 
 ### Implemented
 
 - **Column matching** — Levenshtein name similarity with suffix bonuses, type compatibility scoring
 - **Evidence scoring** — Six signals (name, type, TopK Jaccard, cardinality ratio, range overlap, unique key) combined with configurable weights into composite confidence
-- **Composite key detection** — Multi-column key discovery (up to 4 columns, 0.8 penalty)
-- **Join graph** — Candidates above threshold form edges; BFS discovers transitive chains across 3+ tables
 - **Join classification** — Automatic 1:1, 1:N, N:1, N:M classification from NDV/RowCount ratios
-- **Cross-manifest insights** — 7 rules: ManyToManyJoin, HighNullKey, CardinalityMismatch, DisjointRange, SchemaDrift, DenormalizationHint, StarSchema
-- **SQL generation** — JOIN queries with quality annotations; LEFT JOIN for nullable keys
-- **Integration** — CLI `cross-manifest` command, `.join-suggestions` REPL meta-command, `GetJoinSuggestions` and `GetStats` gRPC RPCs
-- **Serialization** — `SerializeCrossManifest` / `DeserializeCrossManifest` with AOT-compatible source-generated JSON
-- **Tests** — 106 tests covering all pipeline stages
+- **Star schema detection** — Identifies hub tables with ≥2 spoke relationships from OneToMany/ManyToOne candidates
+- **Tests** — Column matching, evidence scoring, and star schema detector tests

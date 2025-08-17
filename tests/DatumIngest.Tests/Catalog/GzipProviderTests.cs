@@ -80,7 +80,7 @@ public sealed class GzipProviderTests : IDisposable
         Assert.Equal("age", schema.Columns[1].Name);
         Assert.Equal("score", schema.Columns[2].Name);
         Assert.Equal(DataKind.String, schema.Columns[0].Kind);
-        Assert.Equal(DataKind.Int8, schema.Columns[1].Kind);
+        Assert.Equal(DataKind.Int32, schema.Columns[1].Kind);
         Assert.Equal(DataKind.Float64, schema.Columns[2].Kind);
     }
 

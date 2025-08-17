@@ -394,10 +394,10 @@ public class QueryPlannerTests
             }
 
             Assert.Equal(3, rows.Count);
-            // CSV auto-detects small integer values as Int8.
-            Assert.Equal((sbyte)1, rows[0]["val"].AsInt8());
-            Assert.Equal((sbyte)2, rows[1]["val"].AsInt8());
-            Assert.Equal((sbyte)3, rows[2]["val"].AsInt8());
+            // CSV infers all integer columns as Int32 minimum to avoid silent truncation.
+            Assert.Equal(1, rows[0]["val"].AsInt32());
+            Assert.Equal(2, rows[1]["val"].AsInt32());
+            Assert.Equal(3, rows[2]["val"].AsInt32());
         }
         finally
         {

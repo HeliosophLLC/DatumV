@@ -1,6 +1,6 @@
 # Data Providers
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest reads from seven file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file. All providers support transparent [gzip decompression](#gzip-compression).
 
@@ -20,6 +20,28 @@ By default (`header=auto`), the provider infers whether the first row is a heade
 Set `header=true` to force the first row to be treated as column names, or `header=false` to force generated column names and treat every row as data.
 
 Columns: derived from header row (or generated when headerless). Numeric values parsed as Scalar, others as String.
+
+### Type inference
+
+CSV files carry no schema, so the provider infers column types from the first 100 data rows using a five-pass detection pipeline:
+
+| Pass | Target | Detection |
+|------|--------|-----------|
+| 1 | Numeric | Parse each field as `long` then `double`. Track integer min/max per column. |
+| 2 | Integer kind | Select narrowest integer type that covers the observed range. |
+| 3 | Date/DateTime | ISO 8601 parsing on remaining `String` columns. |
+| 4 | UUID | Hyphenated GUID format (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). |
+| 5 | Boolean text | Case-insensitive `"true"` / `"false"` detection. |
+
+**Integer narrowing.** Pure-integer columns (all 100 sample values parse to `long`) select the narrowest type that covers the observed min/max range. The floor is `Int32` — the provider never narrows to `Int8` or `Int16` even if the sample values would fit, because a 100-row sample cannot reliably bound the value range of the full file. Values outside the inferred range fail `TryParse` silently during the full read pass and become `NULL`, causing silent data corruption. This is only a risk for CSV; typed formats (Parquet, HDF5, `.datum`) carry authoritative schemas and use all integer widths correctly.
+
+| Sample range | Inferred type |
+|--------------|---------------|
+| `int.MinValue` to `int.MaxValue` | `Int32` |
+| Outside `int` range | `Int64` |
+| Range is exactly [0, 1] | `Boolean` |
+
+**Float detection.** If all 100 values parse as `double` but some have fractional parts, the column is inferred as `Float64`. If all values are integer-valued doubles (no fractions), the column is `Int64`.
 
 Implements `IChunkMeasuringProvider` for source index byte-range measurement. The pre-scan is quote-aware, correctly handling multi-line quoted fields and CRLF line endings.
 

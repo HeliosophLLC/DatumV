@@ -19,6 +19,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DatumIngest.Tests" />
     <InternalsVisibleTo Include="DatumIngest.Cli" />
+    <InternalsVisibleTo Include="StarSchemaRunner" />
   </ItemGroup>
 
   <ItemGroup>

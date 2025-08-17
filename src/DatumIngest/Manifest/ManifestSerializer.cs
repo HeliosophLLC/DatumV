@@ -2,8 +2,8 @@ namespace DatumIngest.Manifest;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DatumIngest.Manifest.CrossManifest;
 using DatumIngest.Manifest.Insights;
+using DatumIngest.Manifest.SchemaMatching;
 
 /// <summary>
 /// Serializes and deserializes <see cref="SourceManifest"/> using System.Text.Json
@@ -79,19 +79,53 @@ public static class ManifestSerializer
     }
 
     /// <summary>
-    /// Serializes a cross-manifest result to a JSON string.
+    /// Serializes a <see cref="SourceVocabularySet"/> to a JSON string.
     /// </summary>
-    public static string SerializeCrossManifest(CrossManifestResult result)
+    public static string SerializeVocabulary(SourceVocabularySet vocabularySet)
     {
-        return JsonSerializer.Serialize(result, ManifestJsonContext.Default.CrossManifestResult);
+        return JsonSerializer.Serialize(vocabularySet, ManifestJsonContext.Default.SourceVocabularySet);
     }
 
     /// <summary>
-    /// Deserializes a cross-manifest result from a JSON string.
+    /// Deserializes a <see cref="SourceVocabularySet"/> from a JSON string.
     /// </summary>
-    public static CrossManifestResult? DeserializeCrossManifest(string json)
+    public static SourceVocabularySet? DeserializeVocabulary(string json)
     {
-        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.CrossManifestResult);
+        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.SourceVocabularySet);
+    }
+
+    /// <summary>
+    /// Writes a <see cref="SourceVocabularySet"/> to a file as formatted JSON.
+    /// </summary>
+    public static async Task WriteVocabularyToFileAsync(SourceVocabularySet vocabularySet, string path)
+    {
+        string json = SerializeVocabulary(vocabularySet);
+        await File.WriteAllTextAsync(path, json);
+    }
+
+    /// <summary>
+    /// Serializes a <see cref="StarSchemaResult"/> to a JSON string.
+    /// </summary>
+    public static string SerializeStarSchema(StarSchemaResult starSchema)
+    {
+        return JsonSerializer.Serialize(starSchema, ManifestJsonContext.Default.StarSchemaResult);
+    }
+
+    /// <summary>
+    /// Deserializes a <see cref="StarSchemaResult"/> from a JSON string.
+    /// </summary>
+    public static StarSchemaResult? DeserializeStarSchema(string json)
+    {
+        return JsonSerializer.Deserialize(json, ManifestJsonContext.Default.StarSchemaResult);
+    }
+
+    /// <summary>
+    /// Writes a <see cref="StarSchemaResult"/> to a file as formatted JSON.
+    /// </summary>
+    public static async Task WriteStarSchemaToFileAsync(StarSchemaResult starSchema, string path)
+    {
+        string json = SerializeStarSchema(starSchema);
+        await File.WriteAllTextAsync(path, json);
     }
 }
 
@@ -120,15 +154,12 @@ public static class ManifestSerializer
 [JsonSerializable(typeof(QueryAnnotation))]
 [JsonSerializable(typeof(InsightThresholds))]
 [JsonSerializable(typeof(QuerySynthesisOptions))]
-[JsonSerializable(typeof(CrossManifestResult))]
-[JsonSerializable(typeof(JoinCandidate))]
-[JsonSerializable(typeof(JoinEvidence))]
-[JsonSerializable(typeof(JoinGraphEdge))]
-[JsonSerializable(typeof(InheritedEdgeOrigin))]
-[JsonSerializable(typeof(JoinChain))]
-[JsonSerializable(typeof(GraphComplexity))]
-[JsonSerializable(typeof(CrossManifestThresholds))]
-[JsonSerializable(typeof(CrossManifestQueryOptions))]
+[JsonSerializable(typeof(SourceVocabularySet))]
+[JsonSerializable(typeof(TableVocabularySet))]
+[JsonSerializable(typeof(StarSchemaResult))]
+[JsonSerializable(typeof(HubTable))]
+[JsonSerializable(typeof(SpokeTable))]
+[JsonSerializable(typeof(JoinClassification))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     WriteIndented = true,
