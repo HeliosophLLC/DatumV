@@ -174,8 +174,6 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
 
 static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
 {
-    List<ColumnIndexHint>? bitmapHints = BuildBitmapHints(options);
-
     if (options.BloomAllColumns || options.IndexAllColumns || options.AutoIndexColumns)
     {
         if (options.BloomColumns.Count > 0 || options.IndexColumns.Count > 0)
@@ -184,38 +182,12 @@ static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
                 "Cannot combine --bloom-all/--index-all/--auto-index with --bloom-columns/--index-columns. Use one approach or the other.");
         }
 
-        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns,
-            indexHints: bitmapHints);
+        return new SourceIndexBuilder(options.BloomAllColumns, options.IndexAllColumns, options.ChunkSize, options.AutoIndexColumns);
     }
 
     HashSet<string>? bloomColumns = options.BloomColumns.Count > 0 ? options.BloomColumns : null;
     HashSet<string>? indexColumns = options.IndexColumns.Count > 0 ? options.IndexColumns : null;
     return new SourceIndexBuilder(options.ChunkSize, bloomColumns, indexColumns);
-}
-
-static List<ColumnIndexHint>? BuildBitmapHints(CliOptions options)
-{
-    if (!options.BitmapAllColumns && options.BitmapColumns.Count == 0)
-    {
-        return null;
-    }
-
-    // --bitmap-all is handled by the auto-detection cascade in SourceIndexBuilder
-    // (all auto-indexable columns get bitmap accumulators by default).
-    // Explicit --bitmap-columns generates Bitmap hints that override auto-detection.
-    if (options.BitmapColumns.Count == 0)
-    {
-        return null;
-    }
-
-    List<ColumnIndexHint> hints = new(options.BitmapColumns.Count);
-
-    foreach (string column in options.BitmapColumns)
-    {
-        hints.Add(new ColumnIndexHint(column, IndexHintType.Bitmap));
-    }
-
-    return hints;
 }
 
 static async Task<int> RunIndexAsync(TableCatalog catalog, CliOptions options)

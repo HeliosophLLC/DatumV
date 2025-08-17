@@ -1,4 +1,4 @@
-using CardinalityEstimation;
+﻿using CardinalityEstimation;
 using DatumIngest.Catalog;
 using DatumIngest.Execution;
 using DatumIngest.Indexing.Bitmap;
@@ -263,10 +263,18 @@ public sealed class SourceIndexBuilder
 
                     if (ordinalBitmapAccumulators is not null)
                     {
-                        BitmapChunkAccumulator? bitmapAcc = ordinalBitmapAccumulators[ordinal];
-                        if (bitmapAcc is not null)
+                        BitmapChunkAccumulator? bitmapAccumulator = ordinalBitmapAccumulators[ordinal];
+                        if (bitmapAccumulator is not null)
                         {
-                            bitmapAcc.Add(value, rowsInCurrentChunk);
+                            bitmapAccumulator.Add(value, rowsInCurrentChunk);
+
+                            // Remove abandoned accumulators from the per-row path
+                            // so high-cardinality columns do not pay method-call overhead
+                            // for every remaining row.
+                            if (bitmapAccumulator.IsAbandoned)
+                            {
+                                ordinalBitmapAccumulators[ordinal] = null;
+                            }
                         }
                     }
                 }
@@ -447,12 +455,12 @@ public sealed class SourceIndexBuilder
 
     /// <summary>
     /// Creates an incremental index builder for co-generation during output writing (the <c>--with-index</c> workflow).
-    /// Each row is observed but not consumed — the caller still owns the enumeration.
+    /// Each row is observed but not consumed — the caller still owns the enumeration.
     /// Call <see cref="IncrementalIndexBuilder.AddRow"/> for each row, then <see cref="IncrementalIndexBuilder.Finalize"/> to produce the index.
     /// </summary>
     /// <summary>
     /// Creates an incremental index builder for co-generation during output writing (the <c>--with-index</c> workflow).
-    /// Each row is observed but not consumed — the caller still owns the enumeration.
+    /// Each row is observed but not consumed — the caller still owns the enumeration.
     /// Call <see cref="IncrementalIndexBuilder.AddRow"/> for each row, then <see cref="IncrementalIndexBuilder.Finalize"/> to produce the index.
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
@@ -795,7 +803,7 @@ public sealed class SourceIndexBuilder
             }
             else
             {
-                // No hint — fall back to auto-indexable kind check.
+                // No hint — fall back to auto-indexable kind check.
                 include = IsAutoIndexableKind(column.Kind);
             }
 
@@ -836,7 +844,7 @@ public sealed class SourceIndexBuilder
     /// <summary>
     /// Lightweight per-column accumulator that tracks min, max, null count, and
     /// estimated cardinality for a single chunk. Much lighter than the full
-    /// <see cref="Statistics.StatisticsCollector"/> — no histograms, percentiles,
+    /// <see cref="Statistics.StatisticsCollector"/> — no histograms, percentiles,
     /// or interaction analysis.
     /// </summary>
     private sealed class ChunkAccumulator
@@ -1083,10 +1091,18 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
             if (bitmapAccs is not null)
             {
-                BitmapChunkAccumulator? bitmapAcc = bitmapAccs[ordinal];
-                if (bitmapAcc is not null)
+                BitmapChunkAccumulator? bitmapAccumulator = bitmapAccs[ordinal];
+                if (bitmapAccumulator is not null)
                 {
-                    bitmapAcc.Add(value, _rowsInCurrentChunk);
+                    bitmapAccumulator.Add(value, _rowsInCurrentChunk);
+
+                    // Remove abandoned accumulators from the per-row path
+                    // so high-cardinality columns do not pay method-call overhead
+                    // for every remaining row.
+                    if (bitmapAccumulator.IsAbandoned)
+                    {
+                        bitmapAccs[ordinal] = null;
+                    }
                 }
             }
         }
@@ -1115,7 +1131,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
     /// <summary>
     /// Finalizes the index after all rows have been observed.
-    /// The spill writer is prepared for reading but not materialized or disposed —
+    /// The spill writer is prepared for reading but not materialized or disposed —
     /// callers that need to serialize sorted indexes should pass <see cref="SpillWriter"/>
     /// to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?, bool)"/>.
     /// The spill writer is cleaned up when this builder is disposed.

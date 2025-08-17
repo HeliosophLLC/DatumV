@@ -1,18 +1,29 @@
+using DatumIngest.DatumFile;
 using DatumIngest.Model;
+using ZstdSharp;
 
 namespace DatumIngest.Indexing.Bitmap;
 
 /// <summary>
 /// Per-column, per-chunk accumulator that tracks which rows contain each distinct value.
-/// Accumulates <see cref="ChunkBitmap"/> instances during row scanning and compresses them
-/// at chunk boundaries. Abandons tracking when the distinct value count exceeds the
-/// configured cardinality threshold to bound memory usage.
+/// Accumulates bit arrays during row scanning, compresses them at chunk boundaries using
+/// a single shared Zstd context, and reuses byte buffers across chunks to minimize
+/// allocation pressure. Abandons tracking when the distinct value count exceeds the
+/// configured cardinality threshold.
 /// </summary>
 internal sealed class BitmapChunkAccumulator
 {
     private readonly int _cardinalityThreshold;
-    private Dictionary<DataValue, ChunkBitmap>? _currentChunkBitmaps;
+
+    /// <summary>
+    /// Persistent dictionary mapping each known distinct value to its reusable byte[] bitset.
+    /// Retained across chunks — bits are cleared to zero at each <see cref="BeginChunk"/> call
+    /// rather than reallocating. This eliminates per-chunk dictionary and byte[] allocation.
+    /// </summary>
+    private Dictionary<DataValue, byte[]>? _activeBitmaps;
+
     private int _currentChunkRowCount;
+    private int _currentChunkByteCount;
     private bool _abandoned;
 
     /// <summary>
@@ -45,6 +56,8 @@ internal sealed class BitmapChunkAccumulator
 
     /// <summary>
     /// Initializes the accumulator for a new chunk with the given row capacity.
+    /// Reuses the existing dictionary and byte buffers when possible, clearing
+    /// all bits to zero rather than reallocating.
     /// Must be called before the first <see cref="Add"/> of each chunk.
     /// </summary>
     /// <param name="chunkRowCapacity">
@@ -57,18 +70,33 @@ internal sealed class BitmapChunkAccumulator
             return;
         }
 
-        _currentChunkBitmaps = new Dictionary<DataValue, ChunkBitmap>();
         _currentChunkRowCount = chunkRowCapacity;
+        _currentChunkByteCount = (chunkRowCapacity + 7) / 8;
+
+        if (_activeBitmaps is null)
+        {
+            _activeBitmaps = new Dictionary<DataValue, byte[]>();
+        }
+        else
+        {
+            // Clear all existing bitmap buffers to zero for the new chunk.
+            // This avoids reallocating the dictionary and byte[] arrays.
+            foreach (byte[] bits in _activeBitmaps.Values)
+            {
+                Array.Clear(bits);
+            }
+        }
     }
 
     /// <summary>
-    /// Records a value at the specified row offset within the current chunk.
+    /// Records a non-null value at the given row offset within the current chunk.
+    /// Abandons tracking if the global distinct count would exceed the threshold.
     /// </summary>
-    /// <param name="value">The data value to record.</param>
+    /// <param name="value">The cell value (must not be null).</param>
     /// <param name="rowOffsetInChunk">Zero-based row offset within the current chunk.</param>
     internal void Add(DataValue value, int rowOffsetInChunk)
     {
-        if (_abandoned || _currentChunkBitmaps is null)
+        if (_abandoned || _activeBitmaps is null)
         {
             return;
         }
@@ -78,23 +106,27 @@ internal sealed class BitmapChunkAccumulator
             return;
         }
 
-        if (!_currentChunkBitmaps.TryGetValue(value, out ChunkBitmap bitmap))
+        if (!_activeBitmaps.TryGetValue(value, out byte[]? bits))
         {
-            if (_currentChunkBitmaps.Count + CountValuesOnlyInPriorChunks(value) >= _cardinalityThreshold)
+            // Completely new global value. Dictionary count is the current global distinct count.
+            if (_activeBitmaps.Count >= _cardinalityThreshold)
             {
                 Abandon();
                 return;
             }
 
-            bitmap = ChunkBitmap.Create(_currentChunkRowCount);
-            _currentChunkBitmaps[value] = bitmap;
+            bits = new byte[_currentChunkByteCount];
+            _activeBitmaps[value] = bits;
         }
 
-        bitmap.SetBit(rowOffsetInChunk);
+        // Inline SetBit to avoid ChunkBitmap struct overhead on the per-row path.
+        bits[rowOffsetInChunk >> 3] |= (byte)(1 << (rowOffsetInChunk & 7));
     }
 
     /// <summary>
-    /// Finalizes the current chunk: compresses all accumulated bitmaps and stores them.
+    /// Finalizes the current chunk: compresses all populated bitmaps using a single
+    /// shared Zstd compression context (amortizing context creation across all values)
+    /// and stores the compressed results.
     /// Must be called at each chunk boundary (and after the last row of the final chunk).
     /// </summary>
     /// <param name="actualRowCount">
@@ -103,17 +135,36 @@ internal sealed class BitmapChunkAccumulator
     /// </param>
     internal void FinalizeChunk(int actualRowCount)
     {
-        if (_abandoned || _currentChunkBitmaps is null)
+        if (_abandoned || _activeBitmaps is null)
         {
             return;
         }
 
         int chunkIndex = _chunkRowCounts.Count;
         _chunkRowCounts.Add(actualRowCount);
+        int trimmedByteCount = (actualRowCount + 7) / 8;
 
-        // Compress current chunk bitmaps and store them.
-        foreach (KeyValuePair<DataValue, ChunkBitmap> entry in _currentChunkBitmaps)
+        // Single compression context for all bitmaps in this chunk.
+        using Compressor compressor = new(DatumFileConstants.DefaultZstdCompressionLevel);
+
+        foreach (KeyValuePair<DataValue, byte[]> entry in _activeBitmaps)
         {
+            byte[] bits = entry.Value;
+            ReadOnlySpan<byte> bitmapSpan = bits.AsSpan(0, trimmedByteCount);
+
+            // Skip values that were not seen in this chunk (all bits are zero).
+            if (bitmapSpan.IndexOfAnyExcept((byte)0) < 0)
+            {
+                // Gap-fill if this value already has compressed entries from prior chunks.
+                if (_allChunkCompressed.TryGetValue(entry.Key, out List<byte[]>? existingList)
+                    && existingList.Count <= chunkIndex)
+                {
+                    existingList.Add(Array.Empty<byte>());
+                }
+
+                continue;
+            }
+
             if (!_allChunkCompressed.TryGetValue(entry.Key, out List<byte[]>? chunkList))
             {
                 chunkList = new List<byte[]>();
@@ -127,23 +178,12 @@ internal sealed class BitmapChunkAccumulator
                 _allChunkCompressed[entry.Key] = chunkList;
             }
 
-            // Trim bitmap to actual row count when the chunk is smaller than
-            // capacity (last partial chunk) so the compressed size matches
-            // the row-count used during decompression.
-            ChunkBitmap bitmap = entry.Value;
-
-            if (actualRowCount < _currentChunkRowCount)
-            {
-                int trimmedByteCount = (actualRowCount + 7) / 8;
-                byte[] trimmedBits = new byte[trimmedByteCount];
-                bitmap.Bits[..trimmedByteCount].CopyTo(trimmedBits);
-                bitmap = new ChunkBitmap(trimmedBits, actualRowCount);
-            }
-
-            chunkList.Add(bitmap.Compress());
+            chunkList.Add(compressor.Wrap(bitmapSpan).ToArray());
         }
 
-        // Fill empty bytes for values seen in previous chunks but not in this one.
+        // Gap-fill values in _allChunkCompressed that have fewer entries than expected.
+        // This covers values whose _activeBitmaps entry was all-zero in this chunk
+        // but were created in _allChunkCompressed during a prior FinalizeChunk.
         foreach (KeyValuePair<DataValue, List<byte[]>> entry in _allChunkCompressed)
         {
             if (entry.Value.Count <= chunkIndex)
@@ -151,8 +191,6 @@ internal sealed class BitmapChunkAccumulator
                 entry.Value.Add(Array.Empty<byte>());
             }
         }
-
-        _currentChunkBitmaps = null;
     }
 
     /// <summary>
@@ -177,40 +215,10 @@ internal sealed class BitmapChunkAccumulator
         return new BitmapColumnIndex(compressedBitmaps, chunkCount, _chunkRowCounts.ToArray());
     }
 
-    /// <summary>
-    /// Checks whether a value exists only in prior chunks (not in the current chunk).
-    /// Used for global cardinality tracking: the total distinct count is the union
-    /// of all values seen in prior chunks plus new values in the current chunk.
-    /// </summary>
-    private int CountValuesOnlyInPriorChunks(DataValue value)
-    {
-        // The total global distinct count is:
-        //   values in _allChunkCompressed (seen in prior chunks) that are NOT in _currentChunkBitmaps
-        //   + values in _currentChunkBitmaps (seen in current chunk)
-        // We only need the global count, which is the union.
-        // _currentChunkBitmaps.Count already covers current-chunk values.
-        // _allChunkCompressed has prior-chunk values (some may also be in current chunk).
-        // Global distinct = _currentChunkBitmaps.Count + (values in _allChunkCompressed NOT in _currentChunkBitmaps).
-        // But we're checking if adding ONE more new value exceeds threshold.
-        // Total after adding = current count + prior-only + 1.
-
-        int priorOnlyCount = 0;
-
-        foreach (DataValue priorValue in _allChunkCompressed.Keys)
-        {
-            if (!_currentChunkBitmaps!.ContainsKey(priorValue))
-            {
-                priorOnlyCount++;
-            }
-        }
-
-        return priorOnlyCount;
-    }
-
     private void Abandon()
     {
         _abandoned = true;
-        _currentChunkBitmaps = null;
+        _activeBitmaps = null;
         _allChunkCompressed.Clear();
         _chunkRowCounts.Clear();
     }
