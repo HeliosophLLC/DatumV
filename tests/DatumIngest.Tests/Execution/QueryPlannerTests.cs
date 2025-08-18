@@ -864,6 +864,8 @@ public class QueryPlannerTests
             AliasOperator alias => FindOperator<T>(alias.Source),
             SubqueryOperator subquery => FindOperator<T>(subquery.InnerOperator),
             LateMaterializationOperator late => FindOperator<T>(late.Child),
+            DistinctOperator distinct => FindOperator<T>(distinct.Source),
+            GroupByOperator groupBy => FindOperator<T>(groupBy.Source),
             _ => null,
         };
     }
@@ -1380,6 +1382,246 @@ public class QueryPlannerTests
 
         // No AliasOperator should be inserted for a single FROM table without JOINs.
         Assert.IsType<ScanOperator>(plan);
+    }
+
+    // ─────── GROUP BY without aggregates → DISTINCT rewrite tests ───────
+
+    /// <summary>
+    /// GROUP BY without aggregate functions should produce a streaming
+    /// <see cref="DistinctOperator"/> instead of a blocking
+    /// <see cref="GroupByOperator"/>, enabling LIMIT short-circuit.
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByWithoutAggregates_ProducesDistinctNotGroupBy()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("a"), "a")],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause([new ColumnReference("a")]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Plan should contain DistinctOperator (streaming) instead of GroupByOperator (blocking).
+        Assert.IsType<ProjectOperator>(plan);
+        ProjectOperator outerProject = (ProjectOperator)plan;
+        Assert.IsType<DistinctOperator>(outerProject.Source);
+        Assert.Null(FindOperator<GroupByOperator>(plan));
+    }
+
+    /// <summary>
+    /// GROUP BY with an aggregate function must still produce a
+    /// <see cref="GroupByOperator"/> (no rewrite to DISTINCT).
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByWithAggregate_ProducesGroupByOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("a"), "a"),
+                new SelectColumn(
+                    new FunctionCallExpression("count", [new LiteralExpression(1)]),
+                    "cnt"),
+            ],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause([new ColumnReference("a")]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.NotNull(FindOperator<GroupByOperator>(plan));
+        Assert.Null(FindOperator<DistinctOperator>(plan));
+    }
+
+    /// <summary>
+    /// GROUP BY with HAVING (even without aggregates) must keep the blocking
+    /// <see cref="GroupByOperator"/> because HAVING may reference aggregate
+    /// results that require full materialisation.
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByWithHaving_KeepsGroupByOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("a"), "a")],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause([new ColumnReference("a")]),
+            Having: new BinaryExpression(
+                new ColumnReference("a"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(0)));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.NotNull(FindOperator<GroupByOperator>(plan));
+    }
+
+    // ─────────────── Join elimination tests ───────────────
+
+    /// <summary>
+    /// A LEFT JOIN to a table whose columns are not referenced anywhere in the
+    /// query output should be removed from the plan.
+    /// </summary>
+    [Fact]
+    public void Plan_LeftJoinUnreferencedTable_EliminatesJoin()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "orders", "orders.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "products", "products.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT orders.id FROM orders LEFT JOIN products ON orders.pid = products.pid
+        // products is unreferenced in SELECT → should be eliminated.
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("orders", "id"), "id")],
+            From: new FromClause(new TableReference("orders")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Left,
+                    new TableReference("products"),
+                    new BinaryExpression(
+                        new ColumnReference("orders", "pid"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("products", "pid"))),
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // No JoinOperator should be present — the LEFT JOIN was eliminated.
+        Assert.Null(FindOperator<JoinOperator>(plan));
+    }
+
+    /// <summary>
+    /// An INNER JOIN to an unreferenced table must NOT be eliminated because
+    /// INNER JOINs can filter rows (non-matching left rows are dropped).
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoinUnreferencedTable_KeepsJoin()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "orders", "orders.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "products", "products.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT orders.id FROM orders INNER JOIN products ON orders.pid = products.pid
+        // Even though products is unreferenced, INNER JOIN filters rows.
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("orders", "id"), "id")],
+            From: new FromClause(new TableReference("orders")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("products"),
+                    new BinaryExpression(
+                        new ColumnReference("orders", "pid"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("products", "pid"))),
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // INNER JOIN must be preserved.
+        Assert.NotNull(FindOperator<JoinOperator>(plan));
+    }
+
+    /// <summary>
+    /// Cascading elimination: when an unreferenced LEFT JOIN is the only
+    /// reason another LEFT JOIN's table is referenced (via ON condition),
+    /// removing the first should allow removing the second.
+    /// </summary>
+    [Fact]
+    public void Plan_CascadingLeftJoinElimination_RemovesBoth()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "orders", "orders.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "products", "products.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "aisles", "aisles.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT orders.id FROM orders
+        //   LEFT JOIN products ON orders.pid = products.pid
+        //   LEFT JOIN aisles ON products.aid = aisles.aid
+        // Neither products nor aisles contribute to SELECT.
+        // aisles references products.aid, so products can only be eliminated
+        // after aisles is eliminated first (cascading).
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("orders", "id"), "id")],
+            From: new FromClause(new TableReference("orders")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Left,
+                    new TableReference("products"),
+                    new BinaryExpression(
+                        new ColumnReference("orders", "pid"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("products", "pid"))),
+                new JoinClause(
+                    JoinType.Left,
+                    new TableReference("aisles"),
+                    new BinaryExpression(
+                        new ColumnReference("products", "aid"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("aisles", "aid"))),
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Both LEFT JOINs should be eliminated.
+        Assert.Null(FindOperator<JoinOperator>(plan));
+    }
+
+    /// <summary>
+    /// A LEFT JOIN whose columns are referenced in WHERE must be preserved.
+    /// </summary>
+    [Fact]
+    public void Plan_LeftJoinReferencedInWhere_KeepsJoin()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "orders", "orders.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "products", "products.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT orders.id FROM orders LEFT JOIN products ON orders.pid = products.pid
+        // WHERE products.name IS NOT NULL
+        // products is referenced in WHERE → must keep the join.
+        SelectStatement statement = new(
+            Columns: [new SelectColumn(new ColumnReference("orders", "id"), "id")],
+            From: new FromClause(new TableReference("orders")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Left,
+                    new TableReference("products"),
+                    new BinaryExpression(
+                        new ColumnReference("orders", "pid"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("products", "pid"))),
+            ],
+            Where: new IsNullExpression(
+                new ColumnReference("products", "name"), Negated: true));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // LEFT JOIN must be preserved because products is referenced in WHERE.
+        Assert.NotNull(FindOperator<JoinOperator>(plan));
     }
 }
 

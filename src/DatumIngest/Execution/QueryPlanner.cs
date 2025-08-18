@@ -334,6 +334,12 @@ public sealed class QueryPlanner
             string? orderBySortTableAlias = GetOrderBySortTableAlias(
                 statement.OrderBy, source, leftAliases, plannedJoins);
 
+            // Join elimination: remove LEFT JOINs whose right-side table is not
+            // referenced anywhere in the query output and is not required by any
+            // other surviving join. Safe because a LEFT JOIN to an unreferenced
+            // table cannot filter rows (it preserves all left-side rows).
+            EliminateUnusedJoins(statement, plannedJoins);
+
             // Greedy join reordering: place the largest table on the probe
             // (streaming) side so LIMIT can short-circuit earlier, and build
             // the smaller tables into hash tables. Only applied when every
@@ -464,14 +470,35 @@ public sealed class QueryPlanner
                 letBindings = rewrittenLetBindings;
             }
 
-            source = new GroupByOperator(source, groupByExpressions, aggregateColumns);
-
-            // Apply HAVING as a filter on the grouped output.
-            if (statement.Having is not null)
+            if (hasGroupBy && aggregateColumns.Count == 0 && statement.Having is null)
             {
-                Expression havingRewritten = RewriteAggregateExpression(
-                    statement.Having, _functionRegistry, aggregateColumns);
-                source = new FilterOperator(source, havingRewritten);
+                // GROUP BY without aggregates or HAVING is equivalent to DISTINCT
+                // on the grouped columns. Replace the blocking GroupByOperator with
+                // a streaming ProjectOperator + DistinctOperator so that a
+                // downstream LIMIT can short-circuit without materialising all rows.
+                List<SelectColumn> groupByProjection = new(groupByExpressions.Count);
+
+                foreach (Expression expression in groupByExpressions)
+                {
+                    string name = QueryExplainer.FormatExpression(expression);
+                    groupByProjection.Add(new SelectColumn(expression, name));
+                }
+
+                source = new ProjectOperator(source, groupByProjection, null);
+                source = new DistinctOperator(source);
+                ExecutionTracer.Write("GROUP BY without aggregates rewritten to streaming DISTINCT");
+            }
+            else
+            {
+                source = new GroupByOperator(source, groupByExpressions, aggregateColumns);
+
+                // Apply HAVING as a filter on the grouped output.
+                if (statement.Having is not null)
+                {
+                    Expression havingRewritten = RewriteAggregateExpression(
+                        statement.Having, _functionRegistry, aggregateColumns);
+                    source = new FilterOperator(source, havingRewritten);
+                }
             }
 
             projectionColumns = rewrittenColumns;
@@ -1113,6 +1140,182 @@ public sealed class QueryPlanner
                 && binary.Right is ColumnReference rightCol)
             {
                 pairs.Add((leftCol, rightCol));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes LEFT JOINs whose right-side table is not referenced anywhere in
+    /// the query output (SELECT, WHERE, GROUP BY, HAVING, ORDER BY, LET, QUALIFY)
+    /// and is not required by any other surviving join's ON condition. This is
+    /// safe because a LEFT JOIN to an unreferenced table cannot filter rows — it
+    /// preserves all left-side rows — and only adds hash-table and I/O cost.
+    /// </summary>
+    /// <remarks>
+    /// Elimination is iterative: removing one join may make another join's
+    /// right-side table unreferenced (cascading elimination). Only LEFT JOINs
+    /// are candidates; INNER/RIGHT/CROSS joins can filter or multiply rows and
+    /// are never removed.
+    /// </remarks>
+    private static void EliminateUnusedJoins(
+        SelectStatement statement,
+        List<(JoinClause Join, IQueryOperator Operator, HashSet<string> Aliases)> plannedJoins)
+    {
+        // Collect table aliases referenced in query output clauses (not JOIN ON).
+        HashSet<string> outputReferenced = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (SelectColumn column in statement.Columns)
+        {
+            if (column is SelectAllColumns)
+            {
+                return; // SELECT * needs all tables — no elimination possible.
+            }
+
+            if (column is SelectTableColumns tableColumns)
+            {
+                outputReferenced.Add(tableColumns.TableName);
+                continue;
+            }
+
+            foreach (string alias in ColumnReferenceCollector.CollectTableAliases(column.Expression))
+            {
+                outputReferenced.Add(alias);
+            }
+        }
+
+        if (statement.Where is not null)
+        {
+            foreach (string alias in ColumnReferenceCollector.CollectTableAliases(statement.Where))
+            {
+                outputReferenced.Add(alias);
+            }
+        }
+
+        if (statement.GroupBy is not null)
+        {
+            foreach (Expression expression in statement.GroupBy.Expressions)
+            {
+                foreach (string alias in ColumnReferenceCollector.CollectTableAliases(expression))
+                {
+                    outputReferenced.Add(alias);
+                }
+            }
+        }
+
+        if (statement.Having is not null)
+        {
+            foreach (string alias in ColumnReferenceCollector.CollectTableAliases(statement.Having))
+            {
+                outputReferenced.Add(alias);
+            }
+        }
+
+        if (statement.OrderBy is not null)
+        {
+            foreach (OrderByItem item in statement.OrderBy.Items)
+            {
+                foreach (string alias in ColumnReferenceCollector.CollectTableAliases(item.Expression))
+                {
+                    outputReferenced.Add(alias);
+                }
+            }
+        }
+
+        if (statement.LetBindings is not null)
+        {
+            foreach (LetBinding binding in statement.LetBindings)
+            {
+                foreach (string alias in ColumnReferenceCollector.CollectTableAliases(binding.Expression))
+                {
+                    outputReferenced.Add(alias);
+                }
+            }
+        }
+
+        if (statement.Qualify is not null)
+        {
+            foreach (string alias in ColumnReferenceCollector.CollectTableAliases(statement.Qualify))
+            {
+                outputReferenced.Add(alias);
+            }
+        }
+
+        // Iteratively eliminate LEFT JOINs whose right-side alias is unreferenced
+        // by both the output clauses and other surviving joins' ON conditions.
+        bool changed = true;
+
+        while (changed)
+        {
+            changed = false;
+
+            for (int index = plannedJoins.Count - 1; index >= 0; index--)
+            {
+                (JoinClause join, _, HashSet<string> aliases) = plannedJoins[index];
+
+                if (join.Type != JoinType.Left)
+                {
+                    continue;
+                }
+
+                // Check if any of this join's right-side aliases are needed.
+                bool needed = false;
+
+                foreach (string alias in aliases)
+                {
+                    if (outputReferenced.Contains(alias))
+                    {
+                        needed = true;
+                        break;
+                    }
+                }
+
+                if (needed)
+                {
+                    continue;
+                }
+
+                // Check if any other surviving join's ON condition references this alias.
+                bool referencedByOtherJoin = false;
+
+                for (int otherIndex = 0; otherIndex < plannedJoins.Count; otherIndex++)
+                {
+                    if (otherIndex == index)
+                    {
+                        continue;
+                    }
+
+                    JoinClause otherJoin = plannedJoins[otherIndex].Join;
+
+                    if (otherJoin.OnCondition is null)
+                    {
+                        continue;
+                    }
+
+                    HashSet<string> onAliases =
+                        ColumnReferenceCollector.CollectTableAliases(otherJoin.OnCondition);
+
+                    foreach (string alias in aliases)
+                    {
+                        if (onAliases.Contains(alias))
+                        {
+                            referencedByOtherJoin = true;
+                            break;
+                        }
+                    }
+
+                    if (referencedByOtherJoin)
+                    {
+                        break;
+                    }
+                }
+
+                if (!referencedByOtherJoin)
+                {
+                    string joinLabel = string.Join(", ", aliases);
+                    ExecutionTracer.Write($"JOIN ELIMINATION  removed {joinLabel} (unreferenced LEFT JOIN)");
+                    plannedJoins.RemoveAt(index);
+                    changed = true;
+                }
             }
         }
     }
