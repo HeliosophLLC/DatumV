@@ -920,7 +920,7 @@ public sealed class ComputeServiceTests : IDisposable
 
             if (Messages.Count >= _cancelAfterRow)
             {
-                _session.CancelAndReset();
+                _session.CancelAllAndReset();
             }
 
             return Task.CompletedTask;

@@ -517,7 +517,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
     /// <summary>
     /// Creates a cancellation token that fires when either the gRPC call is cancelled
-    /// or the session token is cancelled (via <see cref="Session.CancelAndReset"/>).
+    /// or the session token is cancelled (via <see cref="Session.CancelAllAndReset"/>).
     /// </summary>
     /// <remarks>
     /// For the streaming <see cref="Query"/> method the linked source is managed with

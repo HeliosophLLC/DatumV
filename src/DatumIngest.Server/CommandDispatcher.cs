@@ -454,7 +454,7 @@ public sealed class CommandDispatcher
             return CommandResult.Error($"Session '{targetId}' not found.");
         }
 
-        target.CancelAndReset();
+        target.CancelAllAndReset();
         return CommandResult.Success($"Cancelled active query on session '{targetId}'.");
     }
 
@@ -465,7 +465,7 @@ public sealed class CommandDispatcher
             return CommandResult.Error("Permission denied: you are not authorized to cancel queries.");
         }
 
-        session.CancelAndReset();
+        session.CancelAllAndReset();
         return CommandResult.Success("Active query cancelled.");
     }
 

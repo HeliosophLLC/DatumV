@@ -73,16 +73,16 @@ public sealed class SessionTests : IDisposable
     }
 
     /// <summary>
-    /// CancelAndReset cancels the current token and provides a new one.
+    /// CancelAllAndReset cancels the current token and provides a new one.
     /// </summary>
     [Fact]
-    public void CancelAndReset_CancelsCurrentTokenAndResetsScope()
+    public void CancelAllAndReset_CancelsCurrentTokenAndResetsScope()
     {
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
         CancellationToken firstToken = session.CancellationToken;
         Assert.False(firstToken.IsCancellationRequested);
 
-        session.CancelAndReset();
+        session.CancelAllAndReset();
 
         Assert.True(firstToken.IsCancellationRequested);
         Assert.False(session.CancellationToken.IsCancellationRequested);
