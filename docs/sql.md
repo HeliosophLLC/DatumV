@@ -302,8 +302,8 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 | `SUM(DISTINCT expr)` | Sum of distinct non-null values. |
 | `AVG(expr)` | Arithmetic mean of non-null values. Returns null if all values are null. |
 | `AVG(DISTINCT expr)` | Mean of distinct non-null values. |
-| `MIN(expr)` | Minimum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
-| `MAX(expr)` | Maximum value. Works on Scalar, UInt8, String, Date, DateTime, Time. |
+| `MIN(expr)` | Minimum value. Works on Float32, UInt8, String, Date, DateTime, Time. |
+| `MAX(expr)` | Maximum value. Works on Float32, UInt8, String, Date, DateTime, Time. |
 | `VARIANCE(expr)` | Sample variance (N−1 denominator) of non-null values. Alias for `VAR_SAMP`. |
 | `VAR_SAMP(expr)` | Sample variance (N−1). Returns null for fewer than 2 values. |
 | `VAR_POP(expr)` | Population variance (N denominator) of non-null values. |
@@ -877,7 +877,7 @@ When THEN/ELSE branches return different data types, DatumIngest applies
 implicit type coercion following SQL Server–style type precedence rules:
 
 1. **Common type wins.** If all branches share a common type through the
-   standard widening chain (e.g. `UInt8 → Scalar`, `Boolean → Scalar`), that
+   standard widening chain (e.g. `UInt8 → Float32`, `Boolean → Float32`), that
    common type is used.
 2. **Non-String type wins over String.** When some branches return `String` and
    others return a numeric, boolean, or temporal type, the non-String type is
@@ -890,7 +890,7 @@ implicit type coercion following SQL Server–style type precedence rules:
    failures.
 
 ```sql
--- The result type is Scalar, not String.
+-- The result type is Float32, not String.
 -- The string '0' is parsed to the number 0 at runtime.
 SELECT CASE WHEN x > 0 THEN '0' ELSE 1 END AS value
 FROM data
@@ -1220,7 +1220,7 @@ Parameter values are parsed from strings with automatic type inference:
 
 | Value | Inferred type |
 |-------|---------------|
-| `42`, `3.14`, `-1.5` | Scalar |
+| `42`, `3.14`, `-1.5` | Float32 |
 | `true`, `false` | Boolean |
 | `null` | Null |
 | Everything else | String |
@@ -1358,8 +1358,8 @@ datum-ingest schema "SELECT * FROM data" --source csv:data=measurements.csv
 Column                         Type         Nullable   Source
 ----------------------------------------------------------------------
 name                           String       YES        data
-age                            Scalar       YES        data
-score                          Scalar       YES        data
+age                            Float32      YES        data
+score                          Float32      YES        data
 
 (3 column(s) from 1 source(s))
 ```
@@ -1376,7 +1376,7 @@ Column                         Type         Nullable   Source
 ----------------------------------------------------------------------
 file_name                      String       NO         img
 file_bytes                     UInt8Array   NO         img
-image_id                       Scalar       YES        cap
+image_id                       Float32      YES        cap
 caption                        String       YES        cap
 
 (4 column(s) from 2 source(s))
@@ -1390,7 +1390,7 @@ datum-ingest schema "SELECT * FROM RANGE(0, 360) AS r" --source csv:dummy=placeh
 ```
 Column                         Type         Nullable   Source
 ----------------------------------------------------------------------
-Value                          Scalar       NO         r
+Value                          Float32      NO         r
 
 (1 column(s) from 1 source(s))
 ```

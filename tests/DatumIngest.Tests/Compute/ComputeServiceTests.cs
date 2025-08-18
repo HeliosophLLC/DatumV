@@ -247,7 +247,7 @@ public sealed class ComputeServiceTests : IDisposable
         FunctionInfoMessage clamp = Assert.Single(response.Functions, f => f.Name == "clamp");
         Assert.Equal(3, clamp.Parameters.Count);
         Assert.Equal("value", clamp.Parameters[0].Name);
-        Assert.Equal(ParameterKindValue.ParameterKindScalar, clamp.Parameters[0].Kind);
+        Assert.Equal(ParameterKindValue.ParameterKindFloat32, clamp.Parameters[0].Kind);
         Assert.True(clamp.Parameters[0].Required);
     }
 

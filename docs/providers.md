@@ -19,7 +19,7 @@ By default (`header=auto`), the provider infers whether the first row is a heade
 
 Set `header=true` to force the first row to be treated as column names, or `header=false` to force generated column names and treat every row as data.
 
-Columns: derived from header row (or generated when headerless). Numeric values parsed as Scalar, others as String.
+Columns: derived from header row (or generated when headerless). Numeric values parsed as Float32, others as String.
 
 ### Type inference
 
@@ -83,7 +83,7 @@ Implements `ISeekableTableProvider` for random-access row reads using PureHDF's 
 
 Reads Parquet files via Parquet.Net low-level API.
 
-Maps Parquet types to DataKind: INT32/INT64 → Scalar, FLOAT/DOUBLE → Scalar, BYTE_ARRAY (UTF8) → String, BYTE_ARRAY → UInt8Array.
+Maps Parquet types to DataKind: INT32/INT64 → Float32, FLOAT/DOUBLE → Float32, BYTE_ARRAY (UTF8) → String, BYTE_ARRAY → UInt8Array.
 
 Supports statistics-based row group pruning: when a WHERE predicate is pushed down, the provider reads each row group's min/max column statistics from the Parquet footer metadata and skips row groups that cannot contain matching rows. This avoids reading column data for pruned groups entirely. Use EXPLAIN to see which filter is applied (`statistics filter:` annotation on the scan node) and EXPLAIN ANALYZE to see how many row groups were pruned.
 
@@ -96,7 +96,7 @@ Reads IDX binary files — the format used by MNIST, Fashion-MNIST, and similar 
 Implements `ISeekableTableProvider` for random-access row reads, enabling chunk-level seeking during index pruning and sorted index scan for ORDER BY optimization.
 
 Every table has two columns:
-- `index` (Scalar) — 0-based row number, useful for joining separate image and label files
+- `index` (Float32) — 0-based row number, useful for joining separate image and label files
 - A data column whose name and type depend on the data:
 
 | Data type | Per-item dims | Column name | DataKind |
@@ -104,7 +104,7 @@ Every table has two columns:
 | uint8 | 0 (scalar) | `value` | UInt8 |
 | uint8 | 1 (array) | `data` | UInt8Array |
 | uint8 | 2+ (image) | `image` | Image |
-| non-uint8 | 0 (scalar) | `value` | Scalar |
+| non-uint8 | 0 (scalar) | `value` | Float32 |
 | non-uint8 | 1 (vector) | `data` | Vector |
 | non-uint8 | 2 (matrix) | `data` | Matrix |
 | non-uint8 | 3+ (tensor) | `data` | Tensor |

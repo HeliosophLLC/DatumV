@@ -62,7 +62,7 @@ internal static class ProtoConverter
                 break;
 
             case DataKind.Float32:
-                message.ScalarValue = value.AsFloat32();
+                message.Float32Value = value.AsFloat32();
                 break;
 
             case DataKind.String:
@@ -127,8 +127,39 @@ internal static class ProtoConverter
                 break;
 
             case DataKind.Array:
-                // Serialize array elements as a JSON string for wire transport.
-                message.JsonValue = value.ToString() ?? "[]";
+                message.ArrayValue = value.ToString() ?? "[]";
+                break;
+
+            case DataKind.Int8:
+                message.Int8Value = value.AsInt8();
+                break;
+
+            case DataKind.Int16:
+                message.Int16Value = value.AsInt16();
+                break;
+
+            case DataKind.UInt16:
+                message.Uint16Value = value.AsUInt16();
+                break;
+
+            case DataKind.Int32:
+                message.Int32Value = value.AsInt32();
+                break;
+
+            case DataKind.UInt32:
+                message.Uint32Value = value.AsUInt32();
+                break;
+
+            case DataKind.Int64:
+                message.Int64Value = value.AsInt64();
+                break;
+
+            case DataKind.UInt64:
+                message.Uint64Value = value.AsUInt64();
+                break;
+
+            case DataKind.Float64:
+                message.Float64Value = value.AsFloat64();
                 break;
         }
 
@@ -143,7 +174,7 @@ internal static class ProtoConverter
         return kind switch
         {
             DataKind.UInt8 => DataKindValue.DataKindUint8,
-            DataKind.Float32 => DataKindValue.DataKindScalar,
+            DataKind.Float32 => DataKindValue.DataKindFloat32,
             DataKind.Vector => DataKindValue.DataKindVector,
             DataKind.Matrix => DataKindValue.DataKindMatrix,
             DataKind.Tensor => DataKindValue.DataKindTensor,
@@ -157,7 +188,15 @@ internal static class ProtoConverter
             DataKind.Boolean => DataKindValue.DataKindBoolean,
             DataKind.Time => DataKindValue.DataKindTime,
             DataKind.Duration => DataKindValue.DataKindDuration,
-            DataKind.Array => DataKindValue.DataKindJsonValue,
+            DataKind.Array => DataKindValue.DataKindArray,
+            DataKind.Int8 => DataKindValue.DataKindInt8,
+            DataKind.Int16 => DataKindValue.DataKindInt16,
+            DataKind.UInt16 => DataKindValue.DataKindUint16,
+            DataKind.Int32 => DataKindValue.DataKindInt32,
+            DataKind.UInt32 => DataKindValue.DataKindUint32,
+            DataKind.Int64 => DataKindValue.DataKindInt64,
+            DataKind.UInt64 => DataKindValue.DataKindUint64,
+            DataKind.Float64 => DataKindValue.DataKindFloat64,
             _ => DataKindValue.DataKindString,
         };
     }
@@ -178,7 +217,7 @@ internal static class ProtoConverter
         return message.ValueCase switch
         {
             DataValueMessage.ValueOneofCase.Uint8Value => DataValue.FromUInt8((byte)message.Uint8Value),
-            DataValueMessage.ValueOneofCase.ScalarValue => DataValue.FromFloat32(message.ScalarValue),
+            DataValueMessage.ValueOneofCase.Float32Value => DataValue.FromFloat32(message.Float32Value),
             DataValueMessage.ValueOneofCase.StringValue => DataValue.FromString(message.StringValue),
             DataValueMessage.ValueOneofCase.BooleanValue => DataValue.FromBoolean(message.BooleanValue),
             DataValueMessage.ValueOneofCase.DateValue => DataValue.FromDate(DateOnly.Parse(message.DateValue)),
@@ -187,6 +226,15 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.DurationValue => DataValue.FromDuration(TimeSpan.FromSeconds(message.DurationValue)),
             DataValueMessage.ValueOneofCase.UuidValue => DataValue.FromUuid(Guid.Parse(message.UuidValue)),
             DataValueMessage.ValueOneofCase.JsonValue => DataValue.FromJsonValue(message.JsonValue),
+            DataValueMessage.ValueOneofCase.ArrayValue => DataValue.FromJsonValue(message.ArrayValue),
+            DataValueMessage.ValueOneofCase.Int8Value => DataValue.FromInt8((sbyte)message.Int8Value),
+            DataValueMessage.ValueOneofCase.Int16Value => DataValue.FromInt16((short)message.Int16Value),
+            DataValueMessage.ValueOneofCase.Uint16Value => DataValue.FromUInt16((ushort)message.Uint16Value),
+            DataValueMessage.ValueOneofCase.Int32Value => DataValue.FromInt32(message.Int32Value),
+            DataValueMessage.ValueOneofCase.Uint32Value => DataValue.FromUInt32(message.Uint32Value),
+            DataValueMessage.ValueOneofCase.Int64Value => DataValue.FromInt64(message.Int64Value),
+            DataValueMessage.ValueOneofCase.Uint64Value => DataValue.FromUInt64(message.Uint64Value),
+            DataValueMessage.ValueOneofCase.Float64Value => DataValue.FromFloat64(message.Float64Value),
             _ => DataValue.Null(DataKind.Float32),
         };
     }

@@ -51,7 +51,7 @@ The following features are architecturally accounted for but deferred from V1:
 
 ## Type System Extensions (Deferred)
 
-**Status**: Under consideration. These types have clear use cases in OLAP analytics and ML pipelines but are not blocking V1 workflows. The current type system (Scalar, UInt8, Vector, Matrix, Tensor, UInt8Array, Image, String, Date, DateTime, Time, Duration, JsonValue, UUID, Boolean) covers the primary ML and analytics needs.
+**Status**: Under consideration. These types have clear use cases in OLAP analytics and ML pipelines but are not blocking V1 workflows. The current type system (Float32, UInt8, Vector, Matrix, Tensor, UInt8Array, Image, String, Date, DateTime, Time, Duration, JsonValue, UUID, Boolean) covers the primary ML and analytics needs.
 
 ### ~~Time-of-day type (`DataKind.Time`)~~ ✅
 
@@ -59,7 +59,7 @@ The following features are architecturally accounted for but deferred from V1:
 
 ### ~~Interval / Duration type (`DataKind.Duration`)~~ ✅
 
-~~Represents elapsed time spans (days, hours, minutes, seconds). Would allow `date_diff` to return a typed duration instead of a Scalar. Useful for temporal aggregation and arithmetic (`date_add` could accept Duration directly). The current Scalar representation for durations works for ML consumption (models see numbers) but loses semantic information. Parquet has no native interval type; HDF5 would need a custom convention.~~
+~~Represents elapsed time spans (days, hours, minutes, seconds). Would allow `date_diff` to return a typed duration instead of a Float32. Useful for temporal aggregation and arithmetic (`date_add` could accept Duration directly). The current Float32 representation for durations works for ML consumption (models see numbers) but loses semantic information. Parquet has no native interval type; HDF5 would need a custom convention.~~
 
 ### Enum / Categorical type (`DataKind.Categorical`)
 

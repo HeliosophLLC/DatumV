@@ -41,7 +41,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 
 ## Key Features
 
-- **ML-native type system** — Vector, Matrix, Tensor, and Image are first-class column types alongside Scalar, String, Date, DateTime, Time, Duration, JsonValue, UUID, and Boolean
+- **ML-native type system** — Vector, Matrix, Tensor, and Image are first-class column types alongside Float32, String, Date, DateTime, Time, Duration, JsonValue, UUID, and Boolean
 - **Fused image pipeline** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more transforms, with automatic decode/encode fusion across chains
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
@@ -164,7 +164,7 @@ See [docs/api.md](docs/api.md) for the full programmatic API (manifest, EXPLAIN,
 | `--analyze` | Run EXPLAIN ANALYZE: execute the query and report actual row counts and timing. |
 | `--output <path>` | Write manifest output to a file instead of stdout (manifest command). |
 | `--checkpoint` | Enable checkpoint-based resume for sharded writes. Requires `SHARD ON`. |
-| `--param <key=value>` | Bind a named parameter. Repeatable. Value types are inferred: numeric → Scalar, `true`/`false` → Boolean, `null` → Null, else → String. |
+| `--param <key=value>` | Bind a named parameter. Repeatable. Value types are inferred: numeric → Float32, `true`/`false` → Boolean, `null` → Null, else → String. |
 | `--index <path>` | Load a pre-built `.datum-index` file for chunk-level query pruning. Repeatable. |
 | `--with-index` | Co-generate a `.datum-index` for each source during query execution. |
 | `--chunk-size <n>` | Rows per index chunk (default: 10,000). |

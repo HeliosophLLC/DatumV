@@ -34,8 +34,8 @@ Every function belongs to a single **category** that describes its operational d
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `normalize` | `normalize(val, [min], [max])` | Normalize to 0–1 range. Byte/byte[]: default 0–255. Scalar/Vector: requires min/max. | 1 |
-| `clamp` | `clamp(val, min, max)` | Clamp value to [min, max]. Works on Scalar, Vector, Matrix, Tensor. | 1 |
+| `normalize` | `normalize(val, [min], [max])` | Normalize to 0–1 range. Byte/byte[]: default 0–255. Float32/Vector: requires min/max. | 1 |
+| `clamp` | `clamp(val, min, max)` | Clamp value to [min, max]. Works on Float32, Vector, Matrix, Tensor. | 1 |
 | `denormalize` | `denormalize(val, factor)` | Multiply by factor (reverse of normalize). | 1 |
 | `reshape` | `reshape(tensor, dim1, dim2, ...)` | Reinterpret tensor shape without copying. Element count must match. | 1 |
 
@@ -72,7 +72,7 @@ Every function belongs to a single **category** that describes its operational d
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `json_value` | `json_value(col, path)` | Extract scalar from JSON string at path. Returns String, Scalar, or null. | 5 |
+| `json_value` | `json_value(col, path)` | Extract scalar from JSON string at path. Returns String, Float32, or null. | 5 |
 | `json_query` | `json_query(col, path)` | Extract JSON fragment (array/object). Returns JsonValue or Vector if all-numeric. | 5 |
 | `json_exists` | `json_exists(col, path)` | Returns 1.0 if path exists in JSON, 0.0 otherwise. | 5 |
 | `json_array_length` | `json_array_length(col, [path])` | Count elements in JSON array at root or path. | 5 |
@@ -86,7 +86,7 @@ Every function belongs to a single **category** that describes its operational d
 | `array_join` | `array_join(arr, separator)` | Join elements into a String with separator. Null elements are skipped. String elements used directly; others converted via ToString. | 1 |
 | `array_contains` | `array_contains(arr, value)` | Returns Boolean — whether the array contains the value (by equality). | 1 |
 | `array_position` | `array_position(arr, value)` | 1-based index of the first matching element, or null if not found. | 1 |
-| `array_sort` | `array_sort(arr)` | Sorted copy (ascending). Uses ORDER BY comparison semantics — nulls sort last. Supports Scalar, UInt8, String, Date, DateTime elements. | 1 |
+| `array_sort` | `array_sort(arr)` | Sorted copy (ascending). Uses ORDER BY comparison semantics — nulls sort last. Supports Float32, UInt8, String, Date, DateTime elements. | 1 |
 | `array_reverse` | `array_reverse(arr)` | Reversed copy of the array. | 1 |
 | `array_distinct` | `array_distinct(arr)` | Remove duplicates, preserving first-occurrence order. Uses DataValue equality. | 1 |
 | `array_slice` | `array_slice(arr, start, length)` | Sub-array extraction. 1-based start, clamped to bounds. Returns empty array if out of range. | 1 |
@@ -94,8 +94,8 @@ Every function belongs to a single **category** that describes its operational d
 | `array_get` | `array_get(arr, index)` | Element at a 1-based index. Returns null if index is out of bounds or either argument is null. Return type matches the array's element kind. | 1 |
 | `array_min` | `array_min(arr)` | Minimum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind. | 1 |
 | `array_max` | `array_max(arr)` | Maximum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind. | 1 |
-| `array_sum` | `array_sum(arr)` | Sum of numeric (Scalar or UInt8) elements, skipping nulls. Returns null for an empty or all-null array. Always returns Scalar. | 1 |
-| `array_avg` | `array_avg(arr)` | Average (mean) of numeric elements, skipping nulls. Returns null for an empty or all-null array. Always returns Scalar. | 1 |
+| `array_sum` | `array_sum(arr)` | Sum of numeric (Float32 or UInt8) elements, skipping nulls. Returns null for an empty or all-null array. Always returns Float32. | 1 |
+| `array_avg` | `array_avg(arr)` | Average (mean) of numeric elements, skipping nulls. Returns null for an empty or all-null array. Always returns Float32. | 1 |
 
 > **Tip:** `len(arr)` also works as an alias for `array_length(arr)` since `len()` supports Array inputs.
 
@@ -103,8 +103,8 @@ Every function belongs to a single **category** that describes its operational d
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Scalar yields epoch days; DateTime→Scalar yields epoch seconds. Supports "uuid" and "bool" target types. | 1 |
-| `to_epoch` | `to_epoch(val)` | Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Scalar. | 1 |
+| `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Float32 yields epoch days; DateTime→Float32 yields epoch seconds. Supports "uuid" and "bool" target types. | 1 |
+| `to_epoch` | `to_epoch(val)` | Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Float32. | 1 |
 
 ## UUID
 
@@ -115,7 +115,7 @@ Every function belongs to a single **category** that describes its operational d
 | `is_uuid` | `is_uuid(str)` | Returns Boolean — whether the string is a valid UUID. | 1 |
 | `uuid_str` | `uuid_str(uuid)` | Format UUID as lowercase hyphenated string. | 1 |
 | `uuid_bytes` | `uuid_bytes(uuid)` | Extract UUID as 16-byte UInt8Array (big-endian). | 1 |
-| `uuid_version` | `uuid_version(uuid)` | Extract version number as Scalar (4 for random, 7 for time-ordered). | 1 |
+| `uuid_version` | `uuid_version(uuid)` | Extract version number as Float32 (4 for random, 7 for time-ordered). | 1 |
 | `uuid_timestamp` | `uuid_timestamp(uuid)` | Extract embedded timestamp from v7 UUID as DateTime. Returns null for non-v7. | 1 |
 
 ### UUID examples
@@ -140,7 +140,7 @@ SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash 
 |----------|-----------|-------------|----|
 | `bytes_concat` | `bytes_concat(a, b, ...)` | Concatenate two or more byte arrays. Null args treated as empty. | 1 |
 | `bytes_slice` | `bytes_slice(bytes, start, len)` | Extract sub-array by position and length (0-based, clamped). | 1 |
-| `bytes` | `bytes(a, b, ...)` | Construct a byte array from Scalar values (each 0–255). | 1 |
+| `bytes` | `bytes(a, b, ...)` | Construct a byte array from Float32 values (each 0–255). | 1 |
 
 ## Hashing
 
@@ -149,7 +149,7 @@ SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash 
 | `md5` | `md5(val)` | MD5 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
 | `sha256` | `sha256(val)` | SHA-256 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
 | `sha512` | `sha512(val)` | SHA-512 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
-| `crc32` | `crc32(val)` | CRC-32 checksum as Scalar. Accepts String (UTF-8) or UInt8Array. | 2 |
+| `crc32` | `crc32(val)` | CRC-32 checksum as Float32. Accepts String (UTF-8) or UInt8Array. | 2 |
 
 ## Encoding
 
@@ -166,8 +166,8 @@ SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash 
 |----------|-----------|-------------|----|  
 | `one_hot` | `one_hot(value, label1, label2, ...)` | One-hot encode against an explicit domain. Returns Vector[K] with 1.0 at matching index; zero vector for unknown values. | 1 |
 | `one_hot_unk` | `one_hot_unk(value, label1, label2, ...)` | One-hot encode with unknown bucket. Returns Vector[K+1]; unknown values activate the last dimension. | 1 |
-| `label_encode` | `label_encode(value, label1, label2, ...)` | Label-encode against an explicit domain. Returns the zero-based Scalar index; -1 for unknown values. | 1 |
-| `label_encode_unk` | `label_encode_unk(value, label1, label2, ...)` | Label-encode with unknown bucket. Returns the zero-based Scalar index; K (domain size) for unknown values. | 1 |
+| `label_encode` | `label_encode(value, label1, label2, ...)` | Label-encode against an explicit domain. Returns the zero-based Float32 index; -1 for unknown values. | 1 |
+| `label_encode_unk` | `label_encode_unk(value, label1, label2, ...)` | Label-encode with unknown bucket. Returns the zero-based Float32 index; K (domain size) for unknown values. | 1 |
 | `hash_encode` | `hash_encode(value, num_buckets)` | Feature-hash a string into a fixed-size one-hot Vector. Uses XxHash32 modulo num_buckets. Handles any cardinality without an explicit domain. | 2 |
 
 ### Categorical encoding examples
@@ -198,8 +198,8 @@ FROM users
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `date_part` | `date_part(part, val)` | Extract a named component from a Date or DateTime as Scalar. | 1 |
-| `cyclical_encode` | `cyclical_encode(val, period)` | Encode a Scalar as a 2-element Vector `[sin(2π·val/period), cos(2π·val/period)]`. | 1 |
+| `date_part` | `date_part(part, val)` | Extract a named component from a Date or DateTime as Float32. | 1 |
+| `cyclical_encode` | `cyclical_encode(val, period)` | Encode a Float32 as a 2-element Vector `[sin(2π·val/period), cos(2π·val/period)]`. | 1 |
 
 ### `date_part` supported parts
 
@@ -224,7 +224,7 @@ FROM users
 SELECT to_epoch(date_col) AS epoch_days FROM data
 
 -- Equivalent via CAST
-SELECT CAST(date_col AS Scalar) AS epoch_days FROM data
+SELECT CAST(date_col AS Float32) AS epoch_days FROM data
 
 -- Extract individual components
 SELECT date_part('year', date_col) AS year,
@@ -248,7 +248,7 @@ FROM data
 
 ## Date/Time — Extraction (9)
 
-Shorthand functions for extracting individual components from Date, DateTime, or Time values. Each returns a Scalar.
+Shorthand functions for extracting individual components from Date, DateTime, or Time values. Each returns a Float32.
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
@@ -269,13 +269,13 @@ Shorthand functions for extracting individual components from Date, DateTime, or
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
 | `now` | `now()` | Current UTC timestamp as DateTime. | 1 |
-| `make_date` | `make_date(year, month, day)` | Construct a Date from components (all Scalar). | 1 |
-| `make_timestamp` | `make_timestamp(y, m, d, h, min, s)` | Construct a DateTime (UTC) from components (all Scalar). | 1 |
-| `date_diff` | `date_diff(part, start, end)` | Count of part boundaries crossed between two dates. Returns Scalar. | 1 |
+| `make_date` | `make_date(year, month, day)` | Construct a Date from components (all Float32). | 1 |
+| `make_timestamp` | `make_timestamp(y, m, d, h, min, s)` | Construct a DateTime (UTC) from components (all Float32). | 1 |
+| `date_diff` | `date_diff(part, start, end)` | Count of part boundaries crossed between two dates. Returns Float32. | 1 |
 | `date_add` | `date_add(part, amount, date)` | Add amount of the specified part to a date. Preserves input kind. | 1 |
 | `date_trunc` | `date_trunc(part, date)` | Truncate to the specified precision. Week uses ISO 8601 (Monday start). Preserves input kind. | 1 |
 | `date_bucket` | `date_bucket(part, width, date [, origin])` | Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind. | 1 |
-| `make_time` | `make_time(hour, minute, second)` | Construct a Time from components (all Scalar). | 1 |
+| `make_time` | `make_time(hour, minute, second)` | Construct a Time from components (all Float32). | 1 |
 | `current_time` | `current_time()` | Current UTC time of day as Time. | 1 |
 | `date_span` | `date_span(start, end)` | Elapsed Duration between two Date or DateTime values. | 1 |
 | `date_offset` | `date_offset(date, duration)` | Add a Duration to a Date, DateTime, or Time. Returns DateTime for Date/DateTime, Time for Time. | 1 |
@@ -301,11 +301,11 @@ All date part arguments accept these names (case-insensitive) with aliases:
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `make_duration` | `make_duration(days, hours, minutes, seconds)` | Construct a Duration from components (all Scalar). | 1 |
-| `duration_seconds` | `duration_seconds(dur)` | Total seconds in a Duration as Scalar. | 1 |
-| `duration_minutes` | `duration_minutes(dur)` | Total minutes in a Duration as Scalar (fractional). | 1 |
-| `duration_hours` | `duration_hours(dur)` | Total hours in a Duration as Scalar (fractional). | 1 |
-| `duration_days` | `duration_days(dur)` | Total days in a Duration as Scalar (fractional). | 1 |
+| `make_duration` | `make_duration(days, hours, minutes, seconds)` | Construct a Duration from components (all Float32). | 1 |
+| `duration_seconds` | `duration_seconds(dur)` | Total seconds in a Duration as Float32. | 1 |
+| `duration_minutes` | `duration_minutes(dur)` | Total minutes in a Duration as Float32 (fractional). | 1 |
+| `duration_hours` | `duration_hours(dur)` | Total hours in a Duration as Float32 (fractional). | 1 |
+| `duration_days` | `duration_days(dur)` | Total days in a Duration as Float32 (fractional). | 1 |
 
 ## Date/Time — Formatting & Probing (2)
 
@@ -392,8 +392,8 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `COUNT` | `COUNT(*)` or `COUNT(expr)` | Count all rows (`*`) or non-null values (`expr`). | 1 |
 | `SUM` | `SUM(expr)` | Sum of non-null `Float32` values. Returns null if all inputs are null. | 1 |
 | `AVG` | `AVG(expr)` | Arithmetic mean of non-null `Float32` values. Nulls excluded from denominator. | 1 |
-| `MIN` | `MIN(expr)` | Minimum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
-| `MAX` | `MAX(expr)` | Maximum value. Supports Scalar, UInt8, String, Date, DateTime, Time. | 1 |
+| `MIN` | `MIN(expr)` | Minimum value. Supports Float32, UInt8, String, Date, DateTime, Time. | 1 |
+| `MAX` | `MAX(expr)` | Maximum value. Supports Float32, UInt8, String, Date, DateTime, Time. | 1 |
 | `VARIANCE` | `VARIANCE(expr)` | Sample variance (N−1 denominator). Alias for `VAR_SAMP`. | 1 |
 | `VAR_SAMP` | `VAR_SAMP(expr)` | Sample variance (N−1). Null for fewer than 2 values. | 1 |
 | `VAR_POP` | `VAR_POP(expr)` | Population variance (N denominator). | 1 |
@@ -584,27 +584,27 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `vec_sum` | `vec_sum(x)` | Sum of all elements → Scalar. | 2 |
-| `vec_mean` | `vec_mean(x)` | Mean of all elements → Scalar. | 2 |
-| `vec_min` | `vec_min(x)` | Minimum element → Scalar. | 2 |
-| `vec_max` | `vec_max(x)` | Maximum element → Scalar. | 2 |
-| `vec_std` | `vec_std(x)` | Population standard deviation → Scalar. | 2 |
-| `vec_var` | `vec_var(x)` | Population variance → Scalar. | 2 |
-| `vec_median` | `vec_median(x)` | Median → Scalar. | 2 |
-| `vec_argmin` | `vec_argmin(x)` | Index of minimum element → Scalar. | 2 |
-| `vec_argmax` | `vec_argmax(x)` | Index of maximum element → Scalar. | 2 |
+| `vec_sum` | `vec_sum(x)` | Sum of all elements → Float32. | 2 |
+| `vec_mean` | `vec_mean(x)` | Mean of all elements → Float32. | 2 |
+| `vec_min` | `vec_min(x)` | Minimum element → Float32. | 2 |
+| `vec_max` | `vec_max(x)` | Maximum element → Float32. | 2 |
+| `vec_std` | `vec_std(x)` | Population standard deviation → Float32. | 2 |
+| `vec_var` | `vec_var(x)` | Population variance → Float32. | 2 |
+| `vec_median` | `vec_median(x)` | Median → Float32. | 2 |
+| `vec_argmin` | `vec_argmin(x)` | Index of minimum element → Float32. | 2 |
+| `vec_argmax` | `vec_argmax(x)` | Index of maximum element → Float32. | 2 |
 | `vec_norm` | `vec_norm(x, [p])` | Lp norm (default p=2). p=∞ for max-norm. | 2 |
-| `vec_count_nonzero` | `vec_count_nonzero(x)` | Count of non-zero elements → Scalar. | 2 |
+| `vec_count_nonzero` | `vec_count_nonzero(x)` | Count of non-zero elements → Float32. | 2 |
 | `vec_any` | `vec_any(x)` | 1 if any element is non-zero, else 0. | 2 |
 | `vec_all` | `vec_all(x)` | 1 if all elements are non-zero, else 0. | 2 |
-| `vec_product` | `vec_product(x)` | Product of all elements → Scalar. | 2 |
+| `vec_product` | `vec_product(x)` | Product of all elements → Float32. | 2 |
 
 ## Math — Tensor Introspection (3)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `rank` | `rank(x)` | Number of dimensions → Scalar. Vector=1, Matrix=2, Tensor=N. | 1 |
-| `rdim` | `rdim(x, axis)` | Size of a specific dimension → Scalar. | 1 |
+| `rank` | `rank(x)` | Number of dimensions → Float32. Vector=1, Matrix=2, Tensor=N. | 1 |
+| `rdim` | `rdim(x, axis)` | Size of a specific dimension → Float32. | 1 |
 | `shape` | `shape(x)` | All dimension sizes → Vector. | 1 |
 
 ## Math — Vector Manipulation (12)
@@ -709,17 +709,17 @@ SELECT random_choice(tags, 3) AS sampled_tags FROM articles
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `image_brightness_mean` | `image_brightness_mean(img)` | Mean brightness (BT.601 luminance) across all pixels → Scalar 0–255. | 10 + ⌊px/100K⌋ |
-| `image_brightness_std` | `image_brightness_std(img)` | Standard deviation of brightness across all pixels → Scalar. | 10 + ⌊px/100K⌋ |
+| `image_brightness_mean` | `image_brightness_mean(img)` | Mean brightness (BT.601 luminance) across all pixels → Float32 0–255. | 10 + ⌊px/100K⌋ |
+| `image_brightness_std` | `image_brightness_std(img)` | Standard deviation of brightness across all pixels → Float32. | 10 + ⌊px/100K⌋ |
 | `image_brightness_histogram` | `image_brightness_histogram(img)` | 256-bin brightness histogram → Vector. Each element is the pixel count for that luminance bin. | 10 + ⌊px/100K⌋ |
-| `detect_blur` | `detect_blur(img)` | Laplacian variance blur detector → Scalar. Higher values = sharper image. | 10 + ⌊px/100K⌋ |
-| `compression_artifact_score` | `compression_artifact_score(img)` | JPEG blockiness score → Scalar 0–1. Measures 8×8 block boundary discontinuities. | 10 + ⌊px/100K⌋ |
+| `detect_blur` | `detect_blur(img)` | Laplacian variance blur detector → Float32. Higher values = sharper image. | 10 + ⌊px/100K⌋ |
+| `compression_artifact_score` | `compression_artifact_score(img)` | JPEG blockiness score → Float32 0–1. Measures 8×8 block boundary discontinuities. | 10 + ⌊px/100K⌋ |
 
 ## Image — Pixel Statistics (2)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Scalar. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. | 10 + ⌊px/100K⌋ |
+| `image_pixel_mean` | `image_pixel_mean(img[, channels])` | Mean pixel value. Without channels: overall mean → Float32. With channels vector (0=R,1=G,2=B,3=A): per-channel means → Vector. | 10 + ⌊px/100K⌋ |
 | `image_pixel_std` | `image_pixel_std(img[, channels])` | Standard deviation of pixel values. Same signature as `image_pixel_mean`. | 10 + ⌊px/100K⌋ |
 
 ## Image — Loading & Decode (4)

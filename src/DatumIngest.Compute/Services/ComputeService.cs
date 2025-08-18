@@ -601,7 +601,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         return kind switch
         {
             "UInt8" => ParameterKindValue.ParameterKindUint8,
-            "Float32" => ParameterKindValue.ParameterKindScalar,
+            "Float32" => ParameterKindValue.ParameterKindFloat32,
             "Vector" => ParameterKindValue.ParameterKindVector,
             "Matrix" => ParameterKindValue.ParameterKindMatrix,
             "Tensor" => ParameterKindValue.ParameterKindTensor,
@@ -615,6 +615,15 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             "Boolean" => ParameterKindValue.ParameterKindBoolean,
             "Time" => ParameterKindValue.ParameterKindTime,
             "Duration" => ParameterKindValue.ParameterKindDuration,
+            "Array" => ParameterKindValue.ParameterKindArray,
+            "Int8" => ParameterKindValue.ParameterKindInt8,
+            "Int16" => ParameterKindValue.ParameterKindInt16,
+            "UInt16" => ParameterKindValue.ParameterKindUint16,
+            "Int32" => ParameterKindValue.ParameterKindInt32,
+            "UInt32" => ParameterKindValue.ParameterKindUint32,
+            "Int64" => ParameterKindValue.ParameterKindInt64,
+            "UInt64" => ParameterKindValue.ParameterKindUint64,
+            "Float64" => ParameterKindValue.ParameterKindFloat64,
             _ => ParameterKindValue.ParameterKindAny,
         };
     }

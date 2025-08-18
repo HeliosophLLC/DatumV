@@ -77,14 +77,14 @@ Each column page independently records its encoding as a single `DatumEncoding` 
 
 | Encoding | Value | Used for | Layout |
 |----------|-------|----------|--------|
-| `Raw` | 0 | Scalar floats, UInt8, Uuid | Dense binary array: `float32[N]`, `byte[N]`, or `byte[16×N]` |
+| `Raw` | 0 | Float32, UInt8, Uuid | Dense binary array: `float32[N]`, `byte[N]`, or `byte[16×N]` |
 | `BitPacked` | 1 | Boolean | Two bit vectors: `nullBitmap[⌈N/8⌉]` then `valueBitmap[⌈N/8⌉]` |
 | `DeltaInt32` | 2 | Date | `nullBitmap[⌈N/8⌉]` then delta-encoded `int32[N]` relative to first non-null |
 | `DeltaInt64` | 3 | DateTime, Time, Duration | `nullBitmap[⌈N/8⌉]` then delta-encoded `int64[N]` relative to first non-null. DateTime pages append a secondary `int16[N]` array of UTC offset minutes |
-| `FixedFloat32` | 4 | Scalar, Vector, Matrix, Tensor | `nullBitmap[⌈N/8⌉]` then `float32[N × elementsPerRow]`. Null rows store `NaN` to preserve implicit element offsets. A byte-lane shuffle is applied before compression |
+| `FixedFloat32` | 4 | Float32, Vector, Matrix, Tensor | `nullBitmap[⌈N/8⌉]` then `float32[N × elementsPerRow]`. Null rows store `NaN` to preserve implicit element offsets. A byte-lane shuffle is applied before compression |
 | `VariableBytes` | 5 | String, JsonValue, UInt8Array, Image | `nullBitmap[⌈N/8⌉]` then `uint32 offsets[N+1]` then `byte pool[offsets[N]]`. Null rows: `offsets[i] == offsets[i+1]` with null bit set |
 | `VariableDataValue` | 6 | Array (heterogeneous) | Same offset-pool layout as `VariableBytes`, but each pool entry is a serialized `DataValue` |
-| `DictionaryRLE` | 7 | Low-cardinality String, Scalar | In-page dictionary followed by code array: `uint8[N]` when ≤ 255 unique values (sentinel `0xFF` = null), otherwise `uint16[N]` (sentinel `0xFFFF`) |
+| `DictionaryRLE` | 7 | Low-cardinality String, Float32 | In-page dictionary followed by code array: `uint8[N]` when ≤ 255 unique values (sentinel `0xFF` = null), otherwise `uint16[N]` (sentinel `0xFFFF`) |
 | `ExternalBytes` | 8 | Image, UInt8Array (large blobs) | Same layout as `VariableBytes`, but pool contains UTF-8 relative path strings referencing sidecar files instead of raw bytes |
 
 #### Null bitmap
@@ -162,7 +162,7 @@ For each row group:
           DataValue: maximum
 ```
 
-Zone maps are populated for comparable types (Scalar, UInt8, Boolean, String, Date, DateTime, Time, Duration, Uuid). Non-comparable types (Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array) carry only `nullCount`; `minimum` and `maximum` are omitted.
+Zone maps are populated for comparable types (Float32, UInt8, Boolean, String, Date, DateTime, Time, Duration, Uuid). Non-comparable types (Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array) carry only `nullCount`; `minimum` and `maximum` are omitted.
 
 ## File tail
 
@@ -198,7 +198,7 @@ Both zone maps (in the footer) and index entries (in the sidecar) serialize `Dat
 ```
 byte:  DataKind enum
 Then kind-specific payload:
-  Scalar:    float32
+  Float32:    float32
   UInt8:     byte
   Boolean:   bool (1 byte)
   String:    BinaryWriter length-prefixed UTF-8 string

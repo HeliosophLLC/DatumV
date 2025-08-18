@@ -181,7 +181,7 @@ message ParameterInfoMessage {
 enum ParameterKindValue {
   PARAMETER_KIND_ANY = 0;
   PARAMETER_KIND_UINT8 = 1;
-  PARAMETER_KIND_SCALAR = 2;
+  PARAMETER_KIND_FLOAT32 = 2;
   PARAMETER_KIND_VECTOR = 3;
   PARAMETER_KIND_MATRIX = 4;
   PARAMETER_KIND_TENSOR = 5;
@@ -195,6 +195,15 @@ enum ParameterKindValue {
   PARAMETER_KIND_BOOLEAN = 13;
   PARAMETER_KIND_TIME = 14;
   PARAMETER_KIND_DURATION = 15;
+  PARAMETER_KIND_ARRAY = 16;
+  PARAMETER_KIND_INT8 = 17;
+  PARAMETER_KIND_INT16 = 18;
+  PARAMETER_KIND_UINT16 = 19;
+  PARAMETER_KIND_INT32 = 20;
+  PARAMETER_KIND_UINT32 = 21;
+  PARAMETER_KIND_INT64 = 22;
+  PARAMETER_KIND_UINT64 = 23;
+  PARAMETER_KIND_FLOAT64 = 24;
 }
 
 // Classifies a function by its operational domain.
@@ -351,7 +360,7 @@ message ColumnInfoMessage {
 // Mirrors DatumIngest.Model.DataKind enum values.
 enum DataKindValue {
   DATA_KIND_UINT8 = 0;
-  DATA_KIND_SCALAR = 1;
+  DATA_KIND_FLOAT32 = 1;
   DATA_KIND_VECTOR = 2;
   DATA_KIND_MATRIX = 3;
   DATA_KIND_TENSOR = 4;
@@ -365,6 +374,15 @@ enum DataKindValue {
   DATA_KIND_BOOLEAN = 12;
   DATA_KIND_TIME = 13;
   DATA_KIND_DURATION = 14;
+  DATA_KIND_ARRAY = 15;
+  DATA_KIND_INT8 = 16;
+  DATA_KIND_INT16 = 17;
+  DATA_KIND_UINT16 = 18;
+  DATA_KIND_INT32 = 19;
+  DATA_KIND_UINT32 = 20;
+  DATA_KIND_INT64 = 21;
+  DATA_KIND_UINT64 = 22;
+  DATA_KIND_FLOAT64 = 23;
 }
 
 // Discriminated value type transported over the wire.
@@ -374,7 +392,7 @@ message DataValueMessage {
 
   oneof value {
     uint32 uint8_value = 2;
-    float scalar_value = 3;
+    float float32_value = 3;
     string string_value = 4;
     string date_value = 5;       // ISO 8601 date string
     string date_time_value = 6;  // ISO 8601 datetime string
@@ -388,6 +406,15 @@ message DataValueMessage {
     bool boolean_value = 14;
     string time_value = 15;      // HH:mm:ss.FFFFFFF time string
     double duration_value = 16;  // Total seconds as double
+    string array_value = 17;     // JSON-serialized array
+    int32 int8_value = 18;       // Signed 8-bit integer (widened to int32)
+    int32 int16_value = 19;      // Signed 16-bit integer (widened to int32)
+    uint32 uint16_value = 20;    // Unsigned 16-bit integer (widened to uint32)
+    int32 int32_value = 21;
+    uint32 uint32_value = 22;
+    int64 int64_value = 23;
+    uint64 uint64_value = 24;
+    double float64_value = 25;
   }
 }
 

@@ -21,7 +21,7 @@ Each candidate pair carries a `JoinEvidence` object with independent signals and
 | Signal | Range | Description |
 |--------|-------|-------------|
 | `NameSimilarity` | 0–1 | Levenshtein-based similarity with suffix bonuses for `_id`, `_key`, `_code`. |
-| `TypeCompatibility` | 0–1 | 1.0 exact match, 0.8 coercible (Scalar↔UInt8, Date↔DateTime), 0.5 String↔JsonValue, 0.0 incompatible. |
+| `TypeCompatibility` | 0–1 | 1.0 exact match, 0.8 coercible (Float32↔UInt8, Date↔DateTime), 0.5 String↔JsonValue, 0.0 incompatible. |
 | `TopKJaccard` | 0–1 | Jaccard similarity of TopK value sets (case-insensitive, skips continuous numerics). When both columns have a [vocabulary sidecar](#vocabulary-sidecars), exact Jaccard from the full value sets replaces this estimate. |
 | `CardinalityRatio` | 0–1 | min(NDV) / max(NDV). Close to 1.0 suggests both columns draw from the same domain. |
 | `RangeOverlap` | 0–1 or null | Intersection / union of numeric [min, max] ranges. Null for non-numeric columns. |

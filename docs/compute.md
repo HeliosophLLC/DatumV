@@ -128,7 +128,7 @@ grpcurl -plaintext \
 # Run a query with parameters
 grpcurl -plaintext \
   -H "x-api-key: my-secret-key" \
-  -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine WHERE quality > $min_quality", "parameters": {"min_quality": {"scalar_value": 6}}}' \
+  -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine WHERE quality > $min_quality", "parameters": {"min_quality": {"float32_value": 6}}}' \
   localhost:5050 datum_compute.DatumCompute/Query
 
 # List tables
@@ -317,7 +317,7 @@ Returns all available functions with parameter metadata.
 |-------|---------|
 | `PARAMETER_KIND_ANY` (0) | Accepts any type (polymorphic parameter). |
 | `PARAMETER_KIND_UINT8` (1) | `UInt8` |
-| `PARAMETER_KIND_SCALAR` (2) | `Float32` |
+| `PARAMETER_KIND_FLOAT32` (2) | `Float32` |
 | `PARAMETER_KIND_VECTOR` (3) | `Vector` |
 | `PARAMETER_KIND_MATRIX` (4) | `Matrix` |
 | `PARAMETER_KIND_TENSOR` (5) | `Tensor` |
@@ -411,7 +411,7 @@ The `DataValueMessage` uses a `oneof` discriminated union to carry typed values:
 | DataKind | Proto field | Wire type | Notes |
 |----------|-------------|-----------|-------|
 | `UInt8` | `uint8_value` | `uint32` | Single byte (0–255) |
-| `Float32` | `scalar_value` | `float` | 32-bit float |
+| `Float32` | `float32_value` | `float` | 32-bit float |
 | `String` | `string_value` | `string` | UTF-8 text |
 | `Date` | `date_value` | `string` | ISO 8601 date (`2024-06-15`) |
 | `DateTime` | `date_time_value` | `string` | ISO 8601 round-trip (`O` format) |
@@ -464,7 +464,7 @@ using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
         Sql = "SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 10",
         Parameters =
         {
-            ["min_quality"] = new DataValueMessage { ScalarValue = 6 },
+            ["min_quality"] = new DataValueMessage { Float32Value = 6 },
         },
     });
 
@@ -528,7 +528,7 @@ Console.WriteLine($"Queries: {usage.QueryCount}, Total QU: {usage.TotalQueryUnit
 
 static string FormatValue(DataValueMessage value)
 {
-    if (value.HasScalarValue) return value.ScalarValue.ToString("F2");
+    if (value.HasFloat32Value) return value.Float32Value.ToString("F2");
     if (value.HasStringValue) return value.StringValue;
     if (value.HasUint8Value) return value.Uint8Value.ToString();
     return value.ToString();
@@ -587,13 +587,13 @@ for row in stub.Query(
     datum_compute_pb2.QueryRequest(
         session_id=session_id,
         sql="SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 5",
-        parameters={"min_quality": datum_compute_pb2.DataValueMessage(scalar_value=6)},
+        parameters={"min_quality": datum_compute_pb2.DataValueMessage(float32_value=6)},
     ),
     metadata=metadata,
 ):
     if row.schema.columns:
         print([col.name for col in row.schema.columns])
-    print([v.scalar_value if v.HasField("scalar_value") else str(v) for v in row.values])
+    print([v.float32_value if v.HasField("float32_value") else str(v) for v in row.values])
 
 # Clean up.
 stub.DestroySession(

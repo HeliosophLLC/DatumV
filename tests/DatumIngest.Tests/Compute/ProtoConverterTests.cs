@@ -23,7 +23,7 @@ public sealed class ProtoConverterTests
         ColumnInfoMessage message = ProtoConverter.ToProto(column);
 
         Assert.Equal("temperature", message.Name);
-        Assert.Equal(DataKindValue.DataKindScalar, message.Kind);
+        Assert.Equal(DataKindValue.DataKindFloat32, message.Kind);
         Assert.True(message.Nullable);
     }
 
@@ -77,17 +77,17 @@ public sealed class ProtoConverterTests
     }
 
     /// <summary>
-    /// Scalar DataValue converts to ScalarValue field.
+    /// Float32 DataValue converts to Float32Value field.
     /// </summary>
     [Fact]
-    public void ToProto_ScalarValue_SetsScalarField()
+    public void ToProto_Float32Value_SetsFloat32Field()
     {
         DataValue value = DataValue.FromFloat32(3.14f);
 
         DataValueMessage message = ProtoConverter.ToProto(value);
 
         Assert.False(message.IsNull);
-        Assert.Equal(3.14f, message.ScalarValue, precision: 5);
+        Assert.Equal(3.14f, message.Float32Value, precision: 5);
     }
 
     /// <summary>
@@ -244,7 +244,7 @@ public sealed class ProtoConverterTests
     /// </summary>
     [Theory]
     [InlineData(DataKind.UInt8, DataKindValue.DataKindUint8)]
-    [InlineData(DataKind.Float32, DataKindValue.DataKindScalar)]
+    [InlineData(DataKind.Float32, DataKindValue.DataKindFloat32)]
     [InlineData(DataKind.Vector, DataKindValue.DataKindVector)]
     [InlineData(DataKind.Matrix, DataKindValue.DataKindMatrix)]
     [InlineData(DataKind.Tensor, DataKindValue.DataKindTensor)]
@@ -254,6 +254,19 @@ public sealed class ProtoConverterTests
     [InlineData(DataKind.Date, DataKindValue.DataKindDate)]
     [InlineData(DataKind.DateTime, DataKindValue.DataKindDateTime)]
     [InlineData(DataKind.JsonValue, DataKindValue.DataKindJsonValue)]
+    [InlineData(DataKind.Uuid, DataKindValue.DataKindUuid)]
+    [InlineData(DataKind.Boolean, DataKindValue.DataKindBoolean)]
+    [InlineData(DataKind.Time, DataKindValue.DataKindTime)]
+    [InlineData(DataKind.Duration, DataKindValue.DataKindDuration)]
+    [InlineData(DataKind.Array, DataKindValue.DataKindArray)]
+    [InlineData(DataKind.Int8, DataKindValue.DataKindInt8)]
+    [InlineData(DataKind.Int16, DataKindValue.DataKindInt16)]
+    [InlineData(DataKind.UInt16, DataKindValue.DataKindUint16)]
+    [InlineData(DataKind.Int32, DataKindValue.DataKindInt32)]
+    [InlineData(DataKind.UInt32, DataKindValue.DataKindUint32)]
+    [InlineData(DataKind.Int64, DataKindValue.DataKindInt64)]
+    [InlineData(DataKind.UInt64, DataKindValue.DataKindUint64)]
+    [InlineData(DataKind.Float64, DataKindValue.DataKindFloat64)]
     public void ToProto_ColumnInfo_MapsEveryDataKind(DataKind kind, DataKindValue expectedProtoKind)
     {
         ColumnInfo column = new("test", kind, false);
@@ -261,6 +274,31 @@ public sealed class ProtoConverterTests
         ColumnInfoMessage message = ProtoConverter.ToProto(column);
 
         Assert.Equal(expectedProtoKind, message.Kind);
+    }
+
+    /// <summary>
+    /// Extended numeric DataValues survive a ToProto → FromProto round-trip.
+    /// </summary>
+    [Fact]
+    public void ToProtoFromProto_ExtendedNumericTypes_RoundTrip()
+    {
+        DataValue int8Value = DataValue.FromInt8(42);
+        DataValue int16Value = DataValue.FromInt16(1000);
+        DataValue uint16Value = DataValue.FromUInt16(50000);
+        DataValue int32Value = DataValue.FromInt32(123456);
+        DataValue uint32Value = DataValue.FromUInt32(3000000000);
+        DataValue int64Value = DataValue.FromInt64(9876543210L);
+        DataValue uint64Value = DataValue.FromUInt64(18000000000000000000UL);
+        DataValue float64Value = DataValue.FromFloat64(3.141592653589793);
+
+        Assert.Equal(42, ProtoConverter.FromProto(ProtoConverter.ToProto(int8Value)).AsInt8());
+        Assert.Equal(1000, ProtoConverter.FromProto(ProtoConverter.ToProto(int16Value)).AsInt16());
+        Assert.Equal(50000, ProtoConverter.FromProto(ProtoConverter.ToProto(uint16Value)).AsUInt16());
+        Assert.Equal(123456, ProtoConverter.FromProto(ProtoConverter.ToProto(int32Value)).AsInt32());
+        Assert.Equal(3000000000U, ProtoConverter.FromProto(ProtoConverter.ToProto(uint32Value)).AsUInt32());
+        Assert.Equal(9876543210L, ProtoConverter.FromProto(ProtoConverter.ToProto(int64Value)).AsInt64());
+        Assert.Equal(18000000000000000000UL, ProtoConverter.FromProto(ProtoConverter.ToProto(uint64Value)).AsUInt64());
+        Assert.Equal(3.141592653589793, ProtoConverter.FromProto(ProtoConverter.ToProto(float64Value)).AsFloat64());
     }
 
     /// <summary>

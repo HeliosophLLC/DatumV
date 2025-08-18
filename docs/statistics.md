@@ -14,11 +14,11 @@ The `stats` command collects per-column statistics:
 | Null/empty count | CountAccumulator | All columns |
 | Distinct count estimate | CardinalityAccumulator | All columns (HyperLogLog, ±2%) |
 | Top-K values | TopKAccumulator | All columns (default K=10) |
-| Min, Max, Mean, Variance, StdDev | NumericAccumulator | Scalar, UInt8 |
-| Zero count, Zero ratio | NumericAccumulator | Scalar, UInt8 |
-| Outlier count, Outlier ratio | NumericAccumulator | Scalar, UInt8 (Z-score > 3) |
-| Histogram | HistogramAccumulator | Scalar, UInt8 (reservoir sampling, 50 bins) |
-| Percentiles (P1–P99) | QuantileAccumulator | Scalar, UInt8 (reservoir sampling, linear interpolation) |
+| Min, Max, Mean, Variance, StdDev | NumericAccumulator | Float32, UInt8 |
+| Zero count, Zero ratio | NumericAccumulator | Float32, UInt8 |
+| Outlier count, Outlier ratio | NumericAccumulator | Float32, UInt8 (Z-score > 3) |
+| Histogram | HistogramAccumulator | Float32, UInt8 (reservoir sampling, 50 bins) |
+| Percentiles (P1–P99) | QuantileAccumulator | Float32, UInt8 (reservoir sampling, linear interpolation) |
 | Min/Max string length | StringLengthAccumulator | String, JsonValue |
 | Element count range, element-wise min/max/mean/var/std | VectorStatsAccumulator | Vector, Matrix, Tensor |
 | Rank range (dimensionality) | VectorStatsAccumulator | Vector, Matrix, Tensor |
@@ -31,9 +31,9 @@ The `stats` command collects per-column statistics:
 | Extreme dimension counts (tiny/huge) | ImageStatsAccumulator | Image |
 | Byte-length min/max/mean/var/std | BinarySizeAccumulator | UInt8Array |
 | Earliest/Latest date | TemporalRangeAccumulator | Date, DateTime |
-| Shannon entropy | EntropyAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
-| Top-K coverage ratio | CategoricalDiagnosticsAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
-| Rare category ratio | CategoricalDiagnosticsAccumulator | Scalar, UInt8, String, JsonValue, Date, DateTime |
+| Shannon entropy | EntropyAccumulator | Float32, UInt8, String, JsonValue, Date, DateTime |
+| Top-K coverage ratio | CategoricalDiagnosticsAccumulator | Float32, UInt8, String, JsonValue, Date, DateTime |
+| Rare category ratio | CategoricalDiagnosticsAccumulator | Float32, UInt8, String, JsonValue, Date, DateTime |
 
 Accumulators support `Merge()` for parallel collection using Chan et al. algorithm for combining Welford's running statistics.
 
@@ -64,7 +64,7 @@ Thresholds are defined as the `TinyThreshold` (32) and `HugeThreshold` (4096) co
 
 ### Column interactions
 
-The `manifest` command also computes pairwise interaction statistics between columns. Numeric (Scalar, UInt8) and categorical (String, JsonValue, Date, DateTime) columns receive value-based measures appropriate to their pair type. Image, binary, and multidimensional columns participate in missingness correlation only.
+The `manifest` command also computes pairwise interaction statistics between columns. Numeric (Float32, UInt8) and categorical (String, JsonValue, Date, DateTime) columns receive value-based measures appropriate to their pair type. Image, binary, and multidimensional columns participate in missingness correlation only.
 
 | Measure | Pair Type | Algorithm |
 |---------|-----------|----------|
@@ -149,7 +149,7 @@ Each column produces a polymorphic `FeatureManifest` subclass based on its `Data
 
 | DataKind | Manifest Type | Extra Fields |
 |----------|--------------|---------------|
-| Scalar, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram, quantiles, zeroCount, zeroRatio, outlierCount, outlierRatio, integerValued |
+| Float32, UInt8 | `NumericFeatureManifest` | min, max, mean, variance, stdDev, histogram, quantiles, zeroCount, zeroRatio, outlierCount, outlierRatio, integerValued |
 | String, JsonValue | `StringFeatureManifest` | minLength, maxLength |
 | Vector | `VectorFeatureManifest` | minLength, maxLength, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
 | Matrix, Tensor | `TensorFeatureManifest` | minRank, maxRank, minElementCount, maxElementCount, elementStats, zeroElementCount, zeroElementRatio, zeroVectorCount |
@@ -250,7 +250,7 @@ When multiple manifests are available, the schema matching infrastructure discov
 | Signal | Source | Purpose |
 |--------|--------|---------|
 | Name similarity | Levenshtein distance | How closely column names match |
-| Type compatibility | DataKind comparison | 1.0 exact, 0.8 coercible (Scalar↔UInt8, Date↔DateTime), 0.5 String↔JsonValue |
+| Type compatibility | DataKind comparison | 1.0 exact, 0.8 coercible (Float32↔UInt8, Date↔DateTime), 0.5 String↔JsonValue |
 | TopK Jaccard | TopK value sets | Value-domain overlap (case-insensitive, skips continuous numerics) |
 | Cardinality ratio | min(NDV) / max(NDV) | Whether columns draw from the same domain |
 | Range overlap | Numeric [min, max] intersection / union | Physical range compatibility |

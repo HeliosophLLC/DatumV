@@ -174,7 +174,7 @@ Sample values are converted to JSON-friendly representations:
 
 | Data kind | JSON representation |
 |-----------|---------------------|
-| Scalar, UInt8, Boolean | Number or boolean primitive |
+| Float32, UInt8, Boolean | Number or boolean primitive |
 | String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
 | Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
 | Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
@@ -254,7 +254,7 @@ IReadOnlySet<string> names = ParameterBinder.CollectParameterNames(statement);
 `ParameterValueParser.Parse` converts a raw string value (as provided by `--param key=value`) into a `DataValue` with automatic type inference:
 
 ```csharp
-DataValue value = ParameterValueParser.Parse("42");      // Scalar(42)
+DataValue value = ParameterValueParser.Parse("42");      // Float32(42)
 DataValue flag = ParameterValueParser.Parse("true");      // Boolean(true)
 DataValue text = ParameterValueParser.Parse("hello");     // String("hello")
 DataValue nil = ParameterValueParser.Parse("null");       // Null

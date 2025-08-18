@@ -123,7 +123,7 @@ When no explicit `--index-columns` are provided, the programmatic `DatumIngester
 
 | Eligible (auto-indexed) | Skipped |
 |------------------------|---------|
-| Scalar (numeric) | Vector |
+| Float32 (numeric) | Vector |
 | Boolean | Matrix |
 | Date, DateTime, Time, Duration | Tensor |
 | UUID | Image |
@@ -566,7 +566,7 @@ await using DatumIndexResult indexWithProgress = await DatumIngester.BuildIndexA
 
 | Data kind | JSON representation |
 |-----------|---------------------|
-| Scalar, UInt8, Boolean | Number or boolean primitive |
+| Float32, UInt8, Boolean | Number or boolean primitive |
 | String, Date, DateTime, Time, Duration, Uuid | String (ISO 8601 for temporal types) |
 | Vector | Flat numeric array `[1.0, 2.0, 3.0]` |
 | Matrix | Nested array `[[1.0, 2.0], [3.0, 4.0]]` |
