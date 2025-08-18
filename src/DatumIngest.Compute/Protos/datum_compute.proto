@@ -41,11 +41,15 @@ service DatumCompute {
   // Cancels a running query on another session (admin only).
   rpc KillQuery (KillQueryRequest) returns (KillQueryResponse);
 
-  // Cancels the active query on the caller's own session.
+  // Cancels one or all active queries on the caller's own session.
+  // When query_id is set, only that query is cancelled; otherwise all are cancelled.
   rpc CancelQuery (CancelQueryRequest) returns (CancelQueryResponse);
 
   // Returns accumulated usage metrics for a session.
   rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
+
+  // Lists the currently executing queries on a session.
+  rpc ListActiveQueries (ListActiveQueriesRequest) returns (ListActiveQueriesResponse);
 
   // Returns a unified manifest combining all registered tables.
   rpc GetStats (GetStatsRequest) returns (GetStatsResponse);
@@ -115,6 +119,10 @@ message QueryRow {
   // Running total of Query Units consumed so far. The value on the
   // last row of the stream is the definitive cost for the query.
   int64 query_units = 3;
+
+  // Server-assigned query identifier. Present on every row so that
+  // clients can correlate responses when running concurrent queries.
+  string query_id = 4;
 }
 
 // ───────────────────── Schema & Catalog ─────────────────────
@@ -321,6 +329,10 @@ message ListSessionsResponse {
 message KillQueryRequest {
   string session_id = 1;
   string target_session_id = 2;
+
+  // Optional: cancel a specific query on the target session.
+  // When empty, all active queries on the target session are cancelled.
+  string query_id = 3;
 }
 
 message KillQueryResponse {
@@ -329,6 +341,10 @@ message KillQueryResponse {
 
 message CancelQueryRequest {
   string session_id = 1;
+
+  // Optional: cancel a specific query.
+  // When empty, all active queries on the session are cancelled.
+  string query_id = 2;
 }
 
 message CancelQueryResponse {
@@ -343,6 +359,9 @@ message GetUsageResponse {
   string session_id = 1;
   int64 total_query_units = 2;
   int32 query_count = 3;
+
+  // Number of queries currently executing on this session.
+  int32 active_query_count = 4;
 }
 
 // ───────────────────── Shared Types ─────────────────────
@@ -452,4 +471,20 @@ message SessionInfoMessage {
   string last_activity_at = 5;
   int32 query_count = 6;
   int64 total_query_units = 7;
+}
+
+// ───────────────────── Active Queries ─────────────────────
+
+message ListActiveQueriesRequest {
+  string session_id = 1;
+}
+
+message ListActiveQueriesResponse {
+  repeated ActiveQueryMessage queries = 1;
+}
+
+message ActiveQueryMessage {
+  string query_id = 1;
+  string sql = 2;
+  string started_at = 3;
 }
