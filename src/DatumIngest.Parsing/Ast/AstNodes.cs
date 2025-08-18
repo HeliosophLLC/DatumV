@@ -50,9 +50,10 @@ public sealed record LetBinding(
 /// A single Common Table Expression (CTE) definition within a WITH clause.
 /// </summary>
 /// <param name="Name">The name used to reference this CTE in subsequent FROM/JOIN clauses.</param>
-/// <param name="Query">
-/// The inner SELECT statement defining the CTE result set. For recursive CTEs, this is the
-/// anchor member (the non-recursive seed query).
+/// <param name="Body">
+/// The full query expression defining the CTE result set. For non-recursive CTEs this may be
+/// a <see cref="CompoundQueryExpression"/> (e.g. UNION ALL). For recursive CTEs this contains
+/// only the anchor member wrapped as a <see cref="SelectQueryExpression"/>.
 /// </param>
 /// <param name="RecursiveQuery">
 /// The recursive member of a recursive CTE (the SELECT that references the CTE itself),
@@ -64,7 +65,7 @@ public sealed record LetBinding(
 /// <param name="Hint">Materialization hint controlling whether the CTE result is buffered or re-evaluated.</param>
 public sealed record CommonTableExpression(
     string Name,
-    SelectStatement Query,
+    QueryExpression Body,
     SelectStatement? RecursiveQuery = null,
     IReadOnlyList<string>? ColumnNames = null,
     bool IsRecursive = false,

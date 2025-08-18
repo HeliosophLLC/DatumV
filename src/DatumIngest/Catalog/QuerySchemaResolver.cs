@@ -38,13 +38,25 @@ public sealed class QuerySchemaResolver
         SelectStatement statement,
         CancellationToken cancellationToken)
     {
+        // Build a lookup of CTE definitions so table references that match a CTE
+        // name are resolved from the CTE body rather than from the catalog.
+        Dictionary<string, CommonTableExpression>? commonTableExpressionsByName = null;
+        if (statement.CommonTableExpressions is not null && statement.CommonTableExpressions.Count > 0)
+        {
+            commonTableExpressionsByName = new(statement.CommonTableExpressions.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (CommonTableExpression commonTableExpression in statement.CommonTableExpressions)
+            {
+                commonTableExpressionsByName[commonTableExpression.Name] = commonTableExpression;
+            }
+        }
+
         List<ResolvedColumn> allColumns = new();
 
         // Resolve the primary FROM source.
         if (statement.From is not null)
         {
             IReadOnlyList<ResolvedColumn> fromColumns =
-                await ResolveSourceAsync(statement.From.Source, cancellationToken).ConfigureAwait(false);
+                await ResolveSourceAsync(statement.From.Source, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false);
             allColumns.AddRange(fromColumns);
         }
 
@@ -54,7 +66,7 @@ public sealed class QuerySchemaResolver
             foreach (JoinClause join in statement.Joins)
             {
                 IReadOnlyList<ResolvedColumn> joinColumns =
-                    await ResolveSourceAsync(join.Source, cancellationToken).ConfigureAwait(false);
+                    await ResolveSourceAsync(join.Source, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false);
 
                 // LEFT/RIGHT/FULL OUTER joins may produce nulls for the outer side.
                 if (join.Type is JoinType.Left or JoinType.Right or JoinType.FullOuter)
@@ -74,12 +86,13 @@ public sealed class QuerySchemaResolver
     /// </summary>
     private async Task<IReadOnlyList<ResolvedColumn>> ResolveSourceAsync(
         TableSource source,
+        IReadOnlyDictionary<string, CommonTableExpression>? commonTableExpressionsByName,
         CancellationToken cancellationToken)
     {
         return source switch
         {
             TableReference tableReference => await ResolveTableReferenceAsync(
-                tableReference, cancellationToken).ConfigureAwait(false),
+                tableReference, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false),
 
             SubquerySource subquery => await ResolveSubqueryAsync(
                 subquery, cancellationToken).ConfigureAwait(false),
@@ -92,18 +105,91 @@ public sealed class QuerySchemaResolver
     }
 
     /// <summary>
-    /// Resolves a named table reference by fetching its schema from the catalog.
+    /// Resolves a named table reference. If the name matches a CTE definition,
+    /// the CTE body's schema is resolved recursively; otherwise the schema is
+    /// fetched from the catalog.
     /// Applies the alias (or table name) as the source identifier.
     /// </summary>
     private async Task<IReadOnlyList<ResolvedColumn>> ResolveTableReferenceAsync(
         TableReference tableReference,
+        IReadOnlyDictionary<string, CommonTableExpression>? commonTableExpressionsByName,
         CancellationToken cancellationToken)
     {
+        // Check CTE definitions before falling through to the catalog.
+        if (commonTableExpressionsByName is not null &&
+            commonTableExpressionsByName.TryGetValue(tableReference.Name, out CommonTableExpression? commonTableExpression))
+        {
+            return await ResolveCommonTableExpressionAsync(
+                commonTableExpression, tableReference.Alias, cancellationToken).ConfigureAwait(false);
+        }
+
         Schema schema = await _catalog.GetSchemaAsync(
             tableReference.Name, cancellationToken).ConfigureAwait(false);
 
         string sourceIdentifier = tableReference.Alias ?? tableReference.Name;
         return ToResolvedColumns(schema, sourceIdentifier);
+    }
+
+    /// <summary>
+    /// Resolves the output schema of a CTE by extracting the leftmost SELECT
+    /// statement from the CTE body's query expression.
+    /// </summary>
+    private async Task<IReadOnlyList<ResolvedColumn>> ResolveCommonTableExpressionAsync(
+        CommonTableExpression commonTableExpression,
+        string? tableAlias,
+        CancellationToken cancellationToken)
+    {
+        // Extract the leftmost SELECT from the CTE body to determine the output schema.
+        SelectStatement leftmostStatement = ExtractLeftmostStatement(commonTableExpression.Body);
+
+        ResolvedQuerySchema innerSchema = await ResolveAsync(
+            leftmostStatement, cancellationToken).ConfigureAwait(false);
+
+        string sourceIdentifier = tableAlias ?? commonTableExpression.Name;
+
+        // If explicit column names were provided, they rename the output columns positionally.
+        if (commonTableExpression.ColumnNames is not null && commonTableExpression.ColumnNames.Count > 0)
+        {
+            List<ResolvedColumn> renamedColumns = new(innerSchema.Columns.Count);
+            for (int index = 0; index < innerSchema.Columns.Count; index++)
+            {
+                string columnName = index < commonTableExpression.ColumnNames.Count
+                    ? commonTableExpression.ColumnNames[index]
+                    : innerSchema.Columns[index].ColumnName;
+
+                renamedColumns.Add(innerSchema.Columns[index] with
+                {
+                    ColumnName = columnName,
+                    SourceTableOrAlias = sourceIdentifier,
+                });
+            }
+
+            return renamedColumns;
+        }
+
+        // Re-tag all columns with the CTE alias.
+        List<ResolvedColumn> retaggedColumns = new(innerSchema.Columns.Count);
+        foreach (ResolvedColumn column in innerSchema.Columns)
+        {
+            retaggedColumns.Add(column with { SourceTableOrAlias = sourceIdentifier });
+        }
+
+        return retaggedColumns;
+    }
+
+    /// <summary>
+    /// Extracts the leftmost <see cref="SelectStatement"/> from a query expression,
+    /// walking into the left branch of compound queries.
+    /// </summary>
+    private static SelectStatement ExtractLeftmostStatement(QueryExpression query)
+    {
+        return query switch
+        {
+            SelectQueryExpression select => select.Statement,
+            CompoundQueryExpression compound => ExtractLeftmostStatement(compound.Left),
+            _ => throw new InvalidOperationException(
+                $"Unexpected query expression type: {query.GetType().Name}"),
+        };
     }
 
     /// <summary>

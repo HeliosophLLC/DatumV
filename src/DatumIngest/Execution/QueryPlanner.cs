@@ -165,6 +165,41 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Plans a query expression with access to sibling CTE operators so that
+    /// table references inside the expression can resolve earlier CTEs.
+    /// Used when planning non-recursive CTE bodies that may reference sibling CTEs.
+    /// </summary>
+    private IQueryOperator PlanWithSiblingCommonTableExpressions(
+        QueryExpression query,
+        IReadOnlyDictionary<string, CommonTableExpressionOperator> siblingOperators)
+    {
+        return query switch
+        {
+            SelectQueryExpression select => PlanCore(
+                select.Statement,
+                deferredColumns: null,
+                externalCommonTableExpressionOperators: siblingOperators),
+            CompoundQueryExpression compound => PlanCompoundWithSiblingCommonTableExpressions(compound, siblingOperators),
+            _ => throw new InvalidOperationException($"Unexpected query expression type: {query.GetType().Name}"),
+        };
+    }
+
+    /// <summary>
+    /// Plans a compound set operation with sibling CTE operators threaded to both branches.
+    /// </summary>
+    private IQueryOperator PlanCompoundWithSiblingCommonTableExpressions(
+        CompoundQueryExpression compound,
+        IReadOnlyDictionary<string, CommonTableExpressionOperator> siblingOperators)
+    {
+        IQueryOperator left = PlanWithSiblingCommonTableExpressions(compound.Left, siblingOperators);
+        IQueryOperator right = PlanWithSiblingCommonTableExpressions(compound.Right, siblingOperators);
+        IQueryOperator result = new SetOperationOperator(left, right, compound.OperationType, compound.All);
+
+        result = ApplyCompoundTrailingClauses(result, compound);
+        return result;
+    }
+
+    /// <summary>
     /// Async variant of <see cref="PlanCompound"/> with late materialization.
     /// </summary>
     private async Task<IQueryOperator> PlanCompoundAsync(
@@ -2783,8 +2818,16 @@ public sealed class QueryPlanner
         {
             if (commonTableExpression.IsRecursive && commonTableExpression.RecursiveQuery is not null)
             {
+                // Recursive CTEs store the anchor as a SelectQueryExpression wrapper.
+                SelectStatement anchorStatement = commonTableExpression.Body switch
+                {
+                    SelectQueryExpression select => select.Statement,
+                    _ => throw new InvalidOperationException(
+                        $"Recursive CTE '{commonTableExpression.Name}' body must be a single SELECT statement (the anchor member)."),
+                };
+
                 IQueryOperator anchorPlan = PlanCore(
-                    commonTableExpression.Query,
+                    anchorStatement,
                     deferredColumns: null,
                     externalCommonTableExpressionOperators: operators);
 
@@ -2834,10 +2877,9 @@ public sealed class QueryPlanner
                 continue;
             }
 
-            IQueryOperator innerPlan = PlanCore(
-                commonTableExpression.Query,
-                deferredColumns: null,
-                externalCommonTableExpressionOperators: operators);
+            IQueryOperator innerPlan = operators.Count > 0
+                ? PlanWithSiblingCommonTableExpressions(commonTableExpression.Body, operators)
+                : Plan(commonTableExpression.Body);
 
             bool shouldMaterialize = commonTableExpression.Hint switch
             {

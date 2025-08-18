@@ -133,7 +133,8 @@ public sealed class CommonTableExpressionTests
         Assert.NotNull(commonTableExpression.RecursiveQuery);
 
         // Anchor query: SELECT id, parent_id FROM nodes WHERE parent_id IS NULL
-        Assert.Equal(2, commonTableExpression.Query.Columns.Count);
+        SelectStatement anchorStatement = Assert.IsType<SelectQueryExpression>(commonTableExpression.Body).Statement;
+        Assert.Equal(2, anchorStatement.Columns.Count);
 
         // Recursive query: SELECT n.id, n.parent_id FROM nodes AS n JOIN chain ON ...
         Assert.Equal(2, commonTableExpression.RecursiveQuery.Columns.Count);
@@ -461,6 +462,158 @@ public sealed class CommonTableExpressionTests
             catalog);
 
         Assert.Equal(2, results.Count);
+    }
+
+    // ─────────────── Non-recursive CTE with set operations ───────────────
+
+    /// <summary>
+    /// A non-recursive CTE with UNION ALL parses into a <see cref="CompoundQueryExpression"/> body.
+    /// </summary>
+    [Fact]
+    public void Parse_NonRecursiveCteWithUnionAll_ProducesCompoundBody()
+    {
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH combined AS (" +
+            "SELECT x FROM t1 UNION ALL SELECT x FROM t2" +
+            ") SELECT * FROM combined")).Statement;
+
+        Assert.NotNull(result.CommonTableExpressions);
+        CommonTableExpression commonTableExpression = result.CommonTableExpressions[0];
+        Assert.False(commonTableExpression.IsRecursive);
+        Assert.Null(commonTableExpression.RecursiveQuery);
+
+        CompoundQueryExpression compound = Assert.IsType<CompoundQueryExpression>(commonTableExpression.Body);
+        Assert.Equal(SetOperationType.Union, compound.OperationType);
+        Assert.True(compound.All);
+    }
+
+    /// <summary>
+    /// A non-recursive CTE with UNION ALL correctly returns rows from both branches.
+    /// </summary>
+    [Fact]
+    public async Task Execute_NonRecursiveCteWithUnionAll_ReturnsBothBranches()
+    {
+        Row[] firstTable =
+        [
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("value", DataValue.FromString("a"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("value", DataValue.FromString("b"))),
+        ];
+
+        Row[] secondTable =
+        [
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("value", DataValue.FromString("c"))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t1", firstTable), ("t2", secondTable));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH combined AS (" +
+            "SELECT id, value FROM t1 UNION ALL SELECT id, value FROM t2" +
+            ") SELECT * FROM combined",
+            catalog);
+
+        Assert.Equal(3, results.Count);
+    }
+
+    /// <summary>
+    /// A non-recursive CTE with UNION ALL can be joined with other tables.
+    /// </summary>
+    [Fact]
+    public async Task Execute_NonRecursiveCteWithUnionAll_JoinedWithOtherTable()
+    {
+        Row[] orders1 =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(10f))),
+        ];
+
+        Row[] orders2 =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("product_id", DataValue.FromFloat32(20f))),
+        ];
+
+        Row[] products =
+        [
+            MakeRow(("product_id", DataValue.FromFloat32(10f)), ("name", DataValue.FromString("Widget"))),
+            MakeRow(("product_id", DataValue.FromFloat32(20f)), ("name", DataValue.FromString("Gadget"))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t1", orders1), ("t2", orders2), ("products", products));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH all_orders AS (" +
+            "SELECT order_id, product_id FROM t1 UNION ALL SELECT order_id, product_id FROM t2" +
+            ") " +
+            "SELECT all_orders.order_id, products.name " +
+            "FROM all_orders " +
+            "LEFT JOIN products ON all_orders.product_id = products.product_id",
+            catalog);
+
+        Assert.Equal(2, results.Count);
+    }
+
+    // ─────────────── QuerySchemaResolver CTE tests ───────────────
+
+    /// <summary>
+    /// <see cref="QuerySchemaResolver"/> resolves a CTE table reference without
+    /// throwing a catalog lookup error.
+    /// </summary>
+    [Fact]
+    public async Task SchemaResolver_CteReference_ResolvesWithoutCatalogLookup()
+    {
+        Row[] data =
+        [
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("value", DataValue.FromString("a"))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t", data));
+        QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH cte AS (SELECT id, value FROM t) SELECT * FROM cte")).Statement;
+
+        ResolvedQuerySchema schema = await resolver.ResolveAsync(statement, CancellationToken.None);
+
+        Assert.Equal(2, schema.Columns.Count);
+        Assert.Contains(schema.Columns, column => column.ColumnName == "id");
+        Assert.Contains(schema.Columns, column => column.ColumnName == "value");
+    }
+
+    /// <summary>
+    /// <see cref="QuerySchemaResolver"/> resolves a CTE with UNION ALL used in a JOIN
+    /// without throwing a catalog lookup error.
+    /// </summary>
+    [Fact]
+    public async Task SchemaResolver_CteWithUnionAllInJoin_ResolvesCorrectly()
+    {
+        Row[] data1 =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(10f))),
+        ];
+
+        Row[] data2 =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("product_id", DataValue.FromFloat32(20f))),
+        ];
+
+        Row[] orders =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("customer", DataValue.FromString("Alice"))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t1", data1), ("t2", data2), ("orders", orders));
+        QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH order_products AS (" +
+            "SELECT order_id, product_id FROM t1 UNION ALL SELECT order_id, product_id FROM t2" +
+            ") " +
+            "SELECT * FROM orders LEFT JOIN order_products ON order_products.order_id = orders.order_id")).Statement;
+
+        ResolvedQuerySchema schema = await resolver.ResolveAsync(statement, CancellationToken.None);
+
+        Assert.True(schema.Columns.Count >= 3);
+        Assert.Contains(schema.Columns, column => column.ColumnName == "customer");
+        Assert.Contains(schema.Columns, column => column.ColumnName == "product_id");
     }
 
     // ─────────────── Helper infrastructure ───────────────

@@ -966,12 +966,43 @@ public static class SqlParser
             select MaterializationHint.Materialized);
 
     /// <summary>
-    /// A single CTE definition: <c>name [(cols)] AS [MATERIALIZED | NOT MATERIALIZED] ( SELECT ... )</c>.
-    /// For recursive CTEs, the body may contain <c>UNION ALL</c> separating the anchor and
-    /// recursive member queries.
+    /// A single CTE definition: <c>name [(cols)] AS [MATERIALIZED | NOT MATERIALIZED] ( query )</c>.
+    /// For recursive CTEs, the body contains <c>UNION ALL</c> separating the anchor and
+    /// recursive member queries. For non-recursive CTEs, the body is a full query expression
+    /// supporting set operations (UNION ALL, INTERSECT, EXCEPT).
     /// The <paramref name="isRecursive"/> flag is threaded from the WITH RECURSIVE prefix.
     /// </summary>
     private static TokenListParser<SqlToken, CommonTableExpression> SingleCommonTableExpressionParser(bool isRecursive) =>
+        isRecursive
+            ? RecursiveCommonTableExpressionParser
+            : NonRecursiveCommonTableExpressionParser;
+
+    /// <summary>
+    /// Parses a non-recursive CTE whose body is a full query expression, supporting
+    /// UNION, UNION ALL, INTERSECT, and EXCEPT inside the parentheses.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, CommonTableExpression> NonRecursiveCommonTableExpressionParser =
+        from name in Token.EqualTo(SqlToken.Identifier)
+        from columnNames in CommonTableExpressionColumnListParser.OptionalOrDefault()
+        from asKw in Token.EqualTo(SqlToken.As)
+        from hint in MaterializationHintParser.OptionalOrDefault()
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from body in SP.Ref(() => CompoundQueryParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select new CommonTableExpression(
+            GetTokenText(name),
+            body,
+            RecursiveQuery: null,
+            columnNames,
+            IsRecursive: false,
+            hint);
+
+    /// <summary>
+    /// Parses a recursive CTE whose body is split into an anchor member and a recursive
+    /// member separated by UNION ALL. Both are parsed as individual SELECT statements
+    /// for separate planning at execution time.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, CommonTableExpression> RecursiveCommonTableExpressionParser =
         from name in Token.EqualTo(SqlToken.Identifier)
         from columnNames in CommonTableExpressionColumnListParser.OptionalOrDefault()
         from asKw in Token.EqualTo(SqlToken.As)
@@ -987,10 +1018,10 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         select new CommonTableExpression(
             GetTokenText(name),
-            anchorQuery,
+            new SelectQueryExpression(anchorQuery),
             recursivePart,
             columnNames,
-            isRecursive,
+            IsRecursive: true,
             hint);
 
     /// <summary>
