@@ -97,129 +97,144 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
 
-        // Link the gRPC per-call token with the session token so that
-        // KillQuery (which cancels the session token) stops the stream.
-        using CancellationTokenSource linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-            context.CancellationToken, session.CancellationToken);
-        CancellationToken cancellationToken = linkedTokenSource.Token;
-
-        // Apply query deadline if the session governor specifies one.
-        QueryGovernor governor = session.Governor;
-        if (governor.QueryTimeoutSeconds.HasValue)
-        {
-            linkedTokenSource.CancelAfter(TimeSpan.FromSeconds(governor.QueryTimeoutSeconds.Value));
-        }
-
-        // Create a per-query meter for QU cost tracking.
-        QueryMeter meter = new(governor.MaxQueryUnits);
-
-        // Convert gRPC parameter bindings to domain DataValue dictionary.
-        Dictionary<string, DataValue>? parameters = null;
-        if (request.Parameters.Count > 0)
-        {
-            parameters = new Dictionary<string, DataValue>(StringComparer.OrdinalIgnoreCase);
-            foreach (KeyValuePair<string, DataValueMessage> entry in request.Parameters)
-            {
-                parameters[entry.Key] = ProtoConverter.FromProto(entry.Value);
-            }
-        }
-
-        CommandResult result = await _dispatcher.DispatchAsync(
-            session, request.Sql, cancellationToken, meter, parameters).ConfigureAwait(false);
-
-        if (!result.IsSuccess)
-        {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Query failed."));
-        }
-
-        if (result.Kind != CommandResultKind.StreamingRows || result.Rows is null || result.Schema is null)
-        {
-            throw new RpcException(new Status(StatusCode.Internal, "Expected streaming rows result."));
-        }
-
-        bool schemaWritten = false;
-        long rowCount = 0;
-        long? maxRows = governor.MaxOutputRows;
-        int? throttleMilliseconds = governor.ThrottleDelayMilliseconds;
+        // Register a per-query cancellation scope so concurrent queries
+        // can be cancelled independently.
+        ActiveQuery activeQuery = session.RegisterQuery(request.Sql);
+        string queryIdString = activeQuery.QueryId.ToString();
 
         try
         {
-            await foreach (Row row in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
-            {
-                rowCount++;
+            // Link the gRPC per-call token, the session-level token, and
+            // the per-query token so that any of the three can stop the stream.
+            using CancellationTokenSource linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                context.CancellationToken, session.CancellationToken, activeQuery.CancellationToken);
+            CancellationToken cancellationToken = linkedTokenSource.Token;
 
-                if (maxRows.HasValue && rowCount > maxRows.Value)
-                {
-                    throw new RpcException(new Status(
-                        StatusCode.ResourceExhausted,
-                        $"Row budget exceeded (limit: {maxRows.Value})."));
-                }
-
-                if (meter.IsBudgetExceeded)
-                {
-                    throw new RpcException(new Status(
-                        StatusCode.ResourceExhausted,
-                        $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
-                }
-
-                QueryRow queryRow = new();
-
-                // Attach schema to the first row only.
-                if (!schemaWritten)
-                {
-                    queryRow.Schema = ProtoConverter.ToProto(result.Schema);
-                    schemaWritten = true;
-                }
-
-                for (int i = 0; i < row.FieldCount; i++)
-                {
-                    queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
-                }
-
-                queryRow.QueryUnits = meter.QueryUnits;
-
-                await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
-
-                if (throttleMilliseconds.HasValue && rowCount % QueryGovernor.ThrottleBatchSize == 0)
-                {
-                    await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
-                }
-            }
-        }
-        catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
-        {
-            // The gRPC call was not cancelled by the client. If a deadline was
-            // configured, report DeadlineExceeded; otherwise it was a KillQuery.
+            // Apply query deadline if the session governor specifies one.
+            QueryGovernor governor = session.Governor;
             if (governor.QueryTimeoutSeconds.HasValue)
             {
-                throw new RpcException(new Status(
-                    StatusCode.DeadlineExceeded,
-                    $"Query exceeded the {governor.QueryTimeoutSeconds.Value}s deadline."));
+                linkedTokenSource.CancelAfter(TimeSpan.FromSeconds(governor.QueryTimeoutSeconds.Value));
             }
 
-            throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
-        }
-        catch (QueryBudgetExceededException budgetException)
-        {
-            throw new RpcException(new Status(
-                StatusCode.ResourceExhausted,
-                budgetException.Message));
-        }
-        catch (RpcException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            // Surface the real exception so it doesn't get swallowed as
-            // the generic "Exception was thrown by handler" gRPC message.
-            throw new RpcException(new Status(
-                StatusCode.Internal,
-                $"Query failed at row {rowCount}: {exception.GetType().Name}: {exception.Message}"));
+            // Create a per-query meter for QU cost tracking.
+            QueryMeter meter = new(governor.MaxQueryUnits);
+
+            // Convert gRPC parameter bindings to domain DataValue dictionary.
+            Dictionary<string, DataValue>? parameters = null;
+            if (request.Parameters.Count > 0)
+            {
+                parameters = new Dictionary<string, DataValue>(StringComparer.OrdinalIgnoreCase);
+                foreach (KeyValuePair<string, DataValueMessage> entry in request.Parameters)
+                {
+                    parameters[entry.Key] = ProtoConverter.FromProto(entry.Value);
+                }
+            }
+
+            CommandResult result = await _dispatcher.DispatchAsync(
+                session, request.Sql, cancellationToken, meter, parameters).ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Query failed."));
+            }
+
+            if (result.Kind != CommandResultKind.StreamingRows || result.Rows is null || result.Schema is null)
+            {
+                throw new RpcException(new Status(StatusCode.Internal, "Expected streaming rows result."));
+            }
+
+            bool schemaWritten = false;
+            long rowCount = 0;
+            long? maxRows = governor.MaxOutputRows;
+            int? throttleMilliseconds = governor.ThrottleDelayMilliseconds;
+
+            try
+            {
+                await foreach (Row row in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
+                {
+                    rowCount++;
+
+                    if (maxRows.HasValue && rowCount > maxRows.Value)
+                    {
+                        throw new RpcException(new Status(
+                            StatusCode.ResourceExhausted,
+                            $"Row budget exceeded (limit: {maxRows.Value})."));
+                    }
+
+                    if (meter.IsBudgetExceeded)
+                    {
+                        throw new RpcException(new Status(
+                            StatusCode.ResourceExhausted,
+                            $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
+                    }
+
+                    QueryRow queryRow = new()
+                    {
+                        QueryId = queryIdString,
+                    };
+
+                    // Attach schema to the first row only.
+                    if (!schemaWritten)
+                    {
+                        queryRow.Schema = ProtoConverter.ToProto(result.Schema);
+                        schemaWritten = true;
+                    }
+
+                    for (int i = 0; i < row.FieldCount; i++)
+                    {
+                        queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
+                    }
+
+                    queryRow.QueryUnits = meter.QueryUnits;
+
+                    await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
+
+                    if (throttleMilliseconds.HasValue && rowCount % QueryGovernor.ThrottleBatchSize == 0)
+                    {
+                        await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
+            {
+                // The gRPC call was not cancelled by the client. If a deadline was
+                // configured, report DeadlineExceeded; otherwise it was a cancel/kill.
+                if (governor.QueryTimeoutSeconds.HasValue)
+                {
+                    throw new RpcException(new Status(
+                        StatusCode.DeadlineExceeded,
+                        $"Query exceeded the {governor.QueryTimeoutSeconds.Value}s deadline."));
+                }
+
+                throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
+            }
+            catch (QueryBudgetExceededException budgetException)
+            {
+                throw new RpcException(new Status(
+                    StatusCode.ResourceExhausted,
+                    budgetException.Message));
+            }
+            catch (RpcException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // Surface the real exception so it doesn't get swallowed as
+                // the generic "Exception was thrown by handler" gRPC message.
+                throw new RpcException(new Status(
+                    StatusCode.Internal,
+                    $"Query failed at row {rowCount}: {exception.GetType().Name}: {exception.Message}"));
+            }
+            finally
+            {
+                session.AddQueryUnits(meter.QueryUnits);
+            }
         }
         finally
         {
-            session.AddQueryUnits(meter.QueryUnits);
+            session.UnregisterQuery(activeQuery.QueryId);
         }
     }
 
@@ -447,8 +462,12 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
 
+        string command = string.IsNullOrEmpty(request.QueryId)
+            ? $".kill {request.TargetSessionId}"
+            : $".kill {request.TargetSessionId} {request.QueryId}";
+
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".kill {request.TargetSessionId}", LinkedToken(context, session)).ConfigureAwait(false);
+            session, command, LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -464,8 +483,12 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
 
+        string command = string.IsNullOrEmpty(request.QueryId)
+            ? ".cancel"
+            : $".cancel {request.QueryId}";
+
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, ".cancel", LinkedToken(context, session)).ConfigureAwait(false);
+            session, command, LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -486,7 +509,29 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             SessionId = session.SessionId.ToString(),
             TotalQueryUnits = session.TotalQueryUnits,
             QueryCount = session.QueryHistory.Count,
+            ActiveQueryCount = session.GetActiveQueries().Count,
         };
+
+        return Task.FromResult(response);
+    }
+
+    /// <inheritdoc />
+    public override Task<ListActiveQueriesResponse> ListActiveQueries(
+        ListActiveQueriesRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+
+        ListActiveQueriesResponse response = new();
+
+        foreach (ActiveQuery activeQuery in session.GetActiveQueries())
+        {
+            response.Queries.Add(new ActiveQueryMessage
+            {
+                QueryId = activeQuery.QueryId.ToString(),
+                Sql = activeQuery.Sql,
+                StartedAt = activeQuery.StartedAt.ToString("O"),
+            });
+        }
 
         return Task.FromResult(response);
     }

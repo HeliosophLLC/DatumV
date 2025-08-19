@@ -101,7 +101,7 @@ public sealed class CommandDispatcher
             ".explain" => await HandleExplainAsync(session, argument, cancellationToken).ConfigureAwait(false),
             ".sessions" => HandleListSessions(session),
             ".kill" => HandleKillQuery(session, argument),
-            ".cancel" => HandleCancelQuery(session),
+            ".cancel" => HandleCancelQuery(session, argument),
             _ => CommandResult.Error($"Unknown command: {command}. Type .help for available commands."),
         };
     }
@@ -237,8 +237,8 @@ public sealed class CommandDispatcher
             .explain <sql>                 Show the query execution plan
             .explain analyze <sql>         Run query and show plan with runtime metrics
             .sessions                      List all active sessions (admin only)
-            .kill <session_id>             Cancel a query on another session (admin only)
-            .cancel                        Cancel the active query on this session
+            .kill <session_id> [query_id]  Cancel query/queries on another session (admin only)
+            .cancel [query_id]             Cancel a specific or all active queries on this session
             
             Any other input is executed as a SQL query.
             Source definition format: provider:name=path[;key=value;...]
@@ -436,16 +436,18 @@ public sealed class CommandDispatcher
         return CommandResult.SessionList(infos);
     }
 
-    private CommandResult HandleKillQuery(Session session, string sessionIdText)
+    private CommandResult HandleKillQuery(Session session, string argument)
     {
         if (!session.IsAuthorized(ServerOperation.KillQuery))
         {
             return CommandResult.Error("Permission denied: you are not authorized to kill queries.");
         }
 
-        if (!Guid.TryParse(sessionIdText.Trim(), out Guid targetId))
+        string[] parts = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (parts.Length == 0 || !Guid.TryParse(parts[0], out Guid targetId))
         {
-            return CommandResult.Error("Usage: .kill <session_id>");
+            return CommandResult.Error("Usage: .kill <session_id> [query_id]");
         }
 
         Session? target = _sessionManager.GetSession(targetId);
@@ -454,19 +456,49 @@ public sealed class CommandDispatcher
             return CommandResult.Error($"Session '{targetId}' not found.");
         }
 
-        target.CancelAllAndReset();
-        return CommandResult.Success($"Cancelled active query on session '{targetId}'.");
+        if (parts.Length > 1)
+        {
+            if (!Guid.TryParse(parts[1], out Guid queryId))
+            {
+                return CommandResult.Error("Usage: .kill <session_id> [query_id]");
+            }
+
+            if (!target.CancelQuery(queryId))
+            {
+                return CommandResult.Error($"Query '{queryId}' not found on session '{targetId}'.");
+            }
+
+            return CommandResult.Success($"Cancelled query '{queryId}' on session '{targetId}'.");
+        }
+
+        int count = target.CancelAllAndReset();
+        return CommandResult.Success($"Cancelled {count} active query/queries on session '{targetId}'.");
     }
 
-    private static CommandResult HandleCancelQuery(Session session)
+    private static CommandResult HandleCancelQuery(Session session, string argument)
     {
         if (!session.IsAuthorized(ServerOperation.CancelQuery))
         {
             return CommandResult.Error("Permission denied: you are not authorized to cancel queries.");
         }
 
-        session.CancelAllAndReset();
-        return CommandResult.Success("Active query cancelled.");
+        if (!string.IsNullOrWhiteSpace(argument))
+        {
+            if (!Guid.TryParse(argument.Trim(), out Guid queryId))
+            {
+                return CommandResult.Error("Usage: .cancel [query_id]");
+            }
+
+            if (!session.CancelQuery(queryId))
+            {
+                return CommandResult.Error($"Query '{queryId}' not found.");
+            }
+
+            return CommandResult.Success($"Cancelled query '{queryId}'.");
+        }
+
+        int count = session.CancelAllAndReset();
+        return CommandResult.Success($"Cancelled {count} active query/queries.");
     }
 
     /// <summary>
