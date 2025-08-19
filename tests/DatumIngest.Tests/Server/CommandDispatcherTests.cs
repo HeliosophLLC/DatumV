@@ -214,6 +214,102 @@ public sealed class CommandDispatcherTests : IDisposable
     }
 
     /// <summary>
+    /// .kill with a specific query ID cancels only that query on the target session.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_KillSpecificQuery_CancelsOnlyThatQuery()
+    {
+        ActiveQuery query = _userSession.RegisterQuery("SELECT 1");
+
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, $".kill {_userSession.SessionId} {query.QueryId}", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.True(query.CancellationToken.IsCancellationRequested);
+        Assert.False(_userSession.CancellationToken.IsCancellationRequested);
+
+        _userSession.UnregisterQuery(query.QueryId);
+    }
+
+    /// <summary>
+    /// .kill with an unknown query ID returns an error.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_KillUnknownQueryId_ReturnsError()
+    {
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, $".kill {_userSession.SessionId} {Guid.NewGuid()}", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("not found", result.Message);
+    }
+
+    // ─────────────────── .cancel with query ID ───────────────────
+
+    /// <summary>
+    /// .cancel with no argument cancels all active queries.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_CancelNoArgument_CancelsAll()
+    {
+        ActiveQuery query = _adminSession.RegisterQuery("SELECT 1");
+
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, ".cancel", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.True(query.CancellationToken.IsCancellationRequested);
+
+        _adminSession.UnregisterQuery(query.QueryId);
+    }
+
+    /// <summary>
+    /// .cancel with a specific query ID cancels only that query.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_CancelSpecificQuery_CancelsOnlyThatQuery()
+    {
+        ActiveQuery first = _adminSession.RegisterQuery("SELECT 1");
+        ActiveQuery second = _adminSession.RegisterQuery("SELECT 2");
+
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, $".cancel {first.QueryId}", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.True(first.CancellationToken.IsCancellationRequested);
+        Assert.False(second.CancellationToken.IsCancellationRequested);
+
+        _adminSession.UnregisterQuery(first.QueryId);
+        _adminSession.UnregisterQuery(second.QueryId);
+    }
+
+    /// <summary>
+    /// .cancel with an unknown query ID returns an error.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_CancelUnknownQueryId_ReturnsError()
+    {
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, $".cancel {Guid.NewGuid()}", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("not found", result.Message);
+    }
+
+    /// <summary>
+    /// .cancel with an invalid GUID returns a usage error.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_CancelInvalidGuid_ReturnsError()
+    {
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, ".cancel not-a-guid", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("Usage", result.Message);
+    }
+
+    /// <summary>
     /// Invalid SQL returns a syntax error.
     /// </summary>
     [Fact]

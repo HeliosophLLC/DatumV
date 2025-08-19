@@ -607,6 +607,205 @@ public sealed class ComputeServiceTests : IDisposable
         Assert.True(writer.Messages.Count >= 1);
     }
 
+    // ─────────────────── Query ID ───────────────────
+
+    /// <summary>
+    /// Every streamed QueryRow includes a server-assigned query identifier.
+    /// </summary>
+    [Fact]
+    public async Task Query_StreamedRows_ContainQueryId()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+        await _service.Query(request, writer, TestCallContext.Create());
+
+        Assert.True(writer.Messages.Count > 0);
+        Assert.True(Guid.TryParse(writer.Messages[0].QueryId, out _));
+
+        // All rows share the same query ID.
+        string queryId = writer.Messages[0].QueryId;
+        Assert.All(writer.Messages, message => Assert.Equal(queryId, message.QueryId));
+    }
+
+    // ─────────────────── Targeted CancelQuery ───────────────────
+
+    /// <summary>
+    /// CancelQuery with a specific query_id cancels only that query.
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_WithQueryId_CancelsSpecificQuery()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        ActiveQuery active = session.RegisterQuery("SELECT 1");
+
+        CancelQueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            QueryId = active.QueryId.ToString(),
+        };
+
+        CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
+
+        Assert.True(active.CancellationToken.IsCancellationRequested);
+        Assert.NotNull(response.Message);
+
+        // Session-level token is NOT cancelled — only the targeted query was.
+        Assert.False(session.CancellationToken.IsCancellationRequested);
+
+        session.UnregisterQuery(active.QueryId);
+    }
+
+    /// <summary>
+    /// CancelQuery with an unknown query_id throws InvalidArgument.
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_UnknownQueryId_ThrowsInvalidArgument()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+
+        CancelQueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            QueryId = Guid.NewGuid().ToString(),
+        };
+
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.CancelQuery(request, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+    }
+
+    /// <summary>
+    /// CancelQuery without query_id cancels all active queries (backward compatible).
+    /// </summary>
+    [Fact]
+    public async Task CancelQuery_NoQueryId_CancelsAll()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        ActiveQuery first = session.RegisterQuery("SELECT 1");
+        ActiveQuery second = session.RegisterQuery("SELECT 2");
+
+        CancelQueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
+
+        Assert.True(first.CancellationToken.IsCancellationRequested);
+        Assert.True(second.CancellationToken.IsCancellationRequested);
+        Assert.NotNull(response.Message);
+
+        session.UnregisterQuery(first.QueryId);
+        session.UnregisterQuery(second.QueryId);
+    }
+
+    // ─────────────────── Targeted KillQuery ───────────────────
+
+    /// <summary>
+    /// KillQuery with a specific query_id cancels only that query on the target session.
+    /// </summary>
+    [Fact]
+    public async Task KillQuery_WithQueryId_CancelsSpecificQuery()
+    {
+        Session adminSession = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
+        Session targetSession = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        ActiveQuery active = targetSession.RegisterQuery("SELECT 1");
+
+        KillQueryRequest request = new()
+        {
+            SessionId = adminSession.SessionId.ToString(),
+            TargetSessionId = targetSession.SessionId.ToString(),
+            QueryId = active.QueryId.ToString(),
+        };
+
+        KillQueryResponse response = await _service.KillQuery(request, TestCallContext.Create());
+
+        Assert.True(active.CancellationToken.IsCancellationRequested);
+        Assert.False(targetSession.CancellationToken.IsCancellationRequested);
+        Assert.NotNull(response.Message);
+
+        targetSession.UnregisterQuery(active.QueryId);
+    }
+
+    // ─────────────────── ListActiveQueries ───────────────────
+
+    /// <summary>
+    /// ListActiveQueries returns the currently registered queries.
+    /// </summary>
+    [Fact]
+    public async Task ListActiveQueries_ReturnsRegisteredQueries()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        ActiveQuery active = session.RegisterQuery("SELECT 42");
+
+        ListActiveQueriesRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        ListActiveQueriesResponse response = await _service.ListActiveQueries(request, TestCallContext.Create());
+
+        Assert.Single(response.Queries);
+        Assert.Equal(active.QueryId.ToString(), response.Queries[0].QueryId);
+        Assert.Equal("SELECT 42", response.Queries[0].Sql);
+        Assert.False(string.IsNullOrEmpty(response.Queries[0].StartedAt));
+
+        session.UnregisterQuery(active.QueryId);
+    }
+
+    /// <summary>
+    /// ListActiveQueries returns empty when no queries are running.
+    /// </summary>
+    [Fact]
+    public async Task ListActiveQueries_NoQueries_ReturnsEmpty()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+
+        ListActiveQueriesRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        ListActiveQueriesResponse response = await _service.ListActiveQueries(request, TestCallContext.Create());
+
+        Assert.Empty(response.Queries);
+    }
+
+    // ─────────────────── GetUsage with ActiveQueryCount ───────────────────
+
+    /// <summary>
+    /// GetUsage response includes the active query count.
+    /// </summary>
+    [Fact]
+    public async Task GetUsage_IncludesActiveQueryCount()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        ActiveQuery active = session.RegisterQuery("SELECT 1");
+
+        GetUsageRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+        };
+
+        GetUsageResponse response = await _service.GetUsage(request, TestCallContext.Create());
+
+        Assert.Equal(1, response.ActiveQueryCount);
+
+        session.UnregisterQuery(active.QueryId);
+    }
+
     // ─────────────────── GetSchema ───────────────────
 
     /// <summary>
