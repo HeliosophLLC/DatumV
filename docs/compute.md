@@ -211,13 +211,17 @@ Executes a SQL query and streams result rows back. The first `QueryRow` message 
 | `schema` | `SchemaMessage` | Set on the first row only. Column names, kinds, and nullability. |
 | `values` | `repeated DataValueMessage` | One value per column, in schema order. |
 | `query_units` | `int64` | Running total of Query Units consumed by function invocations. The value on the last row is the definitive cost for the query. |
+| `query_id` | `string` | Server-assigned query identifier (GUID). Present on every row so clients can correlate responses when running concurrent queries on the same session. |
 
 **Errors:** `InvalidArgument` on syntax errors or query failures; `NotFound` if the session does not exist.
 
-**Cancellation:** The stream can be stopped in two ways:
+**Cancellation:** The stream can be stopped in three ways:
 
 1. **Client disconnect** — disposing the streaming call (`stream.Dispose()`) triggers gRPC call cancellation on the server.
-2. **Admin kill** — another session calls `KillQuery` with this session as the target. The server links both the gRPC call token and the session token, so either cancellation source stops the row stream immediately.
+2. **Targeted cancel** — the same session (or an admin via `KillQuery`) calls `CancelQuery` with the query's `query_id`. Only the targeted query is cancelled; other concurrent queries on the session continue.
+3. **Cancel all** — calling `CancelQuery` or `KillQuery` without a `query_id` cancels all active queries on the session and resets the session-level cancellation scope.
+
+The server links the gRPC call token, the session-level token, and the per-query token, so any of the three cancellation sources stops the row stream immediately.
 
 **Governance enforcement:** The query streaming loop enforces the session's resource governance limits (see [Resource Governance](#resource-governance) below). A deadline triggers `DeadlineExceeded`, a row budget triggers `ResourceExhausted`, and a throttle delay injects periodic pauses.
 
@@ -365,28 +369,48 @@ Lists all active sessions on the server.
 
 #### KillQuery *(admin only)*
 
-Cancels a running query on another session. The target session's cancellation token is linked into the active query's execution pipeline, so cancellation takes effect immediately — the server stops reading rows and the streaming call ends with `OperationCanceledException`.
+Cancels one or all active queries on another session. The target query's cancellation token is linked into the execution pipeline, so cancellation takes effect immediately — the server stops reading rows and the streaming call ends with `StatusCode.Cancelled`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Calling session GUID (must be admin). |
 | `target_session_id` | `string` | Session whose query should be cancelled. |
+| `query_id` | `string` | Optional. When set, cancels only the specified query. When empty, cancels all active queries on the target session. |
 
-**Returns:** `message` — confirmation text (e.g. `"Cancelled active query on session '...'"`). The target session remains open and can run new queries.
+**Returns:** `message` — confirmation text. The target session remains open and can run new queries.
 
-**Errors:** `InvalidArgument` if the target session is not found or the GUID is malformed.
+**Errors:** `InvalidArgument` if the target session or query is not found, or the GUID is malformed.
 
 #### CancelQuery
 
-Cancels the active query on the caller's own session. Unlike `KillQuery`, this does not require admin privileges — any session can cancel its own query. The session's cancellation token fires, stopping the execution pipeline immediately. The session remains open and can run new queries.
+Cancels one or all active queries on the caller's own session. Unlike `KillQuery`, this does not require admin privileges — any session can cancel its own queries. The session remains open and can run new queries.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID of the caller. |
+| `query_id` | `string` | Optional. When set, cancels only the specified query. When empty, cancels all active queries on the session and resets the session-level cancellation scope. |
 
-**Returns:** `message` — confirmation text (e.g. `"Active query cancelled."`). The session is immediately ready for a new query.
+**Returns:** `message` — confirmation text. The session is immediately ready for new queries.
 
-**Errors:** `NotFound` if the session ID is not found.
+**Errors:** `NotFound` if the session ID is not found; `InvalidArgument` if the query ID is not found.
+
+#### ListActiveQueries
+
+Returns the currently executing queries on a session. Does not require admin privileges.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+
+**Response (`ListActiveQueriesResponse`):** `repeated ActiveQueryMessage queries`.
+
+**`ActiveQueryMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `query_id` | `string` | Server-assigned query identifier (GUID). |
+| `sql` | `string` | The SQL text of the query. |
+| `started_at` | `string` | ISO 8601 timestamp when the query started. |
 
 #### GetUsage
 
@@ -403,6 +427,7 @@ Returns accumulated usage metrics for a session. Unlike `ListSessions`, this doe
 | `session_id` | `string` | Echo of the requested session ID. |
 | `total_query_units` | `int64` | Cumulative Query Units consumed across all queries in this session. |
 | `query_count` | `int32` | Number of queries executed in this session. |
+| `active_query_count` | `int32` | Number of queries currently executing on this session. |
 
 ## Data Types
 
@@ -509,21 +534,40 @@ To cancel the active query on your own session from a separate call
 (e.g. a UI "Cancel" button or a concurrent task):
 
 ```csharp
+// Cancel all active queries on the session.
 string message = await connection.CancelActiveQueryAsync(sessionId);
+
+// Or cancel a specific query by its server-assigned ID (from QueryRow.QueryId).
+string message = await connection.CancelActiveQueryAsync(sessionId, queryId: queryId);
 ```
 
 To cancel another session's query (requires admin):
 
 ```csharp
+// Cancel all active queries on the target session.
 string message = await connection.CancelQueryAsync(
     adminSessionId, targetSessionId);
+
+// Or cancel a specific query on the target session.
+string message = await connection.CancelQueryAsync(
+    adminSessionId, targetSessionId, queryId: queryId);
+```
+
+To list currently executing queries on a session:
+
+```csharp
+ListActiveQueriesResponse active = await connection.ListActiveQueriesAsync(sessionId);
+foreach (ActiveQueryMessage query in active.Queries)
+{
+    Console.WriteLine($"{query.QueryId}: {query.Sql} (started {query.StartedAt})");
+}
 ```
 
 To query accumulated usage for a session:
 
 ```csharp
 GetUsageResponse usage = await connection.GetUsageAsync(sessionId);
-Console.WriteLine($"Queries: {usage.QueryCount}, Total QU: {usage.TotalQueryUnits}");
+Console.WriteLine($"Queries: {usage.QueryCount}, Active: {usage.ActiveQueryCount}, Total QU: {usage.TotalQueryUnits}");
 ```
 
 static string FormatValue(DataValueMessage value)
