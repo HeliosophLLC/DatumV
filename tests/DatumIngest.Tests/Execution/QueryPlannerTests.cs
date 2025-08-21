@@ -1623,6 +1623,141 @@ public class QueryPlannerTests
         // LEFT JOIN must be preserved because products is referenced in WHERE.
         Assert.NotNull(FindOperator<JoinOperator>(plan));
     }
+
+    /// <summary>
+    /// When the right side of a LEFT JOIN has 2x+ more estimated rows than the left,
+    /// the planner sets the flipped flag so the smaller side is materialized.
+    /// </summary>
+    [Fact]
+    public void Plan_LeftJoinBuildSideFlip_FlipsWhenRightIsLarger()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_small", () => new StubRowCountProvider(estimatedRowCount: 100));
+        catalog.RegisterProvider("stub_large", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.Register(new TableDescriptor("stub_small", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_large", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM small_table LEFT JOIN large_table ON ...
+        // Right (build) has 10_000 rows, left (probe) has 100 → ratio 100x → flip.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("small_table")),
+            Joins: [new JoinClause(
+                JoinType.Left,
+                new TableReference("large_table"),
+                new BinaryExpression(
+                    new ColumnReference("small_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("large_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+        Assert.True(join.Flipped, "Expected flipped=true when right side is 100x larger");
+    }
+
+    /// <summary>
+    /// When the right side of a LEFT JOIN is smaller than the left, no flip occurs.
+    /// </summary>
+    [Fact]
+    public void Plan_LeftJoinBuildSideFlip_DoesNotFlipWhenRightIsSmaller()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_small", () => new StubRowCountProvider(estimatedRowCount: 100));
+        catalog.RegisterProvider("stub_large", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.Register(new TableDescriptor("stub_small", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_large", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT * FROM large_table LEFT JOIN small_table ON ...
+        // Right (build) has 100 rows, left (probe) has 10_000 → normal, no flip.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("large_table")),
+            Joins: [new JoinClause(
+                JoinType.Left,
+                new TableReference("small_table"),
+                new BinaryExpression(
+                    new ColumnReference("large_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("small_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+        Assert.False(join.Flipped, "Expected flipped=false when right side is smaller");
+    }
+
+    /// <summary>
+    /// When the ratio is below the 2x threshold, no flip occurs even though the
+    /// right side is larger.
+    /// </summary>
+    [Fact]
+    public void Plan_LeftJoinBuildSideFlip_DoesNotFlipBelowThreshold()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_a", () => new StubRowCountProvider(estimatedRowCount: 1000));
+        catalog.RegisterProvider("stub_b", () => new StubRowCountProvider(estimatedRowCount: 1500));
+        catalog.Register(new TableDescriptor("stub_a", "table_a", "a.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_b", "table_b", "b.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // Right=1500, left=1000 → ratio 1.5x < 2x → no flip.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("table_a")),
+            Joins: [new JoinClause(
+                JoinType.Left,
+                new TableReference("table_b"),
+                new BinaryExpression(
+                    new ColumnReference("table_a", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("table_b", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+        Assert.False(join.Flipped, "Expected flipped=false when ratio is below 2x");
+    }
+
+    /// <summary>
+    /// INNER JOINs should never be flipped (handled by TryReorderJoins instead).
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoinBuildSideFlip_NeverFlips()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("stub_small", () => new StubRowCountProvider(estimatedRowCount: 100));
+        catalog.RegisterProvider("stub_large", () => new StubRowCountProvider(estimatedRowCount: 10_000));
+        catalog.Register(new TableDescriptor("stub_small", "small_table", "s.csv", new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("stub_large", "large_table", "l.csv", new Dictionary<string, string>()));
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("small_table")),
+            Joins: [new JoinClause(
+                JoinType.Inner,
+                new TableReference("large_table"),
+                new BinaryExpression(
+                    new ColumnReference("small_table", "id"),
+                    BinaryOperator.Equal,
+                    new ColumnReference("large_table", "id")))]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator join = FindOperator<JoinOperator>(plan)!;
+        Assert.NotNull(join);
+        Assert.False(join.Flipped, "INNER JOINs should not be flipped");
+    }
 }
 
 /// <summary>

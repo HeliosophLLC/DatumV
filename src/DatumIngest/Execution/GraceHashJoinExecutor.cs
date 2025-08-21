@@ -55,6 +55,7 @@ internal sealed class GraceHashJoinExecutor
     private readonly long _memoryBudgetBytes;
     private readonly ExpressionEvaluator _evaluator;
     private readonly bool _nullSensitiveAntiSemi;
+    private readonly bool _flipped;
     private readonly string _spillDirectory;
 
     /// <summary>Human-readable label used in trace output to identify this join's build side.</summary>
@@ -71,6 +72,11 @@ internal sealed class GraceHashJoinExecutor
     /// When true and <paramref name="joinType"/> is <see cref="JoinType.LeftAntiSemi"/>,
     /// applies SQL-standard NOT IN null semantics.
     /// </param>
+    /// <param name="flipped">
+    /// When <c>true</c>, the build and probe sides are physically swapped so the
+    /// smaller side (left) is materialized while the larger side (right) is streamed.
+    /// Output column order is preserved as [left | right].
+    /// </param>
     /// <param name="label">Human-readable label for the build-side table, used in execution trace output.</param>
     internal GraceHashJoinExecutor(
         JoinType joinType,
@@ -78,6 +84,7 @@ internal sealed class GraceHashJoinExecutor
         long memoryBudgetBytes,
         ExpressionEvaluator evaluator,
         bool nullSensitiveAntiSemi = false,
+        bool flipped = false,
         string label = "")
     {
         _joinType = joinType;
@@ -85,6 +92,7 @@ internal sealed class GraceHashJoinExecutor
         _memoryBudgetBytes = memoryBudgetBytes;
         _evaluator = evaluator;
         _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
+        _flipped = flipped;
         _label = label;
         _spillDirectory = Path.Combine(Path.GetTempPath(), $"datum-join-{Guid.NewGuid():N}");
     }
@@ -103,6 +111,11 @@ internal sealed class GraceHashJoinExecutor
     {
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool useSingleKey = keyPairs.Count == 1;
+
+        // Physical side assignment. When flipped, left=build, right=probe.
+        IQueryOperator buildOperator = _flipped ? leftOperator : rightOperator;
+        IQueryOperator probeOperator = _flipped ? rightOperator : leftOperator;
+        bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();
         SpillPartition[] partitions = CreatePartitions(partitionCount);
@@ -126,7 +139,7 @@ internal sealed class GraceHashJoinExecutor
             bool hasNullKey = false;
             long inMemoryRowCount = 0;
 
-            await foreach (Row buildRow in rightOperator.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (Row buildRow in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
                 buildRowCount++;
                 firstBuildRow ??= buildRow;
@@ -136,14 +149,14 @@ internal sealed class GraceHashJoinExecutor
                 {
                     if (useSingleKey)
                     {
-                        if (_evaluator.Evaluate(keyPairs[0].Right, buildRow).IsNull)
+                        if (_evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow).IsNull)
                         {
                             hasNullKey = true;
                         }
                     }
                     else
                     {
-                        DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: true);
+                        DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
                         if (HasNull(parts))
                         {
                             hasNullKey = true;
@@ -151,7 +164,7 @@ internal sealed class GraceHashJoinExecutor
                     }
                 }
 
-                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: true);
+                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight);
                 partitions[partitionIndex].AddBuildRow(buildRow);
 
                 // Only count rows that landed in memory (not appended to an already-spilled partition).
@@ -198,13 +211,15 @@ internal sealed class GraceHashJoinExecutor
             // It is needed during hybrid Phase 1b for LEFT JOIN null extension.
             Row? nullBuildTemplate = firstBuildRow is not null ? CreateNullRow(firstBuildRow) : null;
 
-            // Hybrid streaming probe: for INNER, LEFT, and semi-join types the probe side
-            // can be processed row-by-row against in-memory partitions, yielding results
-            // immediately so a LIMIT above can terminate without fully materialising the
-            // probe stream. RIGHT and FULL OUTER must see all probe rows before emitting
-            // unmatched build rows, so they still use the buffered path.
-            bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
-            bool useHybrid = !needRightUnmatched;
+            // Hybrid streaming probe: for join types where unmatched build rows do not
+            // need to be emitted, the probe side can be processed row-by-row against
+            // in-memory partitions, yielding results immediately so a LIMIT above can
+            // terminate without fully materialising the probe stream. When unmatched
+            // build rows must be tracked, the buffered path is required.
+            bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
+            bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
+            bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
+            bool useHybrid = !needBuildUnmatched;
             bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
             // ── Phase 1b: Probe phase ──
@@ -261,13 +276,13 @@ internal sealed class GraceHashJoinExecutor
             else
             {
                 // Non-hybrid path: buffer all probe rows before joining.
-                // Required for RIGHT and FULL OUTER joins, which must emit unmatched
-                // build rows only after the complete probe set has been consumed.
-                await foreach (Row probeRow in leftOperator.ExecuteAsync(context).ConfigureAwait(false))
+                // Required when unmatched build rows must be emitted after the
+                // complete probe set has been consumed.
+                await foreach (Row probeRow in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
-                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: false);
+                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight);
                     SpillPartition partition = partitions[partitionIndex];
 
                     if (partition.IsBuildSpilled)
@@ -305,8 +320,13 @@ internal sealed class GraceHashJoinExecutor
             // When hybrid mode is active, in-memory partitions were fully processed during
             // Phase 1b and their probe lists are empty. Pass skipInMemory=true so
             // JoinAllPartitionsAsync skips them, avoiding redundant work.
+            // The template parameters use logical (left, right) naming, but nullBuildTemplate
+            // and nullProbeTemplate use physical roles. Swap when flipped to preserve semantics.
+            Row? nullLeftTemplate = _flipped ? nullBuildTemplate : nullProbeTemplate;
+            Row? nullRightTemplate = _flipped ? nullProbeTemplate : nullBuildTemplate;
+
             await foreach (Row row in JoinAllPartitionsAsync(
-                partitions, useSingleKey, recursionDepth: 0, nullProbeTemplate, nullBuildTemplate, context,
+                partitions, useSingleKey, recursionDepth: 0, nullLeftTemplate, nullRightTemplate, context,
                 skipInMemory: useHybrid)
                 .ConfigureAwait(false))
             {
@@ -361,6 +381,7 @@ internal sealed class GraceHashJoinExecutor
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         bool useSingleKey)
     {
+        bool buildKeyIsRight = !_flipped;
         List<Row> buildList = new(buildRows.Count);
         PartitionBuildTable table = new(buildList, useSingleKey);
 
@@ -371,7 +392,7 @@ internal sealed class GraceHashJoinExecutor
 
             if (useSingleKey)
             {
-                DataValue key = _evaluator.Evaluate(keyPairs[0].Right, buildRow);
+                DataValue key = _evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
                 if (!key.IsNull)
                 {
                     if (!table.SingleKeyTable!.TryGetValue(key, out List<(int, Row)>? bucket))
@@ -385,7 +406,7 @@ internal sealed class GraceHashJoinExecutor
             }
             else
             {
-                DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: true);
+                DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
                 if (!HasNull(parts))
                 {
                     CompositeKey compositeKey = new(parts);
@@ -405,8 +426,8 @@ internal sealed class GraceHashJoinExecutor
 
     /// <summary>
     /// Probes a single row against a <see cref="PartitionBuildTable"/>, yielding every
-    /// matching combined row. Handles INNER, LEFT outer, LeftSemi, and LeftAntiSemi join types.
-    /// RIGHT and FULL OUTER joins are not handled here — they use the non-hybrid buffered path.
+    /// matching combined row. Handles INNER, LEFT outer, RIGHT outer (when flipped),
+    /// LeftSemi, and LeftAntiSemi join types.
     /// </summary>
     private IEnumerable<Row> ProbePartitionRow(
         PartitionBuildTable table,
@@ -416,19 +437,21 @@ internal sealed class GraceHashJoinExecutor
         bool isSemiJoin,
         Row? nullBuildTemplate)
     {
+        bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
 
         if (useSingleKey)
         {
-            DataValue leftKey = _evaluator.Evaluate(keyPairs[0].Left, probeRow);
-            if (!leftKey.IsNull)
+            DataValue probeKey = _evaluator.Evaluate(
+                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+            if (!probeKey.IsNull)
             {
-                table.SingleKeyTable!.TryGetValue(leftKey, out matches);
+                table.SingleKeyTable!.TryGetValue(probeKey, out matches);
             }
         }
         else
         {
-            DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: false);
+            DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: !buildKeyIsRight);
             if (!HasNull(parts))
             {
                 CompositeKey compositeKey = new(parts);
@@ -442,10 +465,14 @@ internal sealed class GraceHashJoinExecutor
         {
             foreach ((int _, Row buildRow) in matches)
             {
+                // Combine in logical (left, right) order regardless of physical assignment.
+                Row leftRow = _flipped ? buildRow : probeRow;
+                Row rightRow = _flipped ? probeRow : buildRow;
+
                 if (_extraction.Residual is not null)
                 {
-                    table.JoinSchema ??= CombinedRowSchema.Build(probeRow, buildRow);
-                    Row combinedRow = table.JoinSchema.Combine(probeRow, buildRow);
+                    table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    Row combinedRow = table.JoinSchema.Combine(leftRow, rightRow);
 
                     if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
                     {
@@ -462,10 +489,10 @@ internal sealed class GraceHashJoinExecutor
 
                 if (_extraction.Residual is null)
                 {
-                    table.JoinSchema ??= CombinedRowSchema.Build(probeRow, buildRow);
+                    table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                 }
 
-                yield return table.JoinSchema!.Combine(probeRow, buildRow);
+                yield return table.JoinSchema!.Combine(leftRow, rightRow);
             }
         }
 
@@ -477,27 +504,36 @@ internal sealed class GraceHashJoinExecutor
                 yield return probeRow;
             }
         }
-        else if (!hasMatch && _joinType == JoinType.Left)
+        else if (!hasMatch)
         {
-            // Left outer: emit a null-extended probe row when no build row matched.
-            Row? nullBuild = table.CachedNullBuild;
+            // Unmatched probe row: emit when the probe side must fully appear in output.
+            bool needProbeUnmatched = _flipped
+                ? (_joinType is JoinType.Right or JoinType.FullOuter)
+                : (_joinType is JoinType.Left or JoinType.FullOuter);
 
-            if (nullBuild is null && table.BuildRows.Count > 0)
+            if (needProbeUnmatched)
             {
-                table.CachedNullBuild = CreateNullRow(table.BuildRows[0]);
-                nullBuild = table.CachedNullBuild;
-            }
+                Row? nullBuild = table.CachedNullBuild;
 
-            nullBuild ??= nullBuildTemplate;
+                if (nullBuild is null && table.BuildRows.Count > 0)
+                {
+                    table.CachedNullBuild = CreateNullRow(table.BuildRows[0]);
+                    nullBuild = table.CachedNullBuild;
+                }
 
-            if (nullBuild is not null)
-            {
-                table.JoinSchema ??= CombinedRowSchema.Build(probeRow, nullBuild);
-                yield return table.JoinSchema.Combine(probeRow, nullBuild);
-            }
-            else
-            {
-                yield return probeRow;
+                nullBuild ??= nullBuildTemplate;
+
+                if (nullBuild is not null)
+                {
+                    Row leftRow = _flipped ? nullBuild : probeRow;
+                    Row rightRow = _flipped ? probeRow : nullBuild;
+                    table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    yield return table.JoinSchema.Combine(leftRow, rightRow);
+                }
+                else
+                {
+                    yield return probeRow;
+                }
             }
         }
     }
@@ -512,6 +548,7 @@ internal sealed class GraceHashJoinExecutor
         bool skipInMemory = false)
     {
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
+        bool buildKeyIsRight = !_flipped;
 
         for (int partitionIndex = 0; partitionIndex < partitions.Length; partitionIndex++)
         {
@@ -560,7 +597,8 @@ internal sealed class GraceHashJoinExecutor
 
                 if (useSingleKey)
                 {
-                    DataValue keyValue = _evaluator.Evaluate(keyPairs[0].Right, buildRow);
+                    DataValue keyValue = _evaluator.Evaluate(
+                        buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
                     if (!keyValue.IsNull)
                     {
                         if (!singleKeyTable!.TryGetValue(keyValue, out List<(int, Row)>? bucket))
@@ -574,7 +612,7 @@ internal sealed class GraceHashJoinExecutor
                 }
                 else
                 {
-                    DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: true);
+                    DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
                     if (!HasNull(parts))
                     {
                         CompositeKey compositeKey = new(parts);
@@ -604,10 +642,13 @@ internal sealed class GraceHashJoinExecutor
 
             // Probe the hash table with probe-side rows.
             bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
-            bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
-            BitArray? rightMatched = needRightUnmatched ? new BitArray(buildRowList.Count) : null;
+            bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
+            bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
+            bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
+            bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
+            BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRowList.Count) : null;
             CombinedRowSchema? schema = null;
-            Row? cachedNullRight = null;
+            Row? cachedNullBuild = null;
 
             foreach (Row probeRow in probeRows)
             {
@@ -616,15 +657,16 @@ internal sealed class GraceHashJoinExecutor
 
                 if (useSingleKey)
                 {
-                    DataValue leftKeyValue = _evaluator.Evaluate(keyPairs[0].Left, probeRow);
-                    if (!leftKeyValue.IsNull)
+                    DataValue probeKeyValue = _evaluator.Evaluate(
+                        buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                    if (!probeKeyValue.IsNull)
                     {
-                        singleKeyTable!.TryGetValue(leftKeyValue, out matches);
+                        singleKeyTable!.TryGetValue(probeKeyValue, out matches);
                     }
                 }
                 else
                 {
-                    DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: false);
+                    DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: !buildKeyIsRight);
                     if (!HasNull(parts))
                     {
                         CompositeKey compositeKey = new(parts);
@@ -636,10 +678,14 @@ internal sealed class GraceHashJoinExecutor
                 {
                     foreach ((int buildIndex, Row buildRow) in matches)
                     {
+                        // Combine in logical (left, right) order.
+                        Row leftRow = _flipped ? buildRow : probeRow;
+                        Row rightRow = _flipped ? probeRow : buildRow;
+
                         if (_extraction.Residual is not null)
                         {
-                            schema ??= CombinedRowSchema.Build(probeRow, buildRow);
-                            Row combinedRow = schema.Combine(probeRow, buildRow);
+                            schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                            Row combinedRow = schema.Combine(leftRow, rightRow);
                             if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
                             {
                                 continue;
@@ -653,17 +699,17 @@ internal sealed class GraceHashJoinExecutor
                             break;
                         }
 
-                        if (rightMatched is not null)
+                        if (buildMatched is not null)
                         {
-                            rightMatched[buildIndex] = true;
+                            buildMatched[buildIndex] = true;
                         }
 
                         if (_extraction.Residual is null)
                         {
-                            schema ??= CombinedRowSchema.Build(probeRow, buildRow);
+                            schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         }
 
-                        yield return schema!.Combine(probeRow, buildRow);
+                        yield return schema!.Combine(leftRow, rightRow);
                     }
                 }
 
@@ -675,22 +721,23 @@ internal sealed class GraceHashJoinExecutor
                         yield return probeRow;
                     }
                 }
-                else if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
+                else if (!hasMatch && needProbeUnmatched)
                 {
-                    // Use a null template from this partition's build rows, or fall back to the global template.
-                    Row? nullRight = cachedNullRight;
-                    if (nullRight is null && buildRowList.Count > 0)
+                    Row? nullBuild = cachedNullBuild;
+                    if (nullBuild is null && buildRowList.Count > 0)
                     {
-                        cachedNullRight = CreateNullRow(buildRowList[0]);
-                        nullRight = cachedNullRight;
+                        cachedNullBuild = CreateNullRow(buildRowList[0]);
+                        nullBuild = cachedNullBuild;
                     }
 
-                    nullRight ??= nullRightTemplate;
+                    nullBuild ??= nullRightTemplate;
 
-                    if (nullRight is not null)
+                    if (nullBuild is not null)
                     {
-                        schema ??= CombinedRowSchema.Build(probeRow, nullRight);
-                        yield return schema.Combine(probeRow, nullRight);
+                        Row leftRow = _flipped ? nullBuild : probeRow;
+                        Row rightRow = _flipped ? probeRow : nullBuild;
+                        schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                        yield return schema.Combine(leftRow, rightRow);
                     }
                     else
                     {
@@ -699,19 +746,23 @@ internal sealed class GraceHashJoinExecutor
                 }
             }
 
-            // Emit unmatched build rows for RIGHT/FULL OUTER.
-            if (rightMatched is not null)
+            // Emit unmatched build rows when the build side must fully appear.
+            if (buildMatched is not null)
             {
-                CombinedRowSchema? rightUnmatchedSchema = null;
+                CombinedRowSchema? buildUnmatchedSchema = null;
 
                 for (int index = 0; index < buildRowList.Count; index++)
                 {
-                    if (!rightMatched[index])
+                    if (!buildMatched[index])
                     {
-                        if (nullLeftTemplate is not null)
+                        Row? nullPad = _flipped ? nullRightTemplate : nullLeftTemplate;
+
+                        if (nullPad is not null)
                         {
-                            rightUnmatchedSchema ??= CombinedRowSchema.Build(nullLeftTemplate, buildRowList[index]);
-                            yield return rightUnmatchedSchema.Combine(nullLeftTemplate, buildRowList[index]);
+                            Row leftRow = _flipped ? buildRowList[index] : nullPad;
+                            Row rightRow = _flipped ? nullPad : buildRowList[index];
+                            buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                            yield return buildUnmatchedSchema.Combine(leftRow, rightRow);
                         }
                         else
                         {
@@ -733,6 +784,7 @@ internal sealed class GraceHashJoinExecutor
         ExecutionContext context)
     {
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
+        bool buildKeyIsRight = !_flipped;
         int subPartitionCount = Math.Min(MaxPartitionCount, Math.Max(4, buildRows.Count / 1000));
         string subSpillDir = Path.Combine(_spillDirectory, $"recurse_{recursionDepth}_{Guid.NewGuid():N}");
         SpillPartition[] subPartitions = new SpillPartition[subPartitionCount];
@@ -749,7 +801,7 @@ internal sealed class GraceHashJoinExecutor
 
             foreach (Row buildRow in buildRows)
             {
-                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: true);
+                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight);
                 subPartitions[partitionIndex].AddBuildRow(buildRow);
 
                 if (estimator.ShouldSample())
@@ -768,7 +820,7 @@ internal sealed class GraceHashJoinExecutor
             // Re-partition probe rows.
             foreach (Row probeRow in probeRows)
             {
-                int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: false);
+                int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: !buildKeyIsRight);
                 SpillPartition partition = subPartitions[partitionIndex];
 
                 if (partition.IsBuildSpilled && !partition.IsProbeSpilled)

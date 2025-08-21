@@ -383,7 +383,31 @@ public sealed class QueryPlanner
                         source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
                     }
 
-                    source = new JoinOperator(source, currentRight, join.Type, join.OnCondition);
+                    // Build-side flip: when the right (build) side has 2x+ more estimated
+                    // rows than the left (probe) side, flip them so the smaller side is
+                    // materialized into the hash table. Only applied to LEFT/RIGHT JOINs
+                    // because INNER joins are handled by TryReorderJoins and semi-joins
+                    // have asymmetric semantics that do not benefit from flipping.
+                    bool flipped = false;
+
+                    if (join.Type is JoinType.Left or JoinType.Right)
+                    {
+                        long? leftRowCount = GetEstimatedRowCount(source);
+                        long? rightRowCount = GetEstimatedRowCount(currentRight);
+
+                        if (leftRowCount is not null && rightRowCount is not null
+                            && leftRowCount > 0 && rightRowCount > 0)
+                        {
+                            // Flip when the build side (right) is at least 2x larger than
+                            // the probe side (left), reducing hash table memory pressure.
+                            if (rightRowCount >= leftRowCount * 2)
+                            {
+                                flipped = true;
+                            }
+                        }
+                    }
+
+                    source = new JoinOperator(source, currentRight, join.Type, join.OnCondition, flipped: flipped);
                 }
 
                 // After the join, both sides' aliases are available on the left.
@@ -1768,7 +1792,8 @@ public sealed class QueryPlanner
                 join.Right,
                 join.Type,
                 join.OnCondition,
-                join.NullSensitiveAntiSemi),
+                join.NullSensitiveAntiSemi,
+                join.Flipped),
             _ => root,
         };
     }

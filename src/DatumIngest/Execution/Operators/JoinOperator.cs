@@ -21,6 +21,7 @@ public sealed class JoinOperator : IQueryOperator
     private readonly JoinType _joinType;
     private readonly Expression? _onCondition;
     private readonly bool _nullSensitiveAntiSemi;
+    private readonly bool _flipped;
 
     /// <summary>
     /// Creates a join operator.
@@ -34,18 +35,25 @@ public sealed class JoinOperator : IQueryOperator
     /// applies SQL-standard NOT IN null semantics: if any right-side key is NULL the
     /// entire result is empty, and left rows with a NULL key are excluded.
     /// </param>
+    /// <param name="flipped">
+    /// When <c>true</c>, the build and probe sides are physically swapped so the
+    /// smaller side (left) is materialized into the hash table while the larger side
+    /// (right) is streamed. Output column order is preserved as [left | right].
+    /// </param>
     public JoinOperator(
         IQueryOperator left,
         IQueryOperator right,
         JoinType joinType,
         Expression? onCondition,
-        bool nullSensitiveAntiSemi = false)
+        bool nullSensitiveAntiSemi = false,
+        bool flipped = false)
     {
         _left = left;
         _right = right;
         _joinType = joinType;
         _onCondition = onCondition;
         _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
+        _flipped = flipped;
     }
 
     /// <summary>The left (probe) side operator.</summary>
@@ -66,6 +74,13 @@ public sealed class JoinOperator : IQueryOperator
     /// entire result is empty, and left rows with a NULL key are excluded.
     /// </summary>
     public bool NullSensitiveAntiSemi => _nullSensitiveAntiSemi;
+
+    /// <summary>
+    /// When <c>true</c>, the build and probe sides are physically swapped so the
+    /// smaller side (left) is materialized into the hash table while the larger side
+    /// (right) is streamed. Output column order is preserved as [left | right].
+    /// </summary>
+    public bool Flipped => _flipped;
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
@@ -102,10 +117,17 @@ public sealed class JoinOperator : IQueryOperator
             warnings.Add("full outer join — materializes both sides");
         }
 
+        if (_flipped)
+        {
+            properties["flipped"] = "true";
+        }
+
         return new OperatorPlanDescription($"{joinTypeName} Join")
         {
             Properties = properties,
-            Children = [(Left, "probe"), (Right, "build")],
+            Children = _flipped
+                ? [(Left, "build"), (Right, "probe")]
+                : [(Left, "probe"), (Right, "build")],
             Warnings = warnings,
         };
     }
@@ -143,7 +165,8 @@ public sealed class JoinOperator : IQueryOperator
             else if (context.MemoryBudgetBytes is long memoryBudget)
             {
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
-                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, label: GetOperatorLabel(_right));
+                IQueryOperator buildSide = _flipped ? _left : _right;
+                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide));
 
                 await foreach (Row row in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
@@ -291,7 +314,13 @@ public sealed class JoinOperator : IQueryOperator
         bool useSingleKey = keyPairs.Count == 1;
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
-        // Build phase: materialize right side into hash table.
+        // Physical side assignment. Normally right=build, left=probe.
+        // When flipped, left=build (smaller side materialized), right=probe (larger, streamed).
+        IQueryOperator buildSource = _flipped ? _left : _right;
+        IQueryOperator probeSource = _flipped ? _right : _left;
+        bool buildKeyIsRight = !_flipped;
+
+        // Build phase: materialize the build side into a hash table.
         // For single-key joins, use DataValue directly as the key to avoid
         // the overhead of CompositeKey allocation.
         Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable =
@@ -299,17 +328,18 @@ public sealed class JoinOperator : IQueryOperator
         Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable =
             useSingleKey ? null : new();
 
-        List<Row> rightRows = new();
+        List<Row> buildRows = new();
         bool hasNullKey = false;
 
-        await foreach (Row rightRow in _right.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (Row buildRow in buildSource.ExecuteAsync(context).ConfigureAwait(false))
         {
-            int rightIndex = rightRows.Count;
-            rightRows.Add(rightRow);
+            int buildIndex = buildRows.Count;
+            buildRows.Add(buildRow);
 
             if (useSingleKey)
             {
-                DataValue keyValue = evaluator.Evaluate(keyPairs[0].Right, rightRow);
+                DataValue keyValue = evaluator.Evaluate(
+                    buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
                 if (keyValue.IsNull)
                 {
                     hasNullKey = true;
@@ -322,11 +352,11 @@ public sealed class JoinOperator : IQueryOperator
                     singleKeyTable[keyValue] = bucket;
                 }
 
-                bucket.Add((rightIndex, rightRow));
+                bucket.Add((buildIndex, buildRow));
             }
             else
             {
-                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, rightRow, rightSide: true);
+                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, buildRow, rightSide: buildKeyIsRight);
                 if (HasNull(parts))
                 {
                     hasNullKey = true;
@@ -340,51 +370,56 @@ public sealed class JoinOperator : IQueryOperator
                     compositeKeyTable[compositeKey] = bucket;
                 }
 
-                bucket.Add((rightIndex, rightRow));
+                bucket.Add((buildIndex, buildRow));
             }
         }
 
-        // NOT IN null semantics: if any right key is NULL, the entire result is empty.
+        // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
         if (_nullSensitiveAntiSemi && hasNullKey)
         {
             yield break;
         }
 
-        // Bloom pruning: if the probe (left) side has a source index with
-        // bloom filters and the join key is a simple column reference, push
-        // the build-side key values down so entire chunks can be skipped.
+        // Bloom pruning: if the probe side has a source index with bloom filters
+        // and the join key is a simple column reference, push the build-side key
+        // values down so entire chunks can be skipped.
         if (!isSemiJoin)
         {
             ApplyBloomPruning(keyPairs, singleKeyTable, compositeKeyTable, useSingleKey);
         }
 
-        // Track which right rows have been matched (for RIGHT/FULL OUTER).
-        bool needRightUnmatched = _joinType == JoinType.Right || _joinType == JoinType.FullOuter;
-        BitArray? rightMatched = needRightUnmatched ? new BitArray(rightRows.Count) : null;
+        // Determine which physical sides need unmatched-row tracking.
+        // Build rows are tracked via BitArray; unmatched probe rows are emitted inline.
+        bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
+        bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
+        bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
+        bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
+        BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRows.Count) : null;
 
-        // Probe phase: stream left side.
-        // Schema is built lazily from the first left-right pair so that zero-match
+        // Probe phase: stream the probe side.
+        // Schema is built lazily from the first combined pair so that zero-match
         // joins never attempt to build it.
         CombinedRowSchema? schema = null;
-        Row? cachedNullRight = null;
+        Row? cachedNullBuild = null;
 
-        await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (Row probeRow in probeSource.ExecuteAsync(context).ConfigureAwait(false))
         {
-            // For null-sensitive anti-semi (NOT IN), NULL left keys are excluded.
+            // For null-sensitive anti-semi (NOT IN), NULL probe keys are excluded.
             if (_nullSensitiveAntiSemi)
             {
-                bool leftKeyIsNull;
+                bool probeKeyIsNull;
                 if (useSingleKey)
                 {
-                    leftKeyIsNull = evaluator.Evaluate(keyPairs[0].Left, leftRow).IsNull;
+                    probeKeyIsNull = evaluator.Evaluate(
+                        buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow).IsNull;
                 }
                 else
                 {
-                    DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, leftRow, rightSide: false);
-                    leftKeyIsNull = HasNull(parts);
+                    DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
+                    probeKeyIsNull = HasNull(parts);
                 }
 
-                if (leftKeyIsNull)
+                if (probeKeyIsNull)
                 {
                     continue;
                 }
@@ -395,15 +430,16 @@ public sealed class JoinOperator : IQueryOperator
 
             if (useSingleKey)
             {
-                DataValue leftKeyValue = evaluator.Evaluate(keyPairs[0].Left, leftRow);
-                if (!leftKeyValue.IsNull)
+                DataValue probeKeyValue = evaluator.Evaluate(
+                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                if (!probeKeyValue.IsNull)
                 {
-                    singleKeyTable!.TryGetValue(leftKeyValue, out matches);
+                    singleKeyTable!.TryGetValue(probeKeyValue, out matches);
                 }
             }
             else
             {
-                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, leftRow, rightSide: false);
+                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
                 if (!HasNull(parts))
                 {
                     CompositeKey compositeKey = new(parts);
@@ -413,8 +449,12 @@ public sealed class JoinOperator : IQueryOperator
 
             if (matches is not null)
             {
-                foreach ((int rightIndex, Row rightRow) in matches)
+                foreach ((int buildIndex, Row buildRow) in matches)
                 {
+                    // Combine in logical (left, right) order regardless of physical assignment.
+                    Row leftRow = _flipped ? buildRow : probeRow;
+                    Row rightRow = _flipped ? probeRow : buildRow;
+
                     // Apply residual filter for non-equi conjuncts.
                     if (extraction.Residual is not null)
                     {
@@ -434,9 +474,9 @@ public sealed class JoinOperator : IQueryOperator
                         break;
                     }
 
-                    if (rightMatched is not null)
+                    if (buildMatched is not null)
                     {
-                        rightMatched[rightIndex] = true;
+                        buildMatched[buildIndex] = true;
                     }
 
                     if (extraction.Residual is null)
@@ -454,45 +494,51 @@ public sealed class JoinOperator : IQueryOperator
                 if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                     (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                 {
-                    yield return leftRow;
+                    yield return probeRow;
                 }
             }
-            else if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
+            else if (!hasMatch && needProbeUnmatched)
             {
-                if (rightRows.Count > 0)
+                if (buildRows.Count > 0)
                 {
-                    cachedNullRight ??= CreateNullRow(rightRows[0]);
-                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
-                    yield return schema.Combine(leftRow, cachedNullRight);
+                    cachedNullBuild ??= CreateNullRow(buildRows[0]);
+                    // Null-pad the build side. Column order is always (left, right).
+                    Row leftRow = _flipped ? cachedNullBuild : probeRow;
+                    Row rightRow = _flipped ? probeRow : cachedNullBuild;
+                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    yield return schema.Combine(leftRow, rightRow);
                 }
                 else
                 {
-                    yield return leftRow;
+                    yield return probeRow;
                 }
             }
         }
 
-        // Emit unmatched right rows for RIGHT and FULL OUTER.
-        if (rightMatched is not null)
+        // Emit unmatched build rows when the build side must fully appear in the output.
+        if (buildMatched is not null)
         {
-            Row? nullLeft = null;
-            CombinedRowSchema? rightUnmatchedSchema = null;
+            Row? nullProbe = null;
+            CombinedRowSchema? buildUnmatchedSchema = null;
 
-            for (int index = 0; index < rightRows.Count; index++)
+            for (int index = 0; index < buildRows.Count; index++)
             {
-                if (!rightMatched[index])
+                if (!buildMatched[index])
                 {
-                    nullLeft ??= await GetFirstLeftRowForNullPadAsync(context).ConfigureAwait(false);
+                    nullProbe ??= await GetFirstRowForNullPadAsync(probeSource, context).ConfigureAwait(false);
 
-                    if (nullLeft is not null)
+                    if (nullProbe is not null)
                     {
-                        Row nullLeftRow = CreateNullRow(nullLeft);
-                        rightUnmatchedSchema ??= CombinedRowSchema.Build(nullLeftRow, rightRows[index]);
-                        yield return rightUnmatchedSchema.Combine(nullLeftRow, rightRows[index]);
+                        Row nullProbeRow = CreateNullRow(nullProbe);
+                        // Column order is always (left, right).
+                        Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
+                        Row rightRow = _flipped ? nullProbeRow : buildRows[index];
+                        buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                        yield return buildUnmatchedSchema.Combine(leftRow, rightRow);
                     }
                     else
                     {
-                        yield return rightRows[index];
+                        yield return buildRows[index];
                     }
                 }
             }
@@ -504,28 +550,40 @@ public sealed class JoinOperator : IQueryOperator
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
 
-        // Materialize right side.
-        List<Row> rightRows = new();
-        await foreach (Row rightRow in _right.ExecuteAsync(context).ConfigureAwait(false))
+        // Physical side assignment mirrors the hash join path.
+        IQueryOperator buildSource = _flipped ? _left : _right;
+        IQueryOperator probeSource = _flipped ? _right : _left;
+
+        // Materialize build side.
+        List<Row> buildRows = new();
+        await foreach (Row buildRow in buildSource.ExecuteAsync(context).ConfigureAwait(false))
         {
-            rightRows.Add(rightRow);
+            buildRows.Add(buildRow);
         }
 
-        BitArray? rightMatched = (_joinType == JoinType.FullOuter || _joinType == JoinType.Right)
-            ? new BitArray(rightRows.Count)
+        bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
+        bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
+        bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
+        bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
+        BitArray? buildMatched = needBuildUnmatched
+            ? new BitArray(buildRows.Count)
             : null;
 
         CombinedRowSchema? schema = null;
-        Row? cachedNullRight = null;
+        Row? cachedNullBuild = null;
 
-        await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (Row probeRow in probeSource.ExecuteAsync(context).ConfigureAwait(false))
         {
             bool hasMatch = false;
 
-            for (int index = 0; index < rightRows.Count; index++)
+            for (int index = 0; index < buildRows.Count; index++)
             {
-                schema ??= CombinedRowSchema.Build(leftRow, rightRows[index]);
-                Row combinedRow = schema.Combine(leftRow, rightRows[index]);
+                // Combine in logical (left, right) order.
+                Row leftRow = _flipped ? buildRows[index] : probeRow;
+                Row rightRow = _flipped ? probeRow : buildRows[index];
+
+                schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                Row combinedRow = schema.Combine(leftRow, rightRow);
 
                 if (_onCondition is null || evaluator.EvaluateAsBoolean(_onCondition, combinedRow))
                 {
@@ -536,9 +594,9 @@ public sealed class JoinOperator : IQueryOperator
                         break;
                     }
 
-                    if (rightMatched is not null)
+                    if (buildMatched is not null)
                     {
-                        rightMatched[index] = true;
+                        buildMatched[index] = true;
                     }
 
                     yield return combinedRow;
@@ -550,45 +608,49 @@ public sealed class JoinOperator : IQueryOperator
                 if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                     (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                 {
-                    yield return leftRow;
+                    yield return probeRow;
                 }
             }
-            else if (!hasMatch && (_joinType == JoinType.Left || _joinType == JoinType.FullOuter))
+            else if (!hasMatch && needProbeUnmatched)
             {
-                if (rightRows.Count > 0)
+                if (buildRows.Count > 0)
                 {
-                    cachedNullRight ??= CreateNullRow(rightRows[0]);
-                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
-                    yield return schema.Combine(leftRow, cachedNullRight);
+                    cachedNullBuild ??= CreateNullRow(buildRows[0]);
+                    Row leftRow = _flipped ? cachedNullBuild : probeRow;
+                    Row rightRow = _flipped ? probeRow : cachedNullBuild;
+                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    yield return schema.Combine(leftRow, rightRow);
                 }
                 else
                 {
-                    yield return leftRow;
+                    yield return probeRow;
                 }
             }
         }
 
-        // Emit unmatched right rows for RIGHT and FULL OUTER.
-        if (rightMatched is not null)
+        // Emit unmatched build rows.
+        if (buildMatched is not null)
         {
-            Row? nullLeft = null;
-            CombinedRowSchema? rightUnmatchedSchema = null;
+            Row? nullProbe = null;
+            CombinedRowSchema? buildUnmatchedSchema = null;
 
-            for (int index = 0; index < rightRows.Count; index++)
+            for (int index = 0; index < buildRows.Count; index++)
             {
-                if (!rightMatched[index])
+                if (!buildMatched[index])
                 {
-                    nullLeft ??= await GetFirstLeftRowForNullPadAsync(context).ConfigureAwait(false);
+                    nullProbe ??= await GetFirstRowForNullPadAsync(probeSource, context).ConfigureAwait(false);
 
-                    if (nullLeft is not null)
+                    if (nullProbe is not null)
                     {
-                        Row nullLeftRow = CreateNullRow(nullLeft);
-                        rightUnmatchedSchema ??= CombinedRowSchema.Build(nullLeftRow, rightRows[index]);
-                        yield return rightUnmatchedSchema.Combine(nullLeftRow, rightRows[index]);
+                        Row nullProbeRow = CreateNullRow(nullProbe);
+                        Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
+                        Row rightRow = _flipped ? nullProbeRow : buildRows[index];
+                        buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                        yield return buildUnmatchedSchema.Combine(leftRow, rightRow);
                     }
                     else
                     {
-                        yield return rightRows[index];
+                        yield return buildRows[index];
                     }
                 }
             }
@@ -616,9 +678,9 @@ public sealed class JoinOperator : IQueryOperator
         }
     }
 
-    private async Task<Row?> GetFirstLeftRowForNullPadAsync(ExecutionContext context)
+    private static async Task<Row?> GetFirstRowForNullPadAsync(IQueryOperator source, ExecutionContext context)
     {
-        await foreach (Row row in _left.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (Row row in source.ExecuteAsync(context).ConfigureAwait(false))
         {
             return row;
         }
@@ -814,8 +876,9 @@ public sealed class JoinOperator : IQueryOperator
         Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable,
         bool useSingleKey)
     {
+        IQueryOperator probeOperator = _flipped ? _right : _left;
         List<ScanOperator> probeScans = new();
-        CollectScanOperators(_left, probeScans);
+        CollectScanOperators(probeOperator, probeScans);
 
         if (probeScans.Count == 0)
         {
@@ -824,7 +887,8 @@ public sealed class JoinOperator : IQueryOperator
 
         for (int keyIndex = 0; keyIndex < keyPairs.Count; keyIndex++)
         {
-            if (keyPairs[keyIndex].Left is not ColumnReference columnReference)
+            Expression probeKeyExpression = _flipped ? keyPairs[keyIndex].Right : keyPairs[keyIndex].Left;
+            if (probeKeyExpression is not ColumnReference columnReference)
             {
                 continue;
             }
