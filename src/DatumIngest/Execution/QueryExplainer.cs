@@ -76,6 +76,8 @@ public static class QueryExplainer
             },
             Details = details,
             EstimatedRows = scan.EstimatedRowCount,
+            AccessStrategyMethod = description.AccessStrategy?.Method,
+            Properties = description.Properties,
         };
 
         AppendAccessStrategyAnnotations(node, description.AccessStrategy);
@@ -99,6 +101,8 @@ public static class QueryExplainer
             OperatorName = "Index Scan",
             Details = details.ToString(),
             EstimatedRows = description.EstimatedRows,
+            AccessStrategyMethod = description.AccessStrategy?.Method,
+            Properties = description.Properties,
         };
 
         AppendAccessStrategyAnnotations(node, description.AccessStrategy);
@@ -140,6 +144,8 @@ public static class QueryExplainer
             Details = details.ToString(),
             Children = children,
             EstimatedRows = description.EstimatedRows,
+            AccessStrategyMethod = description.AccessStrategy?.Method,
+            Properties = description.Properties,
         };
 
         AppendAccessStrategyAnnotations(node, description.AccessStrategy);

@@ -350,8 +350,9 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Session session = ResolveSession(request.SessionId);
 
+        string explainSql = request.Analyze ? $"analyze {request.Sql}" : request.Sql;
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".explain {request.Sql}", LinkedToken(context, session)).ConfigureAwait(false);
+            session, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -387,6 +388,24 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         {
             message.EstimatedRows = node.EstimatedRows.Value;
             message.HasEstimatedRows = true;
+        }
+
+        if (node.AccessStrategyMethod.HasValue)
+        {
+            message.AccessMethod = node.AccessStrategyMethod.Value switch
+            {
+                AccessMethod.TableScan => ExplainAccessMethod.TableScan,
+                AccessMethod.IndexScan => ExplainAccessMethod.IndexScan,
+                _ => ExplainAccessMethod.Unspecified,
+            };
+        }
+
+        if (node.Properties is not null)
+        {
+            foreach (KeyValuePair<string, string> entry in node.Properties)
+            {
+                message.Properties[entry.Key] = entry.Value;
+            }
         }
 
         foreach (ExplainPlanNode child in node.Children)

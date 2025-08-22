@@ -480,6 +480,8 @@ The gRPC `ExplainResponse` includes a structured `ExplainPlanNodeMessage` tree f
 | `estimated_rows` | int64 | Estimated row count (check `has_estimated_rows`). |
 | `has_estimated_rows` | bool | Whether `estimated_rows` was populated (distinguishes 0 from unknown). |
 | `runtime` | ExplainRuntimeMetrics | Runtime metrics (ANALYZE only). |
+| `access_method` | ExplainAccessMethod | Access method for scan operators (`TABLE_SCAN`, `INDEX_SCAN`). `UNSPECIFIED` for non-scan operators. |
+| `properties` | map&lt;string, string&gt; | Structured operator properties. Same data as `details` but in key-value form for programmatic consumption. |
 
 ### ExplainRuntimeMetrics
 
@@ -495,20 +497,6 @@ The gRPC `ExplainResponse` includes a structured `ExplainPlanNodeMessage` tree f
 
 ## Planned Enhancements
 
-The following enhancements are planned for the execution plan system:
-
-### Access Strategy Visibility
-
-Each data-access operator will explicitly declare its access strategy: Table Scan, Statistics Scan, Bloom Filter Scan, Index Scan, or Index Seek. This will be visible in both text and structured output.
-
-### Structured Properties
-
-Operator details will transition from a free-form string to structured key-value pairs, enabling programmatic extraction by editors and dashboards.
-
 ### Materialization and Memory Estimates
 
 Operators that materialize data (Sort, GroupBy, Hash Join build side, Distinct, Window) will report estimated memory consumption.
-
-### Compiler-Enforced Coverage
-
-All operators will be required to self-describe for EXPLAIN via an interface method, preventing new operators from silently producing "unknown operator" nodes.

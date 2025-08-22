@@ -241,12 +241,19 @@ message ListResponse {
 
 // ───────────────────── Explain ─────────────────────
 
+// Access method for data-access operators in an explain plan.
+enum ExplainAccessMethod {
+  EXPLAIN_ACCESS_METHOD_UNSPECIFIED = 0;
+  EXPLAIN_ACCESS_METHOD_TABLE_SCAN = 1;
+  EXPLAIN_ACCESS_METHOD_INDEX_SCAN = 2;
+}
+
 message ExplainRequest {
   string session_id = 1;
   string sql = 2;
 
   // When true, the plan is executed to collect runtime metrics
-  // (row counts, timings). Not yet implemented — reserved for future use.
+  // (row counts, timings). Equivalent to prefixing the SQL with "analyze ".
   bool analyze = 3;
 }
 
@@ -286,6 +293,14 @@ message ExplainPlanNodeMessage {
 
   // Whether the estimated_rows field was populated (distinguishes 0 from unknown).
   bool has_estimated_rows = 9;
+
+  // Access method for data-access operators (Table Scan, Index Scan).
+  // UNSPECIFIED for non-scan operators.
+  ExplainAccessMethod access_method = 10;
+
+  // Structured operator properties in key-value form.
+  // Same data as `details` but available for programmatic consumption.
+  map<string, string> properties = 11;
 }
 
 // Runtime execution metrics for a single plan node.

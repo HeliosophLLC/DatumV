@@ -48,6 +48,20 @@ public sealed class ExplainPlanNode
     /// <summary>Additional runtime annotations (e.g. "buffered: 10,000 rows").</summary>
     public List<string> RuntimeAnnotations { get; init; } = [];
 
+    // ── Access strategy (populated for data-access operators) ──
+
+    /// <summary>
+    /// Access method for data-access operators (e.g. Table Scan, Index Scan).
+    /// <c>null</c> for non-scan operators.
+    /// </summary>
+    public AccessMethod? AccessStrategyMethod { get; set; }
+
+    /// <summary>
+    /// Structured operator properties in key-value form.
+    /// Same data as <see cref="Details"/> but available for programmatic consumption.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Properties { get; set; }
+
     /// <summary>
     /// Renders this plan tree as a human-readable indented string.
     /// </summary>
