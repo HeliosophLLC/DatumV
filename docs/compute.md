@@ -103,6 +103,7 @@ builder.Services.AddDatumCompute(options => options.ApiKey = "key");
 | `ThrottleDelayMilliseconds` | `int?` | `null` | Server-wide default throttle delay in ms. `null` = no throttle. |
 | `MaxQueryUnits` | `long?` | `null` | Server-wide default QU budget per query. `null` = no limit. |
 | `MemoryBudgetBytes` | `long?` | `null` | Server-wide default memory budget for spill-to-disk operators (joins, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT, materialised CTEs) in bytes. `null` = keep everything in memory. |
+| `MaxConcurrentQueries` | `int?` | `3` | Server-wide default maximum concurrent queries per session. `null` = no limit. |
 
 ## Calling with grpcurl
 
@@ -173,6 +174,7 @@ Creates a new session on the compute backend.
 | `throttle_delay_ms` | `int32` | Per-session throttle delay override. `0` = server default, positive = override, negative = disable. |
 | `max_query_units` | `int64` | Per-session QU budget override. `0` = server default, positive = override, negative = disable. |
 | `memory_budget_bytes` | `int64` | Per-session memory budget for spill-to-disk operators (joins, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT, materialised CTEs). `0` = server default, positive = override (bytes), negative = disable (all in-memory). |
+| `max_concurrent_queries` | `int32` | Maximum concurrent queries on this session. `0` = server default (3), positive = override, negative = disable (unlimited). |
 
 **Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
 
@@ -692,6 +694,8 @@ Each governance field in `CreateSessionRequest` follows three-state semantics:
 
 When the budget is `null` (or explicitly disabled with a negative override), all data is held in memory. Typical values are `512MB`–`2GB` depending on available server RAM.
 
+**Concurrent query limit (`max_concurrent_queries`):** The maximum number of queries that may execute simultaneously on a single session. Defaults to `3`. When a new query is submitted and the session already has this many active queries, the server immediately returns `ResourceExhausted` without starting the query. Clients should cancel or wait for an active query to complete before submitting new ones. Set to a negative value to disable the limit entirely.
+
 ### Configuration Example
 
 ```csharp
@@ -740,7 +744,7 @@ CreateSessionResponse session = await connection.Client.CreateSessionAsync(
 | `InvalidArgument` | Malformed session ID, bad SQL syntax, invalid source definition |
 | `NotFound` | Session ID not found, table not found |
 | `PermissionDenied` | User-role session attempting admin operation |
-| `ResourceExhausted` | Row budget or Query Unit budget exceeded during query streaming |
+| `ResourceExhausted` | Row budget, Query Unit budget, or concurrent query limit exceeded during query streaming |
 | `DeadlineExceeded` | Query deadline fired during execution |
 | `Cancelled` | Query cancelled by CancelQuery, KillQuery, or session cancellation |
 | `Internal` | Unexpected server error |

@@ -134,8 +134,19 @@ public sealed class Session : IDisposable
     /// </summary>
     /// <param name="sql">The SQL text of the query being executed.</param>
     /// <returns>The newly registered <see cref="ActiveQuery"/> with a server-assigned identifier.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the session has reached its <see cref="QueryGovernor.MaxConcurrentQueries"/> limit.
+    /// </exception>
     public ActiveQuery RegisterQuery(string sql)
     {
+        if (Governor.MaxConcurrentQueries.HasValue &&
+            _activeQueries.Count >= Governor.MaxConcurrentQueries.Value)
+        {
+            throw new InvalidOperationException(
+                $"Concurrent query limit reached (limit: {Governor.MaxConcurrentQueries.Value}). " +
+                "Cancel or wait for an active query to complete before starting a new one.");
+        }
+
         ActiveQuery activeQuery = new(sql);
         _activeQueries.TryAdd(activeQuery.QueryId, activeQuery);
         return activeQuery;

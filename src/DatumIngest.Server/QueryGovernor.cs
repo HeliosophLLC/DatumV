@@ -25,12 +25,17 @@ namespace DatumIngest.Server;
 /// that exceed this budget will partition and spill to temporary files.
 /// <see langword="null"/> means no budget (joins are fully in-memory).
 /// </param>
+/// <param name="MaxConcurrentQueries">
+/// Maximum number of queries that may execute simultaneously on a single
+/// session. <see langword="null"/> means no limit.
+/// </param>
 public sealed record QueryGovernor(
     int? QueryTimeoutSeconds,
     long? MaxOutputRows,
     int? ThrottleDelayMilliseconds,
     long? MaxQueryUnits = null,
-    long? MemoryBudgetBytes = null)
+    long? MemoryBudgetBytes = null,
+    int? MaxConcurrentQueries = null)
 {
     /// <summary>
     /// Number of rows between throttle delays. When <see cref="ThrottleDelayMilliseconds"/>
@@ -58,6 +63,7 @@ public sealed record QueryGovernor(
     /// <param name="requestThrottleDelayMilliseconds">Throttle override from the client request.</param>
     /// <param name="requestMaxQueryUnits">Query Unit budget override from the client request.</param>
     /// <param name="requestMemoryBudgetBytes">Memory budget override from the client request.</param>
+    /// <param name="requestMaxConcurrentQueries">Concurrent query limit override from the client request.</param>
     /// <returns>A merged governor reflecting the effective limits for the session.</returns>
     public static QueryGovernor Merge(
         QueryGovernor serverDefaults,
@@ -65,14 +71,16 @@ public sealed record QueryGovernor(
         long requestMaxOutputRows,
         int requestThrottleDelayMilliseconds,
         long requestMaxQueryUnits = 0,
-        long requestMemoryBudgetBytes = 0)
+        long requestMemoryBudgetBytes = 0,
+        int requestMaxConcurrentQueries = 0)
     {
         return new QueryGovernor(
             ResolveInt(requestTimeoutSeconds, serverDefaults.QueryTimeoutSeconds),
             ResolveLong(requestMaxOutputRows, serverDefaults.MaxOutputRows),
             ResolveInt(requestThrottleDelayMilliseconds, serverDefaults.ThrottleDelayMilliseconds),
             ResolveLong(requestMaxQueryUnits, serverDefaults.MaxQueryUnits),
-            ResolveLong(requestMemoryBudgetBytes, serverDefaults.MemoryBudgetBytes));
+            ResolveLong(requestMemoryBudgetBytes, serverDefaults.MemoryBudgetBytes),
+            ResolveInt(requestMaxConcurrentQueries, serverDefaults.MaxConcurrentQueries));
     }
 
     /// <summary>

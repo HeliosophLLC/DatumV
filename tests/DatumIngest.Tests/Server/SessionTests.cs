@@ -223,6 +223,90 @@ public sealed class SessionTests : IDisposable
         Assert.Empty(session.GetActiveQueries());
     }
 
+    // ─────────────────── MaxConcurrentQueries ───────────────────
+
+    /// <summary>
+    /// RegisterQuery throws when the concurrent query limit is reached.
+    /// </summary>
+    [Fact]
+    public void RegisterQuery_AtLimit_ThrowsInvalidOperationException()
+    {
+        QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 2);
+        using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog(), governor);
+
+        ActiveQuery first = session.RegisterQuery("SELECT 1");
+        ActiveQuery second = session.RegisterQuery("SELECT 2");
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            () => session.RegisterQuery("SELECT 3"));
+
+        Assert.Contains("Concurrent query limit reached", exception.Message);
+        Assert.Contains("2", exception.Message);
+
+        session.UnregisterQuery(first.QueryId);
+        session.UnregisterQuery(second.QueryId);
+    }
+
+    /// <summary>
+    /// RegisterQuery succeeds when below the concurrent query limit.
+    /// </summary>
+    [Fact]
+    public void RegisterQuery_BelowLimit_Succeeds()
+    {
+        QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 3);
+        using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog(), governor);
+
+        ActiveQuery first = session.RegisterQuery("SELECT 1");
+        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        ActiveQuery third = session.RegisterQuery("SELECT 3");
+
+        Assert.Equal(3, session.GetActiveQueries().Count);
+
+        session.UnregisterQuery(first.QueryId);
+        session.UnregisterQuery(second.QueryId);
+        session.UnregisterQuery(third.QueryId);
+    }
+
+    /// <summary>
+    /// Unregistering a query frees a slot so a new query can be registered.
+    /// </summary>
+    [Fact]
+    public void RegisterQuery_AfterUnregister_FreesSlot()
+    {
+        QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 1);
+        using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog(), governor);
+
+        ActiveQuery first = session.RegisterQuery("SELECT 1");
+        session.UnregisterQuery(first.QueryId);
+
+        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        Assert.Single(session.GetActiveQueries());
+
+        session.UnregisterQuery(second.QueryId);
+    }
+
+    /// <summary>
+    /// When MaxConcurrentQueries is null, unlimited queries are allowed.
+    /// </summary>
+    [Fact]
+    public void RegisterQuery_NullLimit_AllowsUnlimited()
+    {
+        using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
+        List<ActiveQuery> queries = new();
+
+        for (int i = 0; i < 50; i++)
+        {
+            queries.Add(session.RegisterQuery($"SELECT {i}"));
+        }
+
+        Assert.Equal(50, session.GetActiveQueries().Count);
+
+        foreach (ActiveQuery query in queries)
+        {
+            session.UnregisterQuery(query.QueryId);
+        }
+    }
+
     /// <summary>
     /// Local sessions have a null DatasetId.
     /// </summary>

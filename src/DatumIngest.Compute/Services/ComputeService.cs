@@ -42,7 +42,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             request.MaxOutputRows,
             request.ThrottleDelayMs,
             request.MaxQueryUnits,
-            request.MemoryBudgetBytes);
+            request.MemoryBudgetBytes,
+            request.MaxConcurrentQueries);
 
         Session session;
 
@@ -99,7 +100,16 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         // Register a per-query cancellation scope so concurrent queries
         // can be cancelled independently.
-        ActiveQuery activeQuery = session.RegisterQuery(request.Sql);
+        ActiveQuery activeQuery;
+        try
+        {
+            activeQuery = session.RegisterQuery(request.Sql);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, exception.Message));
+        }
+
         string queryIdString = activeQuery.QueryId.ToString();
 
         try

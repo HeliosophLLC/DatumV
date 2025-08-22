@@ -970,6 +970,114 @@ public sealed class ComputeServiceTests : IDisposable
         Assert.True(writer.Messages.Count > 0);
     }
 
+    // ─────────────────── MaxConcurrentQueries ───────────────────
+
+    /// <summary>
+    /// Query returns ResourceExhausted when the session's concurrent query limit is reached.
+    /// </summary>
+    [Fact]
+    public async Task Query_ConcurrentQueryLimitReached_ThrowsResourceExhausted()
+    {
+        QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 1);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
+        catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
+        Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+
+        // Occupy the single slot.
+        ActiveQuery existing = session.RegisterQuery("SELECT 1");
+
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "SELECT * FROM data",
+        };
+
+        CapturingStreamWriter<QueryRow> writer = new();
+
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.Query(request, writer, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.ResourceExhausted, exception.StatusCode);
+        Assert.Contains("Concurrent query limit reached", exception.Status.Detail);
+
+        session.UnregisterQuery(existing.QueryId);
+    }
+
+    /// <summary>
+    /// CreateSession merges MaxConcurrentQueries from the proto request with server defaults.
+    /// </summary>
+    [Fact]
+    public async Task CreateSession_MaxConcurrentQueries_MergedFromRequest()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MaxConcurrentQueries: 3);
+        SessionManager sessionManager = new(_functionRegistry);
+        CommandDispatcher dispatcher = new(sessionManager);
+        ComputeService service = new(sessionManager, dispatcher, serverDefaults);
+
+        // Override to 5.
+        CreateSessionRequest request = new()
+        {
+            Role = "user",
+            MaxConcurrentQueries = 5,
+        };
+
+        CreateSessionResponse response = await service.CreateSession(request, TestCallContext.Create());
+
+        Session? session = sessionManager.GetSession(Guid.Parse(response.SessionId));
+        Assert.NotNull(session);
+        Assert.Equal(5, session.Governor.MaxConcurrentQueries);
+    }
+
+    /// <summary>
+    /// CreateSession with zero max_concurrent_queries uses the server default.
+    /// </summary>
+    [Fact]
+    public async Task CreateSession_MaxConcurrentQueries_ZeroUsesServerDefault()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MaxConcurrentQueries: 3);
+        SessionManager sessionManager = new(_functionRegistry);
+        CommandDispatcher dispatcher = new(sessionManager);
+        ComputeService service = new(sessionManager, dispatcher, serverDefaults);
+
+        CreateSessionRequest request = new()
+        {
+            Role = "user",
+            MaxConcurrentQueries = 0,
+        };
+
+        CreateSessionResponse response = await service.CreateSession(request, TestCallContext.Create());
+
+        Session? session = sessionManager.GetSession(Guid.Parse(response.SessionId));
+        Assert.NotNull(session);
+        Assert.Equal(3, session.Governor.MaxConcurrentQueries);
+    }
+
+    /// <summary>
+    /// CreateSession with negative max_concurrent_queries disables the limit.
+    /// </summary>
+    [Fact]
+    public async Task CreateSession_MaxConcurrentQueries_NegativeDisables()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MaxConcurrentQueries: 3);
+        SessionManager sessionManager = new(_functionRegistry);
+        CommandDispatcher dispatcher = new(sessionManager);
+        ComputeService service = new(sessionManager, dispatcher, serverDefaults);
+
+        CreateSessionRequest request = new()
+        {
+            Role = "user",
+            MaxConcurrentQueries = -1,
+        };
+
+        CreateSessionResponse response = await service.CreateSession(request, TestCallContext.Create());
+
+        Session? session = sessionManager.GetSession(Guid.Parse(response.SessionId));
+        Assert.NotNull(session);
+        Assert.Null(session.Governor.MaxConcurrentQueries);
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {

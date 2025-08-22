@@ -69,4 +69,12 @@ public sealed class DatumComputeOptions
     /// production).
     /// </summary>
     public long? MemoryBudgetBytes { get; set; } = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the server-wide default maximum number of queries that
+    /// may execute simultaneously on a single session. Defaults to 3.
+    /// Set to <see langword="null"/> to allow unlimited concurrent queries.
+    /// Clients may override per-session via <c>CreateSession</c>.
+    /// </summary>
+    public int? MaxConcurrentQueries { get; set; } = 3;
 }

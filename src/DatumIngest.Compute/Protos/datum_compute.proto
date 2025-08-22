@@ -83,6 +83,10 @@ message CreateSessionRequest {
   // Memory budget in bytes for spill-to-disk joins.
   // 0 = use server default, positive = override, negative = disable.
   int64 memory_budget_bytes = 7;
+
+  // Maximum number of queries that may execute concurrently on this session.
+  // 0 = use server default, positive = override, negative = disable.
+  int32 max_concurrent_queries = 8;
 }
 
 message CreateSessionResponse {

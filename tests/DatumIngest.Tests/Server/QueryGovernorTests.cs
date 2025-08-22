@@ -167,4 +167,54 @@ public sealed class QueryGovernorTests
 
         Assert.Null(merged.MemoryBudgetBytes);
     }
+
+    // ─────────────────── MaxConcurrentQueries ───────────────────
+
+    /// <summary>
+    /// MaxConcurrentQueries defaults to null on Unlimited.
+    /// </summary>
+    [Fact]
+    public void Unlimited_HasNoMaxConcurrentQueries()
+    {
+        Assert.Null(QueryGovernor.Unlimited.MaxConcurrentQueries);
+    }
+
+    /// <summary>
+    /// Zero request value uses server default concurrent query limit.
+    /// </summary>
+    [Fact]
+    public void Merge_MaxConcurrentQueries_ZeroUsesServerDefault()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MaxConcurrentQueries: 3);
+
+        QueryGovernor merged = QueryGovernor.Merge(serverDefaults, 0, 0, 0, requestMaxConcurrentQueries: 0);
+
+        Assert.Equal(3, merged.MaxConcurrentQueries);
+    }
+
+    /// <summary>
+    /// Positive request value overrides server default concurrent query limit.
+    /// </summary>
+    [Fact]
+    public void Merge_MaxConcurrentQueries_PositiveOverridesDefault()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MaxConcurrentQueries: 3);
+
+        QueryGovernor merged = QueryGovernor.Merge(serverDefaults, 0, 0, 0, requestMaxConcurrentQueries: 10);
+
+        Assert.Equal(10, merged.MaxConcurrentQueries);
+    }
+
+    /// <summary>
+    /// Negative request value explicitly disables the concurrent query limit.
+    /// </summary>
+    [Fact]
+    public void Merge_MaxConcurrentQueries_NegativeDisables()
+    {
+        QueryGovernor serverDefaults = new(null, null, null, MaxConcurrentQueries: 3);
+
+        QueryGovernor merged = QueryGovernor.Merge(serverDefaults, 0, 0, 0, requestMaxConcurrentQueries: -1);
+
+        Assert.Null(merged.MaxConcurrentQueries);
+    }
 }
