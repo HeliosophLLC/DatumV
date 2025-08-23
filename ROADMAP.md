@@ -49,6 +49,70 @@ The following features are architecturally accounted for but deferred from V1:
 
 ---
 
+## Engine Performance
+
+**Status**: Phases 1–2 shipped (merge join, streaming aggregate). Remaining phases implement when measured scenarios demand them. Reference tag **Pn** / **Dn** when a new bottleneck matches.
+
+### ~~P1. Merge Join~~ ✅
+
+Streaming two-pointer join for equi-joins when both sides have sorted indexes. O(n+m) time, O(k) memory (k = max duplicates per key value). Activated by `SortedJoinBenefitsDownstream` only when a downstream operator (ORDER BY, GROUP BY) benefits from sorted output.
+
+### ~~P2. Streaming Aggregate + LIMIT Short-Circuit~~ ✅
+
+`GroupByOperator` dual-mode: hash (default) vs. streaming when input is pre-sorted by GROUP BY keys. Streaming emits groups one at a time → LIMIT cancels upstream after N groups. `GetOutputOrdering` walks the operator tree to propagate sort metadata; `OutputOrderingSatisfiesOrderBy` eliminates redundant ORDER BY.
+
+### P3. Parallel Hash Join Probe + Parallel Hash Aggregate
+
+Parallelize the two dominant CPU-bound operators. Shared read-only hash table with P concurrent probe workers; thread-local partial aggregation with merge. Target 4–8× speedup for large joins + aggregations. Uses `Channel<Row>` + `Task.Run` + `Task.WhenAll` (same pattern as `ZipTableProvider.FetchByKeysAsync`).
+
+- `ExecutionContext.DegreeOfParallelism` property (default 1 = no parallelism)
+- Parallel hash join: sequential build (small side, read-only after construction), P workers probe shared dictionary concurrently via bounded `Channel<Row>`, single output channel with backpressure
+- `IAggregateAccumulator.Merge(IAggregateAccumulator other)` on all ~15 accumulator types
+- Parallel hash aggregate: P thread-local dictionaries → global merge phase combining partial groups
+- Activation threshold: `GetEstimatedRowCount > 100K` for the operator's input
+- Streaming GROUP BY remains single-threaded (already O(1) memory, LIMIT short-circuits)
+
+**Multi-query concurrency control** (server-side): Workers schedule onto the .NET ThreadPool, which is process-global. Under concurrent gRPC queries, total parallelism must be bounded to avoid oversubscription. Three options, in order of complexity:
+
+1. **Global concurrency semaphore** — `SemaphoreSlim(ProcessorCount)` shared across all queries. Parallel operators acquire slots before spawning workers. Simple, effective, no per-query fairness.
+2. **Adaptive degree of parallelism** — each query checks active worker count at planning time and reduces its own parallelism accordingly (e.g., 8 cores, 3 active queries → 2 workers each). Fairer distribution but more bookkeeping.
+3. **Per-query TaskScheduler** — `ConcurrentExclusiveSchedulerPair` with max concurrency per query. Strongest isolation, heaviest implementation.
+
+Start with option 1. CLI passes `null` (unlimited — single query, all cores available).
+
+**Implement when**: CPU-bound join or aggregate is the measured bottleneck on multi-core hardware.
+
+### P4. DataValue Struct + Batch Execution
+
+Eliminate per-DataValue heap allocation for scalar types via `[StructLayout(LayoutKind.Explicit)]` union (32 bytes inline, no GC pressure for scalars). Then introduce columnar batch processing (`IBatchOperator`, `DataBatch`).
+
+- `DataValue` class → `readonly struct` with explicit field layout
+- `DataValue?` → `.IsNull` flag; hundreds of call sites to migrate
+- `Row` holds `DataValue[]` inline (32 bytes each vs 8-byte pointers)
+- Columnar batches (future sub-phase): `EvaluateBatch(Expression, DataBatch)`, Scan → Filter → Aggregate in batch mode
+
+**Implement when**: GC pressure or per-row evaluation overhead is the measured bottleneck. Expected 5–10× throughput improvement.
+
+### Deferred Optimizations (implement when a measured scenario demands it)
+
+- **D1. Exchange operators** — HashRepartition, RoundRobin, Gather, OrderedGather for arbitrary plan parallelism. *Use case*: a query where the bottleneck is data movement between operators rather than within a single operator — e.g., parallel subqueries feeding into a UNION, or a pipeline where scan→filter→project all need to run on separate thread pools. Today's P3 parallelism is internal to join/aggregate; exchange operators generalize it to arbitrary plan shapes.
+
+- **D2. RowBatch** — amortize per-row channel overhead by sending batches (64–256 rows). *Use case*: after implementing P3, profiling a parallel query shows >10% of wall time in `Channel<Row>.WriteAsync`/`ReadAsync` overhead rather than in the actual probe or accumulate work. Batching reduces channel operations by 64–256×.
+
+- **D3. Parallel sort** — partition → P local sorts → k-way merge. *Use case*: `SELECT * FROM large_table ORDER BY column` with no LIMIT, where the table has millions of rows and no sorted index on that column. The single-threaded `OrderByOperator` sort dominates wall time. Look for ORDER BY appearing as the top cost in EXPLAIN on unindexed columns.
+
+- **D4. Parallel DISTINCT** — hash-partition by distinct key → per-partition hash set → gather. *Use case*: `SELECT DISTINCT user_id FROM events` where `events` has hundreds of millions of rows and high cardinality. The single-threaded hash set construction in `DistinctOperator` is CPU-bound. Look for DISTINCT queries where the input table is large and the distinct column has high NDV.
+
+- **D5. Parallel scan** — divide IndexChunks among P workers for parallel I/O. *Use case*: scanning a large Parquet dataset on NVMe/SSD where a single-threaded sequential read underutilizes the storage bandwidth. Look for queries where EXPLAIN shows the Scan operator dominates wall time and the storage device has unused IOPS capacity (common with NVMe drives that sustain 3–6 GB/s but a single thread reads at 500 MB/s).
+
+- **D6. Eager aggregation** — push aggregate below join to pre-aggregate fact tables before joining. *Use case*: `SELECT d.name, COUNT(*) FROM facts JOIN dims d ON ... GROUP BY d.name` where `facts` has 32M+ rows but the GROUP BY key comes from the dimension table. Pre-aggregating facts by the join key before joining reduces the join input dramatically (e.g., Instacart: 32.4M → 13M rows). Look for queries where a large fact table is joined then aggregated, and the `GROUP BY` columns come from the smaller dimension side.
+
+- **D7. Semi/Anti merge join** — LEFT SEMI and LEFT ANTI via merge algorithm on sorted inputs. *Use case*: `SELECT * FROM orders WHERE EXISTS (SELECT 1 FROM returns WHERE returns.order_id = orders.order_id)` on large tables with sorted indexes on the join key. Currently uses a hash semi-join; merge avoids building the hash table entirely. Look for EXISTS/NOT EXISTS/IN subqueries on sorted columns where the hash table build is the bottleneck.
+
+- **D8. Multi-key merge join** — composite equi-join keys with tuple comparison. *Use case*: `SELECT * FROM a JOIN b ON a.year = b.year AND a.month = b.month ORDER BY a.year, a.month` where both tables have composite sorted indexes on `(year, month)`. Currently falls back to hash join because merge join only supports single-key equi-joins. Look for multi-column equi-joins where both sides have composite indexes and the query benefits from sorted output.
+
+---
+
 ## Type System Extensions (Deferred)
 
 **Status**: Under consideration. These types have clear use cases in OLAP analytics and ML pipelines but are not blocking V1 workflows. The current type system (Float32, UInt8, Vector, Matrix, Tensor, UInt8Array, Image, String, Date, DateTime, Time, Duration, JsonValue, UUID, Boolean) covers the primary ML and analytics needs.

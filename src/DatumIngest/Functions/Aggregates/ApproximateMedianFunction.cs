@@ -78,6 +78,26 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
             }
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            ReservoirMedianAccumulator otherAccumulator = (ReservoirMedianAccumulator)other;
+            _totalCount += otherAccumulator._totalCount;
+            _samples.AddRange(otherAccumulator._samples);
+
+            if (_samples.Count > MaxSamples)
+            {
+                // Shuffle and truncate to maintain reservoir invariant.
+                for (int i = _samples.Count - 1; i > 0; i--)
+                {
+                    int j = _random.Next(i + 1);
+                    (_samples[i], _samples[j]) = (_samples[j], _samples[i]);
+                }
+
+                _samples.RemoveRange(MaxSamples, _samples.Count - MaxSamples);
+            }
+        }
+
         public DataValue Result
         {
             get

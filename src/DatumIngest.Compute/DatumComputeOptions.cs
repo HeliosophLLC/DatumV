@@ -77,4 +77,16 @@ public sealed class DatumComputeOptions
     /// Clients may override per-session via <c>CreateSession</c>.
     /// </summary>
     public int? MaxConcurrentQueries { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets the maximum number of parallel operator workers allowed
+    /// across all concurrent queries. Parallel operators (e.g. parallel hash
+    /// join probe, parallel hash aggregate) acquire slots from a shared
+    /// <see cref="DatumIngest.Execution.ParallelismBudget"/> before starting worker tasks.
+    /// Defaults to <see cref="Environment.ProcessorCount"/>.
+    /// Set to <see langword="null"/> to disable the budget (each query spawns
+    /// up to <c>ProcessorCount</c> workers independently — not recommended
+    /// for multi-tenant deployments).
+    /// </summary>
+    public int? MaxParallelWorkers { get; set; } = Environment.ProcessorCount;
 }

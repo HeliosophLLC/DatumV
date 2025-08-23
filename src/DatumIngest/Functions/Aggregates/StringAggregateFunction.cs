@@ -77,6 +77,19 @@ public sealed class StringAggregateFunction : IAggregateFunction
             _values.Add(arguments[0].AsString());
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            StringAggregateAccumulator otherAccumulator = (StringAggregateAccumulator)other;
+            _values.AddRange(otherAccumulator._values);
+
+            if (!_separatorCaptured && otherAccumulator._separatorCaptured)
+            {
+                _separator = otherAccumulator._separator;
+                _separatorCaptured = true;
+            }
+        }
+
         public DataValue Result
         {
             get

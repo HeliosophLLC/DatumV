@@ -19,6 +19,7 @@ public sealed class ExecutionContextTests
     public void WithOuterRow_PropagatesAllProperties()
     {
         Row outerRow = new(["x"], [DataValue.FromFloat32(1f)]);
+        using ParallelismBudget budget = new(4);
         ExecutionContext original = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
@@ -27,6 +28,8 @@ public sealed class ExecutionContextTests
         {
             MaxRecursionDepth = 42,
             RowLimit = 10,
+            DegreeOfParallelism = 8,
+            ParallelismBudget = budget,
         };
 
         ExecutionContext cloned = original.WithOuterRow(outerRow);
@@ -37,6 +40,8 @@ public sealed class ExecutionContextTests
         Assert.Equal(512L, cloned.MemoryBudgetBytes);
         Assert.Same(original.FunctionRegistry, cloned.FunctionRegistry);
         Assert.Same(original.Catalog, cloned.Catalog);
+        Assert.Equal(8, cloned.DegreeOfParallelism);
+        Assert.Same(budget, cloned.ParallelismBudget);
     }
 
     /// <summary>

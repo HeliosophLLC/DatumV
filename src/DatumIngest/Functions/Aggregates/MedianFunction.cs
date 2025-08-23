@@ -52,6 +52,13 @@ public sealed class MedianFunction : IAggregateFunction
             _values.Add(arguments[0].AsFloat32());
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            MedianAccumulator otherAccumulator = (MedianAccumulator)other;
+            _values.AddRange(otherAccumulator._values);
+        }
+
         public DataValue Result
         {
             get

@@ -54,8 +54,16 @@ try
 
     if (options.Command == "shell")
     {
-        InteractiveShell shell = new(catalog);
+        InteractiveShell shell = new(catalog, options.MemoryBudgetBytes);
         return await shell.RunAsync(CancellationToken.None);
+    }
+
+    // Load SQL from file when --sql-file is specified.
+    if (options.SqlFile is not null)
+    {
+        options.Sql = options.SqlFile == "-"
+            ? await Console.In.ReadToEndAsync()
+            : await File.ReadAllTextAsync(options.SqlFile);
     }
 
     QueryExpression query = SqlParser.Parse(options.Sql);
@@ -711,7 +719,10 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
         CancellationToken.None,
         functionRegistry,
         catalog,
-        memoryBudgetBytes: options.MemoryBudgetBytes);
+        memoryBudgetBytes: options.MemoryBudgetBytes)
+    {
+        DegreeOfParallelism = Environment.ProcessorCount,
+    };
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
     IntoClause? intoClause = ExtractIntoClause(query);

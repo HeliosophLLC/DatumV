@@ -81,6 +81,31 @@ public sealed class StandardDeviationFunction : IAggregateFunction
             _m2 += delta * delta2;
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            WelfordStandardDeviationAccumulator otherAccumulator = (WelfordStandardDeviationAccumulator)other;
+
+            if (otherAccumulator._count == 0)
+            {
+                return;
+            }
+
+            if (_count == 0)
+            {
+                _count = otherAccumulator._count;
+                _mean = otherAccumulator._mean;
+                _m2 = otherAccumulator._m2;
+                return;
+            }
+
+            long combinedCount = _count + otherAccumulator._count;
+            double delta = otherAccumulator._mean - _mean;
+            _m2 += otherAccumulator._m2 + delta * delta * _count * otherAccumulator._count / combinedCount;
+            _mean += delta * otherAccumulator._count / combinedCount;
+            _count = combinedCount;
+        }
+
         public DataValue Result
         {
             get

@@ -1,4 +1,5 @@
 using DatumIngest.Compute.Services;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Server;
 using Microsoft.AspNetCore.Builder;
@@ -67,6 +68,13 @@ public static class DatumComputeServiceExtensions
             apiKeyOptions.Key = options.ApiKey;
         });
 
+        // Register the process-global parallelism budget that prevents thread pool
+        // oversubscription when multiple queries spawn parallel operator workers.
+        if (options.MaxParallelWorkers is int maxParallelWorkers)
+        {
+            services.TryAddSingleton(new ParallelismBudget(maxParallelWorkers));
+        }
+
         // Register engine services only if the host has not already provided them.
         services.TryAddSingleton<FunctionRegistry>(_ => FunctionRegistry.CreateDefault());
 
@@ -77,7 +85,12 @@ public static class DatumComputeServiceExtensions
             return new SessionManager(functionRegistry, store);
         });
 
-        services.TryAddSingleton<CommandDispatcher>();
+        services.TryAddSingleton<CommandDispatcher>(provider =>
+        {
+            SessionManager sessionManager = provider.GetRequiredService<SessionManager>();
+            ParallelismBudget? parallelismBudget = provider.GetService<ParallelismBudget>();
+            return new CommandDispatcher(sessionManager, parallelismBudget);
+        });
 
         // Register the gRPC interceptor and service.
         services.AddSingleton<ApiKeyInterceptor>();

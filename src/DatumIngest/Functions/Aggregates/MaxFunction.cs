@@ -48,6 +48,22 @@ public sealed class MaxFunction : IAggregateFunction
             }
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            MaxAccumulator otherAccumulator = (MaxAccumulator)other;
+
+            if (otherAccumulator._maximum is null)
+            {
+                return;
+            }
+
+            if (_maximum is null || CompareValues(otherAccumulator._maximum, _maximum) > 0)
+            {
+                _maximum = otherAccumulator._maximum;
+            }
+        }
+
         public DataValue Result => _maximum ?? DataValue.Null(DataKind.Float32);
 
         private static int CompareValues(DataValue left, DataValue right)

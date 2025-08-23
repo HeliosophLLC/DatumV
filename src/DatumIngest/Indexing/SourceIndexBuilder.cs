@@ -616,7 +616,15 @@ public sealed class SourceIndexBuilder
     internal static bool IsAutoIndexableKind(DataKind kind)
     {
         return kind is DataKind.Float32
+            or DataKind.Float64
             or DataKind.UInt8
+            or DataKind.Int8
+            or DataKind.Int16
+            or DataKind.UInt16
+            or DataKind.Int32
+            or DataKind.UInt32
+            or DataKind.Int64
+            or DataKind.UInt64
             or DataKind.Boolean
             or DataKind.Date
             or DataKind.DateTime

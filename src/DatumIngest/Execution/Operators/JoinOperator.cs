@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Threading.Channels;
 using DatumIngest.Catalog;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
@@ -394,6 +395,26 @@ public sealed class JoinOperator : IQueryOperator
         bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
         bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
         bool needProbeUnmatched = _flipped ? rightMustAppear : leftMustAppear;
+
+        // Parallel probe dispatch: when build-side tracking is not needed (no BitArray
+        // contention) and the probe side is large enough, fan out probe rows across
+        // P concurrent workers sharing the read-only hash table.
+        if (!needBuildUnmatched && context.DegreeOfParallelism > 1)
+        {
+            long? estimatedProbeRows = GetEstimatedRowCount(probeSource);
+            if (estimatedProbeRows is null or >= 100_000)
+            {
+                await foreach (Row row in ExecuteParallelProbeAsync(
+                    context, extraction, probeSource, singleKeyTable, compositeKeyTable,
+                    buildRows, useSingleKey, isSemiJoin, needProbeUnmatched).ConfigureAwait(false))
+                {
+                    yield return row;
+                }
+
+                yield break;
+            }
+        }
+
         BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRows.Count) : null;
 
         // Probe phase: stream the probe side.
@@ -541,6 +562,258 @@ public sealed class JoinOperator : IQueryOperator
                         yield return buildRows[index];
                     }
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parallel probe phase for the in-memory hash join. Fans out probe rows
+    /// from <paramref name="probeSource"/> across multiple concurrent workers,
+    /// each probing the shared read-only hash table and writing matched rows
+    /// to a bounded output channel. The caller yields from the output channel.
+    /// </summary>
+    private async IAsyncEnumerable<Row> ExecuteParallelProbeAsync(
+        ExecutionContext context,
+        JoinKeyExtractionResult extraction,
+        IQueryOperator probeSource,
+        Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable,
+        Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable,
+        List<Row> buildRows,
+        bool useSingleKey,
+        bool isSemiJoin,
+        bool needProbeUnmatched)
+    {
+        bool buildKeyIsRight = !_flipped;
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs = extraction.KeyPairs;
+        CancellationToken cancellationToken = context.CancellationToken;
+
+        // Pre-create the null build row for LEFT join unmatched probes.
+        Row? nullBuildRow = needProbeUnmatched && buildRows.Count > 0
+            ? CreateNullRow(buildRows[0])
+            : null;
+
+        // Acquire worker slots from the optional global budget.
+        int desiredWorkers = context.DegreeOfParallelism;
+        int acquiredFromBudget = 0;
+
+        if (context.ParallelismBudget is ParallelismBudget budget)
+        {
+            acquiredFromBudget = budget.TryAcquire(desiredWorkers);
+            desiredWorkers = Math.Max(1, acquiredFromBudget);
+        }
+
+        try
+        {
+            int workerCount = desiredWorkers;
+            int channelCapacity = workerCount * 64;
+
+            Channel<Row> probeInput = Channel.CreateBounded<Row>(
+                new BoundedChannelOptions(channelCapacity)
+                {
+                    SingleWriter = true,
+                    SingleReader = false,
+                });
+
+            Channel<Row> output = Channel.CreateBounded<Row>(
+                new BoundedChannelOptions(channelCapacity)
+                {
+                    SingleWriter = false,
+                    SingleReader = true,
+                });
+
+            // Feeder: reads probe source into the shared input channel.
+            Task feederTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (Row row in probeSource.ExecuteAsync(context).ConfigureAwait(false))
+                    {
+                        await probeInput.Writer.WriteAsync(row, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    probeInput.Writer.Complete();
+                }
+            }, cancellationToken);
+
+            // Probe workers: each reads from the shared input channel, evaluates the
+            // join key, probes the hash table, and writes matched rows to the output.
+            Task[] workers = new Task[workerCount];
+            for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
+            {
+                workers[workerIndex] = Task.Run(async () =>
+                {
+                    ExpressionEvaluator workerEvaluator = new(
+                        context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+                    CombinedRowSchema? workerSchema = null;
+
+                    await foreach (Row probeRow in probeInput.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        // NOT IN null semantics: NULL probe keys are excluded.
+                        if (_nullSensitiveAntiSemi)
+                        {
+                            bool probeKeyIsNull;
+                            if (useSingleKey)
+                            {
+                                probeKeyIsNull = workerEvaluator.Evaluate(
+                                    buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow).IsNull;
+                            }
+                            else
+                            {
+                                DataValue[] parts = EvaluateKeyParts(
+                                    workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
+                                probeKeyIsNull = HasNull(parts);
+                            }
+
+                            if (probeKeyIsNull)
+                            {
+                                continue;
+                            }
+                        }
+
+                        bool hasMatch = false;
+                        List<(int Index, Row Row)>? matches = null;
+
+                        if (useSingleKey)
+                        {
+                            DataValue probeKeyValue = workerEvaluator.Evaluate(
+                                buildKeyIsRight ? keyPairs[0].Left : keyPairs[0].Right, probeRow);
+                            if (!probeKeyValue.IsNull)
+                            {
+                                singleKeyTable!.TryGetValue(probeKeyValue, out matches);
+                            }
+                        }
+                        else
+                        {
+                            DataValue[] parts = EvaluateKeyParts(
+                                workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
+                            if (!HasNull(parts))
+                            {
+                                CompositeKey compositeKey = new(parts);
+                                compositeKeyTable!.TryGetValue(compositeKey, out matches);
+                            }
+                        }
+
+                        if (matches is not null)
+                        {
+                            foreach ((int _, Row buildRow) in matches)
+                            {
+                                Row leftRow = _flipped ? buildRow : probeRow;
+                                Row rightRow = _flipped ? probeRow : buildRow;
+
+                                if (extraction.Residual is not null)
+                                {
+                                    workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                    Row combinedRow = workerSchema.Combine(leftRow, rightRow);
+                                    if (!workerEvaluator.EvaluateAsBoolean(extraction.Residual, combinedRow))
+                                    {
+                                        continue;
+                                    }
+                                }
+
+                                hasMatch = true;
+
+                                if (isSemiJoin)
+                                {
+                                    break;
+                                }
+
+                                if (extraction.Residual is null)
+                                {
+                                    workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                }
+
+                                await output.Writer.WriteAsync(
+                                    workerSchema!.Combine(leftRow, rightRow), cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+
+                        if (isSemiJoin)
+                        {
+                            if ((_joinType == JoinType.LeftSemi && hasMatch) ||
+                                (_joinType == JoinType.LeftAntiSemi && !hasMatch))
+                            {
+                                await output.Writer.WriteAsync(probeRow, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+                        else if (!hasMatch && needProbeUnmatched)
+                        {
+                            if (nullBuildRow is not null)
+                            {
+                                Row leftRow = _flipped ? nullBuildRow : probeRow;
+                                Row rightRow = _flipped ? probeRow : nullBuildRow;
+                                workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                                await output.Writer.WriteAsync(
+                                    workerSchema.Combine(leftRow, rightRow), cancellationToken).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                await output.Writer.WriteAsync(probeRow, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                }, cancellationToken);
+            }
+
+            // Complete the output channel when all workers and the feeder finish.
+            _ = CompleteOutputWhenDoneAsync(feederTask, workers, output.Writer);
+
+            await foreach (Row row in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return row;
+            }
+        }
+        finally
+        {
+            if (acquiredFromBudget > 0)
+            {
+                context.ParallelismBudget!.Release(acquiredFromBudget);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Completes the output channel writer when all probe workers and the feeder
+    /// task have finished. Propagates exceptions to the channel reader.
+    /// </summary>
+    private static async Task CompleteOutputWhenDoneAsync(
+        Task feederTask, Task[] workers, ChannelWriter<Row> writer)
+    {
+        try
+        {
+            await feederTask.ConfigureAwait(false);
+            await Task.WhenAll(workers).ConfigureAwait(false);
+            writer.Complete();
+        }
+        catch (Exception exception)
+        {
+            writer.Complete(exception);
+        }
+    }
+
+    /// <summary>
+    /// Walks through transparent operator wrappers (alias, filter, project) to find the
+    /// underlying <see cref="ScanOperator"/> and returns its estimated row count.
+    /// Returns <see langword="null"/> when the tree does not bottom out at a scan.
+    /// </summary>
+    private static long? GetEstimatedRowCount(IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case ScanOperator scan:
+                    return scan.EstimatedRowCount;
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                default:
+                    return null;
             }
         }
     }
@@ -1004,6 +1277,10 @@ public sealed class JoinOperator : IQueryOperator
                 case JoinOperator join:
                     CollectScanOperators(join._left, results);
                     CollectScanOperators(join._right, results);
+                    return;
+                case MergeJoinOperator merge:
+                    CollectScanOperators(merge.Left, results);
+                    CollectScanOperators(merge.Right, results);
                     return;
                 default:
                     return;

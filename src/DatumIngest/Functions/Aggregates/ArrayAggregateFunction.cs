@@ -63,6 +63,14 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
             _elements.Add(arguments[0]);
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            ArrayAggregateAccumulator otherAccumulator = (ArrayAggregateAccumulator)other;
+            _elementKind ??= otherAccumulator._elementKind;
+            _elements.AddRange(otherAccumulator._elements);
+        }
+
         public DataValue Result
         {
             get

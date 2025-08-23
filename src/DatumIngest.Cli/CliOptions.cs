@@ -13,6 +13,13 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the SQL query string.</summary>
     public string Sql { get; set; } = "";
 
+    /// <summary>
+    /// Gets or sets the path to a file containing the SQL query.
+    /// Use <c>"-"</c> to read from standard input.
+    /// When set, takes precedence over the inline <see cref="Sql"/> positional argument.
+    /// </summary>
+    public string? SqlFile { get; set; }
+
     /// <summary>Gets or sets the catalog file path.</summary>
     public string? CatalogPath { get; set; }
 
@@ -99,15 +106,16 @@ internal sealed class CliOptions
         {
             argStart = 1;
         }
-        else
+        else if (args.Length >= 2 && !args[1].StartsWith("--", StringComparison.Ordinal))
         {
-            if (args.Length < 2)
-            {
-                throw new ArgumentException("Usage: datum-ingest <command> <sql> [...options]");
-            }
-
+            // Positional SQL argument.
             options.Sql = args[1];
             argStart = 2;
+        }
+        else
+        {
+            // No positional SQL — expect --sql-file later in the argument list.
+            argStart = 1;
         }
 
         // Special handling: "explain" can have "--analyze" before or after sql
@@ -244,6 +252,14 @@ internal sealed class CliOptions
                     options.OutputPath = args[++i];
                     break;
 
+                case "--sql-file":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--sql-file requires a path argument (or '-' for stdin)");
+                    }
+                    options.SqlFile = args[++i];
+                    break;
+
                 case "--param":
                     if (i + 1 >= args.Length)
                     {
@@ -263,6 +279,13 @@ internal sealed class CliOptions
                 default:
                     throw new ArgumentException($"Unknown argument: {args[i]}");
             }
+        }
+
+        // Require SQL from either the positional argument or --sql-file for SQL commands.
+        bool isSqlCommand = options.Command is not ("index" or "index-manifest" or "manifest-schema" or "shell" or "star-schema");
+        if (isSqlCommand && string.IsNullOrEmpty(options.Sql) && options.SqlFile is null)
+        {
+            throw new ArgumentException("Usage: datum-ingest <command> <sql> [...options] (or use --sql-file <path>)");
         }
 
         if (options.CatalogPath is null && options.Sources.Count == 0)

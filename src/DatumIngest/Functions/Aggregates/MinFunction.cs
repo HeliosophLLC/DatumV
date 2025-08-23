@@ -48,6 +48,22 @@ public sealed class MinFunction : IAggregateFunction
             }
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            MinAccumulator otherAccumulator = (MinAccumulator)other;
+
+            if (otherAccumulator._minimum is null)
+            {
+                return;
+            }
+
+            if (_minimum is null || CompareValues(otherAccumulator._minimum, _minimum) < 0)
+            {
+                _minimum = otherAccumulator._minimum;
+            }
+        }
+
         public DataValue Result => _minimum ?? DataValue.Null(DataKind.Float32);
 
         private static int CompareValues(DataValue left, DataValue right)

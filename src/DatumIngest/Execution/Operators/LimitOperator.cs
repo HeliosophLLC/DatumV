@@ -72,6 +72,8 @@ public sealed class LimitOperator : IQueryOperator
                   OuterRow = context.OuterRow,
                   MaxRecursionDepth = context.MaxRecursionDepth,
                   RowLimit = _limit + _offset,
+                  DegreeOfParallelism = context.DegreeOfParallelism,
+                  ParallelismBudget = context.ParallelismBudget,
               }
             : context;
 

@@ -1384,6 +1384,178 @@ public class QueryPlannerTests
         Assert.IsType<ScanOperator>(plan);
     }
 
+    // ─────── GROUP BY sort injection tests ───────────────────────────────
+
+    /// <summary>
+    /// When GROUP BY keys and ORDER BY keys are identical the planner must
+    /// place the Sort <em>above</em> GroupBy so that only the aggregated output
+    /// rows are sorted — not all input rows.
+    /// Expected plan: Sort → Project → Group By (hash) → Scan.
+    /// No Sort node must appear below GroupBy in the tree.
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByMatchingOrderBy_SortIsAboveGroupBy()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT a, b, COUNT(*) FROM test GROUP BY a, b ORDER BY a, b
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("a"), "a"),
+                new SelectColumn(new ColumnReference("b"), "b"),
+                new SelectColumn(
+                    new FunctionCallExpression("count", [new LiteralExpression(1)]),
+                    "cnt"),
+            ],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause(
+            [
+                new ColumnReference("a"),
+                new ColumnReference("b"),
+            ]),
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("a"), SortDirection.Ascending),
+                new OrderByItem(new ColumnReference("b"), SortDirection.Ascending),
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // GroupBy must be the hash (non-streaming) variant — no sort injection.
+        GroupByOperator groupBy = FindOperator<GroupByOperator>(plan)!;
+        Assert.NotNull(groupBy);
+        Assert.False(groupBy.StreamingSorted, "CSV source has no index ordering — must use hash aggregate");
+
+        // The downstream OrderByOperator must exist (ORDER BY was not elided).
+        OrderByOperator? sort = FindOperator<OrderByOperator>(plan);
+        Assert.NotNull(sort);
+
+        // Critical regression guard: Sort must NOT appear inside the GroupBy subtree.
+        // Sorting N input rows before aggregating is always more expensive than sorting
+        // G aggregated groups afterwards (G << N).
+        Assert.Null(FindOperator<OrderByOperator>(groupBy.Source));
+    }
+
+    /// <summary>
+    /// GROUP BY + ORDER BY + LIMIT: the Sort must appear above GroupBy (operating on
+    /// aggregated output, not input rows) and must use the bounded top-N strategy so
+    /// only N aggregated rows need to be materialised in the heap.
+    /// Expected plan: Limit → Sort (top-N=10) → Project → Group By (hash) → Scan.
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByMatchingOrderByWithLimit_SortOnAggregatedOutputWithTopN()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT a, COUNT(*) FROM test GROUP BY a ORDER BY a LIMIT 10
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("a"), "a"),
+                new SelectColumn(
+                    new FunctionCallExpression("count", [new LiteralExpression(1)]),
+                    "cnt"),
+            ],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause([new ColumnReference("a")]),
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("a"), SortDirection.Ascending),
+            ]),
+            Limit: 10);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<LimitOperator>(plan);
+        GroupByOperator groupBy = FindOperator<GroupByOperator>(plan)!;
+        Assert.NotNull(groupBy);
+        Assert.False(groupBy.StreamingSorted, "CSV source has no index ordering — must use hash aggregate");
+
+        // The downstream Sort must carry top-N so the heap is bounded.
+        OrderByOperator? sort = FindOperator<OrderByOperator>(plan);
+        Assert.NotNull(sort);
+        Assert.Equal(10, sort!.TopNRows);
+
+        // Critical regression guard: Sort must NOT appear inside the GroupBy subtree.
+        Assert.Null(FindOperator<OrderByOperator>(groupBy.Source));
+    }
+
+    /// <summary>
+    /// When ORDER BY keys do not match GROUP BY keys, no sort injection occurs and
+    /// the normal blocking hash aggregate + downstream ORDER BY plan is produced.
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByNonMatchingOrderBy_NoSortInjection()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT a, b, COUNT(*) FROM test GROUP BY a, b ORDER BY b, a
+        // ORDER BY order is different from GROUP BY order → no injection.
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("a"), "a"),
+                new SelectColumn(new ColumnReference("b"), "b"),
+                new SelectColumn(
+                    new FunctionCallExpression("count", [new LiteralExpression(1)]),
+                    "cnt"),
+            ],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause(
+            [
+                new ColumnReference("a"),
+                new ColumnReference("b"),
+            ]),
+            OrderBy: new OrderByClause(
+            [
+                // Reversed from GROUP BY order.
+                new OrderByItem(new ColumnReference("b"), SortDirection.Ascending),
+                new OrderByItem(new ColumnReference("a"), SortDirection.Ascending),
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        GroupByOperator groupBy = FindOperator<GroupByOperator>(plan)!;
+        Assert.NotNull(groupBy);
+        Assert.False(groupBy.StreamingSorted, "No injection — ORDER BY order differs from GROUP BY");
+
+        // Downstream OrderByOperator must still be present (not elided).
+        Assert.NotNull(FindOperator<OrderByOperator>(plan));
+    }
+
+    /// <summary>
+    /// When there is no ORDER BY clause, no sort injection occurs.
+    /// </summary>
+    [Fact]
+    public void Plan_GroupByWithoutOrderBy_NoSortInjection()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // SELECT a, COUNT(*) FROM test GROUP BY a  (no ORDER BY)
+        SelectStatement statement = new(
+            Columns:
+            [
+                new SelectColumn(new ColumnReference("a"), "a"),
+                new SelectColumn(
+                    new FunctionCallExpression("count", [new LiteralExpression(1)]),
+                    "cnt"),
+            ],
+            From: new FromClause(new TableReference("test")),
+            GroupBy: new GroupByClause([new ColumnReference("a")]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        GroupByOperator groupBy = FindOperator<GroupByOperator>(plan)!;
+        Assert.NotNull(groupBy);
+        Assert.False(groupBy.StreamingSorted, "No injection without ORDER BY");
+        Assert.Null(FindOperator<OrderByOperator>(plan));
+    }
+
     // ─────── GROUP BY without aggregates → DISTINCT rewrite tests ───────
 
     /// <summary>

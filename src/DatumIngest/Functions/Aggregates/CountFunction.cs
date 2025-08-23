@@ -45,6 +45,13 @@ public sealed class CountFunction : IAggregateFunction
             }
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            CountAccumulator otherAccumulator = (CountAccumulator)other;
+            _count += otherAccumulator._count;
+        }
+
         public DataValue Result => DataValue.FromFloat32(_count);
     }
 }

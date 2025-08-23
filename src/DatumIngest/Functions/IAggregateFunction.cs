@@ -58,6 +58,17 @@ public interface IAggregateAccumulator
     void Accumulate(ReadOnlySpan<DataValue> arguments);
 
     /// <summary>
+    /// Merges the state of another accumulator (of the same concrete type) into
+    /// this one. Used by parallel hash aggregate to combine thread-local partial
+    /// aggregations into a single result per group. The <paramref name="other"/>
+    /// accumulator must not be used after merging.
+    /// </summary>
+    /// <param name="other">
+    /// The accumulator to merge into this one. Must be the same concrete type.
+    /// </param>
+    void Merge(IAggregateAccumulator other);
+
+    /// <summary>
     /// The current aggregate result after all rows have been accumulated.
     /// </summary>
     DataValue Result { get; }

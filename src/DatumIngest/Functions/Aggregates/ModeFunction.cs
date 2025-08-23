@@ -72,6 +72,32 @@ public sealed class ModeFunction : IAggregateFunction
             }
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            ModeAccumulator otherAccumulator = (ModeAccumulator)other;
+
+            foreach (DataValue value in otherAccumulator._insertionOrder)
+            {
+                long otherFrequency = otherAccumulator._frequencies[value];
+
+                if (_frequencies.TryGetValue(value, out long existingFrequency))
+                {
+                    _frequencies[value] = existingFrequency + otherFrequency;
+                }
+                else
+                {
+                    _frequencies[value] = otherFrequency;
+                    _insertionOrder.Add(value);
+                }
+            }
+
+            if (_frequencies.Count > 0)
+            {
+                _kind = otherAccumulator._kind;
+            }
+        }
+
         public DataValue Result
         {
             get

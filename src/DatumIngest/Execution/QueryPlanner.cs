@@ -383,31 +383,45 @@ public sealed class QueryPlanner
                         source = PushPredicatesBelow(source, leftAliases, pendingPredicates);
                     }
 
-                    // Build-side flip: when the right (build) side has 2x+ more estimated
-                    // rows than the left (probe) side, flip them so the smaller side is
-                    // materialized into the hash table. Only applied to LEFT/RIGHT JOINs
-                    // because INNER joins are handled by TryReorderJoins and semi-joins
-                    // have asymmetric semantics that do not benefit from flipping.
-                    bool flipped = false;
-
-                    if (join.Type is JoinType.Left or JoinType.Right)
+                    // Merge join: when both sides have sorted indexes on the equi-join
+                    // key column AND a downstream operator benefits from sorted output,
+                    // use a streaming two-pointer merge instead of building a hash table.
+                    // Without a downstream sort consumer, merge join's index-ordered
+                    // random-access reads are slower than hash join's sequential scans.
+                    if (SortedJoinBenefitsDownstream(statement, join.OnCondition)
+                        && TryCreateMergeJoin(source, currentRight, join.Type, join.OnCondition,
+                            out MergeJoinOperator? mergeJoin))
                     {
-                        long? leftRowCount = GetEstimatedRowCount(source);
-                        long? rightRowCount = GetEstimatedRowCount(currentRight);
+                        source = mergeJoin;
+                    }
+                    else
+                    {
+                        // Build-side flip: when the right (build) side has 2x+ more estimated
+                        // rows than the left (probe) side, flip them so the smaller side is
+                        // materialized into the hash table. Only applied to LEFT/RIGHT JOINs
+                        // because INNER joins are handled by TryReorderJoins and semi-joins
+                        // have asymmetric semantics that do not benefit from flipping.
+                        bool flipped = false;
 
-                        if (leftRowCount is not null && rightRowCount is not null
-                            && leftRowCount > 0 && rightRowCount > 0)
+                        if (join.Type is JoinType.Left or JoinType.Right)
                         {
-                            // Flip when the build side (right) is at least 2x larger than
-                            // the probe side (left), reducing hash table memory pressure.
-                            if (rightRowCount >= leftRowCount * 2)
+                            long? leftRowCount = GetEstimatedRowCount(source);
+                            long? rightRowCount = GetEstimatedRowCount(currentRight);
+
+                            if (leftRowCount is not null && rightRowCount is not null
+                                && leftRowCount > 0 && rightRowCount > 0)
                             {
-                                flipped = true;
+                                // Flip when the build side (right) is at least 2x larger than
+                                // the probe side (left), reducing hash table memory pressure.
+                                if (rightRowCount >= leftRowCount * 2)
+                                {
+                                    flipped = true;
+                                }
                             }
                         }
-                    }
 
-                    source = new JoinOperator(source, currentRight, join.Type, join.OnCondition, flipped: flipped);
+                        source = new JoinOperator(source, currentRight, join.Type, join.OnCondition, flipped: flipped);
+                    }
                 }
 
                 // After the join, both sides' aliases are available on the left.
@@ -514,7 +528,23 @@ public sealed class QueryPlanner
             }
             else
             {
-                source = new GroupByOperator(source, groupByExpressions, aggregateColumns);
+                bool streamingSorted = CanUseStreamingAggregate(source, groupByExpressions);
+
+                // Sort injection was previously used here to convert a hash aggregate into
+                // a sort + streaming aggregate pair, which bounded memory at the cost of
+                // sorting all input rows.  Now that GroupByOperator supports spill-to-disk
+                // (both sequential and parallel paths), sort injection is unnecessary and
+                // counterproductive: sorting N input rows before streaming is always more
+                // expensive than hash-aggregating N rows into G groups and sorting only G.
+                // Sort injection is therefore disabled.  The natural-ordering path
+                // (CanUseStreamingAggregate returning true) remains for index-scan sources.
+
+                source = new GroupByOperator(source, groupByExpressions, aggregateColumns, streamingSorted);
+
+                if (streamingSorted)
+                {
+                    ExecutionTracer.Write("GROUP BY uses streaming aggregation (sorted input)");
+                }
 
                 // Apply HAVING as a filter on the grouped output.
                 if (statement.Having is not null)
@@ -731,10 +761,15 @@ public sealed class QueryPlanner
             source = new DistinctOperator(source);
         }
 
-        // 6. Apply ORDER BY — use index scan when a sorted index covers the sort column.
+        // 6. Apply ORDER BY — use index scan when a sorted index covers the sort column,
+        //    or elide entirely when a streaming GROUP BY already produces sorted output.
         if (statement.OrderBy is not null)
         {
-            if (!TryReplaceWithIndexScan(ref source, statement.OrderBy))
+            if (OutputOrderingSatisfiesOrderBy(source, statement.OrderBy))
+            {
+                ExecutionTracer.Write("ORDER BY elided — output already sorted by streaming GROUP BY");
+            }
+            else if (!TryReplaceWithIndexScan(ref source, statement.OrderBy))
             {
                 int? topNRows = statement.Limit is not null
                     ? statement.Limit.Value + (statement.Offset ?? 0)
@@ -1661,6 +1696,273 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Inspects the operator tree to determine the output sort ordering, if any.
+    /// Walks through transparent wrappers (<see cref="AliasOperator"/>,
+    /// <see cref="FilterOperator"/>, <see cref="ProjectOperator"/>) that preserve
+    /// row order and extracts ordering from operators that produce sorted output
+    /// (<see cref="IndexScanOperator"/>, <see cref="MergeJoinOperator"/>).
+    /// </summary>
+    /// <returns>
+    /// A list of <c>(ColumnName, Descending)</c> tuples describing the sort order,
+    /// or <c>null</c> if the ordering is unknown or destroyed by a blocking operator.
+    /// </returns>
+    private static IReadOnlyList<(string ColumnName, bool Descending)>? GetOutputOrdering(
+        IQueryOperator operatorNode)
+    {
+        IQueryOperator current = operatorNode;
+        while (true)
+        {
+            switch (current)
+            {
+                case IndexScanOperator indexScan:
+                    return [(indexScan.ColumnName, indexScan.Descending)];
+                case MergeJoinOperator mergeJoin:
+                    // Merge join preserves left-side ordering.
+                    current = mergeJoin.Left;
+                    break;
+                case GroupByOperator { StreamingSorted: true } groupBy:
+                {
+                    // Streaming GROUP BY emits groups in key order, inheriting the
+                    // sort direction from the source. Build the output ordering from
+                    // the GROUP BY key expressions matched against the source ordering.
+                    IReadOnlyList<(string ColumnName, bool Descending)>? sourceOrdering =
+                        GetOutputOrdering(groupBy.Source);
+
+                    if (sourceOrdering is null)
+                    {
+                        return null;
+                    }
+
+                    List<(string, bool)> result = new(groupBy.GroupByExpressions.Count);
+
+                    for (int index = 0; index < groupBy.GroupByExpressions.Count; index++)
+                    {
+                        if (groupBy.GroupByExpressions[index] is not ColumnReference column)
+                        {
+                            return null;
+                        }
+
+                        // Find the direction from the source ordering for this column.
+                        bool found = false;
+                        for (int orderIndex = 0; orderIndex < sourceOrdering.Count; orderIndex++)
+                        {
+                            if (string.Equals(column.ColumnName, sourceOrdering[orderIndex].ColumnName,
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                result.Add((column.ColumnName, sourceOrdering[orderIndex].Descending));
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (!found)
+                        {
+                            return null;
+                        }
+                    }
+
+                    return result;
+                }
+                case AliasOperator alias:
+                    current = alias.Source;
+                    break;
+                case FilterOperator filter:
+                    current = filter.Source;
+                    break;
+                case ProjectOperator project:
+                    current = project.Source;
+                    break;
+                case OrderByOperator orderBy:
+                {
+                    // An ORDER BY operator establishes a known output ordering from its
+                    // sort criteria, provided every item is a simple ColumnReference.
+                    List<(string, bool)> ordering = new(orderBy.OrderByItems.Count);
+                    foreach (OrderByItem item in orderBy.OrderByItems)
+                    {
+                        if (item.Expression is not ColumnReference col)
+                        {
+                            return null;
+                        }
+
+                        ordering.Add((col.ColumnName, item.Direction == SortDirection.Descending));
+                    }
+
+                    return ordering;
+                }
+                default:
+                    return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the source operator's output ordering already
+    /// satisfies every item in the <paramref name="orderBy"/> clause, making a
+    /// separate <see cref="OrderByOperator"/> unnecessary.
+    /// </summary>
+    private static bool OutputOrderingSatisfiesOrderBy(
+        IQueryOperator source,
+        OrderByClause orderBy)
+    {
+        IReadOnlyList<(string ColumnName, bool Descending)>? ordering = GetOutputOrdering(source);
+
+        if (ordering is null || ordering.Count < orderBy.Items.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < orderBy.Items.Count; index++)
+        {
+            OrderByItem item = orderBy.Items[index];
+
+            if (item.Expression is not ColumnReference columnReference)
+            {
+                return false;
+            }
+
+            if (!string.Equals(columnReference.ColumnName, ordering[index].ColumnName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            bool descending = item.Direction == SortDirection.Descending;
+
+            if (descending != ordering[index].Descending)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks whether the GROUP BY key expressions match the output ordering of the
+    /// source operator, enabling streaming aggregation. All GROUP BY expressions must
+    /// be simple <see cref="ColumnReference"/> nodes whose column names match the
+    /// ordering columns in the same sequence.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> when the source is sorted on the GROUP BY keys and streaming
+    /// aggregation can replace hash aggregation.
+    /// </returns>
+    private static bool CanUseStreamingAggregate(
+        IQueryOperator source,
+        IReadOnlyList<Expression> groupByExpressions)
+    {
+        if (groupByExpressions.Count == 0)
+        {
+            // Global aggregation (no GROUP BY) always produces one group — streaming not applicable.
+            return false;
+        }
+
+        IReadOnlyList<(string ColumnName, bool Descending)>? ordering = GetOutputOrdering(source);
+
+        if (ordering is null || ordering.Count == 0)
+        {
+            return false;
+        }
+
+        // The ordering must cover at least the first GROUP BY key. For full streaming,
+        // all GROUP BY keys must match the ordering prefix.
+        if (ordering.Count < groupByExpressions.Count)
+        {
+            // Source produces fewer sorted columns than GROUP BY keys — the remaining
+            // keys could interleave within a single sort-key partition. Only safe when
+            // all GROUP BY keys are covered.
+            return false;
+        }
+
+        for (int index = 0; index < groupByExpressions.Count; index++)
+        {
+            if (groupByExpressions[index] is not ColumnReference columnReference)
+            {
+                return false;
+            }
+
+            if (!string.Equals(columnReference.ColumnName, ordering[index].ColumnName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks whether each GROUP BY key expression is a simple <see cref="ColumnReference"/>
+    /// whose unqualified column name matches the corresponding ORDER BY item at the same
+    /// position. The ORDER BY clause may contain more items than the GROUP BY list; the
+    /// check is a prefix match on the first <c>groupByExpressions.Count</c> ORDER BY items.
+    /// </summary>
+    /// <remarks>
+    /// This predicate gates sort injection: if it returns <c>true</c>, an
+    /// <see cref="OrderByOperator"/> keyed on the GROUP BY columns (in ORDER BY
+    /// directions) can be placed before the <see cref="GroupByOperator"/>, enabling
+    /// streaming aggregation and allowing the downstream ORDER BY to be elided.
+    /// </remarks>
+    private static bool GroupByKeysMatchOrderByPrefix(
+        IReadOnlyList<Expression> groupByExpressions,
+        OrderByClause orderBy)
+    {
+        if (groupByExpressions.Count == 0)
+        {
+            return false;
+        }
+
+        if (orderBy.Items.Count < groupByExpressions.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < groupByExpressions.Count; index++)
+        {
+            if (groupByExpressions[index] is not ColumnReference groupColumn)
+            {
+                return false;
+            }
+
+            if (orderBy.Items[index].Expression is not ColumnReference orderColumn)
+            {
+                return false;
+            }
+
+            if (!string.Equals(groupColumn.ColumnName, orderColumn.ColumnName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds the <see cref="OrderByItem"/> list for the sort injected before a
+    /// <see cref="GroupByOperator"/>. One item is emitted per GROUP BY expression,
+    /// using the sort direction from the corresponding ORDER BY item at the same index.
+    /// </summary>
+    private static IReadOnlyList<OrderByItem> BuildGroupBySortItems(
+        IReadOnlyList<Expression> groupByExpressions,
+        OrderByClause orderBy)
+    {
+        List<OrderByItem> items = new(groupByExpressions.Count);
+
+        for (int index = 0; index < groupByExpressions.Count; index++)
+        {
+            SortDirection direction = index < orderBy.Items.Count
+                ? orderBy.Items[index].Direction
+                : SortDirection.Ascending;
+
+            items.Add(new OrderByItem(groupByExpressions[index], direction));
+        }
+
+        return items;
+    }
+
+    /// <summary>
     /// Attempts to replace the <see cref="ScanOperator"/> in the operator tree with an
     /// <see cref="IndexScanOperator"/> when the ORDER BY clause is a single column reference
     /// covered by a sorted value index and the provider supports seeking.
@@ -1719,6 +2021,173 @@ public sealed class QueryPlanner
     }
 
     /// <summary>
+    /// Returns <c>true</c> when a merge join on the given condition would produce
+    /// output whose sort order benefits a downstream operator. Merge join replaces
+    /// sequential table scans with index-ordered random-access reads — without a
+    /// downstream consumer that exploits the sorted output, hash join's sequential
+    /// scan is faster for full table scans.
+    /// </summary>
+    /// <remarks>
+    /// Checks two cases:
+    /// <list type="number">
+    /// <item>ORDER BY: when the leading ORDER BY column matches the merge join key,
+    /// the sorted merge output can eliminate a separate sort pass.</item>
+    /// <item>GROUP BY: when the leading GROUP BY column matches the merge join key,
+    /// streaming aggregation can emit groups one at a time, enabling LIMIT
+    /// short-circuit.</item>
+    /// </list>
+    /// </remarks>
+    private static bool SortedJoinBenefitsDownstream(
+        SelectStatement statement,
+        Expression? onCondition)
+    {
+        if (onCondition is null)
+        {
+            return false;
+        }
+
+        JoinKeyExtractionResult? extraction = JoinKeyExtractor.TryExtract(onCondition);
+
+        if (extraction is null
+            || extraction.KeyPairs.Count != 1
+            || extraction.KeyPairs[0].Left is not ColumnReference leftKey
+            || extraction.KeyPairs[0].Right is not ColumnReference rightKey)
+        {
+            return false;
+        }
+
+        // Check whether the leading ORDER BY column matches the join key.
+        if (statement.OrderBy is not null
+            && statement.OrderBy.Items.Count > 0
+            && statement.OrderBy.Items[0].Expression is ColumnReference orderColumn)
+        {
+            string orderColumnName = orderColumn.ColumnName;
+
+            if (string.Equals(orderColumnName, leftKey.ColumnName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(orderColumnName, rightKey.ColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        // Check whether the leading GROUP BY column matches the join key,
+        // enabling streaming aggregation with LIMIT short-circuit.
+        if (statement.GroupBy is not null
+            && statement.GroupBy.Expressions.Count > 0
+            && statement.GroupBy.Expressions[0] is ColumnReference groupColumn)
+        {
+            string groupColumnName = groupColumn.ColumnName;
+
+            if (string.Equals(groupColumnName, leftKey.ColumnName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(groupColumnName, rightKey.ColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to create a <see cref="MergeJoinOperator"/> for the given join when both
+    /// sides have sorted value indexes on their respective equi-join key columns.
+    /// Only single-key equi-joins with simple <see cref="ColumnReference"/> keys are eligible.
+    /// Both sides must be simple scan chains (Scan → Alias → Filter) — if the left side is
+    /// already a join tree, the hash join output is unordered so merge join cannot apply.
+    /// <para>
+    /// When eligible, replaces both <see cref="ScanOperator"/> nodes with
+    /// <see cref="IndexScanOperator"/> nodes (ascending) and returns a <see cref="MergeJoinOperator"/>.
+    /// </para>
+    /// </summary>
+    private static bool TryCreateMergeJoin(
+        IQueryOperator left,
+        IQueryOperator right,
+        JoinType joinType,
+        Expression? onCondition,
+        [NotNullWhen(true)] out MergeJoinOperator? mergeJoin)
+    {
+        mergeJoin = null;
+
+        // Only INNER, LEFT, RIGHT, and FULL OUTER joins benefit from merge.
+        // CROSS, SEMI, and ANTI-SEMI joins have different semantics or no equi-key.
+        if (joinType is not (JoinType.Inner or JoinType.Left or JoinType.Right or JoinType.FullOuter))
+        {
+            return false;
+        }
+
+        JoinKeyExtractionResult? extraction = JoinKeyExtractor.TryExtract(onCondition);
+
+        if (extraction is null)
+        {
+            return false;
+        }
+
+        // Only single-key merge join for now.
+        if (extraction.KeyPairs.Count != 1)
+        {
+            return false;
+        }
+
+        // Both keys must be simple column references to match against sorted index names.
+        if (extraction.KeyPairs[0].Left is not ColumnReference leftColumnRef
+            || extraction.KeyPairs[0].Right is not ColumnReference rightColumnRef)
+        {
+            return false;
+        }
+
+        // Both sides must be simple scan chains — if the left side contains a join,
+        // hash join output is unordered and merge join cannot apply.
+        ScanOperator? leftScan = FindScanOperatorInChain(left);
+        ScanOperator? rightScan = FindScanOperatorInChain(right);
+
+        if (leftScan is null || rightScan is null)
+        {
+            return false;
+        }
+
+        // Both scans must have source indexes with sorted value indexes on the join column.
+        if (leftScan.SourceIndex is null || rightScan.SourceIndex is null)
+        {
+            return false;
+        }
+
+        string leftColumnName = leftColumnRef.ColumnName;
+        string rightColumnName = rightColumnRef.ColumnName;
+
+        if (!leftScan.SourceIndex.TryGetColumnIndex(leftColumnName, out IColumnIndex? leftColumnIndex)
+            || !rightScan.SourceIndex.TryGetColumnIndex(rightColumnName, out IColumnIndex? rightColumnIndex))
+        {
+            return false;
+        }
+
+        // Replace both ScanOperators with ascending IndexScanOperators.
+        IndexScanOperator leftIndexScan = new(
+            leftScan.Descriptor,
+            leftScan.RequiredColumns,
+            leftColumnIndex,
+            leftScan.SourceIndex.Chunks,
+            descending: false,
+            leftColumnName);
+
+        IndexScanOperator rightIndexScan = new(
+            rightScan.Descriptor,
+            rightScan.RequiredColumns,
+            rightColumnIndex,
+            rightScan.SourceIndex.Chunks,
+            descending: false,
+            rightColumnName);
+
+        IQueryOperator leftReplaced = ReplaceScanOperator(left, leftScan, leftIndexScan);
+        IQueryOperator rightReplaced = ReplaceScanOperator(right, rightScan, rightIndexScan);
+
+        mergeJoin = new MergeJoinOperator(
+            leftReplaced, rightReplaced, joinType, extraction,
+            leftColumnName, rightColumnName);
+
+        return true;
+    }
+
+    /// <summary>
     /// Finds the <see cref="ScanOperator"/> at the outermost probe position in the operator
     /// tree. Walks through <see cref="AliasOperator"/>, <see cref="FilterOperator"/>,
     /// <see cref="ProjectOperator"/>, <see cref="DistinctOperator"/>, and
@@ -1753,6 +2222,11 @@ public sealed class QueryPlanner
                     // driving scan. This allows sort elimination when the ORDER BY table
                     // has been placed as the outermost probe by join reordering.
                     current = join.Left;
+                    break;
+                case MergeJoinOperator merge:
+                    // Follow the left side of the merge join — the left input preserves
+                    // its sorted order, so the outermost scan is reachable.
+                    current = merge.Left;
                     break;
                 default:
                     return null;
@@ -1794,6 +2268,14 @@ public sealed class QueryPlanner
                 join.OnCondition,
                 join.NullSensitiveAntiSemi,
                 join.Flipped),
+            // Rebuild merge join with the replaced side(s).
+            MergeJoinOperator merge => new MergeJoinOperator(
+                ReplaceScanOperator(merge.Left, target, replacement),
+                ReplaceScanOperator(merge.Right, target, replacement),
+                merge.Type,
+                merge.Extraction,
+                merge.LeftSortColumn,
+                merge.RightSortColumn),
             _ => root,
         };
     }

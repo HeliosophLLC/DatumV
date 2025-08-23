@@ -82,6 +82,38 @@ public sealed class CorrelationFunction : IAggregateFunction
             _coMoment += deltaY * (x - _meanX);
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            CorrelationAccumulator otherAccumulator = (CorrelationAccumulator)other;
+
+            if (otherAccumulator._count == 0)
+            {
+                return;
+            }
+
+            if (_count == 0)
+            {
+                _count = otherAccumulator._count;
+                _meanY = otherAccumulator._meanY;
+                _meanX = otherAccumulator._meanX;
+                _m2Y = otherAccumulator._m2Y;
+                _m2X = otherAccumulator._m2X;
+                _coMoment = otherAccumulator._coMoment;
+                return;
+            }
+
+            long combinedCount = _count + otherAccumulator._count;
+            double deltaY = otherAccumulator._meanY - _meanY;
+            double deltaX = otherAccumulator._meanX - _meanX;
+            _m2Y += otherAccumulator._m2Y + deltaY * deltaY * _count * otherAccumulator._count / combinedCount;
+            _m2X += otherAccumulator._m2X + deltaX * deltaX * _count * otherAccumulator._count / combinedCount;
+            _coMoment += otherAccumulator._coMoment + deltaY * deltaX * _count * otherAccumulator._count / combinedCount;
+            _meanY += deltaY * otherAccumulator._count / combinedCount;
+            _meanX += deltaX * otherAccumulator._count / combinedCount;
+            _count = combinedCount;
+        }
+
         public DataValue Result
         {
             get

@@ -43,6 +43,14 @@ public sealed class AvgFunction : IAggregateFunction
             _count++;
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            AvgAccumulator otherAccumulator = (AvgAccumulator)other;
+            _sum += otherAccumulator._sum;
+            _count += otherAccumulator._count;
+        }
+
         public DataValue Result => _count > 0
             ? DataValue.FromFloat32((float)(_sum / _count))
             : DataValue.Null(DataKind.Float32);

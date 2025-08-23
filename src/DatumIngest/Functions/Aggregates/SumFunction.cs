@@ -43,6 +43,14 @@ public sealed class SumFunction : IAggregateFunction
             _hasValue = true;
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            SumAccumulator otherAccumulator = (SumAccumulator)other;
+            _sum += otherAccumulator._sum;
+            _hasValue |= otherAccumulator._hasValue;
+        }
+
         public DataValue Result => _hasValue
             ? DataValue.FromFloat32((float)_sum)
             : DataValue.Null(DataKind.Float32);

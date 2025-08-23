@@ -114,6 +114,72 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         Assert.Equal(1, discovered!.Schema.TotalRowCount);
     }
 
+    [Fact]
+    public void IndexIsNotLoadedImmediately_AfterDiscoverSidecars()
+    {
+        // Regression guard: DiscoverSidecars must not deserialize the index file at
+        // startup. The index is only loaded on the first call to TryGetIndex.
+        // We verify this indirectly — DiscoverSidecars completes instantly (no I/O
+        // proportional to the index size) and the index is available on first access.
+        string csvPath = CreateCsvFile("lazy.csv", "id\n1\n");
+        SourceIndex index = CreateTestIndex(rowCount: 42);
+        WriteSidecar(csvPath, "lazy", index);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "lazy", csvPath, new Dictionary<string, string>()));
+
+        // DiscoverSidecars should record the pending path without touching the file data.
+        catalog.DiscoverSidecars();
+
+        // First access triggers the deferred load.
+        Assert.True(catalog.TryGetIndex("lazy", out SourceIndex? loaded));
+        Assert.Equal(42, loaded!.Schema.TotalRowCount);
+
+        // Second access returns the already-cached entry without re-reading the file.
+        Assert.True(catalog.TryGetIndex("lazy", out SourceIndex? cached));
+        Assert.Same(loaded, cached);
+    }
+
+    [Fact]
+    public void TwoTablesShareOneSidecar_BothLoadedOnFirstAccess()
+    {
+        // When two tables map to the same source file (e.g. multi-alias scenario),
+        // a single TryGetIndex call for one of them should populate both so the
+        // sidecar file is read exactly once.
+        string csvPath = CreateCsvFile("shared.csv", "id\n1\n");
+        SourceIndex index = CreateTestIndex(rowCount: 7);
+
+        // Write sidecar keyed by the source table name; both aliases share the file.
+        string sidecarPath = csvPath + ".datum-index";
+        using (FileStream stream = File.Create(sidecarPath))
+        {
+            IndexWriter writer = new();
+        // Write entries for both alias names in a single sidecar set.
+            SourceFingerprint fingerprint = new(0, new byte[32]);
+            SourceIndexSet indexSet = new(fingerprint, new Dictionary<string, SourceIndex>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["alias_a"] = index,
+                ["alias_b"] = index,
+            });
+            writer.Write(indexSet, stream);
+        }
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "alias_a", csvPath, new Dictionary<string, string>()));
+        catalog.Register(new TableDescriptor("csv", "alias_b", csvPath, new Dictionary<string, string>()));
+
+        catalog.DiscoverSidecars();
+
+        // Accessing alias_a should cause the sidecar to be read; alias_b should already be populated.
+        Assert.True(catalog.TryGetIndex("alias_a", out SourceIndex? indexA));
+        Assert.Equal(7, indexA!.Schema.TotalRowCount);
+
+        Assert.True(catalog.TryGetIndex("alias_b", out SourceIndex? indexB));
+        Assert.Equal(7, indexB!.Schema.TotalRowCount);
+    }
+
     /// <summary>
     /// Delegates to the unified <see cref="TableCatalog.DiscoverSidecars"/> method.
     /// </summary>

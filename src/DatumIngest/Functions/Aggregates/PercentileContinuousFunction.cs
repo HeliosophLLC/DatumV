@@ -81,6 +81,19 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             _values.Add(arguments[0].AsFloat32());
         }
 
+        /// <inheritdoc/>
+        public void Merge(IAggregateAccumulator other)
+        {
+            PercentileContinuousAccumulator otherAccumulator = (PercentileContinuousAccumulator)other;
+            _values.AddRange(otherAccumulator._values);
+
+            if (!_fractionCaptured && otherAccumulator._fractionCaptured)
+            {
+                _fraction = otherAccumulator._fraction;
+                _fractionCaptured = true;
+            }
+        }
+
         public DataValue Result
         {
             get

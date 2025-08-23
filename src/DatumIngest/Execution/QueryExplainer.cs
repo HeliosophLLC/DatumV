@@ -463,13 +463,20 @@ public static class QueryExplainer
 
         ExplainPlanNode node = new()
         {
-            OperatorName = "GroupBy",
+            OperatorName = groupBy.StreamingSorted ? "Streaming Group By" : "Group By",
             Details = $"keys: [{keys}], aggregates: [{aggregates}]",
             Children = { child },
             EstimatedRows = child.EstimatedRows,
         };
 
-        node.Warnings.Add("GroupBy materializes all groups in memory.");
+        if (!groupBy.StreamingSorted)
+        {
+            node.Warnings.Add("GroupBy materializes all groups in memory.");
+        }
+        else
+        {
+            node.Annotations.Add("sorted input \u2014 streaming one group at a time");
+        }
 
         return node;
     }

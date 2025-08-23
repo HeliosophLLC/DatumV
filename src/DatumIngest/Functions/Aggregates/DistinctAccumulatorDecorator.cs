@@ -71,5 +71,38 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Merges by iterating the other decorator's distinct set and accumulating
+    /// only values that are new to this decorator's set into the inner accumulator.
+    /// The other decorator's inner accumulator is not merged directly — its state
+    /// is redundant because all distinct values are replayed through this inner.
+    /// </remarks>
+    public void Merge(IAggregateAccumulator other)
+    {
+        DistinctAccumulatorDecorator otherDecorator = (DistinctAccumulatorDecorator)other;
+
+        if (_singleArgumentSet is not null && otherDecorator._singleArgumentSet is not null)
+        {
+            foreach (DataValue value in otherDecorator._singleArgumentSet)
+            {
+                if (_singleArgumentSet.Add(value))
+                {
+                    _inner.Accumulate([value]);
+                }
+            }
+        }
+        else if (_multiArgumentSet is not null && otherDecorator._multiArgumentSet is not null)
+        {
+            foreach (CompositeKey key in otherDecorator._multiArgumentSet)
+            {
+                if (_multiArgumentSet.Add(key))
+                {
+                    _inner.Accumulate(key.Values);
+                }
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public DataValue Result => _inner.Result;
 }

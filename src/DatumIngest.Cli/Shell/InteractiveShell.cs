@@ -17,14 +17,17 @@ namespace DatumIngest.Cli.Shell;
 internal sealed class InteractiveShell
 {
     private readonly TableCatalog _catalog;
+    private readonly long? _memoryBudgetBytes;
 
     /// <summary>
     /// Initializes the shell with a pre-built catalog from CLI options.
     /// </summary>
     /// <param name="catalog">Table catalog constructed from --catalog/--source arguments.</param>
-    public InteractiveShell(TableCatalog catalog)
+    /// <param name="memoryBudgetBytes">Optional memory budget for hash aggregates; <see langword="null"/> disables spill-to-disk.</param>
+    public InteractiveShell(TableCatalog catalog, long? memoryBudgetBytes = null)
     {
         _catalog = catalog;
+        _memoryBudgetBytes = memoryBudgetBytes;
     }
 
     /// <summary>
@@ -36,7 +39,8 @@ internal sealed class InteractiveShell
     {
         FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
         SessionManager sessionManager = new(functionRegistry);
-        Session session = sessionManager.CreateLocalSession(SessionRole.Admin, _catalog);
+        QueryGovernor governor = new(null, null, null, MemoryBudgetBytes: _memoryBudgetBytes);
+        Session session = sessionManager.CreateLocalSession(SessionRole.Admin, _catalog, governor);
         CommandDispatcher dispatcher = new(sessionManager);
         TableFormatter formatter = new();
 

@@ -87,6 +87,23 @@ public sealed class ExecutionContext
     public int? RowLimit { get; init; }
 
     /// <summary>
+    /// Number of parallel workers an operator may spawn for CPU-bound work (e.g.
+    /// parallel hash join probe, parallel hash aggregate). Defaults to <c>1</c>
+    /// (single-threaded). Set to <see cref="Environment.ProcessorCount"/> or higher
+    /// to enable intra-query parallelism.
+    /// </summary>
+    public int DegreeOfParallelism { get; init; } = 1;
+
+    /// <summary>
+    /// Optional global concurrency budget that bounds the total number of parallel
+    /// operator workers across all concurrent queries. When <see langword="null"/>,
+    /// operators may spawn up to <see cref="DegreeOfParallelism"/> workers without
+    /// limit — appropriate for single-query CLI usage. On the server, a shared
+    /// <see cref="ParallelismBudget"/> prevents thread pool oversubscription.
+    /// </summary>
+    public ParallelismBudget? ParallelismBudget { get; init; }
+
+    /// <summary>
     /// Returns a new context with the given outer row set for correlated subquery execution.
     /// All other properties are copied from the current context.
     /// </summary>
@@ -104,6 +121,8 @@ public sealed class ExecutionContext
             OuterRow = outerRow,
             RowLimit = RowLimit,
             MaxRecursionDepth = MaxRecursionDepth,
+            DegreeOfParallelism = DegreeOfParallelism,
+            ParallelismBudget = ParallelismBudget,
         };
     }
 }

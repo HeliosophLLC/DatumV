@@ -53,6 +53,12 @@ public readonly struct CompositeKey : IEquatable<CompositeKey>
     /// <param name="index">Zero-based index of the key component.</param>
     public DataValue this[int index] => _parts[index];
 
+    /// <summary>
+    /// Gets the underlying key components as a read-only span for replay during
+    /// accumulator merge operations.
+    /// </summary>
+    public ReadOnlySpan<DataValue> Values => _parts;
+
     /// <inheritdoc/>
     public override bool Equals(object? other) => other is CompositeKey key && Equals(key);
 

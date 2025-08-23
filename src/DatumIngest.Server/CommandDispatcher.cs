@@ -17,14 +17,22 @@ namespace DatumIngest.Server;
 public sealed class CommandDispatcher
 {
     private readonly SessionManager _sessionManager;
+    private readonly ParallelismBudget? _parallelismBudget;
 
     /// <summary>
     /// Initializes a new command dispatcher.
     /// </summary>
     /// <param name="sessionManager">Session manager for session-level operations (list, kill).</param>
-    public CommandDispatcher(SessionManager sessionManager)
+    /// <param name="parallelismBudget">
+    /// Optional global concurrency budget that bounds the total number of parallel
+    /// operator workers across all concurrent queries. When <see langword="null"/>,
+    /// operators may spawn up to <see cref="ExecutionContext.DegreeOfParallelism"/>
+    /// workers without limit — appropriate for single-query CLI usage.
+    /// </param>
+    public CommandDispatcher(SessionManager sessionManager, ParallelismBudget? parallelismBudget = null)
     {
         _sessionManager = sessionManager;
+        _parallelismBudget = parallelismBudget;
     }
 
     /// <summary>
@@ -127,7 +135,11 @@ public sealed class CommandDispatcher
 
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
         ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, queryMeter,
-            memoryBudgetBytes: session.Governor.MemoryBudgetBytes);
+            memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
+        {
+            DegreeOfParallelism = Environment.ProcessorCount,
+            ParallelismBudget = _parallelismBudget,
+        };
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
 
         IAsyncEnumerable<Row> rows = plan.ExecuteAsync(context);
@@ -369,7 +381,7 @@ public sealed class CommandDispatcher
         return CommandResult.Success($"Source '{descriptor.Name}' registered ({descriptor.Provider}).");
     }
 
-    private static async Task<CommandResult> HandleExplainAsync(
+    private async Task<CommandResult> HandleExplainAsync(
         Session session, string sql, CancellationToken cancellationToken)
     {
         if (!session.IsAuthorized(ServerOperation.Explain))
@@ -399,7 +411,11 @@ public sealed class CommandDispatcher
                 cancellationToken,
                 session.FunctionRegistry,
                 session.Catalog,
-                memoryBudgetBytes: session.Governor.MemoryBudgetBytes);
+                memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
+            {
+                DegreeOfParallelism = Environment.ProcessorCount,
+                ParallelismBudget = _parallelismBudget,
+            };
 
             await foreach (Row _ in instrumentedRoot.ExecuteAsync(context).ConfigureAwait(false))
             {

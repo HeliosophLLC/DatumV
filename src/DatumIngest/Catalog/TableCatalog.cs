@@ -35,6 +35,15 @@ public sealed class TableCatalog : IDisposable
     private readonly Dictionary<string, SourceIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, QueryResultsManifest> _manifests = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Schema> _schemas = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Maps table names to the sidecar file path that contains their index.
+    /// Entries here have been discovered but not yet loaded — the index data is
+    /// deserialized on first access rather than at sidecar discovery time,
+    /// so that large index files do not consume heap memory until a query needs them.
+    /// </summary>
+    private readonly Dictionary<string, string> _pendingIndexSidecarPaths = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly List<string> _tempFiles = new();
 
     /// <summary>
@@ -293,13 +302,27 @@ public sealed class TableCatalog : IDisposable
 
     /// <summary>
     /// Attempts to retrieve a source index for the given table name.
+    /// If the index was discovered via a sidecar file but not yet loaded, it is deserialized
+    /// on demand here so that the heap cost is only paid when a query actually needs the index.
     /// </summary>
     /// <param name="tableName">Logical table name.</param>
     /// <param name="index">The source index, or <c>null</c> if none is registered.</param>
     /// <returns><c>true</c> if an index was found; otherwise <c>false</c>.</returns>
     public bool TryGetIndex(string tableName, out SourceIndex? index)
     {
-        return _indexes.TryGetValue(tableName, out index);
+        if (_indexes.TryGetValue(tableName, out index))
+        {
+            return true;
+        }
+
+        if (_pendingIndexSidecarPaths.ContainsKey(tableName))
+        {
+            LoadPendingIndexSidecar(tableName);
+            return _indexes.TryGetValue(tableName, out index);
+        }
+
+        index = null;
+        return false;
     }
 
     /// <summary>
@@ -390,15 +413,70 @@ public sealed class TableCatalog : IDisposable
             return;
         }
 
+        // Register pending entries for all tables that share this source file without
+        // reading the index data. The actual deserialization is deferred until the first
+        // call to TryGetIndex, so that large index files (potentially gigabytes after
+        // decompression) do not consume heap memory at shell startup time.
+        foreach (string name in tableNames)
+        {
+            if (!_descriptors.TryGetValue(name, out TableDescriptor? d)
+                || !string.Equals(d.FilePath, descriptor.FilePath, StringComparison.OrdinalIgnoreCase)
+                || _indexes.ContainsKey(name)
+                || _pendingIndexSidecarPaths.ContainsKey(name))
+            {
+                continue;
+            }
+
+            _pendingIndexSidecarPaths[name] = sidecarPath;
+        }
+    }
+
+    /// <summary>
+    /// Deserializes the sidecar file associated with <paramref name="tableName"/> and registers
+    /// the resulting <see cref="SourceIndex"/> for every pending table that references the same
+    /// sidecar, so the file is read from disk at most once per sidecar path.
+    /// </summary>
+    private void LoadPendingIndexSidecar(string tableName)
+    {
+        if (!_pendingIndexSidecarPaths.TryGetValue(tableName, out string? sidecarPath))
+        {
+            return;
+        }
+
+        // Collect every table waiting on the same sidecar file so all are populated
+        // in one pass rather than deserializing the (potentially very large) file repeatedly.
+        List<string> pendingNames = _pendingIndexSidecarPaths
+            .Where(pair => string.Equals(pair.Value, sidecarPath, StringComparison.OrdinalIgnoreCase))
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (string name in pendingNames)
+        {
+            _pendingIndexSidecarPaths.Remove(name);
+        }
+
+        if (!File.Exists(sidecarPath))
+        {
+            return;
+        }
+
         IndexReader reader = new();
         using FileStream stream = File.OpenRead(sidecarPath);
         SourceIndexSet indexSet = reader.Read(stream);
 
-        RegisterSidecarEntries(
-            indexSet.Tables,
-            descriptor.FilePath,
-            tableNames,
-            (name, index) => { if (!_indexes.ContainsKey(name)) _indexes[name] = index; });
+        foreach (string name in pendingNames)
+        {
+            if (_indexes.ContainsKey(name) || !_descriptors.TryGetValue(name, out TableDescriptor? d))
+            {
+                continue;
+            }
+
+            SourceIndex? entry = ResolveSidecarEntry(indexSet.Tables, name, d.FilePath);
+            if (entry is not null)
+            {
+                _indexes[name] = entry;
+            }
+        }
     }
 
     private void DiscoverSidecarManifest(
