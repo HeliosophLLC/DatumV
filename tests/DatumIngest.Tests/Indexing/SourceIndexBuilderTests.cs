@@ -85,8 +85,8 @@ public sealed class SourceIndexBuilderTests
         SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
         ChunkColumnStatistics stats = index.Chunks[0].ColumnStatistics["x"];
-        Assert.Equal(1.0f, stats.Minimum!.AsFloat32());
-        Assert.Equal(20.0f, stats.Maximum!.AsFloat32());
+        Assert.Equal(1.0f, stats.Minimum.GetValueOrDefault().AsFloat32());
+        Assert.Equal(20.0f, stats.Maximum.GetValueOrDefault().AsFloat32());
     }
 
     [Fact]
@@ -219,8 +219,8 @@ public sealed class SourceIndexBuilderTests
         SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
         ChunkColumnStatistics stats = index.Chunks[0].ColumnStatistics["name"];
-        Assert.Equal("alice", stats.Minimum!.AsString());
-        Assert.Equal("charlie", stats.Maximum!.AsString());
+        Assert.Equal("alice", stats.Minimum.GetValueOrDefault().AsString());
+        Assert.Equal("charlie", stats.Maximum.GetValueOrDefault().AsString());
     }
 
     [Fact]

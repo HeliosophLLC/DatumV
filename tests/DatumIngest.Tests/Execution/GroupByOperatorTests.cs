@@ -297,9 +297,9 @@ public class GroupByOperatorTests
         Row row = results[0];
 
         // Column access by name should work for all output columns.
-        Assert.NotNull(row["category"]);
-        Assert.NotNull(row["COUNT(*)"]);
-        Assert.NotNull(row["SUM(price)"]);
+        Assert.False(row["category"].IsNull);
+        Assert.False(row["COUNT(*)"].IsNull);
+        Assert.False(row["SUM(price)"].IsNull);
     }
 
     // ─────────────── Governor enforcement during materialization ───────────────

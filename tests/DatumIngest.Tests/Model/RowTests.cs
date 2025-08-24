@@ -102,10 +102,10 @@ public class RowTests
             ["name"],
             [DataValue.FromString("test")]);
 
-        bool found = row.TryGetValue("missing", out DataValue? result);
+        bool found = row.TryGetValue("missing", out DataValue result);
 
         Assert.False(found);
-        Assert.Null(result);
+        Assert.Equal(default(DataValue), result);
     }
 
     [Fact]
@@ -115,10 +115,9 @@ public class RowTests
             ["name"],
             [DataValue.FromString("test")]);
 
-        bool found = row.TryGetValue("name", out DataValue? result);
+        bool found = row.TryGetValue("name", out DataValue result);
 
         Assert.True(found);
-        Assert.NotNull(result);
         Assert.Equal("test", result.AsString());
     }
 }

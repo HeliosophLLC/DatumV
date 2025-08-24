@@ -35,13 +35,13 @@ internal sealed class DatumZoneMapAccumulator
             DatumZoneMap zoneMap = rowGroupDescriptor.ColumnChunks[columnIndex].ZoneMap;
             _nullCounts[columnIndex] += zoneMap.NullCount;
 
-            if (!zoneMap.HasMinMax)
+            if (!zoneMap.Minimum.HasValue || !zoneMap.Maximum.HasValue)
             {
                 continue;
             }
 
-            _minimums[columnIndex] = MergeMinimum(_minimums[columnIndex], zoneMap.Minimum!);
-            _maximums[columnIndex] = MergeMaximum(_maximums[columnIndex], zoneMap.Maximum!);
+            _minimums[columnIndex] = MergeMinimum(_minimums[columnIndex], zoneMap.Minimum.Value);
+            _maximums[columnIndex] = MergeMaximum(_maximums[columnIndex], zoneMap.Maximum.Value);
         }
     }
 
@@ -57,13 +57,13 @@ internal sealed class DatumZoneMapAccumulator
     {
         if (existing is null) return candidate;
 
-        return StatisticsPredicateEvaluator.CompareValues(candidate, existing) < 0 ? candidate : existing;
+        return StatisticsPredicateEvaluator.CompareValues(candidate, existing.Value) < 0 ? candidate : existing;
     }
 
     private static DataValue? MergeMaximum(DataValue? existing, DataValue candidate)
     {
         if (existing is null) return candidate;
 
-        return StatisticsPredicateEvaluator.CompareValues(candidate, existing) > 0 ? candidate : existing;
+        return StatisticsPredicateEvaluator.CompareValues(candidate, existing.Value) > 0 ? candidate : existing;
     }
 }

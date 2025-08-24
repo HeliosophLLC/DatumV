@@ -17,8 +17,8 @@ public sealed class ChunkColumnStatisticsTests
 
         ColumnStatisticsRange range = stats.ToColumnStatisticsRange();
 
-        Assert.Equal(1.0f, range.Minimum!.AsFloat32());
-        Assert.Equal(10.0f, range.Maximum!.AsFloat32());
+        Assert.Equal(1.0f, range.Minimum.GetValueOrDefault().AsFloat32());
+        Assert.Equal(10.0f, range.Maximum.GetValueOrDefault().AsFloat32());
         Assert.Equal(3, range.NullCount);
         Assert.Equal(100, range.RowCount);
     }

@@ -440,14 +440,14 @@ public sealed class IndexWriter
 
     internal static void WriteNullableDataValue(BinaryWriter writer, DataValue? value)
     {
-        if (value is null || value.IsNull)
+        if (!value.HasValue || value.Value.IsNull)
         {
             writer.Write(false); // hasValue = false
             return;
         }
 
         writer.Write(true); // hasValue = true
-        WriteDataValue(writer, value);
+        WriteDataValue(writer, value.Value);
     }
 
     internal static void WriteDataValue(BinaryWriter writer, DataValue value)

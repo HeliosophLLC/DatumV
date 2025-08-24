@@ -127,8 +127,8 @@ public sealed class IndexWriterReaderRoundTripTests
         SourceIndex restored = WriteAndRead(original);
 
         ChunkColumnStatistics stats = restored.Chunks[0].ColumnStatistics["value"];
-        Assert.Equal(1.5f, stats.Minimum!.AsFloat32());
-        Assert.Equal(99.9f, stats.Maximum!.AsFloat32());
+        Assert.Equal(1.5f, stats.Minimum.GetValueOrDefault().AsFloat32());
+        Assert.Equal(99.9f, stats.Maximum.GetValueOrDefault().AsFloat32());
         Assert.Equal(3, stats.NullCount);
         Assert.Equal(100, stats.RowCount);
         Assert.Equal(42, stats.EstimatedCardinality);
@@ -160,8 +160,8 @@ public sealed class IndexWriterReaderRoundTripTests
         SourceIndex restored = WriteAndRead(original);
 
         ChunkColumnStatistics stats = restored.Chunks[0].ColumnStatistics["value"];
-        AssertDataValueEqual(value, stats.Minimum!);
-        AssertDataValueEqual(value, stats.Maximum!);
+        AssertDataValueEqual(value, stats.Minimum.GetValueOrDefault());
+        AssertDataValueEqual(value, stats.Maximum.GetValueOrDefault());
     }
 
     public static TheoryData<DataValue, string> DataValueRoundTripCases => new()
@@ -207,7 +207,7 @@ public sealed class IndexWriterReaderRoundTripTests
         Assert.Equal(2, restored.Chunks[0].ColumnStatistics.Count);
         Assert.True(restored.Chunks[0].ColumnStatistics.ContainsKey("id"));
         Assert.True(restored.Chunks[0].ColumnStatistics.ContainsKey("name"));
-        Assert.Equal("alice", restored.Chunks[0].ColumnStatistics["name"].Minimum!.AsString());
+        Assert.Equal("alice", restored.Chunks[0].ColumnStatistics["name"].Minimum.GetValueOrDefault().AsString());
     }
 
     [Fact]

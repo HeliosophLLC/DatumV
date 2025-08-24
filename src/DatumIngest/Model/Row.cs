@@ -99,7 +99,7 @@ public sealed class Row
     /// Attempts to retrieve a value by column name without throwing.
     /// </summary>
     /// <returns><c>true</c> if the column exists; otherwise <c>false</c>.</returns>
-    public bool TryGetValue(string name, out DataValue? result)
+    public bool TryGetValue(string name, out DataValue result)
     {
         if (_nameIndex.TryGetValue(name, out int index))
         {
@@ -107,7 +107,7 @@ public sealed class Row
             return true;
         }
 
-        result = null;
+        result = default;
         return false;
     }
 }

@@ -30,11 +30,11 @@ public sealed class CombinedRowSchemaTests
         Row combined = schema.Combine(left, right);
 
         // Unique columns should be reachable by unqualified name.
-        Assert.True(combined.TryGetValue("label", out DataValue? label));
-        Assert.Equal(5.0, label!.AsFloat32());
+        Assert.True(combined.TryGetValue("label", out DataValue label));
+        Assert.Equal(5.0, label.AsFloat32());
 
-        Assert.True(combined.TryGetValue("image", out DataValue? image));
-        Assert.Equal(42.0, image!.AsFloat32());
+        Assert.True(combined.TryGetValue("image", out DataValue image));
+        Assert.Equal(42.0, image.AsFloat32());
 
         // Qualified names should still work.
         Assert.True(combined.TryGetValue("left_alias.label", out _));

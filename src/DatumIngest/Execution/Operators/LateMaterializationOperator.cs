@@ -109,7 +109,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
         {
             bufferedRows.Add(row);
 
-            if (row.TryGetValue(childKeyColumn, out DataValue? keyValue) && keyValue is not null && !keyValue.IsNull)
+            if (row.TryGetValue(childKeyColumn, out DataValue keyValue) && !keyValue.IsNull)
             {
                 keyValues.Add(keyValue);
             }
@@ -139,7 +139,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
             _descriptor, _keyColumn, keyValues, fetchColumns, cancellationToken)
             .ConfigureAwait(false))
         {
-            if (fetchedRow.TryGetValue(_keyColumn, out DataValue? key) && key is not null && !key.IsNull)
+            if (fetchedRow.TryGetValue(_keyColumn, out DataValue key) && !key.IsNull)
             {
                 fetchedByKey[key] = fetchedRow;
             }
@@ -152,7 +152,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
         {
             Row? deferredRow = null;
 
-            if (row.TryGetValue(childKeyColumn, out DataValue? keyValue) && keyValue is not null && !keyValue.IsNull)
+            if (row.TryGetValue(childKeyColumn, out DataValue keyValue) && !keyValue.IsNull)
             {
                 fetchedByKey.TryGetValue(keyValue, out deferredRow);
             }
@@ -264,8 +264,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
                 DataValue value;
 
                 if (deferredRow is not null &&
-                    deferredRow.TryGetValue(_deferredColumnNames[index], out DataValue? fetched) &&
-                    fetched is not null)
+                    deferredRow.TryGetValue(_deferredColumnNames[index], out DataValue fetched))
                 {
                     value = fetched;
                 }

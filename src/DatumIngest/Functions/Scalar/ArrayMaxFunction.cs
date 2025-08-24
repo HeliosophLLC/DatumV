@@ -53,7 +53,7 @@ public sealed class ArrayMaxFunction : IElementKindAwareFunction
         {
             if (element.IsNull) continue;
 
-            if (maximum is null || OrderByOperator.CompareDataValues(element, maximum) > 0)
+            if (maximum is null || OrderByOperator.CompareDataValues(element, maximum.Value) > 0)
             {
                 maximum = element;
             }

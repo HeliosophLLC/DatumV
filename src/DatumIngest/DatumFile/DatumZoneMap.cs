@@ -51,11 +51,10 @@ public sealed record DatumZoneMap
         writer.Write(NullCount);
         writer.Write(HasMinMax);
 
-        if (HasMinMax)
+        if (Minimum.HasValue && Maximum.HasValue)
         {
-            // Minimum and Maximum are both non-null (HasMinMax guard above).
-            IndexWriter.WriteDataValue(writer, Minimum!);
-            IndexWriter.WriteDataValue(writer, Maximum!);
+            IndexWriter.WriteDataValue(writer, Minimum.Value);
+            IndexWriter.WriteDataValue(writer, Maximum.Value);
         }
     }
 

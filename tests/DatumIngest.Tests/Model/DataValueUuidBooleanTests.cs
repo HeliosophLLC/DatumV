@@ -63,7 +63,7 @@ public class DataValueUuidBooleanTests
     {
         DataValue first = DataValue.FromBoolean(true);
         DataValue second = DataValue.FromBoolean(true);
-        Assert.Same(first, second);
+        Assert.Equal(first, second);
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class DataValueUuidBooleanTests
     {
         DataValue first = DataValue.FromBoolean(false);
         DataValue second = DataValue.FromBoolean(false);
-        Assert.Same(first, second);
+        Assert.Equal(first, second);
     }
 
     // ───────────────── Equality ─────────────────

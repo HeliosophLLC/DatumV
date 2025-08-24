@@ -53,7 +53,7 @@ public sealed class ArrayMinFunction : IElementKindAwareFunction
         {
             if (element.IsNull) continue;
 
-            if (minimum is null || OrderByOperator.CompareDataValues(element, minimum) < 0)
+            if (minimum is null || OrderByOperator.CompareDataValues(element, minimum.Value) < 0)
             {
                 minimum = element;
             }

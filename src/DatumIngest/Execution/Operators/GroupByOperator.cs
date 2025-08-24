@@ -255,7 +255,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 // Evaluate group keys.
                 DataValue[]? keyValues = null;
-                DataValue? singleKey = null;
+                DataValue singleKey = default;
 
                 if (isGlobalAggregation)
                 {
@@ -281,10 +281,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 {
                     // Already spilling — write to a partition file based on the group key hash.
                     int hashCode = useSingleKey
-                        ? singleKey!.GetHashCode()
+                        ? singleKey.GetHashCode()
                         : new CompositeKey(keyValues!).GetHashCode();
 
-                    WriteSpillRow(hashCode, useSingleKey ? [singleKey!] : keyValues!,
+                    WriteSpillRow(hashCode, useSingleKey ? [singleKey] : keyValues!,
                         allArguments, allSortKeys, spillWriters!, spillSchemaWritten!, spillPaths!,
                         spillSchema, _spillDirectory!);
 
@@ -296,7 +296,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                     if (useSingleKey)
                     {
-                        singleKeyGroups!.TryGetValue(singleKey!, out existingGroup);
+                        singleKeyGroups!.TryGetValue(singleKey, out existingGroup);
                     }
                     else
                     {
@@ -319,11 +319,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     }
                     else if (useSingleKey)
                     {
-                        if (!singleKeyGroups!.TryGetValue(singleKey!, out group!))
+                        if (!singleKeyGroups!.TryGetValue(singleKey, out group!))
                         {
                             group = CreateGroupState();
-                            group.KeyValues = [singleKey!];
-                            singleKeyGroups[singleKey!] = group;
+                            group.KeyValues = [singleKey];
+                            singleKeyGroups![singleKey] = group;
                         }
                     }
                     else
@@ -702,7 +702,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         .ConfigureAwait(false))
                     {
                         // Evaluate group keys once for both accumulation and spill routing.
-                        DataValue? singleKeyValue = null;
+                        DataValue singleKeyValue = default;
                         DataValue[]? keyValues = null;
 
                         if (useSingleKey)
@@ -725,11 +725,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         {
                             // Route to a per-worker spill partition file.
                             int hashCode = useSingleKey
-                                ? singleKeyValue!.GetHashCode()
+                                ? singleKeyValue.GetHashCode()
                                 : new CompositeKey(keyValues!).GetHashCode();
 
                             WriteSpillRow(
-                                hashCode, useSingleKey ? [singleKeyValue!] : keyValues!,
+                                hashCode, useSingleKey ? [singleKeyValue] : keyValues!,
                                 allArguments, allSortKeys,
                                 workerSpillWriters![wi]!, workerSchemaWritten[wi]!,
                                 workerLocalSpillPaths[wi]!, workerSchemaStates[wi],
@@ -743,7 +743,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (useSingleKey)
                             {
-                                singleKeyTables[wi].TryGetValue(singleKeyValue!, out existingGroup);
+                                singleKeyTables[wi].TryGetValue(singleKeyValue, out existingGroup);
                             }
                             else
                             {
@@ -763,14 +763,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (useSingleKey)
                             {
-                                if (!singleKeyTables[wi].TryGetValue(singleKeyValue!, out GroupState? existing))
+                                if (!singleKeyTables[wi].TryGetValue(singleKeyValue, out GroupState? existing))
                                 {
                                     existing = CreateGroupState();
-                                    existing.KeyValues = [singleKeyValue!];
-                                    singleKeyTables[wi][singleKeyValue!] = existing;
+                                    existing.KeyValues = [singleKeyValue];
+                                    singleKeyTables[wi][singleKeyValue] = existing;
                                 }
 
-                                group = existing;
+                                group = existing!;
                             }
                             else
                             {

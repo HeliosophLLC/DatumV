@@ -162,29 +162,29 @@ public sealed class ExpressionEvaluator
         // then the unqualified column name.
         if (column.QualifiedName is not null)
         {
-            if (row.TryGetValue(column.QualifiedName, out DataValue? qualifiedValue))
+            if (row.TryGetValue(column.QualifiedName, out DataValue qualifiedValue))
             {
-                return qualifiedValue!;
+                return qualifiedValue;
             }
         }
 
-        if (row.TryGetValue(column.ColumnName, out DataValue? value))
+        if (row.TryGetValue(column.ColumnName, out DataValue value))
         {
-            return value!;
+            return value;
         }
 
         // Fall back to the outer row for correlated subquery column resolution.
         if (outerRow is not null)
         {
             if (column.QualifiedName is not null &&
-                outerRow.TryGetValue(column.QualifiedName, out DataValue? outerQualifiedValue))
+                outerRow.TryGetValue(column.QualifiedName, out DataValue outerQualifiedValue))
             {
-                return outerQualifiedValue!;
+                return outerQualifiedValue;
             }
 
-            if (outerRow.TryGetValue(column.ColumnName, out DataValue? outerValue))
+            if (outerRow.TryGetValue(column.ColumnName, out DataValue outerValue))
             {
-                return outerValue!;
+                return outerValue;
             }
         }
 
@@ -567,7 +567,7 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("Cast function not registered.");
         }
 
-        if (!_castTargetCache.TryGetValue(cast.TargetType, out DataValue? targetTypeValue))
+        if (!_castTargetCache.TryGetValue(cast.TargetType, out DataValue targetTypeValue))
         {
             targetTypeValue = DataValue.FromString(cast.TargetType);
             _castTargetCache[cast.TargetType] = targetTypeValue;

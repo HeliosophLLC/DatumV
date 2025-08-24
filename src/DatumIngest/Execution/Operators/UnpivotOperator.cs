@@ -145,9 +145,9 @@ public sealed class UnpivotOperator : IQueryOperator
                 string sourceColumnName = _sourceColumnNames[sourceIndex];
                 DataValue cellValue;
 
-                if (row.TryGetValue(sourceColumnName, out DataValue? found))
+                if (row.TryGetValue(sourceColumnName, out DataValue found))
                 {
-                    cellValue = found!;
+                    cellValue = found;
                 }
                 else
                 {

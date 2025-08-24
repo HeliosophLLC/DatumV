@@ -42,7 +42,7 @@ public sealed class MinFunction : IAggregateFunction
             DataValue value = arguments[0];
             if (value.IsNull) return;
 
-            if (_minimum is null || CompareValues(value, _minimum) < 0)
+            if (_minimum is null || CompareValues(value, _minimum.Value) < 0)
             {
                 _minimum = value;
             }
@@ -58,7 +58,7 @@ public sealed class MinFunction : IAggregateFunction
                 return;
             }
 
-            if (_minimum is null || CompareValues(otherAccumulator._minimum, _minimum) < 0)
+            if (_minimum is null || CompareValues(otherAccumulator._minimum.Value, _minimum.Value) < 0)
             {
                 _minimum = otherAccumulator._minimum;
             }

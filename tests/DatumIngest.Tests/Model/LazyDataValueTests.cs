@@ -47,7 +47,7 @@ public class LazyDataValueTests
         DataValue second = lazy.Value;
 
         Assert.Equal(1, forceCount);
-        Assert.Same(first, second);
+        Assert.Equal(first, second);
     }
 
     [Fact]

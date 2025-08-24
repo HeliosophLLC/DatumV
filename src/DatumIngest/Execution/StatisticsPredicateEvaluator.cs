@@ -73,7 +73,7 @@ public static class StatisticsPredicateEvaluator
         }
 
         // Try to extract (column, literal, needsFlip) from the binary expression.
-        if (!TryExtractColumnAndLiteral(binary, out string? columnName, out DataValue? literalValue, out bool flipped))
+        if (!TryExtractColumnAndLiteral(binary, out string? columnName, out DataValue literalValue, out bool flipped))
         {
             return false;
         }
@@ -91,7 +91,7 @@ public static class StatisticsPredicateEvaluator
         // Flip the operator if the literal was on the left: "5 > col" becomes "col < 5".
         BinaryOperator effectiveOperator = flipped ? FlipOperator(binary.Operator) : binary.Operator;
 
-        return CanSkipComparison(effectiveOperator, range.Minimum, range.Maximum, literalValue!);
+        return CanSkipComparison(effectiveOperator, range.Minimum.Value, range.Maximum.Value, literalValue);
     }
 
     /// <summary>
@@ -156,7 +156,7 @@ public static class StatisticsPredicateEvaluator
         if (inExpression.Negated)
         {
             // NOT IN — skip only if min = max and that single value is in the exclusion list.
-            if (CompareValues(range.Minimum, range.Maximum) != 0)
+            if (CompareValues(range.Minimum.Value, range.Maximum.Value) != 0)
             {
                 return false;
             }
@@ -165,8 +165,8 @@ public static class StatisticsPredicateEvaluator
             {
                 if (valueExpression is LiteralExpression literal)
                 {
-                    DataValue? literalValue = LiteralToDataValue(literal.Value, range.Minimum.Kind);
-                    if (literalValue is not null && CompareValues(range.Minimum, literalValue) == 0)
+                    DataValue? literalValue = LiteralToDataValue(literal.Value, range.Minimum.Value.Kind);
+                    if (literalValue is not null && CompareValues(range.Minimum.Value, literalValue.Value) == 0)
                     {
                         return true;
                     }
@@ -184,15 +184,15 @@ public static class StatisticsPredicateEvaluator
                 return false; // Non-literal value — cannot evaluate.
             }
 
-            DataValue? literalValue = LiteralToDataValue(literal.Value, range.Minimum.Kind);
+            DataValue? literalValue = LiteralToDataValue(literal.Value, range.Minimum.Value.Kind);
             if (literalValue is null)
             {
                 return false; // Cannot convert — be conservative.
             }
 
             // If any value falls within [min, max], we cannot skip.
-            if (CompareValues(literalValue, range.Minimum) >= 0
-                && CompareValues(literalValue, range.Maximum) <= 0)
+            if (CompareValues(literalValue.Value, range.Minimum.Value) >= 0
+                && CompareValues(literalValue.Value, range.Maximum.Value) <= 0)
             {
                 return false;
             }
@@ -230,8 +230,8 @@ public static class StatisticsPredicateEvaluator
             return false;
         }
 
-        DataValue? lowValue = LiteralToDataValue(lowLiteral.Value, range.Minimum.Kind);
-        DataValue? highValue = LiteralToDataValue(highLiteral.Value, range.Minimum.Kind);
+        DataValue? lowValue = LiteralToDataValue(lowLiteral.Value, range.Minimum.Value.Kind);
+        DataValue? highValue = LiteralToDataValue(highLiteral.Value, range.Minimum.Value.Kind);
 
         if (lowValue is null || highValue is null)
         {
@@ -242,14 +242,14 @@ public static class StatisticsPredicateEvaluator
         {
             // NOT BETWEEN low AND high → col < low OR col > high
             // Skip if all values are within [low, high]: min >= low AND max <= high.
-            return CompareValues(range.Minimum, lowValue) >= 0
-                && CompareValues(range.Maximum, highValue) <= 0;
+            return CompareValues(range.Minimum.Value, lowValue.Value) >= 0
+                && CompareValues(range.Maximum.Value, highValue.Value) <= 0;
         }
 
         // BETWEEN low AND high → col >= low AND col <= high
         // Skip if the partition range doesn't overlap [low, high]: max < low OR min > high.
-        return CompareValues(range.Maximum, lowValue) < 0
-            || CompareValues(range.Minimum, highValue) > 0;
+        return CompareValues(range.Maximum.Value, lowValue.Value) < 0
+            || CompareValues(range.Minimum.Value, highValue.Value) > 0;
     }
 
     // ──────────────────── IS NULL / IS NOT NULL ────────────────────
@@ -293,28 +293,32 @@ public static class StatisticsPredicateEvaluator
     private static bool TryExtractColumnAndLiteral(
         BinaryExpression binary,
         out string? columnName,
-        out DataValue? literalValue,
+        out DataValue literalValue,
         out bool flipped)
     {
         columnName = null;
-        literalValue = null;
+        literalValue = default;
         flipped = false;
 
         // col op literal
         if (binary.Left is ColumnReference leftColumn && binary.Right is LiteralExpression rightLiteral)
         {
             columnName = leftColumn.ColumnName;
-            literalValue = LiteralToDataValue(rightLiteral.Value, targetKind: null);
-            return literalValue is not null;
+            DataValue? temp = LiteralToDataValue(rightLiteral.Value, targetKind: null);
+            if (temp is null) return false;
+            literalValue = temp.Value;
+            return true;
         }
 
         // literal op col → flip
         if (binary.Left is LiteralExpression leftLiteral && binary.Right is ColumnReference rightColumn)
         {
             columnName = rightColumn.ColumnName;
-            literalValue = LiteralToDataValue(leftLiteral.Value, targetKind: null);
+            DataValue? temp = LiteralToDataValue(leftLiteral.Value, targetKind: null);
+            if (temp is null) return false;
+            literalValue = temp.Value;
             flipped = true;
-            return literalValue is not null;
+            return true;
         }
 
         return false;

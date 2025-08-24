@@ -892,12 +892,12 @@ public sealed class SourceIndexBuilder
                 return;
             }
 
-            if (_minimum is null || CompareValues(value, _minimum) < 0)
+            if (_minimum is null || CompareValues(value, _minimum.Value) < 0)
             {
                 _minimum = value;
             }
 
-            if (_maximum is null || CompareValues(value, _maximum) > 0)
+            if (_maximum is null || CompareValues(value, _maximum.Value) > 0)
             {
                 _maximum = value;
             }
@@ -1455,12 +1455,12 @@ internal sealed class SourceIndexBuilder_ChunkAccumulatorProxy
             return;
         }
 
-        if (_minimum is null || StatisticsPredicateEvaluator.CompareValues(value, _minimum) < 0)
+        if (_minimum is null || StatisticsPredicateEvaluator.CompareValues(value, _minimum.Value) < 0)
         {
             _minimum = value;
         }
 
-        if (_maximum is null || StatisticsPredicateEvaluator.CompareValues(value, _maximum) > 0)
+        if (_maximum is null || StatisticsPredicateEvaluator.CompareValues(value, _maximum.Value) > 0)
         {
             _maximum = value;
         }

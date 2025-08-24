@@ -42,7 +42,7 @@ public sealed class MaxFunction : IAggregateFunction
             DataValue value = arguments[0];
             if (value.IsNull) return;
 
-            if (_maximum is null || CompareValues(value, _maximum) > 0)
+            if (_maximum is null || CompareValues(value, _maximum.Value) > 0)
             {
                 _maximum = value;
             }
@@ -58,7 +58,7 @@ public sealed class MaxFunction : IAggregateFunction
                 return;
             }
 
-            if (_maximum is null || CompareValues(otherAccumulator._maximum, _maximum) > 0)
+            if (_maximum is null || CompareValues(otherAccumulator._maximum.Value, _maximum.Value) > 0)
             {
                 _maximum = otherAccumulator._maximum;
             }
