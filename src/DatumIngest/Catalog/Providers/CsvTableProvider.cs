@@ -25,7 +25,7 @@ namespace DatumIngest.Catalog.Providers;
 /// or <c>header=false</c> to force generated column names and treat every row as data.
 /// </para>
 /// </remarks>
-public sealed class CsvTableProvider : IChunkMeasuringProvider
+public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTableProvider
 {
     private const char DefaultDelimiter = ',';
 
@@ -1171,5 +1171,424 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider
             }
         }
         return count;
+    }
+
+    // -------------------------------------------------------------------------
+    // IPartitionedTableProvider — parallel multi-stream scan
+    // -------------------------------------------------------------------------
+
+    /// <summary>Minimum byte size of each partition. Files smaller than this are not split.</summary>
+    private const long MinPartitionBytes = 256 * 1024;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<IAsyncEnumerable<Row>>?> OpenPartitionsAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        int maxPartitions,
+        CancellationToken cancellationToken)
+    {
+        // Compressed files are not seekable — fall back to single-stream.
+        if (descriptor.Compression != CompressionKind.None
+            || !File.Exists(descriptor.FilePath))
+        {
+            return null;
+        }
+
+        FileInfo fileInfo = new(descriptor.FilePath);
+        long fileSize = fileInfo.Length;
+
+        if (fileSize == 0)
+        {
+            return null;
+        }
+
+        Schema schema = await GetSchemaAsync(descriptor, cancellationToken).ConfigureAwait(false);
+        bool hasHeader = HasHeaderRow(descriptor, schema);
+        char delimiter = GetDelimiter(descriptor);
+
+        // Build projection metadata shared across all partitions.
+        int[] projectedIndices;
+        string[] projectedNames;
+        DataKind[] projectedKinds;
+
+        if (requiredColumns is not null)
+        {
+            List<int> indices = new();
+            List<string> names = new();
+            List<DataKind> kinds = new();
+
+            for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
+            {
+                string name = schema.Columns[columnIndex].Name;
+                if (requiredColumns.Contains(name))
+                {
+                    indices.Add(columnIndex);
+                    names.Add(name);
+                    kinds.Add(schema.Columns[columnIndex].Kind);
+                }
+            }
+
+            projectedIndices = indices.ToArray();
+            projectedNames = names.ToArray();
+            projectedKinds = kinds.ToArray();
+        }
+        else
+        {
+            projectedIndices = new int[schema.Columns.Count];
+            projectedNames = new string[schema.Columns.Count];
+            projectedKinds = new DataKind[schema.Columns.Count];
+
+            for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
+            {
+                projectedIndices[columnIndex] = columnIndex;
+                projectedNames[columnIndex] = schema.Columns[columnIndex].Name;
+                projectedKinds[columnIndex] = schema.Columns[columnIndex].Kind;
+            }
+        }
+
+        Dictionary<string, int> nameIndex = new(projectedNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < projectedNames.Length; index++)
+        {
+            nameIndex[projectedNames[index]] = index;
+        }
+
+        // Locate the first byte of data (end of the header line).
+        long dataStartOffset = await FindDataStartOffsetAsync(
+            descriptor.FilePath, hasHeader, cancellationToken).ConfigureAwait(false);
+
+        long dataSize = fileSize - dataStartOffset;
+
+        // Cap partitions so each one covers at least MinPartitionBytes.
+        int workablePartitions = (int)Math.Min(
+            maxPartitions,
+            Math.Max(1, dataSize / MinPartitionBytes));
+
+        if (workablePartitions <= 1)
+        {
+            return null;
+        }
+
+        // Compute N aligned partition start offsets.
+        long[] partitionStarts = new long[workablePartitions];
+        long[] partitionEnds = new long[workablePartitions];
+
+        partitionStarts[0] = dataStartOffset;
+
+        for (int partitionIndex = 1; partitionIndex < workablePartitions; partitionIndex++)
+        {
+            long rawOffset = dataStartOffset + (long)partitionIndex * (dataSize / workablePartitions);
+            long alignedOffset = await FindLineStartAsync(
+                descriptor.FilePath, rawOffset, cancellationToken).ConfigureAwait(false);
+
+            if (alignedOffset < 0 || alignedOffset >= fileSize)
+            {
+                // Could not align — truncate to the partitions found so far.
+                workablePartitions = partitionIndex;
+                break;
+            }
+
+            partitionStarts[partitionIndex] = alignedOffset;
+            partitionEnds[partitionIndex - 1] = alignedOffset;
+        }
+
+        partitionEnds[workablePartitions - 1] = fileSize;
+
+        if (workablePartitions <= 1)
+        {
+            return null;
+        }
+
+        List<IAsyncEnumerable<Row>> partitions = new(workablePartitions);
+
+        for (int partitionIndex = 0; partitionIndex < workablePartitions; partitionIndex++)
+        {
+            partitions.Add(OpenPartitionCoreAsync(
+                descriptor.FilePath,
+                projectedNames, projectedIndices, projectedKinds, nameIndex,
+                delimiter,
+                partitionStarts[partitionIndex],
+                partitionEnds[partitionIndex],
+                cancellationToken));
+        }
+
+        return partitions;
+    }
+
+    /// <summary>
+    /// Returns the byte offset of the first data row — the position immediately
+    /// after the header line (or 0 when there is no header).
+    /// </summary>
+    private static async Task<long> FindDataStartOffsetAsync(
+        string filePath, bool hasHeader, CancellationToken cancellationToken)
+    {
+        if (!hasHeader)
+        {
+            return 0;
+        }
+
+        using FileStream stream = new(
+            filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 512);
+
+        byte[] buffer = new byte[512];
+        long bytesScanned = 0;
+
+        while (true)
+        {
+            int bytesRead = await stream.ReadAsync(
+                buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+
+            if (bytesRead == 0)
+            {
+                // Header occupies entire file — no data rows.
+                return stream.Position;
+            }
+
+            for (int i = 0; i < bytesRead; i++)
+            {
+                if (buffer[i] == (byte)'\n')
+                {
+                    return bytesScanned + i + 1;
+                }
+            }
+
+            bytesScanned += bytesRead;
+        }
+    }
+
+    /// <summary>
+    /// Returns the byte offset of the first character of the line that begins
+    /// at or after <paramref name="approximateOffset"/>. Returns <c>-1</c> when
+    /// EOF is reached before any newline is found.
+    /// </summary>
+    private static async Task<long> FindLineStartAsync(
+        string filePath, long approximateOffset, CancellationToken cancellationToken)
+    {
+        // Seek one byte before the target so that a '\n' landing exactly at
+        // approximateOffset is treated as the end of the preceding line.
+        long searchFrom = Math.Max(0, approximateOffset - 1);
+
+        using FileStream stream = new(
+            filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 512);
+
+        stream.Seek(searchFrom, SeekOrigin.Begin);
+
+        byte[] buffer = new byte[512];
+        long currentOffset = searchFrom;
+
+        while (true)
+        {
+            int bytesRead = await stream.ReadAsync(
+                buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+
+            if (bytesRead == 0)
+            {
+                return -1; // EOF reached without finding a newline.
+            }
+
+            for (int i = 0; i < bytesRead; i++)
+            {
+                if (buffer[i] == (byte)'\n')
+                {
+                    return currentOffset + i + 1;
+                }
+            }
+
+            currentOffset += bytesRead;
+        }
+    }
+
+    /// <summary>
+    /// Reads rows from a byte range of a CSV file. The range must start at an
+    /// aligned line boundary (first byte of a data row) and end at a line boundary
+    /// (the byte after the terminating '\n'). Schema metadata is provided by the
+    /// caller and shared across all concurrent partitions.
+    /// </summary>
+    private static async IAsyncEnumerable<Row> OpenPartitionCoreAsync(
+        string filePath,
+        string[] projectedNames,
+        int[] projectedIndices,
+        DataKind[] projectedKinds,
+        Dictionary<string, int> nameIndex,
+        char delimiter,
+        long partitionStart,
+        long partitionEnd,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        long partitionLength = partitionEnd - partitionStart;
+        if (partitionLength <= 0)
+        {
+            yield break;
+        }
+
+        // leaveOpen: true so the StreamReader does not close the FileStream —
+        // the using block below is the sole owner of the FileStream lifetime.
+        using FileStream fileStream = new(
+            filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: ReaderBufferSize, useAsync: true);
+
+        fileStream.Seek(partitionStart, SeekOrigin.Begin);
+
+        BoundedStream bounded = new(fileStream, partitionLength);
+
+        using StreamReader reader = new(
+            bounded,
+            System.Text.Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: false,
+            bufferSize: ReaderBufferSize,
+            leaveOpen: true);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            string? logicalLine = await ReadLogicalLineAsync(reader, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (logicalLine is null)
+            {
+                break;
+            }
+
+            DataValue[] values = new DataValue[projectedIndices.Length];
+
+            if (!logicalLine.Contains('"'))
+            {
+                ReadOnlySpan<char> lineSpan = logicalLine.AsSpan();
+                int fieldStart = 0;
+                int currentFieldIndex = 0;
+                int projectionIndex = 0;
+
+                for (int charIndex = 0; charIndex <= lineSpan.Length && projectionIndex < projectedIndices.Length; charIndex++)
+                {
+                    if (charIndex == lineSpan.Length || lineSpan[charIndex] == delimiter)
+                    {
+                        if (currentFieldIndex == projectedIndices[projectionIndex])
+                        {
+                            ReadOnlySpan<char> fieldSpan = lineSpan[fieldStart..charIndex].Trim();
+                            values[projectionIndex] = ParseFieldSpan(fieldSpan, projectedKinds[projectionIndex]);
+                            projectionIndex++;
+                        }
+
+                        currentFieldIndex++;
+                        fieldStart = charIndex + 1;
+                    }
+                }
+
+                while (projectionIndex < projectedIndices.Length)
+                {
+                    values[projectionIndex] = DataValue.Null(projectedKinds[projectionIndex]);
+                    projectionIndex++;
+                }
+            }
+            else
+            {
+                List<string> fields = ParseCsvLineList(logicalLine, delimiter);
+
+                for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
+                {
+                    int sourceIndex = projectedIndices[projectionIndex];
+                    string field = sourceIndex < fields.Count ? fields[sourceIndex].Trim() : string.Empty;
+                    values[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
+                }
+            }
+
+            yield return new Row(projectedNames, values, nameIndex);
+        }
+    }
+
+    /// <summary>
+    /// Limits reads from an inner stream to a fixed byte budget. When the
+    /// budget is exhausted, all subsequent reads return zero bytes (the
+    /// end-of-stream signal that stops a wrapping <see cref="StreamReader"/>).
+    /// </summary>
+    private sealed class BoundedStream : Stream
+    {
+        private readonly Stream _inner;
+        private long _remaining;
+
+        /// <summary>Wraps <paramref name="inner"/> and allows reading at most <paramref name="limit"/> bytes.</summary>
+        internal BoundedStream(Stream inner, long limit)
+        {
+            _inner = inner;
+            _remaining = limit;
+        }
+
+        /// <inheritdoc />
+        public override bool CanRead => true;
+
+        /// <inheritdoc />
+        public override bool CanSeek => false;
+
+        /// <inheritdoc />
+        public override bool CanWrite => false;
+
+        /// <inheritdoc />
+        public override long Length => throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override long Position
+        {
+            get => _inner.Position;
+            set => throw new NotSupportedException();
+        }
+
+        /// <inheritdoc />
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_remaining <= 0)
+            {
+                return 0;
+            }
+
+            int toRead = (int)Math.Min(count, _remaining);
+            int bytesRead = _inner.Read(buffer, offset, toRead);
+            _remaining -= bytesRead;
+            return bytesRead;
+        }
+
+        /// <inheritdoc />
+        public override async Task<int> ReadAsync(
+            byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (_remaining <= 0)
+            {
+                return 0;
+            }
+
+            int toRead = (int)Math.Min(count, _remaining);
+            int bytesRead = await _inner.ReadAsync(
+                buffer.AsMemory(offset, toRead), cancellationToken).ConfigureAwait(false);
+            _remaining -= bytesRead;
+            return bytesRead;
+        }
+
+        /// <inheritdoc />
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_remaining <= 0)
+            {
+                return 0;
+            }
+
+            int toRead = (int)Math.Min(buffer.Length, _remaining);
+            int bytesRead = await _inner.ReadAsync(
+                buffer[..toRead], cancellationToken).ConfigureAwait(false);
+            _remaining -= bytesRead;
+            return bytesRead;
+        }
+
+        /// <inheritdoc />
+        public override void Flush() { }
+
+        /// <inheritdoc />
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        /// <inheritdoc />
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 }

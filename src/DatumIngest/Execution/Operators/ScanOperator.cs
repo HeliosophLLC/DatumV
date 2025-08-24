@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
 using DatumIngest.Indexing;
@@ -18,6 +19,10 @@ namespace DatumIngest.Execution.Operators;
 /// enable partition pruning for any provider type. Bloom filter pruning
 /// allows join operators to pre-filter chunks by providing build-side key
 /// values: chunks where no build-side key could possibly exist are skipped.
+/// When the provider implements <see cref="IPartitionedTableProvider"/> and
+/// <see cref="ExecutionContext.DegreeOfParallelism"/> is greater than one,
+/// the scan is split into equal byte-range partitions and read in parallel
+/// to maximise I/O and CPU utilisation on large files.
 /// </summary>
 public sealed class ScanOperator : IQueryOperator
 {
@@ -27,6 +32,12 @@ public sealed class ScanOperator : IQueryOperator
     private SourceIndex? _sourceIndex;
     private Dictionary<string, IReadOnlyCollection<DataValue>>? _bloomPruningKeys;
     private Dictionary<string, IReadOnlyCollection<DataValue>>? _sortedIndexPruningKeys;
+
+    /// <summary>
+    /// Minimum estimated row count that activates the parallel partitioned scan path.
+    /// Below this threshold the Channel fan-out overhead exceeds the I/O savings.
+    /// </summary>
+    private const long ParallelScanMinRows = 100_000;
 
     /// <summary>
     /// Creates a scan operator for the given table.
@@ -215,6 +226,35 @@ public sealed class ScanOperator : IQueryOperator
         }
         else
         {
+            // Parallel scan: when the provider supports byte-range partitioning,
+            // DOP > 1, and the table is large enough, fan out to N concurrent
+            // reader tasks and merge their output through a channel. This hides
+            // both OS I/O latency and per-row CPU cost for large files.
+            // Only activated when no filter hint is present; filterable providers
+            // manage their own partition strategy.
+            if (context.DegreeOfParallelism > 1
+                && EstimatedRowCount is >= ParallelScanMinRows
+                && _filterHint is null
+                && provider is IPartitionedTableProvider partitionedProvider)
+            {
+                IReadOnlyList<IAsyncEnumerable<Row>>? partitions =
+                    await partitionedProvider.OpenPartitionsAsync(
+                        _descriptor, _requiredColumns,
+                        context.DegreeOfParallelism,
+                        cancellationToken).ConfigureAwait(false);
+
+                if (partitions is { Count: > 1 })
+                {
+                    await foreach (Row row in MergePartitionsAsync(
+                        partitions, context).ConfigureAwait(false))
+                    {
+                        yield return row;
+                    }
+
+                    yield break;
+                }
+            }
+
             IAsyncEnumerable<Row> rows;
 
             if (_filterHint is not null && provider is IFilterableTableProvider filterable)
@@ -1216,6 +1256,65 @@ public sealed class ScanOperator : IQueryOperator
             }
 
             results.Add((columnRef.ColumnName, values));
+        }
+    }
+
+    /// <summary>
+    /// Fans out each partition enumerable to its own <see cref="Task"/> and merges
+    /// all rows through a bounded <see cref="Channel{T}"/>. The channel is completed
+    /// when every partition finishes (or faults). On fault, the first exception is
+    /// surfaced to the consumer via the channel's completion state.
+    /// </summary>
+    private static async IAsyncEnumerable<Row> MergePartitionsAsync(
+        IReadOnlyList<IAsyncEnumerable<Row>> partitions,
+        ExecutionContext context)
+    {
+        int capacity = partitions.Count * 64;
+        Channel<Row> output = Channel.CreateBounded<Row>(
+            new BoundedChannelOptions(capacity)
+            {
+                SingleWriter = false,
+                SingleReader = true,
+            });
+
+        int remaining = partitions.Count;
+
+        foreach (IAsyncEnumerable<Row> partition in partitions)
+        {
+            IAsyncEnumerable<Row> captured = partition;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (Row row in captured
+                        .WithCancellation(context.CancellationToken)
+                        .ConfigureAwait(false))
+                    {
+                        await output.Writer.WriteAsync(row, context.CancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    output.Writer.TryComplete(exception);
+                    return;
+                }
+                finally
+                {
+                    if (Interlocked.Decrement(ref remaining) == 0)
+                    {
+                        output.Writer.TryComplete();
+                    }
+                }
+            }, context.CancellationToken);
+        }
+
+        await foreach (Row row in output.Reader
+            .ReadAllAsync(context.CancellationToken)
+            .ConfigureAwait(false))
+        {
+            yield return row;
         }
     }
 }
