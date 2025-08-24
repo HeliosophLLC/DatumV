@@ -183,6 +183,7 @@ public static class QueryExplainer
                 PruningTechnique.BloomFilterPruning => "bloom filter pruning",
                 PruningTechnique.SortedIndexPruning => "sorted index pruning",
                 PruningTechnique.ExactSeek => "exact index seek",
+                PruningTechnique.BPlusTreeIndexPruning => "B+Tree index pruning",
                 _ => pruning.Technique.ToString(),
             };
 

@@ -19,4 +19,7 @@ public enum PruningTechnique
 
     /// <summary>Bitmap index value presence test per chunk.</summary>
     BitmapPruning,
+
+    /// <summary>B+Tree index point-seek or range scan per chunk.</summary>
+    BPlusTreeIndexPruning,
 }

@@ -384,11 +384,16 @@ public sealed class QueryPlanner
                     }
 
                     // Merge join: when both sides have sorted indexes on the equi-join
-                    // key column AND a downstream operator benefits from sorted output,
-                    // use a streaming two-pointer merge instead of building a hash table.
-                    // Without a downstream sort consumer, merge join's index-ordered
-                    // random-access reads are slower than hash join's sequential scans.
-                    if (SortedJoinBenefitsDownstream(statement, join.OnCondition)
+                    // key column, prefer a streaming two-pointer merge over building a
+                    // hash table when either:
+                    //   (a) a downstream operator consumes sorted output (ORDER BY / GROUP BY
+                    //       leading column matches the join key), or
+                    //   (b) the build side is large enough that the index-ordered random-access
+                    //       cost of merge join is cheaper than allocating a multi-million-row
+                    //       hash table.  The threshold mirrors IndexConstants.BPlusTreeAutoThreshold
+                    //       — columns at that cardinality already have B+Tree indexes, so sorted
+                    //       traversal is specifically optimised for them.
+                    if (ShouldUseMergeJoin(statement, join.OnCondition, source, currentRight)
                         && TryCreateMergeJoin(source, currentRight, join.Type, join.OnCondition,
                             out MergeJoinOperator? mergeJoin))
                     {
@@ -420,7 +425,14 @@ public sealed class QueryPlanner
                             }
                         }
 
-                        source = new JoinOperator(source, currentRight, join.Type, join.OnCondition, flipped: flipped);
+                        // Prefer index nested-loop join when the planner detects a
+                        // LIMIT clause and an indexed build side. This allows NLJ to
+                        // activate without waiting for LimitOperator to propagate
+                        // context.RowLimit at runtime.
+                        bool preferIndexNestedLoop = ShouldPreferIndexNestedLoop(statement, currentRight, join);
+
+                        source = new JoinOperator(source, currentRight, join.Type, join.OnCondition,
+                            flipped: flipped, preferIndexNestedLoop: preferIndexNestedLoop);
                     }
                 }
 
@@ -1720,6 +1732,11 @@ public sealed class QueryPlanner
                     // Merge join preserves left-side ordering.
                     current = mergeJoin.Left;
                     break;
+                case JoinOperator { PreferIndexNestedLoop: true } indexNlj:
+                    // Index nested-loop join streams probe rows in left-side order,
+                    // so the output ordering is inherited from the probe (left) side.
+                    current = indexNlj.Left;
+                    break;
                 case GroupByOperator { StreamingSorted: true } groupBy:
                 {
                     // Streaming GROUP BY emits groups in key order, inheriting the
@@ -2037,9 +2054,25 @@ public sealed class QueryPlanner
     /// short-circuit.</item>
     /// </list>
     /// </remarks>
-    private static bool SortedJoinBenefitsDownstream(
+    /// <summary>
+    /// Returns <c>true</c> when a merge join is preferable to a hash join for the
+    /// current join node.  Two independent conditions each independently justify merge join:
+    /// <list type="bullet">
+    /// <item>The leading ORDER BY or GROUP BY column matches the join key so that the merge
+    /// join's sorted output eliminates a downstream <see cref="OrderByOperator"/> or enables
+    /// streaming aggregation.</item>
+    /// <item>Either side of the join has more than
+    /// <see cref="IndexConstants.BPlusTreeAutoThreshold"/> estimated rows, meaning a hash
+    /// table would need to materialise millions of rows — more expensive than the
+    /// index-ordered random-access reads used by <see cref="MergeJoinOperator"/>.</item>
+    /// </list>
+    /// When neither condition holds the hash join's sequential scan pattern is cheaper.
+    /// </summary>
+    private static bool ShouldUseMergeJoin(
         SelectStatement statement,
-        Expression? onCondition)
+        Expression? onCondition,
+        IQueryOperator leftOperator,
+        IQueryOperator rightOperator)
     {
         if (onCondition is null)
         {
@@ -2085,7 +2118,84 @@ public sealed class QueryPlanner
             }
         }
 
+        // Large-build override: when either side exceeds the B+Tree auto-threshold the
+        // cost of allocating and probing a hash table outweighs the random-access penalty
+        // of index-ordered merge join reads.  Merge join is only attempted if TryCreateMergeJoin
+        // subsequently confirms that sorted indexes actually exist on both sides.
+        long? leftRows = GetEstimatedRowCount(leftOperator);
+        long? rightRows = GetEstimatedRowCount(rightOperator);
+
+        if ((leftRows > IndexConstants.BPlusTreeAutoThreshold)
+            || (rightRows > IndexConstants.BPlusTreeAutoThreshold))
+        {
+            return true;
+        }
+
         return false;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the given join should be executed as an index
+    /// nested-loop join at plan time. Three conditions must all hold:
+    /// <list type="number">
+    /// <item>The statement has a LIMIT clause (so only a small top-N result is needed).</item>
+    /// <item>The join has a single equi-join key expressed as two simple
+    /// <see cref="ColumnReference"/> nodes.</item>
+    /// <item>The build side (right operator) is a simple scan chain whose
+    /// <see cref="ScanOperator.SourceIndex"/> contains a sorted index on the
+    /// build key column — confirming that index point-seeks are available.</item>
+    /// </list>
+    /// Join types are restricted to <see cref="JoinType.Inner"/> and
+    /// <see cref="JoinType.LeftSemi"/>; all others fall back to hash join.
+    /// </summary>
+    /// <remarks>
+    /// The seekable-provider check (<see cref="ISeekableTableProvider"/>) is
+    /// intentionally deferred to runtime inside
+    /// <see cref="JoinOperator.TryCreateIndexNestedLoopExecutor"/>.
+    /// Using <see cref="ScanOperator.SourceIndex"/> presence as the plan-time
+    /// proxy is safe because <c>.datum</c> files with an index always expose a
+    /// seekable provider.
+    /// </remarks>
+    private static bool ShouldPreferIndexNestedLoop(
+        SelectStatement statement,
+        IQueryOperator buildSide,
+        JoinClause join)
+    {
+        // NLJ only pays off when LIMIT restricts the result to a small top-N.
+        if (statement.Limit is null)
+        {
+            return false;
+        }
+
+        // Only INNER and LeftSemi joins — must match what IndexNestedLoopJoinExecutor supports.
+        if (join.Type is not (JoinType.Inner or JoinType.LeftSemi))
+        {
+            return false;
+        }
+
+        // Single equi-join key with simple column references on both sides.
+        JoinKeyExtractionResult? extraction = JoinKeyExtractor.TryExtract(join.OnCondition);
+
+        if (extraction is null
+            || extraction.KeyPairs.Count != 1
+            || extraction.KeyPairs[0].Right is not ColumnReference buildKeyRef)
+        {
+            return false;
+        }
+
+        // Build side must be a simple scan chain with a source index.
+        ScanOperator? buildScan = FindScanOperatorInChain(buildSide);
+
+        if (buildScan?.SourceIndex is null)
+        {
+            return false;
+        }
+
+        // The build key column must exist in the index.
+        string buildKeyColumn = buildKeyRef.QualifiedName ?? buildKeyRef.ColumnName;
+
+        return buildScan.SourceIndex.TryGetColumnIndex(buildKeyColumn, out _)
+            || buildScan.SourceIndex.TryGetColumnIndex(buildKeyRef.ColumnName, out _);
     }
 
     /// <summary>

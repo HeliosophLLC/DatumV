@@ -3,6 +3,7 @@ using DatumIngest.Catalog.Providers;
 using DatumIngest.Execution;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
+using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
@@ -1900,6 +1901,245 @@ public class QueryPlannerTests
     }
 
     /// <summary>
+    /// Verifies that the planner sets <see cref="JoinOperator.PreferIndexNestedLoop"/> to
+    /// <see langword="true"/> when a LIMIT clause is present and the build-side table has a
+    /// sorted value index on the equi-join key column. This is the plan-time signal that
+    /// unlocks index nested-loop join without waiting for the runtime
+    /// <see cref="ExecutionContext.RowLimit"/> hint.
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoinWithLimitAndIndexedBuildSide_SetsPreferIndexNestedLoop()
+    {
+        // Register a seekable provider so the catalog resolves it successfully.
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("seekable", () => new SeekableStubProvider());
+
+        TableDescriptor probeDescriptor = new("seekable", "probe_table", "probe.datum", new Dictionary<string, string>());
+        TableDescriptor buildDescriptor = new("seekable", "build_table", "build.datum", new Dictionary<string, string>());
+        catalog.Register(probeDescriptor);
+        catalog.Register(buildDescriptor);
+
+        // Register a sorted index on the build side's join key column.
+        SortedValueIndex sortedIndex = new([new ValueIndexEntry(DataValue.FromFloat32(1f), 0, 0)]);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["build_id"] = sortedIndex,
+        });
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(10, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("build_id", DataKind.Float32, false)]), 10),
+            [],
+            sortedIndexes: sortedIndexSet);
+
+        catalog.RegisterIndex("build_table", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("probe_table")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("build_table"),
+                    new BinaryExpression(
+                        new ColumnReference("probe_table", "probe_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("build_table", "build_id")))
+            ],
+            Limit: 100);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator? join = FindOperator<JoinOperator>(plan);
+        Assert.NotNull(join);
+        Assert.True(join.PreferIndexNestedLoop,
+            "Planner should set PreferIndexNestedLoop when LIMIT is present and build side has a sorted index on the join key.");
+    }
+
+    /// <summary>
+    /// Verifies that the planner does NOT set <see cref="JoinOperator.PreferIndexNestedLoop"/>
+    /// when there is no LIMIT clause, even if the build side has an index.
+    /// Without LIMIT the full result set is needed, so hash join is preferred.
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoinWithoutLimit_DoesNotSetPreferIndexNestedLoop()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("seekable", () => new SeekableStubProvider());
+
+        TableDescriptor probeDescriptor = new("seekable", "probe_table", "probe.datum", new Dictionary<string, string>());
+        TableDescriptor buildDescriptor = new("seekable", "build_table", "build.datum", new Dictionary<string, string>());
+        catalog.Register(probeDescriptor);
+        catalog.Register(buildDescriptor);
+
+        SortedValueIndex sortedIndex = new([new ValueIndexEntry(DataValue.FromFloat32(1f), 0, 0)]);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["build_id"] = sortedIndex,
+        });
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(10, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("build_id", DataKind.Float32, false)]), 10),
+            [],
+            sortedIndexes: sortedIndexSet);
+
+        catalog.RegisterIndex("build_table", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // No Limit clause.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("probe_table")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("build_table"),
+                    new BinaryExpression(
+                        new ColumnReference("probe_table", "probe_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("build_table", "build_id")))
+            ]);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator? join = FindOperator<JoinOperator>(plan);
+        Assert.NotNull(join);
+        Assert.False(join.PreferIndexNestedLoop,
+            "Planner must not set PreferIndexNestedLoop without a LIMIT clause.");
+    }
+
+    /// <summary>
+    /// Verifies that the planner chooses a <see cref="MergeJoinOperator"/> over a hash join
+    /// when the build side exceeds the B+Tree auto-threshold row count, even when the leading
+    /// ORDER BY / GROUP BY column does not match the join key.  At that scale the cost of
+    /// building and probing a hash table exceeds the random-access penalty of merge join.
+    /// </summary>
+    [Fact]
+    public void Plan_LargeJoinBothSidesIndexed_UsesMergeJoinWithoutOrderByAlignment()
+    {
+        TableCatalog catalog = new();
+        // Both providers report 10 M rows — above the 5 M BPlusTreeAutoThreshold.
+        catalog.RegisterProvider("seekable", () => new SeekableStubProvider(estimatedRowCount: 10_000_000));
+
+        TableDescriptor leftDescriptor = new("seekable", "left_table", "left.datum", new Dictionary<string, string>());
+        TableDescriptor rightDescriptor = new("seekable", "right_table", "right.datum", new Dictionary<string, string>());
+        catalog.Register(leftDescriptor);
+        catalog.Register(rightDescriptor);
+
+        // Register sorted indexes on the join key column for both sides.
+        SortedValueIndex sortedIndex = new([new ValueIndexEntry(DataValue.FromInt64(1L), 0, 0)]);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["join_id"] = sortedIndex,
+        });
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(10_000_000, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("join_id", DataKind.Int64, false)]), 10_000_000),
+            [],
+            sortedIndexes: sortedIndexSet);
+
+        catalog.RegisterIndex("left_table", sourceIndex);
+        catalog.RegisterIndex("right_table", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // ORDER BY is on a column that does not match the join key — would fail the old
+        // SortedJoinBenefitsDownstream check, but the large-build override must fire.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("left_table")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("right_table"),
+                    new BinaryExpression(
+                        new ColumnReference("left_table", "join_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("right_table", "join_id")))
+            ],
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("left_table", "other_col"), SortDirection.Ascending)
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<MergeJoinOperator>(FindOperator<MergeJoinOperator>(plan));
+    }
+
+    /// <summary>
+    /// Verifies that the planner keeps a hash join when both sides are small (below the
+    /// B+Tree auto-threshold) and the ORDER BY leading column does not match the join key.
+    /// For small tables, hash join's sequential-scan pattern is cheaper than the
+    /// random-access reads used by merge join.
+    /// </summary>
+    [Fact]
+    public void Plan_SmallJoinNoOrderByAlignment_UsesHashJoinNotMergeJoin()
+    {
+        TableCatalog catalog = new();
+        // Both providers report 100 rows — well below the 5 M BPlusTreeAutoThreshold.
+        catalog.RegisterProvider("seekable", () => new SeekableStubProvider(estimatedRowCount: 100));
+
+        TableDescriptor leftDescriptor = new("seekable", "small_left", "small_left.datum", new Dictionary<string, string>());
+        TableDescriptor rightDescriptor = new("seekable", "small_right", "small_right.datum", new Dictionary<string, string>());
+        catalog.Register(leftDescriptor);
+        catalog.Register(rightDescriptor);
+
+        SortedValueIndex sortedIndex = new([new ValueIndexEntry(DataValue.FromInt64(1L), 0, 0)]);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["join_id"] = sortedIndex,
+        });
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("join_id", DataKind.Int64, false)]), 100),
+            [],
+            sortedIndexes: sortedIndexSet);
+
+        catalog.RegisterIndex("small_left", sourceIndex);
+        catalog.RegisterIndex("small_right", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("small_left")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("small_right"),
+                    new BinaryExpression(
+                        new ColumnReference("small_left", "join_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("small_right", "join_id")))
+            ],
+            OrderBy: new OrderByClause(
+            [
+                new OrderByItem(new ColumnReference("small_left", "other_col"), SortDirection.Ascending)
+            ]));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Merge join must NOT be chosen — hash join is cheaper for small tables.
+        Assert.Null(FindOperator<MergeJoinOperator>(plan));
+        Assert.NotNull(FindOperator<JoinOperator>(plan));
+    }
+
+    /// <summary>
     /// INNER JOINs should never be flipped (handled by TryReorderJoins instead).
     /// </summary>
     [Fact]
@@ -2040,5 +2280,54 @@ internal sealed class StubRowCountProvider : ITableProvider
             EstimatedRowSizeBytes: null,
             SupportsSeek: false,
             ColumnCosts: new Dictionary<string, ColumnCost>()));
+    }
+}
+
+/// <summary>
+/// A minimal seekable <see cref="ISeekableTableProvider"/> for planner tests
+/// that need a provider capable of index-based row reads. Produces no rows.
+/// </summary>
+internal sealed class SeekableStubProvider : ISeekableTableProvider
+{
+    private readonly long _estimatedRowCount;
+
+    internal SeekableStubProvider(long estimatedRowCount = 10)
+    {
+        _estimatedRowCount = estimatedRowCount;
+    }
+
+    public Task<Schema> GetSchemaAsync(
+        TableDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new Schema([]));
+    }
+
+    public IAsyncEnumerable<Row> OpenAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        CancellationToken cancellationToken)
+    {
+        return AsyncEnumerable.Empty<Row>();
+    }
+
+    public Task<ProviderCapabilities> GetCapabilitiesAsync(
+        TableDescriptor descriptor,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(new ProviderCapabilities(
+            EstimatedRowCount: _estimatedRowCount,
+            EstimatedRowSizeBytes: null,
+            SupportsSeek: true,
+            ColumnCosts: new Dictionary<string, ColumnCost>()));
+    }
+
+    public IAsyncEnumerable<Row> ReadRowRangeAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        long startRow,
+        int count,
+        CancellationToken cancellationToken)
+    {
+        return AsyncEnumerable.Empty<Row>();
     }
 }

@@ -23,6 +23,7 @@ public sealed class JoinOperator : IQueryOperator
     private readonly Expression? _onCondition;
     private readonly bool _nullSensitiveAntiSemi;
     private readonly bool _flipped;
+    private readonly bool _preferIndexNestedLoop;
 
     /// <summary>
     /// Creates a join operator.
@@ -41,13 +42,21 @@ public sealed class JoinOperator : IQueryOperator
     /// smaller side (left) is materialized into the hash table while the larger side
     /// (right) is streamed. Output column order is preserved as [left | right].
     /// </param>
+    /// <param name="preferIndexNestedLoop">
+    /// When <c>true</c>, the planner has determined at plan time that an index
+    /// nested-loop join is preferred for this join (indexed build side + LIMIT
+    /// detected). The <see cref="ExecutionContext.RowLimit"/> runtime guard is bypassed so the
+    /// executor activates even before the <see cref="LimitOperator"/> propagates
+    /// its context downstream.
+    /// </param>
     public JoinOperator(
         IQueryOperator left,
         IQueryOperator right,
         JoinType joinType,
         Expression? onCondition,
         bool nullSensitiveAntiSemi = false,
-        bool flipped = false)
+        bool flipped = false,
+        bool preferIndexNestedLoop = false)
     {
         _left = left;
         _right = right;
@@ -55,6 +64,7 @@ public sealed class JoinOperator : IQueryOperator
         _onCondition = onCondition;
         _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
         _flipped = flipped;
+        _preferIndexNestedLoop = preferIndexNestedLoop;
     }
 
     /// <summary>The left (probe) side operator.</summary>
@@ -82,6 +92,15 @@ public sealed class JoinOperator : IQueryOperator
     /// (right) is streamed. Output column order is preserved as [left | right].
     /// </summary>
     public bool Flipped => _flipped;
+
+    /// <summary>
+    /// When <c>true</c>, the planner has flagged this join for index nested-loop
+    /// execution at plan time. The runtime <see cref="ExecutionContext.RowLimit"/>
+    /// guard in <see cref="TryCreateIndexNestedLoopExecutor"/> is bypassed so NLJ
+    /// activates regardless of whether a <see cref="LimitOperator"/> has propagated
+    /// its context hint yet.
+    /// </summary>
+    public bool PreferIndexNestedLoop => _preferIndexNestedLoop;
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
@@ -121,6 +140,11 @@ public sealed class JoinOperator : IQueryOperator
         if (_flipped)
         {
             properties["flipped"] = "true";
+        }
+
+        if (_preferIndexNestedLoop)
+        {
+            properties["index-nested-loop"] = "true";
         }
 
         return new OperatorPlanDescription($"{joinTypeName} Join")
@@ -221,10 +245,14 @@ public sealed class JoinOperator : IQueryOperator
         JoinKeyExtractionResult extraction, ExecutionContext context)
     {
         // Only use index NLJ when a LIMIT is active and small enough that
-        // point-seeks are cheaper than building a full hash table.
+        // point-seeks are cheaper than building a full hash table — unless the
+        // planner has already determined at plan time that NLJ is preferred
+        // (PreferIndexNestedLoop), in which case the runtime RowLimit hint is
+        // not required.
         const int IndexNestedLoopRowLimitThreshold = 1000;
 
-        if (context.RowLimit is not int rowLimit || rowLimit > IndexNestedLoopRowLimitThreshold)
+        if (!_preferIndexNestedLoop
+            && (context.RowLimit is not int rowLimit || rowLimit > IndexNestedLoopRowLimitThreshold))
         {
             return null;
         }

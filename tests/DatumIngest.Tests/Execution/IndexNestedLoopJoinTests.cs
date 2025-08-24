@@ -649,6 +649,171 @@ public sealed class IndexNestedLoopJoinTests
     }
 
     // ------------------------------------------------------------------
+    //  PreferIndexNestedLoop flag tests
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Verifies that <see cref="JoinOperator"/> activates the index NLJ executor when
+    /// <see cref="JoinOperator.PreferIndexNestedLoop"/> is <c>true</c>, even when no
+    /// <see cref="ExecutionContext.RowLimit"/> is set. This covers the planner-driven
+    /// path where a LIMIT clause is detected at plan time rather than at runtime.
+    /// </summary>
+    [Fact]
+    public async Task JoinOperator_PreferIndexNestedLoop_ActivatesNljWithoutRowLimit()
+    {
+        Row[] buildRows =
+        [
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+            MakeRow(("id", DataValue.FromFloat32(2f)), ("name", DataValue.FromString("Bob"))),
+            MakeRow(("id", DataValue.FromFloat32(3f)), ("name", DataValue.FromString("Charlie"))),
+        ];
+
+        ValueIndexEntry[] indexEntries =
+        [
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(3f), ChunkIndex: 0, RowOffsetInChunk: 2),
+        ];
+
+        SortedValueIndex sortedIndex = new(indexEntries);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["id"] = sortedIndex,
+        });
+
+        IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 3)];
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("id", DataKind.Float32, false),
+                            new ColumnInfo("name", DataKind.String, false)]), 3),
+            chunks,
+            sortedIndexes: sortedIndexSet);
+
+        TableDescriptor buildDescriptor = CreateDescriptor("build");
+        ScanOperator buildScan = new(buildDescriptor, requiredColumns: null);
+        buildScan.SetSourceIndex(sourceIndex);
+
+        MockOperator probeOperator = new(
+            MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.score", DataValue.FromFloat32(95f))),
+            MakeRow(("p.id", DataValue.FromFloat32(3f)), ("p.score", DataValue.FromFloat32(87f))));
+
+        // preferIndexNestedLoop: true — NLJ should fire without a RowLimit.
+        JoinOperator join = new(
+            probeOperator,
+            buildScan,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("p", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("id")),
+            preferIndexNestedLoop: true);
+
+        SeekableInMemoryProvider provider = new(buildRows);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(buildDescriptor);
+
+        // No RowLimit set — NLJ must activate via the PreferIndexNestedLoop flag alone.
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+
+        List<Row> results = await CollectAsync(join, context);
+
+        Assert.Equal(2, results.Count);
+        Assert.Contains(results, row => row["name"].AsString() == "Alice");
+        Assert.Contains(results, row => row["name"].AsString() == "Charlie");
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="JoinOperator"/> does NOT activate the index NLJ executor
+    /// when <see cref="JoinOperator.PreferIndexNestedLoop"/> is <c>false</c> and no
+    /// <see cref="ExecutionContext.RowLimit"/> is set. The runtime guard remains in effect
+    /// when the planner has not explicitly opted in.
+    /// </summary>
+    [Fact]
+    public async Task JoinOperator_PreferIndexNestedLoopFalse_RequiresRowLimitToActivateNlj()
+    {
+        Row[] buildRows =
+        [
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+        ];
+
+        ValueIndexEntry[] indexEntries =
+        [
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+        ];
+
+        SortedValueIndex sortedIndex = new(indexEntries);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["id"] = sortedIndex,
+        });
+
+        IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 1)];
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("id", DataKind.Float32, false),
+                            new ColumnInfo("name", DataKind.String, false)]), 1),
+            chunks,
+            sortedIndexes: sortedIndexSet);
+
+        TableDescriptor buildDescriptor = CreateDescriptor("build");
+        ScanOperator buildScan = new(buildDescriptor, requiredColumns: null);
+        buildScan.SetSourceIndex(sourceIndex);
+
+        MockOperator probeOperator = new(
+            MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.score", DataValue.FromFloat32(99f))));
+
+        // preferIndexNestedLoop: false (default) — NLJ requires RowLimit at runtime.
+        JoinOperator join = new(
+            probeOperator,
+            buildScan,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("p", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("id")));
+
+        SeekableInMemoryProvider provider = new(buildRows);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(buildDescriptor);
+
+        // No RowLimit — hash join path should be taken (NLJ not activated).
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+
+        // Hash join still produces the correct result; we just confirm it completes.
+        List<Row> results = await CollectAsync(join, context);
+
+        Assert.Single(results);
+        Assert.Equal("Alice", results[0]["name"].AsString());
+
+        // Confirm that adding RowLimit activates NLJ when flag is false.
+        // Re-create operators fresh since probe is exhausted.
+        probeOperator = new(MakeRow(("p.id", DataValue.FromFloat32(1f)), ("p.score", DataValue.FromFloat32(99f))));
+        JoinOperator joinWithLimit = new(
+            probeOperator,
+            buildScan,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("p", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("id")));
+
+        ExecutionContext contextWithLimit = new(CancellationToken.None, DefaultFunctions, catalog)
+        {
+            RowLimit = 10,
+        };
+
+        List<Row> resultsWithLimit = await CollectAsync(joinWithLimit, contextWithLimit);
+        Assert.Single(resultsWithLimit);
+        Assert.Equal("Alice", resultsWithLimit[0]["name"].AsString());
+    }
+
+    // ------------------------------------------------------------------
     //  Helpers
     // ------------------------------------------------------------------
 

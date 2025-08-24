@@ -188,6 +188,16 @@ public sealed class ScanOperator : IQueryOperator
                 PruningTechnique.BitmapPruning, [.. bitmapIndexes.ColumnNames], pendingRuntime: false));
         }
 
+        if (_sourceIndex?.BPlusTreeIndexes is { } bPlusTreeIndexes)
+        {
+            List<string> btreeColumns = [.. bPlusTreeIndexes.ColumnNames];
+            if (btreeColumns.Count > 0)
+            {
+                pruningCapabilities.Add(new PruningCapability(
+                    PruningTechnique.BPlusTreeIndexPruning, btreeColumns, pendingRuntime: false));
+            }
+        }
+
         AccessStrategyDescription accessStrategy = new(
             AccessMethod.TableScan,
             pruningCapabilities.Count > 0 ? pruningCapabilities : null);
