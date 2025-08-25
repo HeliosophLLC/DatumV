@@ -71,3 +71,66 @@ public readonly struct CompositeKey : IEquatable<CompositeKey>
     /// <inheritdoc/>
     public static bool operator !=(CompositeKey left, CompositeKey right) => !left.Equals(right);
 }
+
+/// <summary>
+/// Combined equality comparer for <see cref="CompositeKey"/> that also implements
+/// <see cref="IAlternateEqualityComparer{TAlternate, TKey}"/> for
+/// <c>ReadOnlySpan&lt;DataValue&gt;</c>.
+/// Pass this comparer to a <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>
+/// constructor and then call <c>GetAlternateLookup&lt;ReadOnlySpan&lt;DataValue&gt;&gt;()</c>
+/// to probe the dictionary with a reusable scratch buffer — eliminating the per-row
+/// <see cref="DataValue"/> array heap allocation that a plain <c>new CompositeKey(...)</c>
+/// lookup would otherwise incur on every probe row.
+/// </summary>
+internal sealed class CompositeKeyComparer
+    : IEqualityComparer<CompositeKey>,
+      IAlternateEqualityComparer<ReadOnlySpan<DataValue>, CompositeKey>
+{
+    /// <summary>The singleton instance. Stateless and thread-safe.</summary>
+    internal static readonly CompositeKeyComparer Instance = new();
+
+    private CompositeKeyComparer() { }
+
+    /// <inheritdoc/>
+    public bool Equals(CompositeKey x, CompositeKey y) => x.Equals(y);
+
+    /// <inheritdoc/>
+    public int GetHashCode(CompositeKey obj) => obj.GetHashCode();
+
+    /// <inheritdoc/>
+    public bool Equals(ReadOnlySpan<DataValue> alternate, CompositeKey other)
+    {
+        ReadOnlySpan<DataValue> otherValues = other.Values;
+
+        if (alternate.Length != otherValues.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < alternate.Length; i++)
+        {
+            if (!alternate[i].Equals(otherValues[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public int GetHashCode(ReadOnlySpan<DataValue> alternate)
+    {
+        HashCode hash = new();
+
+        for (int i = 0; i < alternate.Length; i++)
+        {
+            hash.Add(alternate[i]);
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <inheritdoc/>
+    public CompositeKey Create(ReadOnlySpan<DataValue> alternate) => new(alternate.ToArray());
+}

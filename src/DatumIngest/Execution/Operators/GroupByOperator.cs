@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using DatumIngest.Diagnostics;
@@ -225,7 +226,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         Dictionary<DataValue, GroupState>? singleKeyGroups =
             useSingleKey ? new() : null;
         Dictionary<CompositeKey, GroupState>? compositeKeyGroups =
-            !useSingleKey && !isGlobalAggregation ? new() : null;
+            !useSingleKey && !isGlobalAggregation
+                ? new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance)
+                : null;
 
         // For global aggregation (no GROUP BY), use a single group.
         GroupState? globalGroup = isGlobalAggregation ? CreateGroupState() : null;
@@ -246,6 +249,20 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         // Tracks the spill row schema — built once on the first row that triggers spill.
         SpillSchemaState spillSchema = new();
 
+        // A single buffer rented once per execution and reused for every composite-key row.
+        // GetAlternateLookup<ReadOnlySpan<DataValue>> probes the dictionary directly from this
+        // buffer, avoiding the per-row DataValue[] heap allocation that a plain
+        // new CompositeKey(keyValues) lookup would otherwise incur on every probe row.
+        int keyCount = _groupByExpressions.Count;
+        DataValue[]? compositeKeyScratch = (!useSingleKey && !isGlobalAggregation)
+            ? ArrayPool<DataValue>.Shared.Rent(keyCount)
+            : null;
+        Dictionary<CompositeKey, GroupState>.AlternateLookup<ReadOnlySpan<DataValue>> compositeKeyLookup = default;
+        if (compositeKeyGroups is not null)
+        {
+            compositeKeyLookup = compositeKeyGroups.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+        }
+
         try
         {
             await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
@@ -254,7 +271,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 context.QueryMeter?.ThrowIfExceeded();
 
                 // Evaluate group keys.
-                DataValue[]? keyValues = null;
                 DataValue singleKey = default;
 
                 if (isGlobalAggregation)
@@ -267,10 +283,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
                 else
                 {
-                    keyValues = new DataValue[_groupByExpressions.Count];
-                    for (int index = 0; index < _groupByExpressions.Count; index++)
+                    // Write directly into the reusable scratch buffer; no heap allocation.
+                    for (int index = 0; index < keyCount; index++)
                     {
-                        keyValues[index] = evaluator.Evaluate(_groupByExpressions[index], row);
+                        compositeKeyScratch![index] = evaluator.Evaluate(_groupByExpressions[index], row);
                     }
                 }
 
@@ -282,9 +298,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     // Already spilling — write to a partition file based on the group key hash.
                     int hashCode = useSingleKey
                         ? singleKey.GetHashCode()
-                        : new CompositeKey(keyValues!).GetHashCode();
+                        : CompositeKeyComparer.Instance.GetHashCode(
+                            compositeKeyScratch!.AsSpan(0, keyCount));
 
-                    WriteSpillRow(hashCode, useSingleKey ? [singleKey] : keyValues!,
+                    WriteSpillRow(
+                        hashCode,
+                        useSingleKey ? [singleKey] : compositeKeyScratch!.AsSpan(0, keyCount).ToArray(),
                         allArguments, allSortKeys, spillWriters!, spillSchemaWritten!, spillPaths!,
                         spillSchema, _spillDirectory!);
 
@@ -300,7 +319,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        compositeKeyGroups!.TryGetValue(new CompositeKey(keyValues!), out existingGroup);
+                        compositeKeyLookup.TryGetValue(
+                            compositeKeyScratch!.AsSpan(0, keyCount), out existingGroup);
                     }
 
                     if (existingGroup is not null)
@@ -328,13 +348,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        CompositeKey compositeKey = new(keyValues!);
-
-                        if (!compositeKeyGroups!.TryGetValue(compositeKey, out group!))
+                        // Hot path: probe with span — zero allocation on a cache hit.
+                        if (!compositeKeyLookup.TryGetValue(
+                            compositeKeyScratch!.AsSpan(0, keyCount), out group!))
                         {
+                            // New group — copy scratch into permanent storage only on a miss.
+                            DataValue[] permanentKey = compositeKeyScratch.AsSpan(0, keyCount).ToArray();
+                            CompositeKey compositeKey = new(permanentKey);
                             group = CreateGroupState();
-                            group.KeyValues = keyValues;
-                            compositeKeyGroups[compositeKey] = group;
+                            group.KeyValues = permanentKey;
+                            compositeKeyGroups![compositeKey] = group;
                         }
                     }
 
@@ -431,6 +454,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         finally
         {
             CleanupSpillFiles(spillWriters);
+
+            if (compositeKeyScratch is not null)
+            {
+                ArrayPool<DataValue>.Shared.Return(compositeKeyScratch);
+            }
         }
     }
 
@@ -620,7 +648,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 new Dictionary<CompositeKey, GroupState>[useSingleKey ? 0 : workerCount];
             for (int i = 0; i < compositeKeyTables.Length; i++)
             {
-                compositeKeyTables[i] = new();
+                compositeKeyTables[i] = new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance);
             }
 
             // Per-worker spill infrastructure. Workers own disjoint key partitions so their
