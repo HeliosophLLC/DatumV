@@ -719,6 +719,7 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
         CancellationToken.None,
         functionRegistry,
         catalog,
+        new RowBufferPool(),
         memoryBudgetBytes: options.MemoryBudgetBytes)
     {
         DegreeOfParallelism = Environment.ProcessorCount,
@@ -831,6 +832,7 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
         progress.WriteSummary();
     }
 
+    context.RowBufferPool.DumpStats();
     return 0;
 }
 
@@ -842,7 +844,8 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
-        catalog);
+        catalog,
+        new RowBufferPool());
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
@@ -880,7 +883,8 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
-        catalog);
+        catalog,
+        new RowBufferPool());
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
@@ -930,7 +934,8 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
         ExecutionContext context = new(
             CancellationToken.None,
             functionRegistry,
-            catalog);
+            catalog,
+            new RowBufferPool());
 
         // Consume all rows to collect timing.
         await foreach (Row _ in instrumentedRoot.ExecuteAsync(context))
@@ -952,7 +957,8 @@ static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog cata
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
-        catalog);
+        catalog,
+        new RowBufferPool());
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

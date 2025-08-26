@@ -770,7 +770,7 @@ public sealed class ScalarSubqueryTests
         ExecutionContext context = new(
             CancellationToken.None,
             DefaultFunctions,
-            catalog);
+            catalog, new RowBufferPool());
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

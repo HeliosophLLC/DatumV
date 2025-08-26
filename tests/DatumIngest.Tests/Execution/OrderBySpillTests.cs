@@ -290,6 +290,7 @@ public sealed class OrderBySpillTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
+            new RowBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes);
     }
 

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections;
 using System.Threading.Channels;
 using DatumIngest.Catalog;
@@ -355,7 +356,8 @@ public sealed class JoinOperator : IQueryOperator
         Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable =
             useSingleKey ? new() : null;
         Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable =
-            useSingleKey ? null : new();
+            useSingleKey ? null
+            : new Dictionary<CompositeKey, List<(int Index, Row Row)>>(CompositeKeyComparer.Instance);
 
         List<Row> buildRows = new();
         bool hasNullKey = false;
@@ -451,6 +453,30 @@ public sealed class JoinOperator : IQueryOperator
         CombinedRowSchema? schema = null;
         Row? cachedNullBuild = null;
 
+        // Rent a reusable scratch buffer for composite-key probes so that every
+        // probe row reuses the same DataValue[] instead of allocating a fresh one.
+        // The AlternateLookup probes the dictionary directly from the span, avoiding
+        // the per-row CompositeKey heap allocation.
+        int keyCount = keyPairs.Count;
+        DataValue[]? probeKeyScratch = (!useSingleKey)
+            ? ArrayPool<DataValue>.Shared.Rent(keyCount)
+            : null;
+        Dictionary<CompositeKey, List<(int Index, Row Row)>>.AlternateLookup<ReadOnlySpan<DataValue>>
+            compositeKeyLookup = default;
+        if (compositeKeyTable is not null)
+        {
+            compositeKeyLookup = compositeKeyTable.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+        }
+
+        // Pool for combined-row DataValue[] buffers. Buffers are returned by the
+        // downstream consumer (e.g. GroupByOperator) after it has extracted all
+        // needed values, not by this operator.
+        RowBufferPool bufferPool = context.RowBufferPool;
+        Row? residualCheckRow = null;
+        DataValue[]? residualCheckBuffer = null;
+
+        try
+        {
         await foreach (Row probeRow in probeSource.ExecuteAsync(context).ConfigureAwait(false))
         {
             // For null-sensitive anti-semi (NOT IN), NULL probe keys are excluded.
@@ -464,8 +490,8 @@ public sealed class JoinOperator : IQueryOperator
                 }
                 else
                 {
-                    DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
-                    probeKeyIsNull = HasNull(parts);
+                    EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
+                    probeKeyIsNull = HasNull(probeKeyScratch.AsSpan(0, keyCount));
                 }
 
                 if (probeKeyIsNull)
@@ -488,11 +514,11 @@ public sealed class JoinOperator : IQueryOperator
             }
             else
             {
-                DataValue[] parts = EvaluateKeyParts(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
-                if (!HasNull(parts))
+                // Reuse the scratch buffer and probe via AlternateLookup — zero allocation per row.
+                EvaluateKeyPartsInto(evaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, probeKeyScratch!);
+                if (!HasNull(probeKeyScratch.AsSpan(0, keyCount)))
                 {
-                    CompositeKey compositeKey = new(parts);
-                    compositeKeyTable!.TryGetValue(compositeKey, out matches);
+                    compositeKeyLookup.TryGetValue(probeKeyScratch.AsSpan(0, keyCount), out matches);
                 }
             }
 
@@ -508,8 +534,13 @@ public sealed class JoinOperator : IQueryOperator
                     if (extraction.Residual is not null)
                     {
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        Row combinedRow = schema.Combine(leftRow, rightRow);
-                        if (!evaluator.EvaluateAsBoolean(extraction.Residual, combinedRow))
+                        if (residualCheckRow is null)
+                        {
+                            (residualCheckRow, residualCheckBuffer) = schema.CreateReusableRow();
+                        }
+
+                        schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
+                        if (!evaluator.EvaluateAsBoolean(extraction.Residual, residualCheckRow))
                         {
                             continue;
                         }
@@ -533,7 +564,7 @@ public sealed class JoinOperator : IQueryOperator
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                     }
 
-                    yield return schema!.Combine(leftRow, rightRow);
+                    yield return schema!.CombinePooled(leftRow, rightRow, bufferPool);
                 }
             }
 
@@ -555,12 +586,20 @@ public sealed class JoinOperator : IQueryOperator
                     Row leftRow = _flipped ? cachedNullBuild : probeRow;
                     Row rightRow = _flipped ? probeRow : cachedNullBuild;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    yield return schema.Combine(leftRow, rightRow);
+                    yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
                 }
                 else
                 {
                     yield return probeRow;
                 }
+            }
+        }
+        }
+        finally
+        {
+            if (probeKeyScratch is not null)
+            {
+                ArrayPool<DataValue>.Shared.Return(probeKeyScratch);
             }
         }
 
@@ -667,6 +706,20 @@ public sealed class JoinOperator : IQueryOperator
 
             // Probe workers: each reads from the shared input channel, evaluates the
             // join key, probes the hash table, and writes matched rows to the output.
+            // Each worker rents its own scratch buffer for composite-key probes.
+            int keyCount = keyPairs.Count;
+            Dictionary<CompositeKey, List<(int Index, Row Row)>>.AlternateLookup<ReadOnlySpan<DataValue>>
+                compositeKeyLookup = default;
+            if (compositeKeyTable is not null)
+            {
+                compositeKeyLookup = compositeKeyTable.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+            }
+
+            // Shared buffer pool from the execution context. Workers rent from
+            // the pool when producing combined rows; the downstream consumer
+            // (e.g. GroupByOperator) returns buffers after processing each row.
+            RowBufferPool bufferPool = context.RowBufferPool;
+
             Task[] workers = new Task[workerCount];
             for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
             {
@@ -675,7 +728,15 @@ public sealed class JoinOperator : IQueryOperator
                     ExpressionEvaluator workerEvaluator = new(
                         context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                     CombinedRowSchema? workerSchema = null;
+                    Row? workerResidualRow = null;
+                    DataValue[]? workerResidualBuffer = null;
 
+                    DataValue[]? workerKeyScratch = (!useSingleKey)
+                        ? ArrayPool<DataValue>.Shared.Rent(keyCount)
+                        : null;
+
+                    try
+                    {
                     await foreach (Row probeRow in probeInput.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
                     {
                         // NOT IN null semantics: NULL probe keys are excluded.
@@ -689,9 +750,9 @@ public sealed class JoinOperator : IQueryOperator
                             }
                             else
                             {
-                                DataValue[] parts = EvaluateKeyParts(
-                                    workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
-                                probeKeyIsNull = HasNull(parts);
+                                EvaluateKeyPartsInto(
+                                    workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, workerKeyScratch!);
+                                probeKeyIsNull = HasNull(workerKeyScratch.AsSpan(0, keyCount));
                             }
 
                             if (probeKeyIsNull)
@@ -714,12 +775,11 @@ public sealed class JoinOperator : IQueryOperator
                         }
                         else
                         {
-                            DataValue[] parts = EvaluateKeyParts(
-                                workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight);
-                            if (!HasNull(parts))
+                            EvaluateKeyPartsInto(
+                                workerEvaluator, keyPairs, probeRow, rightSide: !buildKeyIsRight, workerKeyScratch!);
+                            if (!HasNull(workerKeyScratch.AsSpan(0, keyCount)))
                             {
-                                CompositeKey compositeKey = new(parts);
-                                compositeKeyTable!.TryGetValue(compositeKey, out matches);
+                                compositeKeyLookup.TryGetValue(workerKeyScratch.AsSpan(0, keyCount), out matches);
                             }
                         }
 
@@ -733,8 +793,13 @@ public sealed class JoinOperator : IQueryOperator
                                 if (extraction.Residual is not null)
                                 {
                                     workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                                    Row combinedRow = workerSchema.Combine(leftRow, rightRow);
-                                    if (!workerEvaluator.EvaluateAsBoolean(extraction.Residual, combinedRow))
+                                    if (workerResidualRow is null)
+                                    {
+                                        (workerResidualRow, workerResidualBuffer) = workerSchema.CreateReusableRow();
+                                    }
+
+                                    workerSchema.CombineInto(leftRow, rightRow, workerResidualBuffer!);
+                                    if (!workerEvaluator.EvaluateAsBoolean(extraction.Residual, workerResidualRow))
                                     {
                                         continue;
                                     }
@@ -753,7 +818,7 @@ public sealed class JoinOperator : IQueryOperator
                                 }
 
                                 await output.Writer.WriteAsync(
-                                    workerSchema!.Combine(leftRow, rightRow), cancellationToken).ConfigureAwait(false);
+                                    workerSchema!.CombinePooled(leftRow, rightRow, bufferPool), cancellationToken).ConfigureAwait(false);
                             }
                         }
 
@@ -773,12 +838,20 @@ public sealed class JoinOperator : IQueryOperator
                                 Row rightRow = _flipped ? probeRow : nullBuildRow;
                                 workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                                 await output.Writer.WriteAsync(
-                                    workerSchema.Combine(leftRow, rightRow), cancellationToken).ConfigureAwait(false);
+                                    workerSchema.CombinePooled(leftRow, rightRow, bufferPool), cancellationToken).ConfigureAwait(false);
                             }
                             else
                             {
                                 await output.Writer.WriteAsync(probeRow, cancellationToken).ConfigureAwait(false);
                             }
+                        }
+                    }
+                    }
+                    finally
+                    {
+                        if (workerKeyScratch is not null)
+                        {
+                            ArrayPool<DataValue>.Shared.Return(workerKeyScratch);
                         }
                     }
                 }, cancellationToken);
@@ -1000,19 +1073,49 @@ public sealed class JoinOperator : IQueryOperator
         bool rightSide)
     {
         DataValue[] parts = new DataValue[keyPairs.Count];
+        EvaluateKeyPartsInto(evaluator, keyPairs, row, rightSide, parts);
+        return parts;
+    }
+
+    /// <summary>
+    /// Evaluates the key expressions for a single row into a caller-provided buffer,
+    /// avoiding the per-row <see cref="DataValue"/> array heap allocation that the
+    /// array-returning <see cref="EvaluateKeyParts"/> overload would otherwise incur.
+    /// </summary>
+    private static void EvaluateKeyPartsInto(
+        ExpressionEvaluator evaluator,
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
+        Row row,
+        bool rightSide,
+        DataValue[] destination)
+    {
         for (int index = 0; index < keyPairs.Count; index++)
         {
             Expression expression = rightSide ? keyPairs[index].Right : keyPairs[index].Left;
-            parts[index] = evaluator.Evaluate(expression, row);
+            destination[index] = evaluator.Evaluate(expression, row);
         }
-
-        return parts;
     }
 
     /// <summary>
     /// Returns true if any element in the array is null. NULL keys never match in SQL semantics.
     /// </summary>
     private static bool HasNull(DataValue[] parts)
+    {
+        for (int index = 0; index < parts.Length; index++)
+        {
+            if (parts[index].IsNull)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true if any element in the span is null. NULL keys never match in SQL semantics.
+    /// </summary>
+    private static bool HasNull(ReadOnlySpan<DataValue> parts)
     {
         for (int index = 0; index < parts.Length; index++)
         {
@@ -1162,6 +1265,61 @@ public sealed class JoinOperator : IQueryOperator
             }
 
             return new Row(_names, values, _nameIndex);
+        }
+
+        /// <summary>
+        /// Fills the target array with combined values from left and right rows.
+        /// No heap allocation occurs; the caller provides the buffer.
+        /// </summary>
+        internal void CombineInto(Row left, Row right, DataValue[] target)
+        {
+            for (int index = 0; index < _leftFieldCount; index++)
+            {
+                target[index] = left[index];
+            }
+
+            for (int index = 0; index < _names.Length - _leftFieldCount; index++)
+            {
+                target[_leftFieldCount + index] = right[index];
+            }
+        }
+
+        /// <summary>
+        /// Combines two rows, renting the entire <see cref="Row"/> object (including
+        /// its backing <see cref="DataValue"/> array) from <paramref name="bufferPool"/>
+        /// to avoid per-row heap allocation. The downstream consumer returns the row
+        /// via <see cref="RowBufferPool.ReturnRow"/> when it is no longer needed.
+        /// </summary>
+        internal Row CombinePooled(Row left, Row right, RowBufferPool bufferPool)
+        {
+            Row row = bufferPool.RentRow(_names.Length);
+            row.UpdateSchema(_names, _nameIndex);
+            DataValue[] values = row.RawValues;
+
+            for (int index = 0; index < _leftFieldCount; index++)
+            {
+                values[index] = left[index];
+            }
+
+            for (int index = 0; index < _names.Length - _leftFieldCount; index++)
+            {
+                values[_leftFieldCount + index] = right[index];
+            }
+
+            return row;
+        }
+
+        /// <summary>
+        /// Creates a reusable row-plus-buffer pair for scenarios where the same
+        /// row is filled repeatedly (e.g. residual filter evaluation). The caller
+        /// keeps the buffer reference and calls <see cref="CombineInto"/> to
+        /// overwrite its contents before each use.
+        /// </summary>
+        internal (Row Row, DataValue[] Buffer) CreateReusableRow()
+        {
+            DataValue[] buffer = new DataValue[_names.Length];
+            Row row = new(_names, buffer, _nameIndex);
+            return (row, buffer);
         }
     }
 

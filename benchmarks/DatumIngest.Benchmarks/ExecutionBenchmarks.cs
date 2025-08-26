@@ -81,7 +81,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse("SELECT * FROM data");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -96,7 +96,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse("SELECT id, name, value FROM data WHERE value > 500");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -111,7 +111,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse("SELECT id, name FROM data");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -127,7 +127,7 @@ public class ExecutionBenchmarks
             "SELECT a.id, a.name, b.description FROM data AS a INNER JOIN lookup AS b ON a.id = b.lookup_id");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -142,7 +142,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse("SELECT id, name, value FROM data ORDER BY value DESC LIMIT 100");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -157,7 +157,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse(
             "SELECT id, name FROM data WHERE id IN (SELECT lookup_id FROM lookup WHERE weight > 25)");
         QueryPlanner planner = new(catalog, functions);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -174,7 +174,7 @@ public class ExecutionBenchmarks
             "SELECT data.id, data.name FROM data " +
             "WHERE EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id AND weight > 25)");
         QueryPlanner planner = new(catalog, functions);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -191,7 +191,7 @@ public class ExecutionBenchmarks
             "SELECT data.id, data.name FROM data " +
             "WHERE NOT EXISTS (SELECT 1 FROM lookup WHERE lookup.lookup_id = data.id)");
         QueryPlanner planner = new(catalog, functions);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -207,7 +207,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse(
             "SELECT data.id, data.name, (SELECT MAX(weight) FROM lookup WHERE lookup.lookup_id = data.id) AS max_weight FROM data");
         QueryPlanner planner = new(catalog, functions);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         await foreach (Row _ in root.ExecuteAsync(context))
@@ -223,7 +223,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse("SELECT DISTINCT category FROM data");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -238,7 +238,7 @@ public class ExecutionBenchmarks
         QueryExpression query = SqlParser.Parse("SELECT DISTINCT id, category FROM data");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -254,7 +254,7 @@ public class ExecutionBenchmarks
             "SELECT category, COUNT(DISTINCT name) AS unique_names FROM data GROUP BY category");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -270,7 +270,7 @@ public class ExecutionBenchmarks
             "WITH filtered AS (SELECT id, name, value FROM data WHERE value > 500) SELECT id, name FROM filtered");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -287,7 +287,7 @@ public class ExecutionBenchmarks
             "SELECT a.category, a.avg_val, b.cnt FROM stats AS a INNER JOIN stats AS b ON a.category = b.category");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -305,7 +305,7 @@ public class ExecutionBenchmarks
             "SELECT id, name FROM top_high");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -321,7 +321,7 @@ public class ExecutionBenchmarks
             "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM seq WHERE n < 100) SELECT n FROM seq");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -337,7 +337,7 @@ public class ExecutionBenchmarks
             "WITH RECURSIVE seq AS (SELECT 1 AS n UNION ALL SELECT n + 1 AS n FROM seq WHERE n < 1000) SELECT n FROM seq");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -353,7 +353,7 @@ public class ExecutionBenchmarks
             "SELECT id, name, value FROM data UNION ALL SELECT id, name, value FROM data_b");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -369,7 +369,7 @@ public class ExecutionBenchmarks
             "SELECT id, name, value FROM data UNION SELECT id, name, value FROM data_b");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -385,7 +385,7 @@ public class ExecutionBenchmarks
             "SELECT category FROM data INTERSECT SELECT category FROM data_b");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -401,7 +401,7 @@ public class ExecutionBenchmarks
             "SELECT id, name FROM data EXCEPT SELECT id, name FROM data_b");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -419,7 +419,7 @@ public class ExecutionBenchmarks
             "SELECT id, name, value FROM data WHERE value < 200");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {
@@ -437,7 +437,7 @@ public class ExecutionBenchmarks
             "UNION ALL SELECT id, name FROM data");
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {

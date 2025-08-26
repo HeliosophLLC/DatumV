@@ -22,6 +22,7 @@ public sealed class SetOperationTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
+            new RowBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes);
     }
 

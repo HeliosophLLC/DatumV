@@ -56,23 +56,21 @@ public sealed class AliasOperator : IQueryOperator
 
     /// <summary>
     /// Pre-computed doubled column schema for alias expansion. Built once from
-    /// the first source row and reused for all subsequent rows, allocating only
-    /// a <see cref="DataValue"/> array per row.
+    /// the first source row and reused for all subsequent rows. The
+    /// <see cref="Apply"/> method shares the source row's backing array
+    /// with zero copy — only the column names and lookup index change.
     /// </summary>
     private sealed class AliasSchema
     {
         private readonly string[] _names;
         private readonly Dictionary<string, int> _nameIndex;
-        private readonly int _sourceFieldCount;
 
         private AliasSchema(
             string[] names,
-            Dictionary<string, int> nameIndex,
-            int sourceFieldCount)
+            Dictionary<string, int> nameIndex)
         {
             _names = names;
             _nameIndex = nameIndex;
-            _sourceFieldCount = sourceFieldCount;
         }
 
         /// <summary>
@@ -100,23 +98,17 @@ public sealed class AliasOperator : IQueryOperator
                 nameIndex[firstRow.ColumnNames[index]] = index;
             }
 
-            return new AliasSchema(names, nameIndex, fieldCount);
+            return new AliasSchema(names, nameIndex);
         }
 
         /// <summary>
-        /// Applies the alias schema to a source row. Only a <see cref="DataValue"/>
-        /// array is allocated per call.
+        /// Applies the alias schema to a source row by sharing the source row's
+        /// backing <see cref="DataValue"/> array. Zero allocation, zero copy — only
+        /// the column names and lookup index change.
         /// </summary>
         internal Row Apply(Row sourceRow)
         {
-            DataValue[] values = new DataValue[_sourceFieldCount];
-
-            for (int index = 0; index < _sourceFieldCount; index++)
-            {
-                values[index] = sourceRow[index];
-            }
-
-            return new Row(_names, values, _nameIndex);
+            return new Row(_names, sourceRow.RawValues, _nameIndex);
         }
     }
 }

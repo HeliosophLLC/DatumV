@@ -548,7 +548,7 @@ public sealed class SemiJoinSubqueryTests
         ExecutionContext context = new(
             CancellationToken.None,
             DefaultFunctions,
-            catalog);
+            catalog, new RowBufferPool());
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

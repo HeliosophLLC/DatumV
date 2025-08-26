@@ -245,6 +245,7 @@ internal sealed class GraceHashJoinExecutor
 
                 await foreach (Row probeRow in leftOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
+                    bool isFirst = firstProbeRow is null;
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
                     int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: false);
@@ -256,9 +257,19 @@ internal sealed class GraceHashJoinExecutor
                         // A LIMIT operator above can stop iteration here, preventing the
                         // remaining probe rows from ever being read from the source.
                         foreach (Row result in ProbePartitionRow(
-                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate))
+                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.RowBufferPool))
                         {
                             yield return result;
+                        }
+
+                        // The probe row has been fully consumed — return it to the pool
+                        // so that upstream operators (e.g. AliasOperator) can reuse it.
+                        // Semi-joins yield the probe row itself, so it must not be returned.
+                        // The first probe row is retained for null-template construction
+                        // after the loop, so skip returning it.
+                        if (!isSemiJoin && !isFirst)
+                        {
+                            context.RowBufferPool.ReturnRow(probeRow);
                         }
                     }
                     else
@@ -435,7 +446,8 @@ internal sealed class GraceHashJoinExecutor
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         bool useSingleKey,
         bool isSemiJoin,
-        Row? nullBuildTemplate)
+        Row? nullBuildTemplate,
+        RowBufferPool bufferPool)
     {
         bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
@@ -492,7 +504,7 @@ internal sealed class GraceHashJoinExecutor
                     table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                 }
 
-                yield return table.JoinSchema!.Combine(leftRow, rightRow);
+                yield return table.JoinSchema!.CombinePooled(leftRow, rightRow, bufferPool);
             }
         }
 
@@ -528,7 +540,7 @@ internal sealed class GraceHashJoinExecutor
                     Row leftRow = _flipped ? nullBuild : probeRow;
                     Row rightRow = _flipped ? probeRow : nullBuild;
                     table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    yield return table.JoinSchema.Combine(leftRow, rightRow);
+                    yield return table.JoinSchema.CombinePooled(leftRow, rightRow, bufferPool);
                 }
                 else
                 {
@@ -709,7 +721,7 @@ internal sealed class GraceHashJoinExecutor
                             schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         }
 
-                        yield return schema!.Combine(leftRow, rightRow);
+                        yield return schema!.CombinePooled(leftRow, rightRow, context.RowBufferPool);
                     }
                 }
 
@@ -720,6 +732,9 @@ internal sealed class GraceHashJoinExecutor
                     {
                         yield return probeRow;
                     }
+
+                    // Semi-join may yield probeRow directly — skip the ReturnRow below.
+                    continue;
                 }
                 else if (!hasMatch && needProbeUnmatched)
                 {
@@ -737,12 +752,24 @@ internal sealed class GraceHashJoinExecutor
                         Row leftRow = _flipped ? nullBuild : probeRow;
                         Row rightRow = _flipped ? probeRow : nullBuild;
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        yield return schema.Combine(leftRow, rightRow);
+                        yield return schema.CombinePooled(leftRow, rightRow, context.RowBufferPool);
                     }
                     else
                     {
+                        // No null template — yield the probe row directly.
+                        // Cannot return it to the pool since the caller still owns it.
                         yield return probeRow;
+                        continue;
                     }
+                }
+
+                // Probe row fully consumed — return it to the pool. Semi-joins
+                // and the null-template fallback yield probeRow directly (handled
+                // with continue above), so we only reach here when probeRow was
+                // consumed by value through CombinePooled.
+                if (!isSemiJoin)
+                {
+                    context.RowBufferPool.ReturnRow(probeRow);
                 }
             }
 
@@ -762,7 +789,7 @@ internal sealed class GraceHashJoinExecutor
                             Row leftRow = _flipped ? buildRowList[index] : nullPad;
                             Row rightRow = _flipped ? nullPad : buildRowList[index];
                             buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                            yield return buildUnmatchedSchema.Combine(leftRow, rightRow);
+                            yield return buildUnmatchedSchema.CombinePooled(leftRow, rightRow, context.RowBufferPool);
                         }
                         else
                         {

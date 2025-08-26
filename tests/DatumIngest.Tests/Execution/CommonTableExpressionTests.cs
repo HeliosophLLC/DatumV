@@ -311,7 +311,7 @@ public sealed class CommonTableExpressionTests
         ExecutionContext context = new(
             CancellationToken.None,
             DefaultFunctions,
-            catalog)
+            catalog, new RowBufferPool())
         {
             MaxRecursionDepth = 3,
         };
@@ -405,6 +405,7 @@ public sealed class CommonTableExpressionTests
             CancellationToken.None,
             DefaultFunctions,
             new TableCatalog(),
+            new RowBufferPool(),
             memoryBudgetBytes: 1);
 
         try
@@ -644,7 +645,8 @@ public sealed class CommonTableExpressionTests
         return new ExecutionContext(
             CancellationToken.None,
             DefaultFunctions,
-            new TableCatalog());
+            new TableCatalog(),
+            new RowBufferPool());
     }
 
     private static async Task<List<Row>> ExecuteQueryAsync(string sql, TableCatalog catalog)
@@ -655,7 +657,8 @@ public sealed class CommonTableExpressionTests
         ExecutionContext context = new(
             CancellationToken.None,
             DefaultFunctions,
-            catalog);
+            catalog,
+            new RowBufferPool());
 
         IQueryOperator plan = planner.Plan(query);
 

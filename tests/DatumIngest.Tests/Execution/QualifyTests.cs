@@ -25,7 +25,8 @@ public sealed class QualifyTests
         return new ExecutionContext(
             CancellationToken.None,
             DefaultFunctions,
-            new TableCatalog());
+            new TableCatalog(),
+            new RowBufferPool());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
@@ -64,7 +65,7 @@ public sealed class QualifyTests
     {
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog);
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
         IQueryOperator plan = planner.Plan(query);
 
         List<Row> rows = [];

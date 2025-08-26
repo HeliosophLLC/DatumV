@@ -528,6 +528,7 @@ public sealed class GraceHashJoinTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
+            new RowBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes);
     }
 
@@ -543,7 +544,8 @@ public sealed class GraceHashJoinTests
         context ??= new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog());
+            new TableCatalog(),
+            new RowBufferPool());
 
         List<Row> rows = new();
         await foreach (Row row in op.ExecuteAsync(context))

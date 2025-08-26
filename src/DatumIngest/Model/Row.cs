@@ -4,13 +4,13 @@ namespace DatumIngest.Model;
 /// A single row of named <see cref="DataValue"/> entries.
 /// Provides both name-based and ordinal-based access with case-insensitive name matching.
 /// </summary>
-public sealed class Row
+public class Row
 {
-    private readonly string[] _names;
+    private string[] _names;
     private readonly DataValue[] _values;
 
     // Case-insensitive index for fast name lookups.
-    private readonly Dictionary<string, int> _nameIndex;
+    private Dictionary<string, int> _nameIndex;
 
     /// <summary>
     /// Creates a row from parallel arrays of column names and values.
@@ -57,6 +57,23 @@ public sealed class Row
 
     /// <summary>The ordered column names.</summary>
     public IReadOnlyList<string> ColumnNames => _names;
+
+    /// <summary>
+    /// The raw backing array of values. Used internally by pooling infrastructure
+    /// to return rented buffers without exposing mutation to public consumers.
+    /// </summary>
+    internal DataValue[] RawValues => _values;
+
+    /// <summary>
+    /// Replaces the column name array and name-index dictionary without allocating
+    /// a new <see cref="Row"/>. Used by the pooling infrastructure when a rented
+    /// row needs to adopt a different <see cref="Execution.Operators.JoinOperator.CombinedRowSchema"/>.
+    /// </summary>
+    internal void UpdateSchema(string[] names, Dictionary<string, int> nameIndex)
+    {
+        _names = names;
+        _nameIndex = nameIndex;
+    }
 
     /// <summary>
     /// Retrieves a value by column name (case-insensitive).

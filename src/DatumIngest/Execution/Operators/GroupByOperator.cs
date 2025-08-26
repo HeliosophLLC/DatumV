@@ -157,6 +157,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         DataValue? currentSingleKey = null;
         DataValue[]? currentKeyValues = null;
 
+        (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
+
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
@@ -206,9 +208,13 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
             }
 
-            // Evaluate and accumulate aggregate arguments.
-            DataValue[][] allArguments = EvaluateAggregateArguments(evaluator, row, out DataValue[]?[]? allSortKeys);
-            AccumulateRow(currentGroup, allArguments, allSortKeys, context);
+            // Evaluate and accumulate aggregate arguments using reusable scratch buffers.
+            EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+            AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context);
+
+            // Row values have been fully extracted — return the row to
+            // the pool so the upstream operator can reuse it.
+            context.RowBufferPool.ReturnRow(row);
         }
 
         // Emit the final group.
@@ -257,6 +263,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         // Tracks the spill row schema — built once on the first row that triggers spill.
         SpillSchemaState spillSchema = new();
+
+        // Pre-allocate reusable scratch buffers for aggregate argument evaluation.
+        (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
 
         // A single buffer rented once per execution and reused for every composite-key row.
         // GetAlternateLookup<ReadOnlySpan<DataValue>> probes the dictionary directly from this
@@ -316,8 +325,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     }
                 }
 
-                // Evaluate aggregate arguments.
-                DataValue[][] allArguments = EvaluateAggregateArguments(evaluator, row, out DataValue[]?[]? allSortKeys);
+                // Evaluate aggregate arguments into reusable scratch buffers.
+                EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
 
                 if (spilling)
                 {
@@ -330,7 +339,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     WriteSpillRow(
                         hashCode,
                         useSingleKey ? [singleKey] : compositeKeyScratch!.AsSpan(0, keyCount).ToArray(),
-                        allArguments, allSortKeys, spillWriters!, spillSchemaWritten!, spillPaths!,
+                        argumentScratch, sortKeyScratch, spillWriters!, spillSchemaWritten!, spillPaths!,
                         spillSchema, _spillDirectory!);
 
                     // Continue accumulating in-memory for groups that existed before
@@ -351,7 +360,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                     if (existingGroup is not null)
                     {
-                        AccumulateRow(existingGroup, allArguments, allSortKeys, context);
+                        AccumulateRow(existingGroup, argumentScratch, sortKeyScratch, context);
                     }
                 }
                 else
@@ -387,7 +396,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         }
                     }
 
-                    AccumulateRow(group, allArguments, allSortKeys, context);
+                    AccumulateRow(group, argumentScratch, sortKeyScratch, context);
 
                     // Memory estimation.
                     if (estimator is not null)
@@ -426,6 +435,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         }
                     }
                 }
+
+                // Row values have been fully extracted — return the row
+                // to the pool so the upstream join can reuse it.
+                context.RowBufferPool.ReturnRow(row);
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -614,12 +627,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         ExpressionEvaluator workerEvaluator = new(
                             context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
+                        (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =
+                            CreateAggregateArgumentScratch();
+
                         await foreach (Row row in globalChannel.Reader.ReadAllAsync(cancellationToken)
                             .ConfigureAwait(false))
                         {
-                            DataValue[][] allArguments = EvaluateAggregateArguments(
-                                workerEvaluator, row, out DataValue[]?[]? allSortKeys);
-                            AccumulateRow(workerGlobalGroups[wi], allArguments, allSortKeys, context);
+                            EvaluateAggregateArgumentsInto(
+                                workerEvaluator, row, workerArgScratch, workerSortScratch);
+                            AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context);
+                            context.RowBufferPool.ReturnRow(row);
                         }
                     }, cancellationToken);
                 }
@@ -761,6 +778,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                     MemoryEstimator? estimator = workerEstimators[wi];
 
+                    (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =
+                        CreateAggregateArgumentScratch();
+
                     await foreach (Row row in inputChannels[wi].Reader.ReadAllAsync(cancellationToken)
                         .ConfigureAwait(false))
                     {
@@ -781,8 +801,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             }
                         }
 
-                        DataValue[][] allArguments = EvaluateAggregateArguments(
-                            workerEvaluator, row, out DataValue[]?[]? allSortKeys);
+                        EvaluateAggregateArgumentsInto(
+                            workerEvaluator, row, workerArgScratch, workerSortScratch);
 
                         if (workerSpilling[wi])
                         {
@@ -793,7 +813,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             WriteSpillRow(
                                 hashCode, useSingleKey ? [singleKeyValue] : keyValues!,
-                                allArguments, allSortKeys,
+                                workerArgScratch, workerSortScratch,
                                 workerSpillWriters![wi]!, workerSchemaWritten[wi]!,
                                 workerLocalSpillPaths[wi]!, workerSchemaStates[wi],
                                 workerSpillDirectories![wi]!);
@@ -816,7 +836,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                             if (existingGroup is not null)
                             {
-                                AccumulateRow(existingGroup, allArguments, allSortKeys, context);
+                                AccumulateRow(existingGroup, workerArgScratch, workerSortScratch, context);
                             }
                         }
                         else
@@ -849,7 +869,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                 group = existing;
                             }
 
-                            AccumulateRow(group, allArguments, allSortKeys, context);
+                            AccumulateRow(group, workerArgScratch, workerSortScratch, context);
 
                             // Per-worker memory estimation against the worker's share of the budget.
                             if (estimator is not null)
@@ -1032,7 +1052,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             if (aggregateColumn.OrderBy is not null && allSortKeys?[aggregateIndex] is DataValue[] sortKeys)
             {
-                group.OrderedBuffers![aggregateIndex]!.Add((allArguments[aggregateIndex], sortKeys));
+                // Ordered aggregate buffers retain tuples until flush — copy the
+                // scratch arrays so the next row doesn't overwrite buffered data.
+                group.OrderedBuffers![aggregateIndex]!.Add(
+                    (allArguments[aggregateIndex].ToArray(), sortKeys.ToArray()));
             }
             else
             {
@@ -1095,15 +1118,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     }
 
     /// <summary>
-    /// Evaluates all aggregate function arguments and optional sort keys for a single input row.
+    /// Creates reusable scratch buffers for aggregate argument and sort-key evaluation.
+    /// The outer <see cref="DataValue"/>[][] and each inner <see cref="DataValue"/>[] are
+    /// allocated once and reused across all input rows, eliminating per-row heap allocations.
     /// </summary>
-    private DataValue[][] EvaluateAggregateArguments(
-        ExpressionEvaluator evaluator,
-        Row row,
-        out DataValue[]?[]? allSortKeys)
+    private (DataValue[][] Arguments, DataValue[]?[]? SortKeys) CreateAggregateArgumentScratch()
     {
-        DataValue[][] allArguments = new DataValue[_aggregateColumns.Count][];
-        allSortKeys = null;
+        DataValue[][] arguments = new DataValue[_aggregateColumns.Count][];
+        DataValue[]?[]? sortKeys = null;
 
         for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
         {
@@ -1111,35 +1133,60 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             if (aggregateColumn.IsCountStar)
             {
-                allArguments[aggregateIndex] = [];
+                arguments[aggregateIndex] = [];
             }
             else
             {
-                DataValue[] arguments = new DataValue[aggregateColumn.ArgumentExpressions.Count];
-                for (int argumentIndex = 0; argumentIndex < aggregateColumn.ArgumentExpressions.Count; argumentIndex++)
-                {
-                    arguments[argumentIndex] = evaluator.Evaluate(
-                        aggregateColumn.ArgumentExpressions[argumentIndex], row);
-                }
-
-                allArguments[aggregateIndex] = arguments;
+                arguments[aggregateIndex] = new DataValue[aggregateColumn.ArgumentExpressions.Count];
 
                 if (aggregateColumn.OrderBy is not null)
                 {
-                    allSortKeys ??= new DataValue[]?[_aggregateColumns.Count];
-                    DataValue[] sortKeys = new DataValue[aggregateColumn.OrderBy.Count];
-                    for (int sortIndex = 0; sortIndex < aggregateColumn.OrderBy.Count; sortIndex++)
-                    {
-                        sortKeys[sortIndex] = evaluator.Evaluate(
-                            aggregateColumn.OrderBy[sortIndex].Expression, row);
-                    }
-
-                    allSortKeys[aggregateIndex] = sortKeys;
+                    sortKeys ??= new DataValue[]?[_aggregateColumns.Count];
+                    sortKeys[aggregateIndex] = new DataValue[aggregateColumn.OrderBy.Count];
                 }
             }
         }
 
-        return allArguments;
+        return (arguments, sortKeys);
+    }
+
+    /// <summary>
+    /// Evaluates all aggregate function arguments and optional sort keys for a single
+    /// input row into pre-allocated scratch buffers. Callers must create the buffers
+    /// once via <see cref="CreateAggregateArgumentScratch"/> and pass them on every row.
+    /// </summary>
+    private void EvaluateAggregateArgumentsInto(
+        ExpressionEvaluator evaluator,
+        Row row,
+        DataValue[][] allArguments,
+        DataValue[]?[]? allSortKeys)
+    {
+        for (int aggregateIndex = 0; aggregateIndex < _aggregateColumns.Count; aggregateIndex++)
+        {
+            AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
+
+            if (aggregateColumn.IsCountStar)
+            {
+                continue;
+            }
+
+            DataValue[] arguments = allArguments[aggregateIndex];
+            for (int argumentIndex = 0; argumentIndex < aggregateColumn.ArgumentExpressions.Count; argumentIndex++)
+            {
+                arguments[argumentIndex] = evaluator.Evaluate(
+                    aggregateColumn.ArgumentExpressions[argumentIndex], row);
+            }
+
+            if (aggregateColumn.OrderBy is not null)
+            {
+                DataValue[] sortKeyBuffer = allSortKeys![aggregateIndex]!;
+                for (int sortIndex = 0; sortIndex < aggregateColumn.OrderBy.Count; sortIndex++)
+                {
+                    sortKeyBuffer[sortIndex] = evaluator.Evaluate(
+                        aggregateColumn.OrderBy[sortIndex].Expression, row);
+                }
+            }
+        }
     }
 
     /// <summary>

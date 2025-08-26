@@ -24,6 +24,7 @@ public sealed class ExecutionContextTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
+            new RowBufferPool(),
             memoryBudgetBytes: 512)
         {
             MaxRecursionDepth = 42,
@@ -56,7 +57,7 @@ public sealed class ExecutionContextTests
         ExecutionContext original = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog());
+            new TableCatalog(), new RowBufferPool());
 
         ExecutionContext cloned = original.WithOuterRow(outerRow);
 

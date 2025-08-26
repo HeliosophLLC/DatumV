@@ -71,7 +71,8 @@ public class OperatorTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog());
+            new TableCatalog(),
+            new RowBufferPool());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
@@ -749,8 +750,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            meter);
+            new TableCatalog(), new RowBufferPool(), meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(orderBy, context));
@@ -781,8 +781,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(),
-            meter);
+            new TableCatalog(), new RowBufferPool(), meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(orderBy, context));
@@ -810,7 +809,7 @@ public class OperatorTests
         ExecutionContext context = new(
             cancellationTokenSource.Token,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog());
+            new TableCatalog(), new RowBufferPool());
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(orderBy, context));
@@ -1108,7 +1107,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog);
+            catalog, new RowBufferPool());
 
         List<Row> rows = await CollectAsync(op, context);
 
@@ -1148,7 +1147,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog);
+            catalog, new RowBufferPool());
 
         List<Row> rows = await CollectAsync(op, context);
 
@@ -1179,7 +1178,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog);
+            catalog, new RowBufferPool());
 
         List<Row> rows = await CollectAsync(op, context);
 
@@ -1210,7 +1209,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog);
+            catalog, new RowBufferPool());
 
         List<Row> rows = await CollectAsync(op, context);
 
@@ -1263,7 +1262,7 @@ public class OperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog);
+            catalog, new RowBufferPool());
 
         List<Row> rows = await CollectAsync(op, context);
 

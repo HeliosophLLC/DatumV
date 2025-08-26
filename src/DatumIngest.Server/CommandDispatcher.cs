@@ -134,7 +134,7 @@ public sealed class CommandDispatcher
         }
 
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
-        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, queryMeter,
+        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, new RowBufferPool(), queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
         {
             DegreeOfParallelism = Environment.ProcessorCount,
@@ -411,6 +411,7 @@ public sealed class CommandDispatcher
                 cancellationToken,
                 session.FunctionRegistry,
                 session.Catalog,
+                new RowBufferPool(),
                 memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
             {
                 DegreeOfParallelism = Environment.ProcessorCount,

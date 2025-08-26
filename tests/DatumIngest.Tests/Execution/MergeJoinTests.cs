@@ -411,7 +411,8 @@ public sealed class MergeJoinTests
         context ??= new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog());
+            new TableCatalog(),
+            new RowBufferPool());
 
         List<Row> rows = new();
         await foreach (Row row in op.ExecuteAsync(context))

@@ -62,12 +62,7 @@ public sealed class LimitOperator : IQueryOperator
         // Propagate the row limit hint so downstream operators (e.g. join) can
         // choose cheaper strategies when only a small result set is needed.
         ExecutionContext limitedContext = context.RowLimit is null || _limit + _offset < context.RowLimit
-            ? new ExecutionContext(
-                context.CancellationToken,
-                context.FunctionRegistry,
-                context.Catalog,
-                context.QueryMeter,
-                context.MemoryBudgetBytes)
+            ? new ExecutionContext(context)
               {
                   OuterRow = context.OuterRow,
                   MaxRecursionDepth = context.MaxRecursionDepth,

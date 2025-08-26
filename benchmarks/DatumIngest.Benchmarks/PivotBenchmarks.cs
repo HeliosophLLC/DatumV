@@ -156,7 +156,7 @@ public class PivotBenchmarks
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, functions);
         IQueryOperator root = planner.Plan(query);
-        ExecutionContext context = new(CancellationToken.None, functions, catalog);
+        ExecutionContext context = new(CancellationToken.None, functions, catalog, new RowBufferPool());
 
         await foreach (Row _ in root.ExecuteAsync(context))
         {

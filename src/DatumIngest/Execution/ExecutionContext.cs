@@ -12,6 +12,19 @@ namespace DatumIngest.Execution;
 public sealed class ExecutionContext
 {
     /// <summary>
+    /// Creates a new execution context from an existing context, copying all properties. Useful for creating a child
+    /// </summary>
+    public ExecutionContext(ExecutionContext context)
+    {
+        CancellationToken = context.CancellationToken;
+        FunctionRegistry = context.FunctionRegistry;
+        Catalog = context.Catalog;
+        RowBufferPool = context.RowBufferPool;
+        QueryMeter = context.QueryMeter;
+        MemoryBudgetBytes = context.MemoryBudgetBytes;
+    }
+
+    /// <summary>
     /// Creates a new execution context.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for cooperative cancellation.</param>
@@ -25,19 +38,26 @@ public sealed class ExecutionContext
     /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
     /// and materialised CTEs.
     /// </param>
+    /// <param name="rowBufferPool">
+    /// Pool for reusing <see cref="Model.Row"/> objects and their backing
+    /// <see cref="Model.DataValue"/> arrays in join operators.
+    /// </param>
     public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
+        RowBufferPool rowBufferPool,
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
         Catalog = catalog;
+        RowBufferPool = rowBufferPool;
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
     }
+
 
     /// <summary>Cancellation token for cooperative cancellation.</summary>
     public CancellationToken CancellationToken { get; }
@@ -104,6 +124,14 @@ public sealed class ExecutionContext
     public ParallelismBudget? ParallelismBudget { get; init; }
 
     /// <summary>
+    /// Pool for reusing <see cref="Model.Row"/> objects and their backing
+    /// <see cref="Model.DataValue"/> arrays in join operators. Join operators
+    /// rent rows from this pool instead of allocating, and downstream consumers
+    /// (e.g. GROUP BY) return rows after extracting values.
+    /// </summary>
+    public RowBufferPool RowBufferPool { get; }
+
+    /// <summary>
     /// Returns a new context with the given outer row set for correlated subquery execution.
     /// All other properties are copied from the current context.
     /// </summary>
@@ -115,6 +143,7 @@ public sealed class ExecutionContext
             CancellationToken,
             FunctionRegistry,
             Catalog,
+            RowBufferPool,
             QueryMeter,
             MemoryBudgetBytes)
         {

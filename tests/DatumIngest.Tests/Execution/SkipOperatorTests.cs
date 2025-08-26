@@ -78,7 +78,8 @@ public sealed class SkipOperatorTests
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog());
+            new TableCatalog(),
+            new RowBufferPool());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
