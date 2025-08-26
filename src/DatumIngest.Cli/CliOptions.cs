@@ -76,11 +76,13 @@ internal sealed class CliOptions
 
     /// <summary>
     /// Gets or sets the memory budget in bytes for operators that support spill-to-disk.
-    /// Defaults to 2 GB, which is appropriate for single-user CLI workloads. Pass
-    /// <c>--memory-budget 0</c> to remove the budget entirely (fully in-memory joins).
-    /// Accepts raw byte counts or human-readable suffixes (e.g. 512MB, 2GB).
+    /// Defaults to half of the available physical memory, so that hash join build tables
+    /// and GROUP BY aggregation state can coexist in RAM on typical workstations without
+    /// triggering unnecessary spill-to-disk. Pass <c>--memory-budget 0</c> to remove the
+    /// budget entirely (fully in-memory). Accepts raw byte counts or human-readable
+    /// suffixes (e.g. 512MB, 2GB, 16GB).
     /// </summary>
-    public long? MemoryBudgetBytes { get; set; } = 2L * 1024 * 1024 * 1024;
+    public long? MemoryBudgetBytes { get; set; } = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 2;
 
     /// <summary>Gets or sets the named parameter bindings (name → raw string value).</summary>
     public Dictionary<string, string> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);

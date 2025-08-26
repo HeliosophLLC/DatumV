@@ -468,6 +468,10 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
             rows.Add(row);
         }
 
+        // Dispose closes the cached DatumFileReader so the file is not held open
+        // when the test teardown deletes the temp directory.
+        provider.Dispose();
+
         return rows;
     }
 

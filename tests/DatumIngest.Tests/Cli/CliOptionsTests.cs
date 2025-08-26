@@ -335,4 +335,52 @@ public sealed class CliOptionsTests
         Assert.True(options.BloomAllColumns);
         Assert.True(options.IndexAllColumns);
     }
+
+    [Fact]
+    public void Parse_MemoryBudgetMegabytes_ParsesCorrectly()
+    {
+        string[] args = ["query", "SELECT 1", "--source", "csv:a=a.csv", "--memory-budget", "512MB"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal(512L * 1024 * 1024, options.MemoryBudgetBytes);
+    }
+
+    [Fact]
+    public void Parse_MemoryBudgetGigabytes_ParsesCorrectly()
+    {
+        string[] args = ["query", "SELECT 1", "--source", "csv:a=a.csv", "--memory-budget", "4GB"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal(4L * 1024 * 1024 * 1024, options.MemoryBudgetBytes);
+    }
+
+    [Fact]
+    public void Parse_MemoryBudgetRawBytes_ParsesCorrectly()
+    {
+        string[] args = ["query", "SELECT 1", "--source", "csv:a=a.csv", "--memory-budget", "1073741824"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Equal(1073741824L, options.MemoryBudgetBytes);
+    }
+
+    [Fact]
+    public void Parse_MemoryBudgetZero_DisablesBudget()
+    {
+        string[] args = ["query", "SELECT 1", "--source", "csv:a=a.csv", "--memory-budget", "0"];
+
+        CliOptions options = CliOptions.Parse(args);
+
+        Assert.Null(options.MemoryBudgetBytes);
+    }
+
+    [Fact]
+    public void Parse_MemoryBudgetMissingValue_Throws()
+    {
+        string[] args = ["query", "SELECT 1", "--source", "csv:a=a.csv", "--memory-budget"];
+
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse(args));
+    }
 }

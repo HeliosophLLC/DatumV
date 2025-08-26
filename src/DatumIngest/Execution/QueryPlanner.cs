@@ -2264,8 +2264,12 @@ public sealed class QueryPlanner
         string leftColumnName = leftColumnRef.ColumnName;
         string rightColumnName = rightColumnRef.ColumnName;
 
-        if (!leftScan.SourceIndex.TryGetColumnIndex(leftColumnName, out IColumnIndex? leftColumnIndex)
-            || !rightScan.SourceIndex.TryGetColumnIndex(rightColumnName, out IColumnIndex? rightColumnIndex))
+        // Both sides must have a physically-sorted column index on the join key.
+        // B+Tree indexes are excluded: they enumerate entries in key order but the
+        // underlying rows are scattered in the datum file, making a full-table
+        // merge-join scan prohibitively expensive.
+        if (!leftScan.SourceIndex.TryGetSortedColumnIndex(leftColumnName, out IColumnIndex? leftColumnIndex)
+            || !rightScan.SourceIndex.TryGetSortedColumnIndex(rightColumnName, out IColumnIndex? rightColumnIndex))
         {
             return false;
         }

@@ -11,8 +11,13 @@ namespace DatumIngest.Catalog.Providers;
 /// Supports projection pushdown, zone-map-based row group pruning when a filter hint
 /// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider
+public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider, IDisposable
 {
+    // Reused across multiple ReadRowRangeAsync calls within the same scan session.
+    // Opening a DatumFileReader re-reads and decompresses all row-group metadata;
+    // amortising that cost over the full index traversal is critical for B+Tree scans.
+    private DatumFileReader? _cachedReader;
+    private string? _cachedReaderPath;
     /// <summary>Total number of row groups examined in the most recent read.</summary>
     public int TotalRowGroups { get; private set; }
 
@@ -128,7 +133,17 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         int count,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        // Reuse the open reader across repeated calls within the same scan session.
+        // Opening a new DatumFileReader decompresses all row-group metadata each time,
+        // which is prohibitive when called once per index entry during a B+Tree scan.
+        if (_cachedReader is null || _cachedReaderPath != descriptor.FilePath)
+        {
+            _cachedReader?.Dispose();
+            _cachedReader = DatumFileReader.Open(descriptor.FilePath);
+            _cachedReaderPath = descriptor.FilePath;
+        }
+
+        DatumFileReader reader = _cachedReader;
         Schema schema = reader.Schema;
 
         int[] projectedIndices = ResolveProjection(schema, requiredColumns);
@@ -184,6 +199,13 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         }
 
         await Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _cachedReader?.Dispose();
+        _cachedReader = null;
     }
 
     private static int[] ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)

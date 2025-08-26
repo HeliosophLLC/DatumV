@@ -120,4 +120,28 @@ public sealed class SourceIndex
         index = null;
         return false;
     }
+
+    /// <summary>
+    /// Retrieves a sorted-array column index for the specified column.
+    /// Unlike <see cref="TryGetColumnIndex"/>, this method never returns a
+    /// <see cref="BTree.BPlusTreeColumnIndex"/>. Use this when the caller requires
+    /// data that is physically ordered on disk (e.g. merge join).
+    /// B+Tree indexes enumerate entries in key order but the underlying rows are
+    /// scattered throughout the datum file, making full-scan sequential access
+    /// prohibitively expensive.
+    /// </summary>
+    /// <param name="columnName">Column name (case-insensitive lookup).</param>
+    /// <param name="index">The sorted column index, or <c>null</c> if none exists.</param>
+    /// <returns><c>true</c> if a sorted array index exists for the specified column.</returns>
+    public bool TryGetSortedColumnIndex(string columnName, [NotNullWhen(true)] out IColumnIndex? index)
+    {
+        if (SortedIndexes is not null && SortedIndexes.TryGetIndex(columnName, out SortedValueIndex? sortedIndex))
+        {
+            index = sortedIndex;
+            return true;
+        }
+
+        index = null;
+        return false;
+    }
 }

@@ -118,7 +118,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             return ExecuteStreamingAsync(context);
         }
 
-        if (context.DegreeOfParallelism > 1)
+        // Parallel hash aggregation is only used for global aggregation (no GROUP BY
+        // keys). The global path distributes rows round-robin with no per-row key
+        // evaluation in the feeder, so workers accumulate truly in parallel.
+        //
+        // For keyed aggregation the feeder must evaluate GROUP BY keys on every row
+        // to compute the routing hash, then each worker re-evaluates the same keys
+        // for its own hash table lookup — doubling key evaluation cost. Combined with
+        // bounded-channel overhead and a single-threaded feeder bottleneck, the
+        // parallel keyed path is consistently slower than the serial path.
+        if (context.DegreeOfParallelism > 1 && _groupByExpressions.Count == 0)
         {
             long? estimatedRows = GetEstimatedSourceRowCount();
             if (estimatedRows is null or >= 100_000)
@@ -265,10 +274,27 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         try
         {
+            // Counts input rows for throughput tracing (guarded by IsEnabled — zero cost when off).
+            long inputRowCount = 0;
+
             await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
                 context.CancellationToken.ThrowIfCancellationRequested();
                 context.QueryMeter?.ThrowIfExceeded();
+
+                if (ExecutionTracer.IsEnabled)
+                {
+                    inputRowCount++;
+
+                    if (inputRowCount % 1_000_000 == 0)
+                    {
+                        long groupCount = isGlobalAggregation ? 1
+                            : useSingleKey ? singleKeyGroups!.Count
+                            : compositeKeyGroups!.Count;
+                        ExecutionTracer.Write(
+                            $"GroupBy  consumed {inputRowCount:N0} rows  groups: {groupCount:N0}");
+                    }
+                }
 
                 // Evaluate group keys.
                 DataValue singleKey = default;
@@ -400,6 +426,15 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         }
                     }
                 }
+            }
+
+            if (ExecutionTracer.IsEnabled)
+            {
+                long groupCount = isGlobalAggregation ? 1
+                    : useSingleKey ? singleKeyGroups!.Count
+                    : compositeKeyGroups!.Count;
+                ExecutionTracer.Write(
+                    $"GroupBy  done consuming  inputRows={inputRowCount:N0}  groups={groupCount:N0}");
             }
 
             // Flush ordered buffers for in-memory groups.

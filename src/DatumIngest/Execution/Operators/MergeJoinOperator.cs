@@ -1,3 +1,4 @@
+using DatumIngest.Diagnostics;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
 using static DatumIngest.Execution.Operators.JoinOperator;
@@ -125,6 +126,12 @@ public sealed class MergeJoinOperator : IQueryOperator
 
         bool hasLeft = await leftEnumerator.MoveNextAsync().ConfigureAwait(false);
         bool hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            ExecutionTracer.Write(
+                $"MergeJoin  start  type={_joinType}  leftKey={_leftSortColumn}  rightKey={_rightSortColumn}");
+        }
 
         while (hasLeft && hasRight)
         {
@@ -318,6 +325,12 @@ public sealed class MergeJoinOperator : IQueryOperator
             }
 
             hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+        }
+
+        if (ExecutionTracer.IsEnabled)
+        {
+            ExecutionTracer.Write(
+                $"MergeJoin  done  type={_joinType}");
         }
     }
 }

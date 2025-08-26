@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
+using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 
@@ -101,41 +102,83 @@ public sealed class IndexScanOperator : IQueryOperator
                 $"uses '{provider.GetType().Name}' which does not implement ISeekableTableProvider.");
         }
 
-        // Traverse the index in sorted order (ascending or descending).
-        // Batch consecutive entries from the same chunk into a single read.
-        IEnumerable<ValueIndexEntry> traversal = _descending
-            ? _columnIndex.TraverseBackward()
-            : _columnIndex.TraverseForward();
-
-        List<ValueIndexEntry> batch = new();
-        int batchChunkIndex = -1;
-
-        foreach (ValueIndexEntry entry in traversal)
+        try
         {
-            if (batch.Count > 0 && entry.ChunkIndex != batchChunkIndex)
+            // Traverse the index in sorted order (ascending or descending).
+            // Batch consecutive entries from the same chunk into a single read.
+            IEnumerable<ValueIndexEntry> traversal = _descending
+                ? _columnIndex.TraverseBackward()
+                : _columnIndex.TraverseForward();
+
+            List<ValueIndexEntry> batch = new();
+            int batchChunkIndex = -1;
+            long indexScanRowsYielded = 0;
+
+            if (ExecutionTracer.IsEnabled)
             {
-                // Chunk boundary: flush the accumulated batch.
+                ExecutionTracer.Write(
+                    $"IndexScan  start  table={_descriptor.Name}  totalEntries={_columnIndex.EntryCount:N0}");
+            }
+
+            foreach (ValueIndexEntry entry in traversal)
+            {
+                if (batch.Count > 0 && entry.ChunkIndex != batchChunkIndex)
+                {
+                    // Chunk boundary: flush the accumulated batch.
+                    await foreach (Row row in FlushBatchAsync(
+                        seekable, batch, cancellationToken).ConfigureAwait(false))
+                    {
+                        if (ExecutionTracer.IsEnabled)
+                        {
+                            indexScanRowsYielded++;
+
+                            if (indexScanRowsYielded % 1_000_000 == 0)
+                            {
+                                ExecutionTracer.Write(
+                                    $"IndexScan  {_descriptor.Name}  yielded {indexScanRowsYielded:N0} rows");
+                            }
+                        }
+
+                        yield return row;
+                    }
+
+                    batch.Clear();
+                }
+
+                batch.Add(entry);
+                batchChunkIndex = entry.ChunkIndex;
+            }
+
+            // Flush any remaining entries.
+            if (batch.Count > 0)
+            {
                 await foreach (Row row in FlushBatchAsync(
                     seekable, batch, cancellationToken).ConfigureAwait(false))
                 {
+                    if (ExecutionTracer.IsEnabled)
+                    {
+                        indexScanRowsYielded++;
+
+                        if (indexScanRowsYielded % 1_000_000 == 0)
+                        {
+                            ExecutionTracer.Write(
+                                $"IndexScan  {_descriptor.Name}  yielded {indexScanRowsYielded:N0} rows");
+                        }
+                    }
+
                     yield return row;
                 }
-
-                batch.Clear();
             }
 
-            batch.Add(entry);
-            batchChunkIndex = entry.ChunkIndex;
-        }
-
-        // Flush any remaining entries.
-        if (batch.Count > 0)
-        {
-            await foreach (Row row in FlushBatchAsync(
-                seekable, batch, cancellationToken).ConfigureAwait(false))
+            if (ExecutionTracer.IsEnabled)
             {
-                yield return row;
+                ExecutionTracer.Write(
+                    $"IndexScan  done  table={_descriptor.Name}  totalYielded={indexScanRowsYielded:N0}");
             }
+        }
+        finally
+        {
+            (provider as IDisposable)?.Dispose();
         }
     }
 
