@@ -211,11 +211,6 @@ internal sealed class GraceHashJoinExecutor
             // It is needed during hybrid Phase 1b for LEFT JOIN null extension.
             Row? nullBuildTemplate = firstBuildRow is not null ? CreateNullRow(firstBuildRow) : null;
 
-            // Hybrid streaming probe: for join types where unmatched build rows do not
-            // need to be emitted, the probe side can be processed row-by-row against
-            // in-memory partitions, yielding results immediately so a LIMIT above can
-            // terminate without fully materialising the probe stream. When unmatched
-            // build rows must be tracked, the buffered path is required.
             bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
             bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
             bool needBuildUnmatched = _flipped ? leftMustAppear : rightMustAppear;
@@ -228,8 +223,10 @@ internal sealed class GraceHashJoinExecutor
 
             if (useHybrid)
             {
-                // Build in-memory hash tables for non-spilled partitions so individual
-                // probe rows can be looked up and yielded immediately without buffering.
+                // Hybrid streaming probe: probe rows are streamed one-at-a-time
+                // against in-memory build partitions, yielding results immediately
+                // so a LIMIT above can terminate without fully materialising the
+                // probe stream.
                 PartitionBuildTable?[] buildTables = new PartitionBuildTable?[partitionCount];
 
                 for (int tableIndex = 0; tableIndex < partitionCount; tableIndex++)
@@ -243,12 +240,12 @@ internal sealed class GraceHashJoinExecutor
                     }
                 }
 
-                await foreach (Row probeRow in leftOperator.ExecuteAsync(context).ConfigureAwait(false))
+                await foreach (Row probeRow in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
                     bool isFirst = firstProbeRow is null;
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
-                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: false);
+                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight);
                     SpillPartition partition = partitions[partitionIndex];
 
                     if (!partition.IsBuildSpilled)

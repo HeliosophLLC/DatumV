@@ -65,6 +65,18 @@ public class Row
     internal DataValue[] RawValues => _values;
 
     /// <summary>
+    /// The raw column name array. Used internally by flat-buffer probe storage
+    /// in <see cref="Execution.SpillPartition"/> to share schema across reconstructed rows.
+    /// </summary>
+    internal string[] RawNames => _names;
+
+    /// <summary>
+    /// The raw name-to-ordinal dictionary. Used internally by flat-buffer probe storage
+    /// in <see cref="Execution.SpillPartition"/> to share schema across reconstructed rows.
+    /// </summary>
+    internal Dictionary<string, int> RawNameIndex => _nameIndex;
+
+    /// <summary>
     /// Replaces the column name array and name-index dictionary without allocating
     /// a new <see cref="Row"/>. Used by the pooling infrastructure when a rented
     /// row needs to adopt a different <see cref="Execution.Operators.JoinOperator.CombinedRowSchema"/>.
