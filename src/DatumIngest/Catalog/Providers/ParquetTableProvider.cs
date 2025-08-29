@@ -103,7 +103,9 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = new DataValue[projectedFields.Length];
+                Row row = GlobalBufferPool.RentRow(projectedFields.Length);
+                row.UpdateSchema(columnNames, nameIndex);
+                DataValue[] values = row.RawValues;
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     values[fieldIndex] = ExtractValue(
@@ -112,7 +114,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                         rowIndex);
                 }
 
-                yield return new Row(columnNames, values, nameIndex);
+                yield return row;
             }
         }
     }
@@ -215,7 +217,9 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = new DataValue[projectedFields.Length];
+                Row row = GlobalBufferPool.RentRow(projectedFields.Length);
+                row.UpdateSchema(columnNames, nameIndex);
+                DataValue[] values = row.RawValues;
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     values[fieldIndex] = ExtractValue(
@@ -224,7 +228,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                         rowIndex);
                 }
 
-                yield return new Row(columnNames, values, nameIndex);
+                yield return row;
             }
         }
     }
@@ -401,7 +405,9 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = new DataValue[projectedFields.Length];
+                Row row = GlobalBufferPool.RentRow(projectedFields.Length);
+                row.UpdateSchema(columnNames, nameIndex);
+                DataValue[] values = row.RawValues;
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     values[fieldIndex] = ExtractValue(
@@ -410,7 +416,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                         rowIndex);
                 }
 
-                yield return new Row(columnNames, values, nameIndex);
+                yield return row;
                 remaining--;
             }
 

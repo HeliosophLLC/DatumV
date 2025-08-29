@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog.Providers;
@@ -144,7 +145,9 @@ public sealed class JsonTableProvider : IMultiTableSource
                     continue;
                 }
 
-                DataValue[] values = new DataValue[projectedColumns.Count];
+                Row row = GlobalBufferPool.RentRow(projectedColumns.Count);
+                row.UpdateSchema(names, nameIndex);
+                DataValue[] values = row.RawValues;
                 for (int columnIndex = 0; columnIndex < projectedColumns.Count; columnIndex++)
                 {
                     ColumnInfo column = projectedColumns[columnIndex];
@@ -158,7 +161,7 @@ public sealed class JsonTableProvider : IMultiTableSource
                     }
                 }
 
-                yield return new Row(names, values, nameIndex);
+                yield return row;
             }
         }
     }

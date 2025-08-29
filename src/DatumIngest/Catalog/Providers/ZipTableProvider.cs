@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
 namespace DatumIngest.Catalog.Providers;
@@ -105,7 +106,9 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
                 continue;
             }
 
-            DataValue[] values = new DataValue[names.Length];
+            Row resultRow = GlobalBufferPool.RentRow(names.Length);
+            resultRow.UpdateSchema(names, nameIndex);
+            DataValue[] values = resultRow.RawValues;
             int valueIndex = 0;
 
             if (includeFileName)
@@ -123,7 +126,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
                 values[valueIndex++] = DataValue.FromUInt8Array(bytes);
             }
 
-            yield return new Row(names, values, nameIndex);
+            yield return resultRow;
         }
     }
 
@@ -456,7 +459,9 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
         bool includeFileName,
         bool includeFileBytes)
     {
-        DataValue[] values = new DataValue[names.Length];
+        Row resultRow = GlobalBufferPool.RentRow(names.Length);
+        resultRow.UpdateSchema(names, nameIndex);
+        DataValue[] values = resultRow.RawValues;
         int valueIndex = 0;
 
         if (includeFileName)
@@ -470,7 +475,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
             values[valueIndex++] = DataValue.FromUInt8Array(bytes);
         }
 
-        return new Row(names, values, nameIndex);
+        return resultRow;
     }
 
     /// <summary>

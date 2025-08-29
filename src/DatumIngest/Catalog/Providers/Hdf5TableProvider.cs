@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using PureHDF;
 using PureHDF.Selections;
@@ -95,13 +96,15 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            DataValue[] values = new DataValue[columnDataList.Count];
+            Row row = GlobalBufferPool.RentRow(columnDataList.Count);
+            row.UpdateSchema(columnNames, nameIndex);
+            DataValue[] values = row.RawValues;
             for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
             {
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
-            yield return new Row(columnNames, values, nameIndex);
+            yield return row;
         }
 
         await Task.CompletedTask;
@@ -212,13 +215,15 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            DataValue[] values = new DataValue[columnDataList.Count];
+            Row row = GlobalBufferPool.RentRow(columnDataList.Count);
+            row.UpdateSchema(columnNames, nameIndex);
+            DataValue[] values = row.RawValues;
             for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
             {
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
-            yield return new Row(columnNames, values, nameIndex);
+            yield return row;
         }
 
         await Task.CompletedTask;

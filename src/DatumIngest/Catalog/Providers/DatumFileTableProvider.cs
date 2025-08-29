@@ -114,13 +114,15 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = new DataValue[projectedIndices.Length];
+                Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
+                row.UpdateSchema(projectedNames, nameIndex);
+                DataValue[] values = row.RawValues;
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
-                yield return new Row(projectedNames, values, nameIndex);
+                yield return row;
             }
         }
     }
@@ -185,13 +187,15 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = new DataValue[projectedIndices.Length];
+                Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
+                row.UpdateSchema(projectedNames, nameIndex);
+                DataValue[] values = row.RawValues;
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
-                yield return new Row(projectedNames, values, nameIndex);
+                yield return row;
                 emitted++;
             }
 

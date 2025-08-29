@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using DatumIngest.Execution;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 
@@ -400,7 +401,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
         // If headerless, the first line is data — emit it as a row.
         if (!hasHeader)
         {
-            DataValue[] firstValues = new DataValue[projectedIndices.Length];
+            Row firstRow = GlobalBufferPool.RentRow(projectedIndices.Length);
+            firstRow.UpdateSchema(projectedNames, nameIndex);
+            DataValue[] firstValues = firstRow.RawValues;
             for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
             {
                 int sourceIndex = projectedIndices[projectionIndex];
@@ -408,7 +411,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 firstValues[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
             }
 
-            yield return new Row(projectedNames, firstValues, nameIndex);
+            yield return firstRow;
         }
 
         while (!cancellationToken.IsCancellationRequested)
@@ -419,7 +422,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 break;
             }
 
-            DataValue[] values = new DataValue[projectedIndices.Length];
+            Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
+            row.UpdateSchema(projectedNames, nameIndex);
+            DataValue[] values = row.RawValues;
 
             // Fast path for unquoted lines: extract fields as spans and parse scalars
             // directly, avoiding per-field substring allocations. This is the common case
@@ -467,7 +472,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 }
             }
 
-            yield return new Row(projectedNames, values, nameIndex);
+            yield return row;
         }
     }
 
@@ -1447,7 +1452,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 break;
             }
 
-            DataValue[] values = new DataValue[projectedIndices.Length];
+            Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
+            row.UpdateSchema(projectedNames, nameIndex);
+            DataValue[] values = row.RawValues;
 
             if (!logicalLine.Contains('"'))
             {
@@ -1490,7 +1497,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 }
             }
 
-            yield return new Row(projectedNames, values, nameIndex);
+            yield return row;
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using DatumIngest.Execution;
 using DatumIngest.Functions.Image;
 using DatumIngest.Model;
 using SkiaSharp;
@@ -83,7 +84,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
         int itemByteSize = header.ItemByteSize;
         byte[] itemBuffer = new byte[itemByteSize];
 
-        for (int row = 0; row < header.ItemCount; row++)
+        for (int rowIndex = 0; rowIndex < header.ItemCount; rowIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -97,12 +98,14 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 stream.Seek(itemByteSize, SeekOrigin.Current);
             }
 
-            DataValue[] values = new DataValue[names.Length];
+            Row resultRow = GlobalBufferPool.RentRow(names.Length);
+            resultRow.UpdateSchema(names, nameIndex);
+            DataValue[] values = resultRow.RawValues;
             int valueIndex = 0;
 
             if (includeIndex)
             {
-                values[valueIndex++] = DataValue.FromFloat32(row);
+                values[valueIndex++] = DataValue.FromFloat32(rowIndex);
             }
 
             if (includeData)
@@ -110,7 +113,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 values[valueIndex] = CreateDataValue(header, itemBuffer);
             }
 
-            yield return new Row(names, values, nameIndex);
+            yield return resultRow;
         }
 
         await Task.CompletedTask;
@@ -200,7 +203,9 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 stream.Seek(itemByteSize, SeekOrigin.Current);
             }
 
-            DataValue[] values = new DataValue[names.Length];
+            Row resultRow = GlobalBufferPool.RentRow(names.Length);
+            resultRow.UpdateSchema(names, nameIndex);
+            DataValue[] values = resultRow.RawValues;
             int valueIndex = 0;
 
             if (includeIndex)
@@ -213,7 +218,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 values[valueIndex] = CreateDataValue(header, itemBuffer);
             }
 
-            yield return new Row(names, values, nameIndex);
+            yield return resultRow;
         }
 
         await Task.CompletedTask;
@@ -272,7 +277,9 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             long offset = dataStartPosition + (long)rowIndex * itemByteSize;
             stream.Seek(offset, SeekOrigin.Begin);
 
-            DataValue[] values = new DataValue[names.Length];
+            Row resultRow = GlobalBufferPool.RentRow(names.Length);
+            resultRow.UpdateSchema(names, nameIndex);
+            DataValue[] values = resultRow.RawValues;
             values[0] = DataValue.FromFloat32(rowIndex);
 
             if (includeData)
@@ -281,7 +288,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 values[1] = CreateDataValue(header, itemBuffer);
             }
 
-            yield return new Row(names, values, nameIndex);
+            yield return resultRow;
         }
 
         await Task.CompletedTask;
