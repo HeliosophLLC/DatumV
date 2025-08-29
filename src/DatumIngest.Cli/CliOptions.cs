@@ -87,6 +87,9 @@ internal sealed class CliOptions
     /// <summary>Gets or sets the named parameter bindings (name → raw string value).</summary>
     public Dictionary<string, string> Parameters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Gets or sets the number of times to repeat the query. Used for warm-pool benchmarking.</summary>
+    public int Repeat { get; set; } = 1;
+
     /// <summary>
     /// Parses command-line arguments into a CliOptions instance.
     /// </summary>
@@ -276,6 +279,14 @@ internal sealed class CliOptions
                     string paramName = paramArg[..equalsIndex];
                     string paramValue = paramArg[(equalsIndex + 1)..];
                     options.Parameters[paramName] = paramValue;
+                    break;
+
+                case "--repeat":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--repeat requires a count argument");
+                    }
+                    options.Repeat = int.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
                     break;
 
                 default:

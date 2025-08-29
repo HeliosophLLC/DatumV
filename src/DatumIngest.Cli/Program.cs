@@ -82,7 +82,7 @@ try
 
     return options.Command switch
     {
-        "query" => await RunQueryAsync(query, catalog, options),
+        "query" => await RunQueryRepeatedAsync(query, catalog, options),
         "explore" => await RunExploreAsync(query, catalog, options.Limit),
         "stats" => await RunStatsAsync(query, catalog),
         "explain" => await RunExplainAsync(query, catalog, options.Analyze, options.MemoryBudgetBytes),
@@ -708,6 +708,25 @@ static TableDescriptor ParseSourceDefinition(string source)
     }
 
     return new TableDescriptor(provider, name, filePath, options);
+}
+
+static async Task<int> RunQueryRepeatedAsync(QueryExpression query, TableCatalog catalog, CliOptions options)
+{
+    for (int iteration = 0; iteration < options.Repeat; iteration++)
+    {
+        if (options.Repeat > 1)
+        {
+            Console.Error.WriteLine($"--- Iteration {iteration + 1}/{options.Repeat} ---");
+        }
+
+        int result = await RunQueryAsync(query, catalog, options);
+        if (result != 0)
+        {
+            return result;
+        }
+    }
+
+    return 0;
 }
 
 static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog, CliOptions options)
