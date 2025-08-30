@@ -157,9 +157,9 @@ internal sealed class IndexNestedLoopJoinExecutor
                         continue;
                     }
 
-                    buildRow = ApplyBuildAlias(buildRow, ref buildAliasSchema);
-                    combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
-                    Row combined = combinedSchema.Combine(probeRow, buildRow);
+                    buildRow = ApplyBuildAlias(buildRow.Value, ref buildAliasSchema);
+                    combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow.Value);
+                    Row combined = combinedSchema.Combine(probeRow, buildRow.Value);
 
                     if (EvaluateResidual(residual, combined))
                     {
@@ -189,9 +189,9 @@ internal sealed class IndexNestedLoopJoinExecutor
                     continue;
                 }
 
-                buildRow = ApplyBuildAlias(buildRow, ref buildAliasSchema);
-                combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
-                Row combined = combinedSchema.Combine(probeRow, buildRow);
+                buildRow = ApplyBuildAlias(buildRow.Value, ref buildAliasSchema);
+                combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow.Value);
+                Row combined = combinedSchema.Combine(probeRow, buildRow.Value);
 
                 if (residual is not null && !EvaluateResidual(residual, combined))
                 {

@@ -412,7 +412,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             // Build a min-heap keyed by the current row of each run.
             PriorityQueue<RunReader, RunReader> heap = new(
                 Comparer<RunReader>.Create(
-                    (a, b) => CompareRows(a.Current!, b.Current!, evaluator)));
+                    (a, b) => CompareRows(a.Current.GetValueOrDefault(), b.Current.GetValueOrDefault(), evaluator)));
 
             foreach (RunReader reader in readers)
             {
@@ -427,7 +427,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
 
                 RunReader winner = heap.Dequeue();
                 outputBatch ??= RowBatch.Rent(context.BatchSize);
-                outputBatch.Add(winner.Current!);
+                outputBatch.Add(winner.Current.GetValueOrDefault());
                 if (outputBatch.IsFull)
                 {
                     yield return outputBatch;

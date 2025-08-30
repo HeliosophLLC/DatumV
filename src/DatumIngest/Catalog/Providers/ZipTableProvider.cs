@@ -114,9 +114,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
                 continue;
             }
 
-            Row resultRow = GlobalBufferPool.RentRow(names.Length);
-            resultRow.UpdateSchema(names, nameIndex);
-            DataValue[] values = resultRow.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(names.Length);
             int valueIndex = 0;
 
             if (includeFileName)
@@ -135,7 +133,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(resultRow);
+            batch.Add(new Row(names, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;
@@ -504,9 +502,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
         bool includeFileName,
         bool includeFileBytes)
     {
-        Row resultRow = GlobalBufferPool.RentRow(names.Length);
-        resultRow.UpdateSchema(names, nameIndex);
-        DataValue[] values = resultRow.RawValues;
+        DataValue[] values = GlobalBufferPool.Rent(names.Length);
         int valueIndex = 0;
 
         if (includeFileName)
@@ -520,7 +516,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
             values[valueIndex++] = DataValue.FromUInt8Array(bytes);
         }
 
-        return resultRow;
+        return new Row(names, values, nameIndex);
     }
 
     /// <summary>

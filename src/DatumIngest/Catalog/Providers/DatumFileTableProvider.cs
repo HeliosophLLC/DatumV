@@ -118,16 +118,14 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
-                row.UpdateSchema(projectedNames, nameIndex);
-                DataValue[] values = row.RawValues;
+                DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(row);
+                batch.Add(new Row(projectedNames, values, nameIndex));
 
                 if (batch.IsFull)
                 {
@@ -202,16 +200,14 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
-                row.UpdateSchema(projectedNames, nameIndex);
-                DataValue[] values = row.RawValues;
+                DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(row);
+                batch.Add(new Row(projectedNames, values, nameIndex));
                 emitted++;
 
                 if (batch.IsFull)

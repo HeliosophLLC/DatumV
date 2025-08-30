@@ -266,7 +266,7 @@ public sealed class IndexScanOperator : IQueryOperator
         {
             long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-            if (rowsByOffset.TryGetValue(absoluteRow, out Row? indexRow))
+            if (rowsByOffset.TryGetValue(absoluteRow, out Row indexRow))
             {
                 yield return indexRow;
             }

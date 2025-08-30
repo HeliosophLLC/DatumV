@@ -1332,7 +1332,7 @@ internal sealed class MockKeyedProvider : IKeyedTableProvider
         foreach (DataValue keyValue in keyValues)
         {
             string key = keyValue.AsString();
-            if (_rowsByKey.TryGetValue(key, out Row? row))
+            if (_rowsByKey.TryGetValue(key, out Row row))
             {
                 batch.Add(row);
 

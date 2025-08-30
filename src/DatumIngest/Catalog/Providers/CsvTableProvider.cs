@@ -408,9 +408,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
         // If headerless, the first line is data — emit it as a row.
         if (!hasHeader)
         {
-            Row firstRow = GlobalBufferPool.RentRow(projectedIndices.Length);
-            firstRow.UpdateSchema(projectedNames, nameIndex);
-            DataValue[] firstValues = firstRow.RawValues;
+            DataValue[] firstValues = GlobalBufferPool.Rent(projectedIndices.Length);
             for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
             {
                 int sourceIndex = projectedIndices[projectionIndex];
@@ -419,7 +417,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(firstRow);
+            batch.Add(new Row(projectedNames, firstValues, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;
@@ -435,9 +433,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 break;
             }
 
-            Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
-            row.UpdateSchema(projectedNames, nameIndex);
-            DataValue[] values = row.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
 
             // Fast path for unquoted lines: extract fields as spans and parse scalars
             // directly, avoiding per-field substring allocations. This is the common case
@@ -486,7 +482,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(row);
+            batch.Add(new Row(projectedNames, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;
@@ -1478,9 +1474,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 break;
             }
 
-            Row row = GlobalBufferPool.RentRow(projectedIndices.Length);
-            row.UpdateSchema(projectedNames, nameIndex);
-            DataValue[] values = row.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
 
             if (!logicalLine.Contains('"'))
             {
@@ -1524,7 +1518,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(row);
+            batch.Add(new Row(projectedNames, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;

@@ -1,19 +1,29 @@
 namespace DatumIngest.Model;
 
 /// <summary>
-/// A single row of named <see cref="DataValue"/> entries.
-/// Provides both name-based and ordinal-based access with case-insensitive name matching.
+/// A single row of named <see cref="DataValue"/> entries. This is a lightweight value type
+/// that stores references to shared column-name and name-index arrays, avoiding per-row
+/// heap allocations in hot paths such as hash join build phases.
 /// </summary>
-public class Row
+/// <remarks>
+/// <para>
+/// Schema arrays (<c>names</c> and <c>nameIndex</c>) are typically shared across all rows
+/// in a <see cref="RowBatch"/> — each struct holds the same two references, so the actual
+/// per-row overhead is just three managed references (24 bytes on x64), stored inline in
+/// the containing array or <see cref="List{T}"/>. This eliminates millions of individual
+/// heap objects that previously caused expensive gen2 card-table scanning during ephemeral
+/// GC collections.
+/// </para>
+/// </remarks>
+public readonly struct Row
 {
-    private string[] _names;
+    private readonly string[] _names;
     private readonly DataValue[] _values;
-
-    // Case-insensitive index for fast name lookups.
-    private Dictionary<string, int> _nameIndex;
+    private readonly Dictionary<string, int> _nameIndex;
 
     /// <summary>
-    /// Creates a row from parallel arrays of column names and values.
+    /// Creates a row from parallel arrays of column names and values, building a
+    /// case-insensitive name-to-ordinal index. Suitable for tests and one-off construction.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// Thrown when the name and value arrays have different lengths.
@@ -29,7 +39,7 @@ public class Row
         _names = names;
         _values = values;
 
-        _nameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        _nameIndex = new Dictionary<string, int>(names.Length, StringComparer.OrdinalIgnoreCase);
         for (int index = 0; index < names.Length; index++)
         {
             _nameIndex[names[index]] = index;
@@ -43,9 +53,9 @@ public class Row
     /// </summary>
     /// <remarks>
     /// Callers must guarantee that <paramref name="names"/> and <paramref name="nameIndex"/>
-    /// are never mutated after construction. <see cref="Row"/> is immutable, so sharing is safe.
+    /// are never mutated after construction.
     /// </remarks>
-    internal Row(string[] names, DataValue[] values, Dictionary<string, int> nameIndex)
+    public Row(string[] names, DataValue[] values, Dictionary<string, int> nameIndex)
     {
         _names = names;
         _values = values;
@@ -77,15 +87,11 @@ public class Row
     internal Dictionary<string, int> RawNameIndex => _nameIndex;
 
     /// <summary>
-    /// Replaces the column name array and name-index dictionary without allocating
-    /// a new <see cref="Row"/>. Used by the pooling infrastructure when a rented
-    /// row needs to adopt a different <see cref="Execution.Operators.JoinOperator.CombinedRowSchema"/>.
+    /// <c>true</c> when this instance is the <c>default</c> (uninitialized) value.
+    /// Useful for nullable-replacement patterns where <c>Row?</c> (<see cref="Nullable{Row}"/>)
+    /// is avoided.
     /// </summary>
-    internal void UpdateSchema(string[] names, Dictionary<string, int> nameIndex)
-    {
-        _names = names;
-        _nameIndex = nameIndex;
-    }
+    public bool IsEmpty => _values is null;
 
     /// <summary>
     /// Retrieves a value by column name (case-insensitive).

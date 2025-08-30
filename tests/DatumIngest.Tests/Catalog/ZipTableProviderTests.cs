@@ -217,13 +217,11 @@ public sealed class ZipTableProviderTests : IDisposable
 
         Assert.Equal(2, rows.Count);
 
-        Row? helloRow = rows.FirstOrDefault(r => r["file_name"].AsString() == "hello.txt");
-        Assert.NotNull(helloRow);
+        Row helloRow = rows.First(r => r["file_name"].AsString() == "hello.txt");
         byte[] helloBytes = helloRow["file_bytes"].AsUInt8Array();
         Assert.Equal("Hello, World!", System.Text.Encoding.UTF8.GetString(helloBytes));
 
-        Row? nestedRow = rows.FirstOrDefault(r => r["file_name"].AsString() == "data/nested.bin");
-        Assert.NotNull(nestedRow);
+        Row nestedRow = rows.First(r => r["file_name"].AsString() == "data/nested.bin");
         Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, nestedRow["file_bytes"].AsUInt8Array());
     }
 
@@ -334,8 +332,7 @@ public sealed class ZipTableProviderTests : IDisposable
         }
 
         // Spot-check one entry's content.
-        Row? entry5 = rows.FirstOrDefault(r => r["file_name"].AsString() == "entry_5.bin");
-        Assert.NotNull(entry5);
+        Row entry5 = rows.First(r => r["file_name"].AsString() == "entry_5.bin");
         byte[] bytes = entry5["file_bytes"].AsUInt8Array();
         Assert.Equal(5, bytes[0]);
     }

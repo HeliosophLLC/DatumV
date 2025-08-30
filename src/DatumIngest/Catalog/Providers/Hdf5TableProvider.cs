@@ -100,16 +100,14 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            Row row = GlobalBufferPool.RentRow(columnDataList.Count);
-            row.UpdateSchema(columnNames, nameIndex);
-            DataValue[] values = row.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(columnDataList.Count);
             for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
             {
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(row);
+            batch.Add(new Row(columnNames, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;
@@ -231,16 +229,14 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            Row row = GlobalBufferPool.RentRow(columnDataList.Count);
-            row.UpdateSchema(columnNames, nameIndex);
-            DataValue[] values = row.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(columnDataList.Count);
             for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
             {
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(row);
+            batch.Add(new Row(columnNames, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;

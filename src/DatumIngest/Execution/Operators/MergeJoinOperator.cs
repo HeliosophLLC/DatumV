@@ -214,9 +214,9 @@ public sealed class MergeJoinOperator : IQueryOperator
                 if (leftMustAppear)
                 {
                     cachedNullRight ??= CreateNullRow(rightRow);
-                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
+                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
@@ -229,9 +229,9 @@ public sealed class MergeJoinOperator : IQueryOperator
                 if (rightMustAppear)
                 {
                     cachedNullLeft ??= CreateNullRow(leftRow);
-                    schema ??= CombinedRowSchema.Build(cachedNullLeft, rightRow);
+                    schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(schema.Combine(cachedNullLeft, rightRow));
+                    outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
@@ -247,9 +247,9 @@ public sealed class MergeJoinOperator : IQueryOperator
                 if (leftMustAppear)
                 {
                     cachedNullRight ??= CreateNullRow(rightRow);
-                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
+                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
@@ -261,9 +261,9 @@ public sealed class MergeJoinOperator : IQueryOperator
                 if (rightMustAppear)
                 {
                     cachedNullLeft ??= CreateNullRow(leftRow);
-                    schema ??= CombinedRowSchema.Build(cachedNullLeft, rightRow);
+                    schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(schema.Combine(cachedNullLeft, rightRow));
+                    outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
@@ -333,9 +333,9 @@ public sealed class MergeJoinOperator : IQueryOperator
                     {
                         // All right-group rows filtered out by residual — emit unmatched left.
                         cachedNullRight ??= CreateNullRow(rightGroup[0]);
-                        schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
+                        schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                         outputBatch ??= RowBatch.Rent(context.BatchSize);
-                        outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                        outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
 
@@ -369,9 +369,9 @@ public sealed class MergeJoinOperator : IQueryOperator
 
                 if (cachedNullRight is not null)
                 {
-                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
+                    schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
@@ -397,9 +397,9 @@ public sealed class MergeJoinOperator : IQueryOperator
 
                 if (cachedNullLeft is not null)
                 {
-                    schema ??= CombinedRowSchema.Build(cachedNullLeft, rightRow);
+                    schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(schema.Combine(cachedNullLeft, rightRow));
+                    outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else

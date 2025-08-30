@@ -249,7 +249,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             // Row values have been fully extracted — return the row to
             // the pool so the upstream operator can reuse it.
-            context.LocalBufferPool.ReturnRow(row);
+            context.LocalBufferPool.ReturnValues(row);
             }
 
             inputBatch.Return();
@@ -486,7 +486,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 // Row values have been fully extracted — return the row
                 // to the pool so the upstream join can reuse it.
-                context.LocalBufferPool.ReturnRow(row);
+                context.LocalBufferPool.ReturnValues(row);
                 }
 
                 inputBatch.Return();
@@ -720,7 +720,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             EvaluateAggregateArgumentsInto(
                                 workerEvaluator, row, workerArgScratch, workerSortScratch);
                             AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context);
-                            context.LocalBufferPool.ReturnRow(row);
+                            context.LocalBufferPool.ReturnValues(row);
                         }
                     }, cancellationToken);
                 }
@@ -1399,9 +1399,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
         }
 
-        Row row = GlobalBufferPool.RentRow(outputFieldCount);
-        row.UpdateSchema(outputNames, outputNameIndex!);
-        DataValue[] values = row.RawValues;
+        DataValue[] values = GlobalBufferPool.Rent(outputFieldCount);
 
         if (!isGlobalAggregation)
         {
@@ -1416,7 +1414,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             values[_groupByExpressions.Count + index] = group.Accumulators[index].Result;
         }
 
-        return row;
+        return new Row(outputNames, values, outputNameIndex!);
     }
 
     // ---------------------------------------------------------------
@@ -1504,7 +1502,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
         }
 
-        Row spillRow = schemaState.SpillRow!;
+        Row spillRow = schemaState.SpillRow.GetValueOrDefault();
 
         if (!schemaWritten[partition])
         {

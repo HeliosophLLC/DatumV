@@ -35,7 +35,7 @@ public sealed class ExecutionContextTests
 
         ExecutionContext cloned = original.WithOuterRow(outerRow);
 
-        Assert.Same(outerRow, cloned.OuterRow);
+        Assert.Equal(outerRow, cloned.OuterRow);
         Assert.Equal(42, cloned.MaxRecursionDepth);
         Assert.Equal(10, cloned.RowLimit);
         Assert.Equal(512L, cloned.MemoryBudgetBytes);

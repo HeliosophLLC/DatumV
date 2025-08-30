@@ -106,9 +106,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 stream.Seek(itemByteSize, SeekOrigin.Current);
             }
 
-            Row resultRow = GlobalBufferPool.RentRow(names.Length);
-            resultRow.UpdateSchema(names, nameIndex);
-            DataValue[] values = resultRow.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(names.Length);
             int valueIndex = 0;
 
             if (includeIndex)
@@ -122,7 +120,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(resultRow);
+            batch.Add(new Row(names, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;
@@ -224,9 +222,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 stream.Seek(itemByteSize, SeekOrigin.Current);
             }
 
-            Row resultRow = GlobalBufferPool.RentRow(names.Length);
-            resultRow.UpdateSchema(names, nameIndex);
-            DataValue[] values = resultRow.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(names.Length);
             int valueIndex = 0;
 
             if (includeIndex)
@@ -240,7 +236,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(resultRow);
+            batch.Add(new Row(names, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;
@@ -311,9 +307,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             long offset = dataStartPosition + (long)rowIndex * itemByteSize;
             stream.Seek(offset, SeekOrigin.Begin);
 
-            Row resultRow = GlobalBufferPool.RentRow(names.Length);
-            resultRow.UpdateSchema(names, nameIndex);
-            DataValue[] values = resultRow.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(names.Length);
             values[0] = DataValue.FromFloat32(rowIndex);
 
             if (includeData)
@@ -323,7 +317,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(resultRow);
+            batch.Add(new Row(names, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;

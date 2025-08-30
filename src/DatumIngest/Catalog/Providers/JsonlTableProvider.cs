@@ -149,9 +149,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
                 continue;
             }
 
-            Row row = GlobalBufferPool.RentRow(projectedColumns.Count);
-            row.UpdateSchema(names, nameIndex);
-            DataValue[] values = row.RawValues;
+            DataValue[] values = GlobalBufferPool.Rent(projectedColumns.Count);
             for (int columnIndex = 0; columnIndex < projectedColumns.Count; columnIndex++)
             {
                 ColumnInfo column = projectedColumns[columnIndex];
@@ -166,7 +164,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
             }
 
             batch ??= RowBatch.Rent(DefaultBatchSize);
-            batch.Add(row);
+            batch.Add(new Row(names, values, nameIndex));
             if (batch.IsFull)
             {
                 yield return batch;

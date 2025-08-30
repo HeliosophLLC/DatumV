@@ -549,7 +549,7 @@ public sealed class JoinOperator : IQueryOperator
                         }
 
                         schema.CombineInto(leftRow, rightRow, residualCheckBuffer!);
-                        if (!evaluator.EvaluateAsBoolean(extraction.Residual, residualCheckRow))
+                        if (!evaluator.EvaluateAsBoolean(extraction.Residual, residualCheckRow.Value))
                         {
                             continue;
                         }
@@ -596,8 +596,8 @@ public sealed class JoinOperator : IQueryOperator
                 {
                     cachedNullBuild ??= CreateNullRow(buildRows[0]);
                     // Null-pad the build side. Column order is always (left, right).
-                    Row leftRow = _flipped ? cachedNullBuild : probeRow;
-                    Row rightRow = _flipped ? probeRow : cachedNullBuild;
+                    Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
+                    Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
                     outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
@@ -636,7 +636,7 @@ public sealed class JoinOperator : IQueryOperator
 
                     if (nullProbe is not null)
                     {
-                        Row nullProbeRow = CreateNullRow(nullProbe);
+                        Row nullProbeRow = CreateNullRow(nullProbe.Value);
                         // Column order is always (left, right).
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
@@ -831,7 +831,7 @@ public sealed class JoinOperator : IQueryOperator
                                     }
 
                                     workerSchema.CombineInto(leftRow, rightRow, workerResidualBuffer!);
-                                    if (!workerEvaluator.EvaluateAsBoolean(extraction.Residual, workerResidualRow))
+                                    if (!workerEvaluator.EvaluateAsBoolean(extraction.Residual, workerResidualRow.Value))
                                     {
                                         continue;
                                     }
@@ -866,8 +866,8 @@ public sealed class JoinOperator : IQueryOperator
                         {
                             if (nullBuildRow is not null)
                             {
-                                Row leftRow = _flipped ? nullBuildRow : probeRow;
-                                Row rightRow = _flipped ? probeRow : nullBuildRow;
+                                Row leftRow = _flipped ? nullBuildRow.Value : probeRow;
+                                Row rightRow = _flipped ? probeRow : nullBuildRow.Value;
                                 workerSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                                 await output.Writer.WriteAsync(
                                     workerSchema.CombinePooled(leftRow, rightRow, bufferPool), cancellationToken).ConfigureAwait(false);
@@ -1023,7 +1023,7 @@ public sealed class JoinOperator : IQueryOperator
 
                     schema.CombineInto(leftRow, rightRow, reusableFilterBuffer);
 
-                    if (!evaluator.EvaluateAsBoolean(_onCondition, reusableFilterRow!))
+                    if (!evaluator.EvaluateAsBoolean(_onCondition, reusableFilterRow.GetValueOrDefault()))
                     {
                         continue;
                     }
@@ -1061,8 +1061,8 @@ public sealed class JoinOperator : IQueryOperator
                 if (buildRows.Count > 0)
                 {
                     cachedNullBuild ??= CreateNullRow(buildRows[0]);
-                    Row leftRow = _flipped ? cachedNullBuild : probeRow;
-                    Row rightRow = _flipped ? probeRow : cachedNullBuild;
+                    Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
+                    Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
                     outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
@@ -1093,7 +1093,7 @@ public sealed class JoinOperator : IQueryOperator
 
                     if (nullProbe is not null)
                     {
-                        Row nullProbeRow = CreateNullRow(nullProbe);
+                        Row nullProbeRow = CreateNullRow(nullProbe.Value);
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
@@ -1392,16 +1392,14 @@ public sealed class JoinOperator : IQueryOperator
         }
 
         /// <summary>
-        /// Combines two rows, renting the entire <see cref="Row"/> object (including
-        /// its backing <see cref="DataValue"/> array) from <paramref name="bufferPool"/>
-        /// to avoid per-row heap allocation. The downstream consumer returns the row
-        /// via <see cref="LocalBufferPool.ReturnRow"/> when it is no longer needed.
+        /// Combines two rows, renting the backing <see cref="DataValue"/> array from
+        /// <paramref name="bufferPool"/> to avoid per-row heap allocation. The downstream
+        /// consumer returns the array via <see cref="LocalBufferPool.Return"/> when it
+        /// is no longer needed.
         /// </summary>
         internal Row CombinePooled(Row left, Row right, LocalBufferPool bufferPool)
         {
-            Row row = bufferPool.RentRow(_names.Length);
-            row.UpdateSchema(_names, _nameIndex);
-            DataValue[] values = row.RawValues;
+            DataValue[] values = bufferPool.Rent(_names.Length);
 
             for (int index = 0; index < _leftFieldCount; index++)
             {
@@ -1413,7 +1411,7 @@ public sealed class JoinOperator : IQueryOperator
                 values[_leftFieldCount + index] = right[index];
             }
 
-            return row;
+            return new Row(_names, values, _nameIndex);
         }
 
         /// <summary>

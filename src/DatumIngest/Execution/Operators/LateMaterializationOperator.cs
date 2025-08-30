@@ -166,9 +166,10 @@ public sealed class LateMaterializationOperator : IQueryOperator
         {
             Row? deferredRow = null;
 
-            if (row.TryGetValue(childKeyColumn, out DataValue keyValue) && !keyValue.IsNull)
+            if (row.TryGetValue(childKeyColumn, out DataValue keyValue) && !keyValue.IsNull
+                && fetchedByKey.TryGetValue(keyValue, out Row fetchedRow))
             {
-                fetchedByKey.TryGetValue(keyValue, out deferredRow);
+                deferredRow = fetchedRow;
             }
 
             schema ??= MergedRowSchema.Build(row, _deferredColumns, _alias);
@@ -291,7 +292,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
                 DataValue value;
 
                 if (deferredRow is not null &&
-                    deferredRow.TryGetValue(_deferredColumnNames[index], out DataValue fetched))
+                    deferredRow.Value.TryGetValue(_deferredColumnNames[index], out DataValue fetched))
                 {
                     value = fetched;
                 }

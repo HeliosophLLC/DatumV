@@ -177,12 +177,12 @@ public sealed class ExpressionEvaluator
         if (outerRow is not null)
         {
             if (column.QualifiedName is not null &&
-                outerRow.TryGetValue(column.QualifiedName, out DataValue outerQualifiedValue))
+                outerRow.Value.TryGetValue(column.QualifiedName, out DataValue outerQualifiedValue))
             {
                 return outerQualifiedValue;
             }
 
-            if (outerRow.TryGetValue(column.ColumnName, out DataValue outerValue))
+            if (outerRow.Value.TryGetValue(column.ColumnName, out DataValue outerValue))
             {
                 return outerValue;
             }

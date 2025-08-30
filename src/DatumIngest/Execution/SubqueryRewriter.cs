@@ -450,13 +450,13 @@ internal static class SubqueryRewriter
             return new LiteralExpression(null);
         }
 
-        if (firstRow.FieldCount != 1)
+        if (firstRow.Value.FieldCount != 1)
         {
             throw new InvalidOperationException(
-                $"Scalar subquery must return exactly one column, but returned {firstRow.FieldCount}.");
+                $"Scalar subquery must return exactly one column, but returned {firstRow.Value.FieldCount}.");
         }
 
-        DataValue value = firstRow[0];
+        DataValue value = firstRow.Value[0];
 
         if (value.IsNull)
         {

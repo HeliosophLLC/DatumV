@@ -83,7 +83,6 @@ internal sealed class CountedPool<T>
 public static class GlobalBufferPool
 {
     private static readonly ConcurrentDictionary<int, CountedPool<DataValue[]>> ArrayPools = new();
-    private static readonly ConcurrentDictionary<int, CountedPool<Row>> RowPools = new();
     private static readonly ConcurrentDictionary<int, CountedPool<GroupState>> GroupStatePools = new();
     private static readonly ConcurrentDictionary<int, CountedPool<IAggregateAccumulator[]>> AccumulatorArrayPools = new();
     private static readonly ConcurrentQueue<LocalBufferPool> LocalBufferPools = new();
@@ -104,7 +103,7 @@ public static class GlobalBufferPool
     /// </summary>
     /// <param name="maxItemsPerBucket">
     /// Upper bound on items per field-count bucket. <see cref="Return"/> and
-    /// <see cref="ReturnRow"/> silently discard items once a bucket reaches this limit.
+    /// <see cref="ReturnValues"/> silently discard items once a bucket reaches this limit.
     /// </param>
     public static void Configure(int maxItemsPerBucket)
     {
@@ -115,24 +114,21 @@ public static class GlobalBufferPool
     }
 
     /// <summary>
-    /// Burst-allocates <paramref name="count"/> <see cref="Row"/> objects with backing
-    /// <see cref="DataValue"/> arrays of <paramref name="fieldCount"/> elements. The rows
-    /// are allocated contiguously to ensure dense packing in the managed heap, then
-    /// enqueued into the pool for immediate reuse.
+    /// Burst-allocates <paramref name="count"/> <see cref="DataValue"/> arrays of
+    /// <paramref name="fieldCount"/> elements. The arrays are allocated contiguously to
+    /// ensure dense packing in the managed heap, then enqueued into the pool for
+    /// immediate reuse.
     /// </summary>
-    /// <param name="fieldCount">Number of fields (columns) per row.</param>
-    /// <param name="count">Number of rows to pre-allocate.</param>
+    /// <param name="fieldCount">Number of fields (columns) per array.</param>
+    /// <param name="count">Number of arrays to pre-allocate.</param>
     public static void Warmup(int fieldCount, int count)
     {
-        CountedPool<Row> rowPool = RowPools.GetOrAdd(fieldCount, static _ => new CountedPool<Row>());
-        Dictionary<string, int> sharedEmptyIndex = new(StringComparer.OrdinalIgnoreCase);
+        CountedPool<DataValue[]> pool = ArrayPools.GetOrAdd(fieldCount, static _ => new CountedPool<DataValue[]>());
 
         for (int i = 0; i < count; i++)
         {
-            string[] names = new string[fieldCount];
             DataValue[] values = new DataValue[fieldCount];
-            Row row = new(names, values, sharedEmptyIndex);
-            rowPool.Enqueue(row);
+            pool.Enqueue(values);
         }
     }
 
@@ -162,30 +158,13 @@ public static class GlobalBufferPool
     }
 
     /// <summary>
-    /// Rents a <see cref="Row"/> with a backing <see cref="DataValue"/> array of
-    /// <paramref name="fieldCount"/> elements. The caller must call
-    /// <see cref="Row.UpdateSchema"/> to set the correct column names before use.
+    /// Returns a <see cref="DataValue"/> array extracted from a <see cref="Row"/> to
+    /// the pool. Convenience overload for callers that hold a <see cref="Row"/> struct
+    /// and need to recycle its backing buffer.
     /// </summary>
-    public static Row RentRow(int fieldCount)
+    public static void ReturnValues(Row row)
     {
-        if (RowPools.TryGetValue(fieldCount, out CountedPool<Row>? pool)
-            && pool.TryDequeue(out Row? row))
-        {
-            return row;
-        }
-
-        return new Row(new string[fieldCount], new DataValue[fieldCount],
-            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// Returns a <see cref="Row"/> to the pool so it can be reused by a future
-    /// <see cref="RentRow"/> call with the same field count.
-    /// </summary>
-    public static void ReturnRow(Row row)
-    {
-        CountedPool<Row> pool = RowPools.GetOrAdd(row.FieldCount, static _ => new CountedPool<Row>());
-        pool.EnqueueIfUnderLimit(row, _maxItemsPerBucket);
+        Return(row.RawValues);
     }
 
     /// <summary>
@@ -314,8 +293,6 @@ public static class GlobalBufferPool
     {
         foreach (CountedPool<DataValue[]> pool in ArrayPools.Values) pool.Clear();
         ArrayPools.Clear();
-        foreach (CountedPool<Row> pool in RowPools.Values) pool.Clear();
-        RowPools.Clear();
         foreach (CountedPool<GroupState> pool in GroupStatePools.Values) pool.Clear();
         GroupStatePools.Clear();
         foreach (CountedPool<IAggregateAccumulator[]> pool in AccumulatorArrayPools.Values) pool.Clear();

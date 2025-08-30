@@ -107,9 +107,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Row row = GlobalBufferPool.RentRow(projectedFields.Length);
-                row.UpdateSchema(columnNames, nameIndex);
-                DataValue[] values = row.RawValues;
+                DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     values[fieldIndex] = ExtractValue(
@@ -119,7 +117,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(row);
+                batch.Add(new Row(columnNames, values, nameIndex));
                 if (batch.IsFull)
                 {
                     yield return batch;
@@ -234,9 +232,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Row row = GlobalBufferPool.RentRow(projectedFields.Length);
-                row.UpdateSchema(columnNames, nameIndex);
-                DataValue[] values = row.RawValues;
+                DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     values[fieldIndex] = ExtractValue(
@@ -246,7 +242,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(row);
+                batch.Add(new Row(columnNames, values, nameIndex));
                 if (batch.IsFull)
                 {
                     yield return batch;
@@ -435,9 +431,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Row row = GlobalBufferPool.RentRow(projectedFields.Length);
-                row.UpdateSchema(columnNames, nameIndex);
-                DataValue[] values = row.RawValues;
+                DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     values[fieldIndex] = ExtractValue(
@@ -447,7 +441,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(row);
+                batch.Add(new Row(columnNames, values, nameIndex));
                 if (batch.IsFull)
                 {
                     yield return batch;

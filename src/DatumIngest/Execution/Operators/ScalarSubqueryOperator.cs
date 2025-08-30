@@ -110,13 +110,13 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
                 }
                 else
                 {
-                    if (firstRow.FieldCount != 1)
+                    if (firstRow.Value.FieldCount != 1)
                     {
                         throw new InvalidOperationException(
-                            $"Scalar subquery must return exactly one column, but returned {firstRow.FieldCount}.");
+                            $"Scalar subquery must return exactly one column, but returned {firstRow.Value.FieldCount}.");
                     }
 
-                    scalarResult = firstRow[0];
+                    scalarResult = firstRow.Value[0];
                 }
 
                 // Augment the outer row with the synthetic column.

@@ -214,7 +214,7 @@ internal sealed class GraceHashJoinExecutor
 
             // Null build template can be computed as soon as Phase 1a completes.
             // It is needed during hybrid Phase 1b for LEFT JOIN null extension.
-            Row? nullBuildTemplate = firstBuildRow is not null ? CreateNullRow(firstBuildRow) : null;
+            Row? nullBuildTemplate = firstBuildRow is not null ? CreateNullRow(firstBuildRow.Value) : null;
 
             bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
             bool rightMustAppear = _joinType is JoinType.Right or JoinType.FullOuter;
@@ -278,7 +278,7 @@ internal sealed class GraceHashJoinExecutor
                         // after the loop, so skip returning it.
                         if (!isSemiJoin && !isFirst)
                         {
-                            context.LocalBufferPool.ReturnRow(probeRow);
+                            context.LocalBufferPool.ReturnValues(probeRow);
                         }
                     }
                     else
@@ -330,7 +330,7 @@ internal sealed class GraceHashJoinExecutor
                 }
             }
 
-            Row? nullProbeTemplate = firstProbeRow is not null ? CreateNullRow(firstProbeRow) : null;
+            Row? nullProbeTemplate = firstProbeRow is not null ? CreateNullRow(firstProbeRow.Value) : null;
 
             if (ExecutionTracer.IsEnabled)
             {
@@ -555,8 +555,8 @@ internal sealed class GraceHashJoinExecutor
 
                 if (nullBuild is not null)
                 {
-                    Row leftRow = _flipped ? nullBuild : probeRow;
-                    Row rightRow = _flipped ? probeRow : nullBuild;
+                    Row leftRow = _flipped ? nullBuild.Value : probeRow;
+                    Row rightRow = _flipped ? probeRow : nullBuild.Value;
                     table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                     yield return table.JoinSchema.CombinePooled(leftRow, rightRow, bufferPool);
                 }
@@ -775,8 +775,8 @@ internal sealed class GraceHashJoinExecutor
 
                     if (nullBuild is not null)
                     {
-                        Row leftRow = _flipped ? nullBuild : probeRow;
-                        Row rightRow = _flipped ? probeRow : nullBuild;
+                        Row leftRow = _flipped ? nullBuild.Value : probeRow;
+                        Row rightRow = _flipped ? probeRow : nullBuild.Value;
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         Row unmatchedProbeResult = schema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
                         outputBatch ??= RowBatch.Rent(context.BatchSize);
@@ -800,7 +800,7 @@ internal sealed class GraceHashJoinExecutor
                 // consumed by value through CombinePooled.
                 if (!isSemiJoin)
                 {
-                    context.LocalBufferPool.ReturnRow(probeRow);
+                    context.LocalBufferPool.ReturnValues(probeRow);
                 }
             }
 
@@ -817,8 +817,8 @@ internal sealed class GraceHashJoinExecutor
 
                         if (nullPad is not null)
                         {
-                            Row leftRow = _flipped ? buildRowList[index] : nullPad;
-                            Row rightRow = _flipped ? nullPad : buildRowList[index];
+                            Row leftRow = _flipped ? buildRowList[index] : nullPad.Value;
+                            Row rightRow = _flipped ? nullPad.Value : buildRowList[index];
                             buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                             Row unmatchedBuildResult = buildUnmatchedSchema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
                             outputBatch ??= RowBatch.Rent(context.BatchSize);

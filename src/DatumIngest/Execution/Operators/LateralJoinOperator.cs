@@ -132,8 +132,8 @@ public sealed class LateralJoinOperator : IQueryOperator
                     Row unmatched;
                     if (cachedNullRight is not null)
                     {
-                        schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, cachedNullRight);
-                        unmatched = schema.Combine(leftRow, cachedNullRight);
+                        schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
+                        unmatched = schema.Combine(leftRow, cachedNullRight.Value);
                     }
                     else
                     {
