@@ -36,4 +36,29 @@ internal sealed class UInt8ColumnDecoder : DatumColumnDecoder
 
         return result;
     }
+
+    /// <inheritdoc/>
+    public override void DecodeIntoColumn(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        StringArena stringArena,
+        DataArena dataArena)
+    {
+        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            target[rowIndex] = nullBitmap.IsNull(rowIndex)
+                ? DataValue.Null(DataKind.UInt8)
+                : DataValue.FromUInt8(raw[bitmapByteCount + rowIndex]);
+        }
+    }
 }

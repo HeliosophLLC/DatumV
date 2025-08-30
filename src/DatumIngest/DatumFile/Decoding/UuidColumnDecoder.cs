@@ -48,4 +48,36 @@ internal sealed class UuidColumnDecoder : DatumColumnDecoder
 
         return result;
     }
+
+    /// <inheritdoc/>
+    public override void DecodeIntoColumn(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        StringArena stringArena,
+        DataArena dataArena)
+    {
+        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            if (nullBitmap.IsNull(rowIndex))
+            {
+                target[rowIndex] = DataValue.Null(DataKind.Uuid);
+            }
+            else
+            {
+                int byteOffset = bitmapByteCount + rowIndex * GuidByteSize;
+                Guid guid = MemoryMarshal.Read<Guid>(raw.AsSpan(byteOffset, GuidByteSize));
+                target[rowIndex] = DataValue.FromUuid(guid);
+            }
+        }
+    }
 }

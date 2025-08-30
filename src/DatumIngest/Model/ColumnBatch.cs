@@ -236,6 +236,28 @@ public sealed class ColumnBatch : IDisposable
         return new Row(_columnNames, values, _nameIndex);
     }
 
+    // ───────────────────────── Arena merging ─────────────────────────
+
+    /// <summary>
+    /// Adjusts the arena offsets of all arena-backed <see cref="DataValue"/> entries in a
+    /// column buffer by adding <paramref name="baseOffset"/>.
+    /// Used after merging a per-column private <see cref="StringArena"/> into the batch's
+    /// shared arena during parallel decode.
+    /// </summary>
+    /// <param name="column">The column buffer whose values may need offset adjustment.</param>
+    /// <param name="rowCount">Number of valid rows in the buffer.</param>
+    /// <param name="baseOffset">Byte offset to add to each arena-backed value's stored offset.</param>
+    public static void AdjustArenaOffsets(DataValue[] column, int rowCount, int baseOffset)
+    {
+        for (int row = 0; row < rowCount; row++)
+        {
+            if (column[row].IsArenaBacked)
+            {
+                column[row] = column[row].WithArenaOffset(baseOffset);
+            }
+        }
+    }
+
     // ───────────────────────── Adapter ─────────────────────────
 
     /// <summary>

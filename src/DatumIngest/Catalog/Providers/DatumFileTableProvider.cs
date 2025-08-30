@@ -11,7 +11,7 @@ namespace DatumIngest.Catalog.Providers;
 /// Supports projection pushdown, zone-map-based row group pruning when a filter hint
 /// is provided by the query engine, and random-access row reads via row group seeking.
 /// </summary>
-public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider, IDisposable
+public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider, IColumnBatchProvider, IDisposable
 {
     private const int DefaultBatchSize = 1024;
 
@@ -139,6 +139,58 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         {
             yield return batch;
         }
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<ColumnBatch> OpenColumnBatchAsync(
+        TableDescriptor descriptor,
+        IReadOnlySet<string>? requiredColumns,
+        Expression? filterHint,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        Schema schema = reader.Schema;
+
+        int[] projectedIndices = ResolveProjection(schema, requiredColumns);
+        string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
+        Dictionary<string, int> nameIndex = BuildNameIndex(projectedNames);
+
+        HashSet<string>? filterColumnNames = null;
+        if (filterHint is not null)
+        {
+            filterColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach ((string? _, string columnName) in ColumnReferenceCollector.Collect(filterHint))
+            {
+                filterColumnNames.Add(columnName);
+            }
+        }
+
+        TotalRowGroups = reader.RowGroupCount;
+        PrunedRowGroups = 0;
+
+        for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            DatumRowGroupDescriptor rowGroupDescriptor = reader.GetRowGroupDescriptor(rowGroupIndex);
+
+            if (filterHint is not null && filterColumnNames is not null)
+            {
+                Dictionary<string, ColumnStatisticsRange> statistics =
+                    BuildStatistics(schema, rowGroupDescriptor, filterColumnNames);
+
+                if (StatisticsPredicateEvaluator.CanSkipPartition(filterHint, statistics))
+                {
+                    PrunedRowGroups++;
+                    continue;
+                }
+            }
+
+            yield return reader.ReadColumnsAsColumnBatch(
+                rowGroupIndex, projectedIndices, projectedNames, nameIndex);
+        }
+
+        await Task.CompletedTask;
     }
 
     /// <inheritdoc/>

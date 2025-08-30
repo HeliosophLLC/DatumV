@@ -49,6 +49,41 @@ internal sealed class FixedShapeFloatColumnDecoder : DatumColumnDecoder
         return result;
     }
 
+    /// <inheritdoc/>
+    public override void DecodeIntoColumn(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        StringArena stringArena,
+        DataArena dataArena)
+    {
+        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        int elementsPerRow = ResolveElementsPerRow(descriptor, raw, bitmapByteCount, rowCount);
+
+        float[] allFloats = new float[rowCount * elementsPerRow];
+        FloatByteShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), allFloats);
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            if (nullBitmap.IsNull(rowIndex))
+            {
+                target[rowIndex] = DataValue.Null(descriptor.Kind);
+                continue;
+            }
+
+            float[] rowFloats = allFloats[(rowIndex * elementsPerRow)..((rowIndex + 1) * elementsPerRow)];
+            target[rowIndex] = BuildDataValue(descriptor, rowFloats);
+        }
+    }
+
     private static int ResolveElementsPerRow(DatumColumnDescriptor descriptor, byte[] raw, int bitmapByteCount, int rowCount)
     {
         if (descriptor.HasFixedShape)

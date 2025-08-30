@@ -112,6 +112,91 @@ public sealed class DatumMemoryMappedReader : IDisposable
     }
 
     /// <summary>
+    /// Decodes the specified columns for the given row group directly into a
+    /// <see cref="ColumnBatch"/> using <c>Parallel.For</c> over columns.
+    /// Each column decoder writes into the batch's pre-allocated column buffer;
+    /// string and binary payloads are decoded into per-column private arenas
+    /// and then merged into the batch's shared arenas.
+    /// </summary>
+    /// <param name="rowGroupIndex">Zero-based row group index.</param>
+    /// <param name="columnIndices">Schema column indices to decode.</param>
+    /// <param name="columnNames">Projected column names in the same order as <paramref name="columnIndices"/>.</param>
+    /// <param name="nameIndex">Case-insensitive name-to-ordinal mapping.</param>
+    /// <returns>A <see cref="ColumnBatch"/> with <see cref="ColumnBatch.RowCount"/> set. Caller must dispose.</returns>
+    public ColumnBatch ReadColumnsAsColumnBatch(
+        int rowGroupIndex,
+        int[] columnIndices,
+        string[] columnNames,
+        Dictionary<string, int> nameIndex)
+    {
+        DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
+        int rowCount = (int)rowGroup.RowCount;
+
+        ColumnBatch batch = ColumnBatch.Create(columnNames, nameIndex, rowCount);
+        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+
+        // Each parallel column gets a private arena pair; after decode completes,
+        // their contents are bulk-copied into the batch's shared arenas and offsets
+        // in the DataValues are adjusted.
+        StringArena[] perColumnStringArenas = new StringArena[columnIndices.Length];
+        DataArena[] perColumnDataArenas = new DataArena[columnIndices.Length];
+
+        Parallel.For(0, columnIndices.Length, resultIndex =>
+        {
+            StringArena localStringArena = new();
+            DataArena localDataArena = new();
+            perColumnStringArenas[resultIndex] = localStringArena;
+            perColumnDataArenas[resultIndex] = localDataArena;
+
+            int columnIndex = columnIndices[resultIndex];
+            DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
+            DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
+
+            byte[] compressedBytes = ReadPageBytes(chunk);
+
+            DatumColumnDecoder decoder = DatumDecoderFactory.GetDecoder(descriptor, chunk.Encoding);
+            decoder.DecodeIntoColumn(
+                compressedBytes,
+                chunk.Encoding,
+                chunk.Compression,
+                (int)chunk.UncompressedByteLength,
+                rowCount,
+                descriptor,
+                context,
+                batch.GetColumnBuffer(resultIndex),
+                localStringArena,
+                localDataArena);
+        });
+
+        // Merge per-column arenas into the batch's shared arenas sequentially.
+        for (int i = 0; i < columnIndices.Length; i++)
+        {
+            StringArena localStringArena = perColumnStringArenas[i];
+            DataArena localDataArena = perColumnDataArenas[i];
+
+            if (localStringArena.BytesWritten > 0)
+            {
+                int baseOffset = batch.StringArena.CopyFrom(localStringArena);
+                if (baseOffset > 0)
+                {
+                    ColumnBatch.AdjustArenaOffsets(batch.GetColumnBuffer(i), rowCount, baseOffset);
+                }
+            }
+
+            if (localDataArena.BytesWritten > 0)
+            {
+                batch.DataArena.CopyFrom(localDataArena);
+            }
+
+            localStringArena.Dispose();
+            localDataArena.Dispose();
+        }
+
+        batch.SetRowCount(rowCount);
+        return batch;
+    }
+
+    /// <summary>
     /// Decodes a <see cref="DatumEncoding.FixedFloat32"/> column page into a contiguous
     /// float array without creating <see cref="DataValue"/> wrappers, providing a
     /// zero-boxing path for embedding and tensor columns.

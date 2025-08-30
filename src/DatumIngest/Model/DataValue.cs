@@ -293,6 +293,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
+    /// Returns a new arena-backed <see cref="DataValue"/> whose offset has been shifted by
+    /// <paramref name="delta"/> bytes.  Used when merging per-column private arenas into a
+    /// shared batch arena after parallel decode.
+    /// </summary>
+    /// <param name="delta">Number of bytes to add to the current offset.</param>
+    /// <returns>An adjusted value whose length is unchanged.</returns>
+    internal DataValue WithArenaOffset(int delta)
+    {
+        return new DataValue(_kind, numericBits: _numericBits + delta, reference: null, shape: null, isNull: false, bits1: _bits1);
+    }
+
+    /// <summary>
     /// Creates a typed array value from an element kind and an array of elements.
     /// The element kind is stored in the shape metadata so it can be recovered at runtime.
     /// </summary>

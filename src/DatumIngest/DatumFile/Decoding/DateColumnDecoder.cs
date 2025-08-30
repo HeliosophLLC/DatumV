@@ -44,4 +44,36 @@ internal sealed class DateColumnDecoder : DatumColumnDecoder
 
         return result;
     }
+
+    /// <inheritdoc/>
+    public override void DecodeIntoColumn(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        StringArena stringArena,
+        DataArena dataArena)
+    {
+        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+
+        int readOffset = bitmapByteCount;
+        int baseline = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(readOffset));
+        readOffset += 4;
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            int delta = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(readOffset));
+            readOffset += 4;
+
+            target[rowIndex] = nullBitmap.IsNull(rowIndex)
+                ? DataValue.Null(DataKind.Date)
+                : DataValue.FromDate(DateOnly.FromDayNumber(baseline + delta));
+        }
+    }
 }

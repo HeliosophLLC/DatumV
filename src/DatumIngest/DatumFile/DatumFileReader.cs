@@ -121,6 +121,56 @@ public sealed class DatumFileReader : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Reads and decodes the specified columns for the given row group directly into
+    /// a <see cref="ColumnBatch"/>.  String and JSON columns are decoded into the
+    /// batch's <see cref="StringArena"/> as raw UTF-8 bytes rather than managed strings.
+    /// </summary>
+    /// <param name="rowGroupIndex">Zero-based row group index.</param>
+    /// <param name="columnIndices">Schema column indices to decode.</param>
+    /// <param name="columnNames">Projected column names in the same order as <paramref name="columnIndices"/>.</param>
+    /// <param name="nameIndex">Case-insensitive name-to-ordinal mapping (shared with caller).</param>
+    /// <returns>A <see cref="ColumnBatch"/> with <see cref="ColumnBatch.RowCount"/> set. Caller must dispose.</returns>
+    public ColumnBatch ReadColumnsAsColumnBatch(
+        int rowGroupIndex,
+        int[] columnIndices,
+        string[] columnNames,
+        Dictionary<string, int> nameIndex)
+    {
+        DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
+        int rowCount = (int)rowGroup.RowCount;
+
+        ColumnBatch batch = ColumnBatch.Create(columnNames, nameIndex, rowCount);
+        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+
+        for (int i = 0; i < columnIndices.Length; i++)
+        {
+            int columnIndex = columnIndices[i];
+            DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
+            DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
+
+            byte[] compressedBytes = new byte[chunk.CompressedByteLength];
+            _stream.Seek(chunk.PageOffset, SeekOrigin.Begin);
+            _stream.ReadExactly(compressedBytes);
+
+            DatumColumnDecoder decoder = DatumDecoderFactory.GetDecoder(descriptor, chunk.Encoding);
+            decoder.DecodeIntoColumn(
+                compressedBytes,
+                chunk.Encoding,
+                chunk.Compression,
+                (int)chunk.UncompressedByteLength,
+                rowCount,
+                descriptor,
+                context,
+                batch.GetColumnBuffer(i),
+                batch.StringArena,
+                batch.DataArena);
+        }
+
+        batch.SetRowCount(rowCount);
+        return batch;
+    }
+
     /// <inheritdoc/>
     public void Dispose() => _stream.Dispose();
 
