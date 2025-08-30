@@ -78,11 +78,12 @@ public sealed class ProjectOperator : IQueryOperator
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         ProjectionSchema? schema = null;
+        LocalBufferPool pool = context.LocalBufferPool;
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
             schema ??= ProjectionSchema.Build(_columns, _letBindings, row);
-            yield return schema.Project(row, evaluator);
+            yield return schema.Project(row, evaluator, pool);
         }
     }
 
@@ -241,17 +242,18 @@ public sealed class ProjectOperator : IQueryOperator
         /// <summary>
         /// Projects a source row using the pre-computed schema. When LET bindings
         /// are present, builds an augmented row with memoized LET values before
-        /// evaluating projection expressions. Only a <see cref="DataValue"/> array
-        /// is allocated per call (plus one augmented array when LET bindings exist).
+        /// evaluating projection expressions. The output <see cref="DataValue"/>
+        /// array is rented from <paramref name="pool"/> and owned for the query
+        /// lifetime — the row can be safely held across iterations.
         /// </summary>
-        internal Row Project(Row sourceRow, ExpressionEvaluator evaluator)
+        internal Row Project(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool)
         {
             if (_letExpressions is not null && _letExpressions.Length > 0)
             {
-                return ProjectWithLetBindings(sourceRow, evaluator);
+                return ProjectWithLetBindings(sourceRow, evaluator, pool);
             }
 
-            DataValue[] values = new DataValue[_slots.Length];
+            DataValue[] values = pool.RentOwned(_slots.Length);
 
             for (int index = 0; index < _slots.Length; index++)
             {
@@ -270,7 +272,7 @@ public sealed class ProjectOperator : IQueryOperator
         /// LET expression sequentially (so later bindings can reference earlier
         /// ones), then evaluates projection expressions against the augmented row.
         /// </summary>
-        private Row ProjectWithLetBindings(Row sourceRow, ExpressionEvaluator evaluator)
+        private Row ProjectWithLetBindings(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool)
         {
             // Build augmented values: source columns + LET binding slots.
             DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
@@ -293,7 +295,7 @@ public sealed class ProjectOperator : IQueryOperator
             }
 
             // Evaluate output slots against the augmented row.
-            DataValue[] values = new DataValue[_slots.Length];
+            DataValue[] values = pool.RentOwned(_slots.Length);
             for (int index = 0; index < _slots.Length; index++)
             {
                 ProjectionSlot slot = _slots[index];

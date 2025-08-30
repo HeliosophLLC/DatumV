@@ -22,7 +22,7 @@ public sealed class StreamingGroupByTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool());
+            new LocalBufferPool());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)

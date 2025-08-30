@@ -549,7 +549,7 @@ public sealed class BitmapPruningTests
 
     private static async Task<List<Row>> ExecuteScanAsync(ScanOperator scan, TableCatalog catalog)
     {
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> rows = new();
         await foreach (Row row in scan.ExecuteAsync(context))

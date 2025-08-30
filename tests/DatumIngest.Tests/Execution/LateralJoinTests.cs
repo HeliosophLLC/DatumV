@@ -236,7 +236,7 @@ public sealed class LateralJoinTests
         ExecutionContext context = new(
             CancellationToken.None,
             DefaultFunctions,
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

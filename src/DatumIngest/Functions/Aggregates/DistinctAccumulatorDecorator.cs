@@ -22,6 +22,12 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator
     private readonly HashSet<CompositeKey>? _multiArgumentSet;
 
     /// <summary>
+    /// The wrapped accumulator. Exposed so pooling infrastructure can return
+    /// the inner accumulator to a type-keyed pool independently of the decorator.
+    /// </summary>
+    internal IAggregateAccumulator InnerAccumulator => _inner;
+
+    /// <summary>
     /// Creates a new distinct decorator wrapping the given accumulator.
     /// </summary>
     /// <param name="inner">The accumulator to delegate to for distinct values.</param>

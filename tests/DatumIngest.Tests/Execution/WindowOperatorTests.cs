@@ -22,7 +22,7 @@ public class WindowOperatorTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool());
+            new LocalBufferPool());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
@@ -316,7 +316,7 @@ public class WindowOperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool(), meter);
+            new TableCatalog(), new LocalBufferPool(), meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(window, context));
@@ -352,7 +352,7 @@ public class WindowOperatorTests
         ExecutionContext context = new(
             cancellationTokenSource.Token,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool());
+            new TableCatalog(), new LocalBufferPool());
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(window, context));

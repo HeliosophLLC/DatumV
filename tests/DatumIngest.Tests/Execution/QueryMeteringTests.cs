@@ -138,7 +138,7 @@ public class QueryMeteringTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool(), meter);
+            new TableCatalog(), new LocalBufferPool(), meter);
 
         MockOperator source = new(
             new Row(["x"], [DataValue.FromFloat32(1f)]),
@@ -177,7 +177,7 @@ public class QueryMeteringTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool(), meter);
+            new TableCatalog(), new LocalBufferPool(), meter);
 
         MockOperator source = new(
             new Row(["x"], [DataValue.FromFloat32(4f)]),
@@ -217,7 +217,7 @@ public class QueryMeteringTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool(), meter);
+            new TableCatalog(), new LocalBufferPool(), meter);
 
         MockOperator source = new(
             new Row(["x"], [DataValue.FromFloat32(1f)]),

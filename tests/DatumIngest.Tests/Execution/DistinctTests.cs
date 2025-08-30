@@ -23,7 +23,7 @@ public class DistinctTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool(),
+            new LocalBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes);
     }
 

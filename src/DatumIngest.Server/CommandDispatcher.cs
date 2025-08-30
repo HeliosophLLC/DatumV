@@ -134,7 +134,8 @@ public sealed class CommandDispatcher
         }
 
         QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
-        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, new RowBufferPool(), queryMeter,
+        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, localBufferPool, queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
         {
             DegreeOfParallelism = Environment.ProcessorCount,
@@ -142,7 +143,10 @@ public sealed class CommandDispatcher
         };
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
 
-        IAsyncEnumerable<Row> rows = plan.ExecuteAsync(context);
+        // Wrap the deferred execution so the pool is disposed after the stream
+        // is fully consumed (or abandoned). The pool cannot be scoped with `using`
+        // here because the IAsyncEnumerable outlives this method.
+        IAsyncEnumerable<Row> rows = StreamWithDisposal(plan.ExecuteAsync(context), localBufferPool);
 
         // We need the schema before streaming. Use the leftmost SELECT for column metadata.
         SelectStatement schemaStatement = ExtractLeftmostStatement(query);
@@ -407,11 +411,12 @@ public sealed class CommandDispatcher
         if (analyze)
         {
             InstrumentedOperator instrumentedRoot = InstrumentedOperator.InstrumentTree(plan);
+            using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
             ExecutionContext context = new(
                 cancellationToken,
                 session.FunctionRegistry,
                 session.Catalog,
-                new RowBufferPool(),
+                localBufferPool,
                 memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
@@ -616,5 +621,27 @@ public sealed class CommandDispatcher
         }
 
         return ((SelectQueryExpression)current).Statement;
+    }
+
+    /// <summary>
+    /// Wraps an <see cref="IAsyncEnumerable{Row}"/> so that the given
+    /// <see cref="LocalBufferPool"/> is disposed after the stream finishes
+    /// (or is abandoned). This ensures owned objects are returned even when
+    /// the enumerable outlives the method that created the pool.
+    /// </summary>
+    private static async IAsyncEnumerable<Row> StreamWithDisposal(
+        IAsyncEnumerable<Row> source, LocalBufferPool pool)
+    {
+        try
+        {
+            await foreach (Row row in source.ConfigureAwait(false))
+            {
+                yield return row;
+            }
+        }
+        finally
+        {
+            pool.Dispose();
+        }
     }
 }

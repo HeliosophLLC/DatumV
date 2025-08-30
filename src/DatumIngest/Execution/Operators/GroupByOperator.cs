@@ -39,6 +39,15 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     private string? _spillDirectory;
 
     /// <summary>
+    /// Cached <see cref="RuntimeTypeHandle"/> of each aggregate column's inner
+    /// accumulator type (before <see cref="DistinctAccumulatorDecorator"/> wrapping).
+    /// Built lazily on the first <see cref="CreateGroupState"/> call so that
+    /// subsequent calls can rent pooled accumulators by type without creating
+    /// throwaway instances.
+    /// </summary>
+    private RuntimeTypeHandle[]? _accumulatorInnerTypes;
+
+    /// <summary>
     /// Creates a GROUP BY operator.
     /// </summary>
     /// <param name="source">The child operator producing rows.</param>
@@ -174,6 +183,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     FlushOrderedBuffersForGroup(currentGroup, context);
                     yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
                         ref outputNames, ref outputNameIndex);
+                    GlobalBufferPool.ReturnGroupState(currentGroup);
                     currentGroup = null;
                 }
 
@@ -197,6 +207,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     FlushOrderedBuffersForGroup(currentGroup, context);
                     yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
                         ref outputNames, ref outputNameIndex);
+                    GlobalBufferPool.ReturnGroupState(currentGroup);
                     currentGroup = null;
                 }
 
@@ -214,7 +225,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             // Row values have been fully extracted — return the row to
             // the pool so the upstream operator can reuse it.
-            context.RowBufferPool.ReturnRow(row);
+            context.LocalBufferPool.ReturnRow(row);
         }
 
         // Emit the final group.
@@ -223,6 +234,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             FlushOrderedBuffersForGroup(currentGroup, context);
             yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
                 ref outputNames, ref outputNameIndex);
+            GlobalBufferPool.ReturnGroupState(currentGroup);
         }
     }
 
@@ -438,7 +450,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 // Row values have been fully extracted — return the row
                 // to the pool so the upstream join can reuse it.
-                context.RowBufferPool.ReturnRow(row);
+                context.LocalBufferPool.ReturnRow(row);
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -474,6 +486,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             foreach (GroupState group in allGroups)
             {
                 yield return EmitGroupRow(group, isGlobalAggregation, ref outputNames, ref outputNameIndex);
+            }
+
+            // Return completed in-memory GroupState objects to the static pool.
+            if (!isGlobalAggregation)
+            {
+                GlobalBufferPool.ReturnGroupStates(
+                    useSingleKey
+                        ? singleKeyGroups!.Values
+                        : compositeKeyGroups!.Values,
+                    _aggregateColumns.Count);
             }
 
             // Drain phase: process spilled partitions.
@@ -636,7 +658,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             EvaluateAggregateArgumentsInto(
                                 workerEvaluator, row, workerArgScratch, workerSortScratch);
                             AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context);
-                            context.RowBufferPool.ReturnRow(row);
+                            context.LocalBufferPool.ReturnRow(row);
                         }
                     }, cancellationToken);
                 }
@@ -939,6 +961,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         group, isGlobalAggregation: false, ref outputNames, ref outputNameIndex);
                 }
 
+                // Return completed in-memory GroupState objects to the static pool.
+                GlobalBufferPool.ReturnGroupStates(workerGroups, _aggregateColumns.Count);
+
                 // Drain phase: re-aggregate spill files for this worker, skipping keys
                 // already complete in the worker's in-memory table.
                 if (workerSpilling[i])
@@ -993,7 +1018,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// </summary>
     private void MergeGroupState(GroupState target, GroupState source)
     {
-        for (int i = 0; i < target.Accumulators.Length; i++)
+        for (int i = 0; i < _aggregateColumns.Count; i++)
         {
             AggregateColumn column = _aggregateColumns[i];
 
@@ -1012,29 +1037,77 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
     private GroupState CreateGroupState()
     {
-        IAggregateAccumulator[] accumulators = new IAggregateAccumulator[_aggregateColumns.Count];
-        List<(DataValue[] Arguments, DataValue[] SortKeys)>?[]? orderedBuffers = null;
+        int count = _aggregateColumns.Count;
+        GroupState state = GlobalBufferPool.RentGroupState(count);
+        RuntimeTypeHandle[]? innerTypes = _accumulatorInnerTypes;
 
-        for (int index = 0; index < _aggregateColumns.Count; index++)
+        for (int index = 0; index < count; index++)
         {
             AggregateColumn column = _aggregateColumns[index];
-            IAggregateAccumulator accumulator = column.Function.CreateAccumulator();
+            IAggregateAccumulator? existing = state.Accumulators[index];
+            IAggregateAccumulator? accumulator = null;
 
-            if (column.Distinct)
+            // Try to reuse the accumulator left in the pooled array from the
+            // previous owner. A type-handle comparison avoids creating fresh
+            // objects for the overwhelmingly common same-operator-shape case.
+            if (innerTypes is not null && existing is not null)
             {
-                accumulator = new DistinctAccumulatorDecorator(
-                    accumulator, column.ArgumentExpressions.Count);
+                if (!column.Distinct
+                    && existing is not DistinctAccumulatorDecorator
+                    && existing.GetType().TypeHandle.Equals(innerTypes[index]))
+                {
+                    existing.Reset();
+                    accumulator = existing;
+                }
+                else if (column.Distinct
+                         && existing is DistinctAccumulatorDecorator decorator
+                         && decorator.InnerAccumulator.GetType().TypeHandle.Equals(innerTypes[index]))
+                {
+                    existing.Reset();
+                    accumulator = existing;
+                }
             }
 
-            accumulators[index] = accumulator;
+            if (accumulator is null)
+            {
+                accumulator = column.Function.CreateAccumulator();
+
+                if (column.Distinct)
+                {
+                    accumulator = new DistinctAccumulatorDecorator(
+                        accumulator, column.ArgumentExpressions.Count);
+                }
+            }
+
+            state.Accumulators[index] = accumulator;
 
             if (column.OrderBy is not null)
             {
-                orderedBuffers ??= new List<(DataValue[], DataValue[])>?[_aggregateColumns.Count];
-                orderedBuffers[index] = [];
+                state.OrderedBuffers ??= new List<(DataValue[], DataValue[])>?[count];
+                state.OrderedBuffers[index] = [];
             }
         }
-        return new GroupState { Accumulators = accumulators, OrderedBuffers = orderedBuffers };
+
+        if (innerTypes is null)
+        {
+            RuntimeTypeHandle[] newTypes = new RuntimeTypeHandle[count];
+            for (int i = 0; i < count; i++)
+            {
+                IAggregateAccumulator accumulator = state.Accumulators[i];
+                if (accumulator is DistinctAccumulatorDecorator decorator)
+                {
+                    newTypes[i] = decorator.InnerAccumulator.GetType().TypeHandle;
+                }
+                else
+                {
+                    newTypes[i] = accumulator.GetType().TypeHandle;
+                }
+            }
+
+            Interlocked.CompareExchange(ref _accumulatorInnerTypes, newTypes, null);
+        }
+
+        return state;
     }
 
     /// <summary>
@@ -1313,10 +1386,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             schemaState.SchemaNames = names.ToArray();
             schemaState.ColumnCount = names.Count;
+            schemaState.FlatValues = new DataValue[names.Count];
+            schemaState.SpillRow = new Row(schemaState.SchemaNames, schemaState.FlatValues);
         }
 
-        // Build the flat values array.
-        DataValue[] flatValues = new DataValue[schemaState.ColumnCount];
+        // Build the flat values array (reuses the buffer cached on schemaState).
+        DataValue[] flatValues = schemaState.FlatValues!;
         int offset = 0;
 
         for (int index = 0; index < keyValues.Length; index++)
@@ -1340,7 +1415,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
         }
 
-        Row spillRow = new(schemaState.SchemaNames, flatValues);
+        Row spillRow = schemaState.SpillRow!;
 
         if (!schemaWritten[partition])
         {
@@ -1490,6 +1565,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             results.Add(EmitGroupRow(group, isGlobalAggregation: false, ref outputNames, ref outputNameIndex));
         }
 
+        // Return partition GroupState objects to the static pool.
+        GlobalBufferPool.ReturnGroupStates(allPartitionGroups, _aggregateColumns.Count);
+
         return results;
     }
 
@@ -1594,26 +1672,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         /// <summary>Total number of columns in the spill row layout.</summary>
         public int ColumnCount;
+
+        /// <summary>Reusable flat values buffer, allocated once when schema is built.</summary>
+        public DataValue[]? FlatValues;
+
+        /// <summary>Reusable spill row, allocated once when schema is built.</summary>
+        public Row? SpillRow;
     }
 
-    /// <summary>
-    /// Mutable state for a single group during hash aggregation.
-    /// </summary>
-    private sealed class GroupState
-    {
-        /// <summary>The GROUP BY key values for this group (null for global aggregation).</summary>
-        public DataValue[]? KeyValues;
-
-        /// <summary>One accumulator per aggregate column.</summary>
-        public IAggregateAccumulator[] Accumulators = [];
-
-        /// <summary>
-        /// Buffered rows for aggregates with intra-aggregate ORDER BY. Null when
-        /// no aggregates in the query use ORDER BY. Each element is either null
-        /// (aggregate has no ORDER BY) or a list of (arguments, sort-keys) tuples.
-        /// </summary>
-        public List<(DataValue[] Arguments, DataValue[] SortKeys)>?[]? OrderedBuffers;
-    }
 }
 
 /// <summary>

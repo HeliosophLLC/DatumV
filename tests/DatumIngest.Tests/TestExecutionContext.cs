@@ -25,7 +25,7 @@ internal static class TestExecutionContext
             CancellationToken.None,
             functionRegistry ?? FunctionRegistry.CreateDefault(),
             catalog ?? new TableCatalog(),
-            new RowBufferPool(),
+            new LocalBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes);
     }
 }

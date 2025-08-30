@@ -19,7 +19,7 @@ public sealed class ExecutionContext
         CancellationToken = context.CancellationToken;
         FunctionRegistry = context.FunctionRegistry;
         Catalog = context.Catalog;
-        RowBufferPool = context.RowBufferPool;
+        LocalBufferPool = context.LocalBufferPool;
         QueryMeter = context.QueryMeter;
         MemoryBudgetBytes = context.MemoryBudgetBytes;
     }
@@ -38,7 +38,7 @@ public sealed class ExecutionContext
     /// Supported operators: hash join, ORDER BY, GROUP BY, DISTINCT, PIVOT, UNION/INTERSECT/EXCEPT,
     /// and materialised CTEs.
     /// </param>
-    /// <param name="rowBufferPool">
+    /// <param name="localBufferPool">
     /// Pool for reusing <see cref="Model.Row"/> objects and their backing
     /// <see cref="Model.DataValue"/> arrays in join operators.
     /// </param>
@@ -46,14 +46,14 @@ public sealed class ExecutionContext
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
-        RowBufferPool rowBufferPool,
+        LocalBufferPool localBufferPool,
         QueryMeter? queryMeter = null,
         long? memoryBudgetBytes = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
         Catalog = catalog;
-        RowBufferPool = rowBufferPool;
+        LocalBufferPool = localBufferPool;
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
     }
@@ -129,7 +129,7 @@ public sealed class ExecutionContext
     /// rent rows from this pool instead of allocating, and downstream consumers
     /// (e.g. GROUP BY) return rows after extracting values.
     /// </summary>
-    public RowBufferPool RowBufferPool { get; }
+    public LocalBufferPool LocalBufferPool { get; }
 
     /// <summary>
     /// Returns a new context with the given outer row set for correlated subquery execution.
@@ -143,7 +143,7 @@ public sealed class ExecutionContext
             CancellationToken,
             FunctionRegistry,
             Catalog,
-            RowBufferPool,
+            LocalBufferPool,
             QueryMeter,
             MemoryBudgetBytes)
         {

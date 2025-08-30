@@ -216,7 +216,7 @@ public sealed class FlippedJoinTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool(),
+            new LocalBufferPool(),
             memoryBudgetBytes: memoryBudgetBytes);
     }
 
@@ -233,7 +233,7 @@ public sealed class FlippedJoinTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool());
+            new LocalBufferPool());
 
         List<Row> rows = new();
         await foreach (Row row in op.ExecuteAsync(context))

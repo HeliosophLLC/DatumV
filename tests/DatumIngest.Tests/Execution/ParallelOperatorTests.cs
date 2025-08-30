@@ -25,7 +25,7 @@ public sealed class ParallelOperatorTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool())
+            new LocalBufferPool())
         {
             DegreeOfParallelism = degreeOfParallelism,
             ParallelismBudget = new ParallelismBudget(degreeOfParallelism),
@@ -575,7 +575,7 @@ public sealed class ParallelOperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool())
+            new TableCatalog(), new LocalBufferPool())
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,
@@ -613,7 +613,7 @@ public sealed class ParallelOperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool())
+            new TableCatalog(), new LocalBufferPool())
         {
             DegreeOfParallelism = 2,
             ParallelismBudget = budget,

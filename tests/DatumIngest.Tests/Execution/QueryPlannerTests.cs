@@ -338,7 +338,7 @@ public class QueryPlannerTests
             ExecutionContext context = new(
                 CancellationToken.None,
                 FunctionRegistry.CreateDefault(),
-                catalog, new RowBufferPool());
+                catalog, new LocalBufferPool());
 
             List<Row> rows = new();
             await foreach (Row row in plan.ExecuteAsync(context))
@@ -386,7 +386,7 @@ public class QueryPlannerTests
             ExecutionContext context = new(
                 CancellationToken.None,
                 FunctionRegistry.CreateDefault(),
-                catalog, new RowBufferPool());
+                catalog, new LocalBufferPool());
 
             List<Row> rows = new();
             await foreach (Row row in plan.ExecuteAsync(context))

@@ -21,7 +21,7 @@ public class GroupByOperatorTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool());
+            new LocalBufferPool());
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
@@ -335,7 +335,7 @@ public class GroupByOperatorTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool(), meter);
+            new TableCatalog(), new LocalBufferPool(), meter);
 
         await Assert.ThrowsAsync<QueryBudgetExceededException>(
             () => CollectAsync(groupBy, context));
@@ -367,7 +367,7 @@ public class GroupByOperatorTests
         ExecutionContext context = new(
             cancellationTokenSource.Token,
             FunctionRegistry.CreateDefault(),
-            new TableCatalog(), new RowBufferPool());
+            new TableCatalog(), new LocalBufferPool());
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => CollectAsync(groupBy, context));

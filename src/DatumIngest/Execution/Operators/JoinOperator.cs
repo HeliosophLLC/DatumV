@@ -471,7 +471,7 @@ public sealed class JoinOperator : IQueryOperator
         // Pool for combined-row DataValue[] buffers. Buffers are returned by the
         // downstream consumer (e.g. GroupByOperator) after it has extracted all
         // needed values, not by this operator.
-        RowBufferPool bufferPool = context.RowBufferPool;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
 
@@ -718,7 +718,7 @@ public sealed class JoinOperator : IQueryOperator
             // Shared buffer pool from the execution context. Workers rent from
             // the pool when producing combined rows; the downstream consumer
             // (e.g. GroupByOperator) returns buffers after processing each row.
-            RowBufferPool bufferPool = context.RowBufferPool;
+            LocalBufferPool bufferPool = context.LocalBufferPool;
 
             Task[] workers = new Task[workerCount];
             for (int workerIndex = 0; workerIndex < workerCount; workerIndex++)
@@ -1288,9 +1288,9 @@ public sealed class JoinOperator : IQueryOperator
         /// Combines two rows, renting the entire <see cref="Row"/> object (including
         /// its backing <see cref="DataValue"/> array) from <paramref name="bufferPool"/>
         /// to avoid per-row heap allocation. The downstream consumer returns the row
-        /// via <see cref="RowBufferPool.ReturnRow"/> when it is no longer needed.
+        /// via <see cref="LocalBufferPool.ReturnRow"/> when it is no longer needed.
         /// </summary>
-        internal Row CombinePooled(Row left, Row right, RowBufferPool bufferPool)
+        internal Row CombinePooled(Row left, Row right, LocalBufferPool bufferPool)
         {
             Row row = bufferPool.RentRow(_names.Length);
             row.UpdateSchema(_names, _nameIndex);

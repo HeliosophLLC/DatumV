@@ -522,7 +522,7 @@ public class ExplainTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         long actualRows = 0;
         await foreach (Row _ in instrumented.ExecuteAsync(context))
@@ -562,7 +562,7 @@ public class ExplainTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         await foreach (Row _ in instrumented.ExecuteAsync(context))
         {
@@ -600,7 +600,7 @@ public class ExplainTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         await foreach (Row _ in instrumented.ExecuteAsync(context))
         {
@@ -668,7 +668,7 @@ public class ExplainTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         await foreach (Row _ in instrumentedRoot.ExecuteAsync(context))
         {

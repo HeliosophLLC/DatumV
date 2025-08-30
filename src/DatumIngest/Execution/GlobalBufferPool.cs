@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DatumIngest.Functions;
 using DatumIngest.Model;
 
 namespace DatumIngest.Execution;
@@ -23,6 +24,9 @@ public static class GlobalBufferPool
 {
     private static readonly ConcurrentDictionary<int, ConcurrentQueue<DataValue[]>> ArrayPools = new();
     private static readonly ConcurrentDictionary<int, ConcurrentQueue<Row>> RowPools = new();
+    private static readonly ConcurrentDictionary<int, ConcurrentQueue<GroupState>> GroupStatePools = new();
+    private static readonly ConcurrentDictionary<int, ConcurrentQueue<IAggregateAccumulator[]>> AccumulatorArrayPools = new();
+    private static readonly ConcurrentQueue<LocalBufferPool> LocalBufferPools = new();
 
     /// <summary>
     /// Maximum number of items per bucket. Prevents unbounded growth when queries of
@@ -129,6 +133,141 @@ public static class GlobalBufferPool
     }
 
     /// <summary>
+    /// Rents a <see cref="GroupState"/> shell with an <see cref="IAggregateAccumulator"/>
+    /// array of exactly <paramref name="accumulatorCount"/> elements. The array may
+    /// still contain accumulators from the previous owner — the caller should
+    /// type-check each slot and <see cref="IAggregateAccumulator.Reset">Reset</see>
+    /// matching accumulators rather than creating fresh ones.
+    /// </summary>
+    /// <param name="accumulatorCount">Number of aggregate columns.</param>
+    /// <returns>
+    /// A <see cref="GroupState"/> with an <see cref="GroupState.Accumulators"/>
+    /// array ready to be populated by the caller.
+    /// </returns>
+    public static GroupState RentGroupState(int accumulatorCount)
+    {
+        GroupState state;
+
+        if (GroupStatePools.TryGetValue(accumulatorCount, out ConcurrentQueue<GroupState>? pool)
+            && pool.TryDequeue(out GroupState? pooled))
+        {
+            state = pooled;
+        }
+        else
+        {
+            state = new GroupState();
+        }
+
+        if (AccumulatorArrayPools.TryGetValue(accumulatorCount, out ConcurrentQueue<IAggregateAccumulator[]>? arrayPool)
+            && arrayPool.TryDequeue(out IAggregateAccumulator[]? array))
+        {
+            state.Accumulators = array;
+        }
+        else
+        {
+            state.Accumulators = new IAggregateAccumulator[accumulatorCount];
+        }
+
+        state.AccumulatorCount = accumulatorCount;
+        state.OrderedBuffers = null;
+        state.KeyValues = null;
+
+        return state;
+    }
+
+    /// <summary>
+    /// Returns a <see cref="GroupState"/> to the pool. The backing
+    /// <see cref="IAggregateAccumulator"/> array is returned to the exact-length
+    /// pool <em>without</em> clearing accumulator references — the next renter can
+    /// type-check and <see cref="IAggregateAccumulator.Reset">Reset</see> them
+    /// rather than allocating fresh accumulators.
+    /// </summary>
+    public static void ReturnGroupState(GroupState state)
+    {
+        IAggregateAccumulator[] array = state.Accumulators;
+        int accumulatorCount = state.AccumulatorCount;
+
+        ConcurrentQueue<IAggregateAccumulator[]> arrayPool = AccumulatorArrayPools.GetOrAdd(
+            accumulatorCount, static _ => new ConcurrentQueue<IAggregateAccumulator[]>());
+        if (arrayPool.Count < _maxItemsPerBucket)
+        {
+            arrayPool.Enqueue(array);
+        }
+
+        state.Accumulators = [];
+        state.AccumulatorCount = 0;
+        state.KeyValues = null;
+        state.OrderedBuffers = null;
+
+        ConcurrentQueue<GroupState> pool = GroupStatePools.GetOrAdd(
+            accumulatorCount, static _ => new ConcurrentQueue<GroupState>());
+
+        if (pool.Count < _maxItemsPerBucket)
+        {
+            pool.Enqueue(state);
+        }
+    }
+
+    /// <summary>
+    /// Returns multiple <see cref="GroupState"/> objects to the pool in bulk.
+    /// </summary>
+    public static void ReturnGroupStates(IEnumerable<GroupState> groups, int accumulatorCount)
+    {
+        ConcurrentQueue<GroupState> pool = GroupStatePools.GetOrAdd(
+            accumulatorCount, static _ => new ConcurrentQueue<GroupState>());
+        ConcurrentQueue<IAggregateAccumulator[]> arrayPool = AccumulatorArrayPools.GetOrAdd(
+            accumulatorCount, static _ => new ConcurrentQueue<IAggregateAccumulator[]>());
+
+        foreach (GroupState state in groups)
+        {
+            IAggregateAccumulator[] array = state.Accumulators;
+
+            if (arrayPool.Count < _maxItemsPerBucket)
+            {
+                arrayPool.Enqueue(array);
+            }
+
+            state.Accumulators = [];
+            state.AccumulatorCount = 0;
+            state.KeyValues = null;
+            state.OrderedBuffers = null;
+
+            if (pool.Count >= _maxItemsPerBucket)
+            {
+                break;
+            }
+
+            pool.Enqueue(state);
+        }
+    }
+
+    /// <summary>
+    /// Rents a <see cref="LocalBufferPool"/> for a single query. Returns a previously
+    /// returned instance when one is available; allocates otherwise. The caller must
+    /// <see cref="LocalBufferPool.Dispose">dispose</see> the pool after the query
+    /// completes to return owned objects and the pool itself.
+    /// </summary>
+    public static LocalBufferPool RentLocalBufferPool()
+    {
+        if (LocalBufferPools.TryDequeue(out LocalBufferPool? pool))
+        {
+            pool.Reset();
+            return pool;
+        }
+
+        return new LocalBufferPool();
+    }
+
+    /// <summary>
+    /// Returns a <see cref="LocalBufferPool"/> to the process-wide pool for reuse
+    /// by a subsequent query. Called by <see cref="LocalBufferPool.Dispose"/>.
+    /// </summary>
+    public static void ReturnLocalBufferPool(LocalBufferPool pool)
+    {
+        LocalBufferPools.Enqueue(pool);
+    }
+
+    /// <summary>
     /// Removes all pooled objects from all buckets, allowing the GC to reclaim memory.
     /// Intended for testing and diagnostic scenarios only.
     /// </summary>
@@ -136,5 +275,8 @@ public static class GlobalBufferPool
     {
         ArrayPools.Clear();
         RowPools.Clear();
+        GroupStatePools.Clear();
+        AccumulatorArrayPools.Clear();
+        while (LocalBufferPools.TryDequeue(out _)) { }
     }
 }

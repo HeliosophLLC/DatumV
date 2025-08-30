@@ -51,7 +51,7 @@ public sealed class IndexScanOperatorTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(descriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> results = await CollectRowsAsync(indexScan.ExecuteAsync(context));
 
@@ -88,7 +88,7 @@ public sealed class IndexScanOperatorTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(descriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> results = await CollectRowsAsync(indexScan.ExecuteAsync(context));
 
@@ -132,7 +132,7 @@ public sealed class IndexScanOperatorTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(descriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> results = await CollectRowsAsync(indexScan.ExecuteAsync(context));
 
@@ -269,7 +269,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -306,7 +306,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -344,7 +344,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(3, results.Count);
@@ -383,7 +383,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Single(results);
@@ -424,7 +424,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(2, results.Count);
@@ -457,7 +457,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Empty(results);
@@ -503,7 +503,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         // value=2 matches rows at index 0,1,2. index>1 further filters to index 2 only.
@@ -545,7 +545,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         // Should still produce correct results via normal scan + filter.
@@ -581,7 +581,7 @@ public sealed class IndexScanOperatorTests
             BinaryOperator.Equal,
             new LiteralExpression(5.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Single(results);
@@ -619,7 +619,7 @@ public sealed class IndexScanOperatorTests
             BinaryOperator.LessThan,
             new LiteralExpression(6.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -652,7 +652,7 @@ public sealed class IndexScanOperatorTests
             BinaryOperator.GreaterThan,
             new LiteralExpression(5.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -686,7 +686,7 @@ public sealed class IndexScanOperatorTests
             BinaryOperator.LessThanOrEqual,
             new LiteralExpression(5.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -722,7 +722,7 @@ public sealed class IndexScanOperatorTests
             new LiteralExpression(6.0),
             new LiteralExpression(10.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -755,7 +755,7 @@ public sealed class IndexScanOperatorTests
             new ColumnReference("value"),
             [new LiteralExpression(1.0), new LiteralExpression(3.0)]));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(2, results.Count);
@@ -791,7 +791,7 @@ public sealed class IndexScanOperatorTests
             new LiteralExpression(3.0),
             new LiteralExpression(7.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);
@@ -827,7 +827,7 @@ public sealed class IndexScanOperatorTests
             new ColumnReference("value"),
             [new LiteralExpression(2.0), new LiteralExpression(5.0), new LiteralExpression(8.0)]));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Equal(3, results.Count);
@@ -863,7 +863,7 @@ public sealed class IndexScanOperatorTests
 
         FilterOperator filter = new(scan, predicate);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         // value < 5 → rows with values 1,2,3,4 from chunk 0.
@@ -901,7 +901,7 @@ public sealed class IndexScanOperatorTests
             BinaryOperator.Equal,
             new LiteralExpression(3.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Single(results);
@@ -936,7 +936,7 @@ public sealed class IndexScanOperatorTests
             BinaryOperator.Equal,
             new LiteralExpression(5.0)));
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(filter.ExecuteAsync(context));
 
         Assert.Single(results);
@@ -999,7 +999,7 @@ public sealed class IndexScanOperatorTests
 
         IQueryOperator plan = planner.Plan(statement);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         List<Row> results = await CollectRowsAsync(plan.ExecuteAsync(context));
 
         Assert.Equal(5, results.Count);

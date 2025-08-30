@@ -375,7 +375,7 @@ public sealed class LetBindingTests
     {
         QueryExpression query = SqlParser.Parse(sql);
         QueryPlanner planner = new(catalog, DefaultFunctions);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         IQueryOperator plan = planner.Plan(query);
 
         List<Row> rows = [];

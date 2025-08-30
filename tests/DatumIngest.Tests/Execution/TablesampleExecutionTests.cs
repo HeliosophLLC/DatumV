@@ -230,7 +230,7 @@ public sealed class TablesampleExecutionTests
         ExecutionContext context = new(
             CancellationToken.None,
             DefaultFunctions,
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

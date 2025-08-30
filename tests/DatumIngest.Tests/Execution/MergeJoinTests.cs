@@ -412,7 +412,7 @@ public sealed class MergeJoinTests
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
-            new RowBufferPool());
+            new LocalBufferPool());
 
         List<Row> rows = new();
         await foreach (Row row in op.ExecuteAsync(context))

@@ -734,11 +734,12 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
+    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog,
-        new RowBufferPool(),
+        localBufferPool,
         memoryBudgetBytes: options.MemoryBudgetBytes)
     {
         DegreeOfParallelism = Environment.ProcessorCount,
@@ -851,7 +852,7 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
         progress.WriteSummary();
     }
 
-    context.RowBufferPool.DumpStats();
+    context.LocalBufferPool.DumpStats();
     return 0;
 }
 
@@ -860,11 +861,12 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
+    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog,
-        new RowBufferPool());
+        localBufferPool);
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
@@ -899,11 +901,12 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
+    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog,
-        new RowBufferPool());
+        localBufferPool);
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
@@ -950,11 +953,12 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
         // Wrap the tree with instrumented operators, execute, and collect metrics.
         InstrumentedOperator instrumentedRoot = InstrumentedOperator.InstrumentTree(plan);
 
+        using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
         ExecutionContext context = new(
             CancellationToken.None,
             functionRegistry,
             catalog,
-            new RowBufferPool());
+            localBufferPool);
 
         // Consume all rows to collect timing.
         await foreach (Row _ in instrumentedRoot.ExecuteAsync(context))
@@ -973,11 +977,12 @@ static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog cata
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
+    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
         CancellationToken.None,
         functionRegistry,
         catalog,
-        new RowBufferPool());
+        localBufferPool);
 
     IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 

@@ -65,7 +65,7 @@ public sealed class IndexNestedLoopJoinTests
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -121,7 +121,7 @@ public sealed class IndexNestedLoopJoinTests
         SeekableInMemoryProvider provider = new(buildRows);
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -163,7 +163,7 @@ public sealed class IndexNestedLoopJoinTests
         SeekableInMemoryProvider provider = new(buildRows);
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -211,7 +211,7 @@ public sealed class IndexNestedLoopJoinTests
         SeekableInMemoryProvider provider = new(buildRows);
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -263,7 +263,7 @@ public sealed class IndexNestedLoopJoinTests
         SeekableInMemoryProvider provider = new(buildRows);
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -325,7 +325,7 @@ public sealed class IndexNestedLoopJoinTests
         SeekableInMemoryProvider provider = new(buildRows);
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -371,7 +371,7 @@ public sealed class IndexNestedLoopJoinTests
         SeekableInMemoryProvider provider = new(buildRows);
         TableCatalog catalog = new();
         catalog.RegisterProvider("test", () => provider);
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         ExpressionEvaluator evaluator = new(DefaultFunctions);
 
         IndexNestedLoopJoinExecutor executor = new(
@@ -447,7 +447,7 @@ public sealed class IndexNestedLoopJoinTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(buildDescriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool())
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
         {
             RowLimit = 10,
         };
@@ -523,7 +523,7 @@ public sealed class IndexNestedLoopJoinTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(buildDescriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool())
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
         {
             RowLimit = 10,
         };
@@ -576,7 +576,7 @@ public sealed class IndexNestedLoopJoinTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(buildDescriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> results = await CollectAsync(join, context);
 
@@ -636,7 +636,7 @@ public sealed class IndexNestedLoopJoinTests
         catalog.RegisterProvider("test", () => provider);
         catalog.Register(buildDescriptor);
 
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool())
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
         {
             RowLimit = 10,
         };
@@ -716,7 +716,7 @@ public sealed class IndexNestedLoopJoinTests
         catalog.Register(buildDescriptor);
 
         // No RowLimit set — NLJ must activate via the PreferIndexNestedLoop flag alone.
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> results = await CollectAsync(join, context);
 
@@ -783,7 +783,7 @@ public sealed class IndexNestedLoopJoinTests
         catalog.Register(buildDescriptor);
 
         // No RowLimit — hash join path should be taken (NLJ not activated).
-        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool());
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         // Hash join still produces the correct result; we just confirm it completes.
         List<Row> results = await CollectAsync(join, context);
@@ -803,7 +803,7 @@ public sealed class IndexNestedLoopJoinTests
                 BinaryOperator.Equal,
                 new ColumnReference("id")));
 
-        ExecutionContext contextWithLimit = new(CancellationToken.None, DefaultFunctions, catalog, new RowBufferPool())
+        ExecutionContext contextWithLimit = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
         {
             RowLimit = 10,
         };

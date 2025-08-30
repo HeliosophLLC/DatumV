@@ -103,7 +103,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         // Act
         List<Row> results = new();
@@ -175,7 +175,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         List<Row> results = new();
         await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
@@ -231,7 +231,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         List<Row> results = new();
         await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
@@ -316,7 +316,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         List<Row> results = new();
         await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
@@ -422,7 +422,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         // Act
         List<Row> results = new();
@@ -563,7 +563,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         List<Row> results = new();
         await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
@@ -653,7 +653,7 @@ public sealed class BloomJoinPruningTests
         ExecutionContext context = new(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
-            catalog, new RowBufferPool());
+            catalog, new LocalBufferPool());
 
         List<Row> results = new();
         await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
