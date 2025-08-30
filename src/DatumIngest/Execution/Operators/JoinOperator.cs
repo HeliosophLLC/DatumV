@@ -622,7 +622,7 @@ public sealed class JoinOperator : IQueryOperator
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        yield return buildUnmatchedSchema.Combine(leftRow, rightRow);
+                        yield return buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool);
                     }
                     else
                     {
@@ -945,6 +945,12 @@ public sealed class JoinOperator : IQueryOperator
 
         CombinedRowSchema? schema = null;
         Row? cachedNullBuild = null;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
+
+        // Reusable buffer for ON condition evaluation — avoids renting a pooled
+        // row for each candidate pair only to discard it when the filter fails.
+        Row? reusableFilterRow = null;
+        DataValue[]? reusableFilterBuffer = null;
 
         await foreach (Row probeRow in probeSource.ExecuteAsync(context).ConfigureAwait(false))
         {
@@ -957,24 +963,37 @@ public sealed class JoinOperator : IQueryOperator
                 Row rightRow = _flipped ? probeRow : buildRows[index];
 
                 schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                Row combinedRow = schema.Combine(leftRow, rightRow);
 
-                if (_onCondition is null || evaluator.EvaluateAsBoolean(_onCondition, combinedRow))
+                // When there is an ON condition, evaluate it using a reusable
+                // buffer so that non-matching combinations incur zero allocation.
+                if (_onCondition is not null)
                 {
-                    hasMatch = true;
-
-                    if (isSemiJoin)
+                    if (reusableFilterBuffer is null)
                     {
-                        break;
+                        (reusableFilterRow, reusableFilterBuffer) = schema.CreateReusableRow();
                     }
 
-                    if (buildMatched is not null)
-                    {
-                        buildMatched[index] = true;
-                    }
+                    schema.CombineInto(leftRow, rightRow, reusableFilterBuffer);
 
-                    yield return combinedRow;
+                    if (!evaluator.EvaluateAsBoolean(_onCondition, reusableFilterRow!))
+                    {
+                        continue;
+                    }
                 }
+
+                hasMatch = true;
+
+                if (isSemiJoin)
+                {
+                    break;
+                }
+
+                if (buildMatched is not null)
+                {
+                    buildMatched[index] = true;
+                }
+
+                yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
             }
 
             if (isSemiJoin)
@@ -993,7 +1012,7 @@ public sealed class JoinOperator : IQueryOperator
                     Row leftRow = _flipped ? cachedNullBuild : probeRow;
                     Row rightRow = _flipped ? probeRow : cachedNullBuild;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    yield return schema.Combine(leftRow, rightRow);
+                    yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
                 }
                 else
                 {
@@ -1020,7 +1039,7 @@ public sealed class JoinOperator : IQueryOperator
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        yield return buildUnmatchedSchema.Combine(leftRow, rightRow);
+                        yield return buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool);
                     }
                     else
                     {
@@ -1041,13 +1060,14 @@ public sealed class JoinOperator : IQueryOperator
         }
 
         CombinedRowSchema? schema = null;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
 
         await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
             foreach (Row rightRow in rightRows)
             {
                 schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                yield return schema.Combine(leftRow, rightRow);
+                yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
             }
         }
     }

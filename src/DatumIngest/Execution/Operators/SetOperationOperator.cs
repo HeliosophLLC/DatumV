@@ -1211,13 +1211,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
             return row[0].GetHashCode();
         }
 
-        DataValue[] parts = new DataValue[columnCount];
-        for (int index = 0; index < columnCount; index++)
-        {
-            parts[index] = row[index];
-        }
-
-        return new CompositeKey(parts).GetHashCode();
+        return CompositeKeyComparer.Instance.GetHashCode(row.RawValues.AsSpan(0, columnCount));
     }
 
     /// <summary>

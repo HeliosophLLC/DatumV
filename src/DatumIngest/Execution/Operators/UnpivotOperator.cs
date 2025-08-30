@@ -94,6 +94,7 @@ public sealed class UnpivotOperator : IQueryOperator
         HashSet<string>? sourceColumnSet = null;
         int[]? keyFieldOrdinals = null;
         string[]? keyFieldNames = null;
+        LocalBufferPool pool = context.LocalBufferPool;
 
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
@@ -160,7 +161,7 @@ public sealed class UnpivotOperator : IQueryOperator
                     continue;
                 }
 
-                DataValue[] values = new DataValue[outputNames!.Length];
+                DataValue[] values = pool.RentOwned(outputNames!.Length);
 
                 // Copy key field values.
                 for (int keyIndex = 0; keyIndex < keyFieldOrdinals!.Length; keyIndex++)

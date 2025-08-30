@@ -122,6 +122,7 @@ public sealed class WindowOperator : IQueryOperator
         // Step 4: Emit all rows in original order, augmented with window columns.
         string[]? outputNames = null;
         Dictionary<string, int>? outputNameIndex = null;
+        LocalBufferPool pool = context.LocalBufferPool;
 
         for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
         {
@@ -145,7 +146,7 @@ public sealed class WindowOperator : IQueryOperator
                 }
             }
 
-            DataValue[] values = new DataValue[totalFieldCount];
+            DataValue[] values = pool.RentOwned(totalFieldCount);
             for (int field = 0; field < inputFieldCount; field++)
             {
                 values[field] = sourceRow[field];

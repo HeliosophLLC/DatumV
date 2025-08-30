@@ -57,6 +57,10 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
     {
+        LocalBufferPool pool = context.LocalBufferPool;
+        string[]? outputNames = null;
+        Dictionary<string, int>? outputNameIndex = null;
+
         await foreach (Row outerRow in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
@@ -102,19 +106,35 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
 
             // Augment the outer row with the synthetic column.
             int outerFieldCount = outerRow.FieldCount;
-            string[] names = new string[outerFieldCount + 1];
-            DataValue[] values = new DataValue[outerFieldCount + 1];
+
+            if (outputNames is null)
+            {
+                outputNames = new string[outerFieldCount + 1];
+                for (int index = 0; index < outerFieldCount; index++)
+                {
+                    outputNames[index] = outerRow.ColumnNames[index];
+                }
+
+                outputNames[outerFieldCount] = _syntheticColumnName;
+
+                outputNameIndex = new Dictionary<string, int>(
+                    outputNames.Length, StringComparer.OrdinalIgnoreCase);
+                for (int index = 0; index < outputNames.Length; index++)
+                {
+                    outputNameIndex[outputNames[index]] = index;
+                }
+            }
+
+            DataValue[] values = pool.RentOwned(outerFieldCount + 1);
 
             for (int index = 0; index < outerFieldCount; index++)
             {
-                names[index] = outerRow.ColumnNames[index];
                 values[index] = outerRow[index];
             }
 
-            names[outerFieldCount] = _syntheticColumnName;
             values[outerFieldCount] = scalarResult;
 
-            yield return new Row(names, values);
+            yield return new Row(outputNames, values, outputNameIndex!);
         }
     }
 }

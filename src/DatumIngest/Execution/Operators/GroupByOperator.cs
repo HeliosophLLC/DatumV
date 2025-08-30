@@ -168,6 +168,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
 
+        // Reusable scratch buffer for composite key evaluation — avoids a
+        // per-row DataValue[] allocation in the multi-key path. Only the keys
+        // for the first row of each new group are copied to permanent storage.
+        int keyCount = _groupByExpressions.Count;
+        DataValue[]? compositeKeyScratch = (!useSingleKey) ? new DataValue[keyCount] : null;
+
         await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
@@ -196,13 +202,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
             else
             {
-                DataValue[] keyValues = new DataValue[_groupByExpressions.Count];
-                for (int index = 0; index < _groupByExpressions.Count; index++)
+                for (int index = 0; index < keyCount; index++)
                 {
-                    keyValues[index] = evaluator.Evaluate(_groupByExpressions[index], row);
+                    compositeKeyScratch![index] = evaluator.Evaluate(_groupByExpressions[index], row);
                 }
 
-                if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, keyValues))
+                if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
                 {
                     FlushOrderedBuffersForGroup(currentGroup, context);
                     yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
@@ -213,9 +218,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 if (currentGroup is null)
                 {
+                    // Copy scratch into permanent storage only at group boundaries.
+                    DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
                     currentGroup = CreateGroupState();
-                    currentGroup.KeyValues = keyValues;
-                    currentKeyValues = keyValues;
+                    currentGroup.KeyValues = permanentKey;
+                    currentKeyValues = permanentKey;
                 }
             }
 

@@ -295,9 +295,11 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                     ? singleKeyGroups.Values
                     : compositeKeyGroups.Values;
 
+            LocalBufferPool pool = context.LocalBufferPool;
+
             foreach (PivotGroupState group in allGroups)
             {
-                DataValue[] values = new DataValue[totalOutputFields];
+                DataValue[] values = pool.RentOwned(totalOutputFields);
 
                 if (group.KeyValues is not null)
                 {
