@@ -119,5 +119,13 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
                 return DataValue.FromFloat32((float)interpolated);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _values.Clear();
+            _fraction = 0;
+            _fractionCaptured = false;
+        }
     }
 }

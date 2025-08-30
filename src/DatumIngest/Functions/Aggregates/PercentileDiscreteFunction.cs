@@ -113,5 +113,13 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
                 return DataValue.FromFloat32(_values[index]);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _values.Clear();
+            _fraction = 0;
+            _fractionCaptured = false;
+        }
     }
 }

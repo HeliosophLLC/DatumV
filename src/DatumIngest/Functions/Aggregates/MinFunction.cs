@@ -66,6 +66,12 @@ public sealed class MinFunction : IAggregateFunction
 
         public DataValue Result => _minimum ?? DataValue.Null(DataKind.Float32);
 
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _minimum = null;
+        }
+
         private static int CompareValues(DataValue left, DataValue right)
         {
             return left.Kind switch

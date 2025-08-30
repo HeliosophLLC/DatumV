@@ -142,5 +142,14 @@ public sealed class CovarianceFunction : IAggregateFunction
                     : DataValue.Null(DataKind.Float32);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _count = 0;
+            _meanY = 0;
+            _meanX = 0;
+            _coMoment = 0;
+        }
     }
 }

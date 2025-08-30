@@ -105,4 +105,12 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator
 
     /// <inheritdoc />
     public DataValue Result => _inner.Result;
+
+    /// <inheritdoc />
+    public void Reset()
+    {
+        _inner.Reset();
+        _singleArgumentSet?.Clear();
+        _multiArgumentSet?.Clear();
+    }
 }

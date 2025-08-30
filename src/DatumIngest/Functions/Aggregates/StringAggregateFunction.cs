@@ -102,5 +102,13 @@ public sealed class StringAggregateFunction : IAggregateFunction
                 return DataValue.FromString(string.Join(_separator, _values));
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _values.Clear();
+            _separator = "";
+            _separatorCaptured = false;
+        }
     }
 }

@@ -54,5 +54,12 @@ public sealed class AvgFunction : IAggregateFunction
         public DataValue Result => _count > 0
             ? DataValue.FromFloat32((float)(_sum / _count))
             : DataValue.Null(DataKind.Float32);
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _sum = 0;
+            _count = 0;
+        }
     }
 }

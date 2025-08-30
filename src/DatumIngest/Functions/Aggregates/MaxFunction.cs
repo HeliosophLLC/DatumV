@@ -66,6 +66,12 @@ public sealed class MaxFunction : IAggregateFunction
 
         public DataValue Result => _maximum ?? DataValue.Null(DataKind.Float32);
 
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _maximum = null;
+        }
+
         private static int CompareValues(DataValue left, DataValue right)
         {
             return left.Kind switch

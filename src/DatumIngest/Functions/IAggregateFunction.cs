@@ -72,4 +72,12 @@ public interface IAggregateAccumulator
     /// The current aggregate result after all rows have been accumulated.
     /// </summary>
     DataValue Result { get; }
+
+    /// <summary>
+    /// Resets the accumulator to its initial (empty) state so it can be reused
+    /// for a different group without allocating a new instance. Implementations
+    /// must clear all mutable state but should retain allocated collection
+    /// capacity to avoid re-allocation on the next group.
+    /// </summary>
+    void Reset();
 }

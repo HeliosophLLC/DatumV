@@ -54,5 +54,12 @@ public sealed class SumFunction : IAggregateFunction
         public DataValue Result => _hasValue
             ? DataValue.FromFloat32((float)_sum)
             : DataValue.Null(DataKind.Float32);
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _sum = 0;
+            _hasValue = false;
+        }
     }
 }

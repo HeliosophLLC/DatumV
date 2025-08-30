@@ -123,5 +123,13 @@ public sealed class StandardDeviationFunction : IAggregateFunction
                     : DataValue.Null(DataKind.Float32);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _count = 0;
+            _mean = 0;
+            _m2 = 0;
+        }
     }
 }

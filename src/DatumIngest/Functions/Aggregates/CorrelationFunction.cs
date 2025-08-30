@@ -133,5 +133,16 @@ public sealed class CorrelationFunction : IAggregateFunction
                 return DataValue.FromFloat32((float)(_coMoment / denominator));
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _count = 0;
+            _meanY = 0;
+            _meanX = 0;
+            _m2Y = 0;
+            _m2X = 0;
+            _coMoment = 0;
+        }
     }
 }

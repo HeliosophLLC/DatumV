@@ -82,5 +82,11 @@ public sealed class MedianFunction : IAggregateFunction
                 return DataValue.FromFloat32(median);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _values.Clear();
+        }
     }
 }

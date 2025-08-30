@@ -53,5 +53,11 @@ public sealed class CountFunction : IAggregateFunction
         }
 
         public DataValue Result => DataValue.FromFloat32(_count);
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _count = 0;
+        }
     }
 }

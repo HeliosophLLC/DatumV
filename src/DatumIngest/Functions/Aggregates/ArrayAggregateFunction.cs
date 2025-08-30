@@ -83,5 +83,12 @@ public sealed class ArrayAggregateFunction : IAggregateFunction
                 return DataValue.FromArray(_elementKind!.Value, [.. _elements]);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _elements.Clear();
+            _elementKind = null;
+        }
     }
 }

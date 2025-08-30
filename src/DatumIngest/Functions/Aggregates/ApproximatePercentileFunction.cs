@@ -156,5 +156,14 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
                 return DataValue.FromFloat32((float)interpolated);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _samples.Clear();
+            _totalCount = 0;
+            _fraction = 0;
+            _fractionCaptured = false;
+        }
     }
 }

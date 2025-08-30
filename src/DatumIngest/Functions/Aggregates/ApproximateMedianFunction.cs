@@ -121,5 +121,12 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
                 return DataValue.FromFloat32(median);
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _samples.Clear();
+            _totalCount = 0;
+        }
     }
 }

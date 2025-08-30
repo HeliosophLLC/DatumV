@@ -1215,7 +1215,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         ref Dictionary<string, int>? outputNameIndex)
     {
         int outputFieldCount = _groupByExpressions.Count + _aggregateColumns.Count;
-        DataValue[] values = new DataValue[outputFieldCount];
 
         if (outputNames is null)
         {
@@ -1238,6 +1237,10 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
         }
 
+        Row row = GlobalBufferPool.RentRow(outputFieldCount);
+        row.UpdateSchema(outputNames, outputNameIndex!);
+        DataValue[] values = row.RawValues;
+
         if (!isGlobalAggregation)
         {
             for (int index = 0; index < _groupByExpressions.Count; index++)
@@ -1251,7 +1254,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             values[_groupByExpressions.Count + index] = group.Accumulators[index].Result;
         }
 
-        return new Row(outputNames, values, outputNameIndex!);
+        return row;
     }
 
     // ---------------------------------------------------------------

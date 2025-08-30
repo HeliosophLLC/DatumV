@@ -125,5 +125,13 @@ public sealed class ModeFunction : IAggregateFunction
                 return modeValue;
             }
         }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            _frequencies.Clear();
+            _insertionOrder.Clear();
+            _kind = DataKind.Float32;
+        }
     }
 }
