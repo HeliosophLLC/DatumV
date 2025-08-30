@@ -288,23 +288,29 @@ public static class DatumIngester
         SamplePreviewCollector sampleCollector = new();
 
         long rowCount = 0;
-        await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
-            datumWriter.WriteRow(row);
-            sampleCollector.Consider(row);
-            rowCount++;
-
-            if (progress is not null && totalRows is > 0)
+            for (int i = 0; i < batch.Count; i++)
             {
-                int currentPercent = (int)Math.Min(100, rowCount * 100 / totalRows.Value);
-                if (currentPercent >= lastReportedPercent + 5)
+                Row row = batch[i];
+                datumWriter.WriteRow(row);
+                sampleCollector.Consider(row);
+                rowCount++;
+
+                if (progress is not null && totalRows is > 0)
                 {
-                    lastReportedPercent = currentPercent;
-                    progress(new IngestionProgress(
-                        descriptor.Name, rowCount, totalRows, currentPercent));
+                    int currentPercent = (int)Math.Min(100, rowCount * 100 / totalRows.Value);
+                    if (currentPercent >= lastReportedPercent + 5)
+                    {
+                        lastReportedPercent = currentPercent;
+                        progress(new IngestionProgress(
+                            descriptor.Name, rowCount, totalRows, currentPercent));
+                    }
                 }
             }
+
+            batch.Return();
         }
 
         if (progress is not null && lastReportedPercent < 100)
@@ -439,22 +445,28 @@ public static class DatumIngester
 
         long rowsProcessed = 0;
 
-        await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
             .ConfigureAwait(false))
         {
-            indexBuilder.AddRow(row);
-            rowsProcessed++;
-
-            if (progress is not null && totalRows is > 0)
+            for (int i = 0; i < batch.Count; i++)
             {
-                int currentPercent = (int)Math.Min(100, rowsProcessed * 100 / totalRows.Value);
-                if (currentPercent >= lastReportedPercent + 5)
+                Row row = batch[i];
+                indexBuilder.AddRow(row);
+                rowsProcessed++;
+
+                if (progress is not null && totalRows is > 0)
                 {
-                    lastReportedPercent = currentPercent;
-                    progress(new IndexingProgress(
-                        descriptor.Name, rowsProcessed, totalRows.Value, currentPercent));
+                    int currentPercent = (int)Math.Min(100, rowsProcessed * 100 / totalRows.Value);
+                    if (currentPercent >= lastReportedPercent + 5)
+                    {
+                        lastReportedPercent = currentPercent;
+                        progress(new IndexingProgress(
+                            descriptor.Name, rowsProcessed, totalRows.Value, currentPercent));
+                    }
                 }
             }
+
+            batch.Return();
         }
 
         if (progress is not null && totalRows is > 0 && lastReportedPercent < 100)

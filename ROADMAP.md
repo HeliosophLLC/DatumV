@@ -111,6 +111,8 @@ Eliminate per-DataValue heap allocation for scalar types via `[StructLayout(Layo
 
 - **D8. Multi-key merge join** — composite equi-join keys with tuple comparison. *Use case*: `SELECT * FROM a JOIN b ON a.year = b.year AND a.month = b.month ORDER BY a.year, a.month` where both tables have composite sorted indexes on `(year, month)`. Currently falls back to hash join because merge join only supports single-key equi-joins. Look for multi-column equi-joins where both sides have composite indexes and the query benefits from sorted output.
 
+- **D9. Column-major vectorized execution** — replace the current row-major `Row[]` batch model with a columnar `DataValue[][]` representation where the first index is the column and the second is the row offset within the batch. *Use case*: aggregation-heavy and expression-heavy queries where tight loops over a single column (e.g. `SUM`, `AVG`, predicate evaluation) benefit from sequential memory access and SIMD auto-vectorisation. Requires rewriting the expression evaluator to operate on column vectors, converting all operators to produce and consume columnar batches, and adding a row-to-columnar adapter at provider boundaries. The current row-major RowBatch already amortises async state-machine overhead; this optimisation targets the *inner-loop* compute cost.
+
 ---
 
 ## Type System Extensions (Deferred)

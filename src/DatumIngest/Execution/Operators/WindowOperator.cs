@@ -68,18 +68,24 @@ public sealed class WindowOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
 
         // Step 1: Materialize all source rows and track their original order.
         List<Row> allRows = new();
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+                Row row = inputBatch[i];
+                context.CancellationToken.ThrowIfCancellationRequested();
+                context.QueryMeter?.ThrowIfExceeded();
 
-            allRows.Add(row);
+                allRows.Add(row);
+            }
+
+            inputBatch.Return();
         }
 
         if (allRows.Count == 0)
@@ -123,6 +129,7 @@ public sealed class WindowOperator : IQueryOperator
         string[]? outputNames = null;
         Dictionary<string, int>? outputNameIndex = null;
         LocalBufferPool pool = context.LocalBufferPool;
+        RowBatch? outputBatch = null;
 
         for (int rowIndex = 0; rowIndex < allRows.Count; rowIndex++)
         {
@@ -156,7 +163,19 @@ public sealed class WindowOperator : IQueryOperator
                 values[inputFieldCount + windowColumnIndex] = windowResults[rowIndex][windowColumnIndex];
             }
 
-            yield return new Row(outputNames, values, outputNameIndex!);
+            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
+
+            if (outputBatch.IsFull)
+            {
+                yield return outputBatch;
+                outputBatch = null;
+            }
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 

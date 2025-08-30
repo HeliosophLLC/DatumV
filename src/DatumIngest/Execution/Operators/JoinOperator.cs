@@ -159,13 +159,13 @@ public sealed class JoinOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         if (_joinType == JoinType.Cross)
         {
-            await foreach (Row row in ExecuteCrossJoinAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch batch in ExecuteCrossJoinAsync(context).ConfigureAwait(false))
             {
-                yield return row;
+                yield return batch;
             }
             yield break;
         }
@@ -183,9 +183,9 @@ public sealed class JoinOperator : IQueryOperator
 
             if (indexNlj is not null)
             {
-                await foreach (Row row in indexNlj.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
+                await foreach (RowBatch batch in indexNlj.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
-                    yield return row;
+                    yield return batch;
                 }
             }
             else if (context.MemoryBudgetBytes is long memoryBudget)
@@ -194,24 +194,24 @@ public sealed class JoinOperator : IQueryOperator
                 IQueryOperator buildSide = _flipped ? _left : _right;
                 GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide));
 
-                await foreach (Row row in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
+                await foreach (RowBatch batch in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
-                    yield return row;
+                    yield return batch;
                 }
             }
             else
             {
-                await foreach (Row row in ExecuteHashJoinAsync(context, extraction).ConfigureAwait(false))
+                await foreach (RowBatch batch in ExecuteHashJoinAsync(context, extraction).ConfigureAwait(false))
                 {
-                    yield return row;
+                    yield return batch;
                 }
             }
         }
         else
         {
-            await foreach (Row row in ExecuteNestedLoopJoinAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch batch in ExecuteNestedLoopJoinAsync(context).ConfigureAwait(false))
             {
-                yield return row;
+                yield return batch;
             }
         }
     }
@@ -336,7 +336,7 @@ public sealed class JoinOperator : IQueryOperator
             evaluator);
     }
 
-    private async IAsyncEnumerable<Row> ExecuteHashJoinAsync(
+    private async IAsyncEnumerable<RowBatch> ExecuteHashJoinAsync(
         ExecutionContext context, JoinKeyExtractionResult extraction)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
@@ -362,10 +362,13 @@ public sealed class JoinOperator : IQueryOperator
         List<Row> buildRows = new();
         bool hasNullKey = false;
 
-        await foreach (Row buildRow in buildSource.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
         {
-            int buildIndex = buildRows.Count;
-            buildRows.Add(buildRow);
+            for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
+            {
+                Row buildRow = buildBatch[batchIndex];
+                int buildIndex = buildRows.Count;
+                buildRows.Add(buildRow);
 
             if (useSingleKey)
             {
@@ -403,6 +406,8 @@ public sealed class JoinOperator : IQueryOperator
 
                 bucket.Add((buildIndex, buildRow));
             }
+            }
+            buildBatch.Return();
         }
 
         // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
@@ -434,11 +439,11 @@ public sealed class JoinOperator : IQueryOperator
             long? estimatedProbeRows = GetEstimatedRowCount(probeSource);
             if (estimatedProbeRows is null or >= 100_000)
             {
-                await foreach (Row row in ExecuteParallelProbeAsync(
+                await foreach (RowBatch batch in ExecuteParallelProbeAsync(
                     context, extraction, probeSource, singleKeyTable, compositeKeyTable,
                     buildRows, useSingleKey, isSemiJoin, needProbeUnmatched).ConfigureAwait(false))
                 {
-                    yield return row;
+                    yield return batch;
                 }
 
                 yield break;
@@ -474,11 +479,15 @@ public sealed class JoinOperator : IQueryOperator
         LocalBufferPool bufferPool = context.LocalBufferPool;
         Row? residualCheckRow = null;
         DataValue[]? residualCheckBuffer = null;
+        RowBatch? outputBatch = null;
 
         try
         {
-        await foreach (Row probeRow in probeSource.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch probeBatch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
         {
+        for (int probeIndex = 0; probeIndex < probeBatch.Count; probeIndex++)
+        {
+            Row probeRow = probeBatch[probeIndex];
             // For null-sensitive anti-semi (NOT IN), NULL probe keys are excluded.
             if (_nullSensitiveAntiSemi)
             {
@@ -564,7 +573,9 @@ public sealed class JoinOperator : IQueryOperator
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                     }
 
-                    yield return schema!.CombinePooled(leftRow, rightRow, bufferPool);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema!.CombinePooled(leftRow, rightRow, bufferPool));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
 
@@ -574,7 +585,9 @@ public sealed class JoinOperator : IQueryOperator
                 if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                     (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                 {
-                    yield return probeRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(probeRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
             else if (!hasMatch && needProbeUnmatched)
@@ -586,13 +599,19 @@ public sealed class JoinOperator : IQueryOperator
                     Row leftRow = _flipped ? cachedNullBuild : probeRow;
                     Row rightRow = _flipped ? probeRow : cachedNullBuild;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
-                    yield return probeRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(probeRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
+        }
+        probeBatch.Return();
         }
         }
         finally
@@ -622,14 +641,23 @@ public sealed class JoinOperator : IQueryOperator
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        yield return buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool));
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                     else
                     {
-                        yield return buildRows[index];
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(buildRows[index]);
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                 }
             }
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 
@@ -639,7 +667,7 @@ public sealed class JoinOperator : IQueryOperator
     /// each probing the shared read-only hash table and writing matched rows
     /// to a bounded output channel. The caller yields from the output channel.
     /// </summary>
-    private async IAsyncEnumerable<Row> ExecuteParallelProbeAsync(
+    private async IAsyncEnumerable<RowBatch> ExecuteParallelProbeAsync(
         ExecutionContext context,
         JoinKeyExtractionResult extraction,
         IQueryOperator probeSource,
@@ -693,9 +721,13 @@ public sealed class JoinOperator : IQueryOperator
             {
                 try
                 {
-                    await foreach (Row row in probeSource.ExecuteAsync(context).ConfigureAwait(false))
+                    await foreach (RowBatch batch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
                     {
-                        await probeInput.Writer.WriteAsync(row, cancellationToken).ConfigureAwait(false);
+                        for (int i = 0; i < batch.Count; i++)
+                        {
+                            await probeInput.Writer.WriteAsync(batch[i], cancellationToken).ConfigureAwait(false);
+                        }
+                        batch.Return();
                     }
                 }
                 finally
@@ -860,9 +892,17 @@ public sealed class JoinOperator : IQueryOperator
             // Complete the output channel when all workers and the feeder finish.
             _ = CompleteOutputWhenDoneAsync(feederTask, workers, output.Writer);
 
+            RowBatch? outputBatch = null;
             await foreach (Row row in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
         finally
@@ -919,7 +959,7 @@ public sealed class JoinOperator : IQueryOperator
         }
     }
 
-    private async IAsyncEnumerable<Row> ExecuteNestedLoopJoinAsync(ExecutionContext context)
+    private async IAsyncEnumerable<RowBatch> ExecuteNestedLoopJoinAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         bool isSemiJoin = _joinType == JoinType.LeftSemi || _joinType == JoinType.LeftAntiSemi;
@@ -930,9 +970,13 @@ public sealed class JoinOperator : IQueryOperator
 
         // Materialize build side.
         List<Row> buildRows = new();
-        await foreach (Row buildRow in buildSource.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
         {
-            buildRows.Add(buildRow);
+            for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
+            {
+                buildRows.Add(buildBatch[batchIndex]);
+            }
+            buildBatch.Return();
         }
 
         bool leftMustAppear = _joinType is JoinType.Left or JoinType.FullOuter;
@@ -951,9 +995,13 @@ public sealed class JoinOperator : IQueryOperator
         // row for each candidate pair only to discard it when the filter fails.
         Row? reusableFilterRow = null;
         DataValue[]? reusableFilterBuffer = null;
+        RowBatch? outputBatch = null;
 
-        await foreach (Row probeRow in probeSource.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch probeBatch in probeSource.ExecuteAsync(context).ConfigureAwait(false))
         {
+        for (int probeIndex = 0; probeIndex < probeBatch.Count; probeIndex++)
+        {
+            Row probeRow = probeBatch[probeIndex];
             bool hasMatch = false;
 
             for (int index = 0; index < buildRows.Count; index++)
@@ -993,7 +1041,9 @@ public sealed class JoinOperator : IQueryOperator
                     buildMatched[index] = true;
                 }
 
-                yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
             if (isSemiJoin)
@@ -1001,7 +1051,9 @@ public sealed class JoinOperator : IQueryOperator
                 if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                     (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                 {
-                    yield return probeRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(probeRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
             else if (!hasMatch && needProbeUnmatched)
@@ -1012,13 +1064,19 @@ public sealed class JoinOperator : IQueryOperator
                     Row leftRow = _flipped ? cachedNullBuild : probeRow;
                     Row rightRow = _flipped ? probeRow : cachedNullBuild;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
-                    yield return probeRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(probeRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
+        }
+        probeBatch.Return();
         }
 
         // Emit unmatched build rows.
@@ -1039,44 +1097,73 @@ public sealed class JoinOperator : IQueryOperator
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        yield return buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool));
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                     else
                     {
-                        yield return buildRows[index];
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(buildRows[index]);
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                 }
             }
         }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
+        }
     }
 
-    private async IAsyncEnumerable<Row> ExecuteCrossJoinAsync(ExecutionContext context)
+    private async IAsyncEnumerable<RowBatch> ExecuteCrossJoinAsync(ExecutionContext context)
     {
         // Materialize right side.
         List<Row> rightRows = new();
-        await foreach (Row rightRow in _right.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch rightBatch in _right.ExecuteAsync(context).ConfigureAwait(false))
         {
-            rightRows.Add(rightRow);
+            for (int batchIndex = 0; batchIndex < rightBatch.Count; batchIndex++)
+            {
+                rightRows.Add(rightBatch[batchIndex]);
+            }
+            rightBatch.Return();
         }
 
         CombinedRowSchema? schema = null;
         LocalBufferPool bufferPool = context.LocalBufferPool;
+        RowBatch? outputBatch = null;
 
-        await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
-            foreach (Row rightRow in rightRows)
+            for (int leftIndex = 0; leftIndex < leftBatch.Count; leftIndex++)
             {
-                schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                yield return schema.CombinePooled(leftRow, rightRow, bufferPool);
+                Row leftRow = leftBatch[leftIndex];
+                foreach (Row rightRow in rightRows)
+                {
+                    schema ??= CombinedRowSchema.Build(leftRow, rightRow);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                }
             }
+            leftBatch.Return();
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 
     private static async Task<Row?> GetFirstRowForNullPadAsync(IQueryOperator source, ExecutionContext context)
     {
-        await foreach (Row row in source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            return row;
+            if (batch.Count > 0)
+            {
+                return batch[0];
+            }
         }
 
         return null;

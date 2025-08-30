@@ -84,7 +84,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
@@ -93,9 +93,20 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             List<Row> rows = await CollectTopNAsync(topN, evaluator, context).ConfigureAwait(false);
             rows.Sort((left, right) => CompareRows(left, right, evaluator));
 
+            RowBatch? outputBatch = null;
             foreach (Row row in rows)
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
 
             yield break;
@@ -114,9 +125,20 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 // Everything fit in memory — sort and emit.
                 buffer.Sort((left, right) => CompareRows(left, right, evaluator));
 
+                RowBatch? outputBatch = null;
                 foreach (Row row in buffer)
                 {
-                    yield return row;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(row);
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
+                }
+                if (outputBatch is not null)
+                {
+                    yield return outputBatch;
                 }
             }
             else
@@ -132,10 +154,10 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 }
 
                 // K-way merge all sorted runs.
-                await foreach (Row row in MergeSortedRunsAsync(
-                    sortedRunPaths, evaluator, context.CancellationToken).ConfigureAwait(false))
+                await foreach (RowBatch mergeBatch in MergeSortedRunsAsync(
+                    sortedRunPaths, evaluator, context).ConfigureAwait(false))
                 {
-                    yield return row;
+                    yield return mergeBatch;
                 }
             }
         }
@@ -159,8 +181,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+            Row row = inputBatch[i];
             context.CancellationToken.ThrowIfCancellationRequested();
             context.QueryMeter?.ThrowIfExceeded();
 
@@ -207,6 +232,9 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                     estimator.EscalateToEveryRow();
                 }
             }
+            }
+
+            inputBatch.Return();
         }
 
         if (ExecutionTracer.IsEnabled && sortedRunPaths.Count > 0)
@@ -234,8 +262,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             Comparer<Row>.Create(
                 (left, right) => -CompareRows(left, right, evaluator)));
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+            Row row = inputBatch[i];
             context.CancellationToken.ThrowIfCancellationRequested();
             context.QueryMeter?.ThrowIfExceeded();
 
@@ -250,6 +281,9 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 // the one removed — effectively a no-op.
                 heap.EnqueueDequeue(row, row);
             }
+            }
+
+            inputBatch.Return();
         }
 
         List<Row> rows = new(heap.Count);
@@ -346,10 +380,10 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     /// Uses a priority queue where each entry tracks which run it came from, so the next
     /// row from that run can be loaded when the current one is dequeued.
     /// </summary>
-    private async IAsyncEnumerable<Row> MergeSortedRunsAsync(
+    private async IAsyncEnumerable<RowBatch> MergeSortedRunsAsync(
         List<string> runPaths,
         ExpressionEvaluator evaluator,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        ExecutionContext context)
     {
         // Open all run files and read their first row.
         List<RunReader> readers = new(runPaths.Count);
@@ -385,12 +419,20 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 heap.Enqueue(reader, reader);
             }
 
+            RowBatch? outputBatch = null;
+
             while (heap.Count > 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                context.CancellationToken.ThrowIfCancellationRequested();
 
                 RunReader winner = heap.Dequeue();
-                yield return winner.Current!;
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(winner.Current!);
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
 
                 if (winner.ReadNext())
                 {
@@ -400,6 +442,11 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 {
                     winner.Dispose();
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
         finally

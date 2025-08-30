@@ -181,9 +181,9 @@ public sealed class JsonlChunkMeasurementTests : IDisposable
             descriptor, chunkSize: 2, CancellationToken.None);
 
         int providerRowCount = 0;
-        await foreach (Row _ in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
         {
-            providerRowCount++;
+            providerRowCount += batch.Count;
         }
 
         long measuredTotalRows = ranges.Sum(r => r.RowCount);

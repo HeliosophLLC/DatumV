@@ -21,6 +21,8 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
     /// <summary>Number of row groups skipped by statistics-based pruning in the most recent read.</summary>
     public int PrunedRowGroups { get; private set; }
 
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -42,7 +44,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -83,6 +85,8 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             nameIndex[columnNames[fieldIndex]] = fieldIndex;
         }
 
+        RowBatch? batch = null;
+
         // Iterate all row groups
         for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
         {
@@ -114,13 +118,24 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                         rowIndex);
                 }
 
-                yield return row;
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(row);
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
             }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 
     /// <inheritdoc />
-    IAsyncEnumerable<Row> IFilterableTableProvider.OpenAsync(
+    IAsyncEnumerable<RowBatch> IFilterableTableProvider.OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression filterHint,
@@ -129,7 +144,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         return OpenWithFilterAsync(descriptor, requiredColumns, filterHint, cancellationToken);
     }
 
-    private async IAsyncEnumerable<Row> OpenWithFilterAsync(
+    private async IAsyncEnumerable<RowBatch> OpenWithFilterAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression filterHint,
@@ -188,6 +203,8 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         TotalRowGroups = reader.RowGroupCount;
         PrunedRowGroups = 0;
 
+        RowBatch? batch = null;
+
         // Iterate row groups with statistics-based pruning
         for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
         {
@@ -228,8 +245,19 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                         rowIndex);
                 }
 
-                yield return row;
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(row);
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
             }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 
@@ -330,7 +358,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+    public async IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
@@ -370,6 +398,8 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         {
             nameIndex[columnNames[fieldIndex]] = fieldIndex;
         }
+
+        RowBatch? batch = null;
 
         // Walk row groups to find the range [startRow, startRow + count).
         long cumulativeRowOffset = 0;
@@ -416,11 +446,22 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                         rowIndex);
                 }
 
-                yield return row;
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(row);
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
                 remaining--;
             }
 
             cumulativeRowOffset = rowGroupEnd;
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 

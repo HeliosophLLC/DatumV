@@ -12,6 +12,11 @@ namespace DatumIngest.Functions.TableValued;
 /// </summary>
 public sealed class UnnestFunction : IElementKindAwareTableFunction
 {
+    /// <summary>
+    /// Number of rows accumulated before yielding a batch.
+    /// </summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public string Name => "unnest";
 
@@ -60,7 +65,7 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ExecuteAsync(
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         DataValue[] arguments,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -75,6 +80,8 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
             yield break;
         }
 
+        RowBatch? batch = null;
+
         switch (input.Kind)
         {
             case DataKind.Vector:
@@ -85,7 +92,13 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 foreach (float item in values)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    yield return new Row(names, [DataValue.FromFloat32(item)], nameIndex);
+                    batch ??= RowBatch.Rent(DefaultBatchSize);
+                    batch.Add(new Row(names, [DataValue.FromFloat32(item)], nameIndex));
+                    if (batch.IsFull)
+                    {
+                        yield return batch;
+                        batch = null;
+                    }
                 }
                 break;
             }
@@ -98,7 +111,13 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 foreach (byte item in bytes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    yield return new Row(names, [DataValue.FromUInt8(item)], nameIndex);
+                    batch ??= RowBatch.Rent(DefaultBatchSize);
+                    batch.Add(new Row(names, [DataValue.FromUInt8(item)], nameIndex));
+                    if (batch.IsFull)
+                    {
+                        yield return batch;
+                        batch = null;
+                    }
                 }
                 break;
             }
@@ -136,12 +155,24 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                             values[index] = ConvertJsonElement(property.Value);
                             index++;
                         }
-                        yield return new Row(names, values);
+                        batch ??= RowBatch.Rent(DefaultBatchSize);
+                        batch.Add(new Row(names, values));
+                        if (batch.IsFull)
+                        {
+                            yield return batch;
+                            batch = null;
+                        }
                     }
                     else
                     {
                         // Scalar elements get a single "value" column.
-                        yield return new Row(["value"], [ConvertJsonElement(item)]);
+                        batch ??= RowBatch.Rent(DefaultBatchSize);
+                        batch.Add(new Row(["value"], [ConvertJsonElement(item)]));
+                        if (batch.IsFull)
+                        {
+                            yield return batch;
+                            batch = null;
+                        }
                     }
                 }
                 break;
@@ -155,13 +186,24 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
                 foreach (DataValue element in elements)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    yield return new Row(names, [element], nameIndex);
+                    batch ??= RowBatch.Rent(DefaultBatchSize);
+                    batch.Add(new Row(names, [element], nameIndex));
+                    if (batch.IsFull)
+                    {
+                        yield return batch;
+                        batch = null;
+                    }
                 }
                 break;
             }
 
             default:
                 throw new ArgumentException($"unnest() does not support {input.Kind}.");
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         // Ensure the method is truly async to satisfy the compiler.

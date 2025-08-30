@@ -57,7 +57,7 @@ public sealed class LimitOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         // Propagate the row limit hint so downstream operators (e.g. join) can
         // choose cheaper strategies when only a small result set is needed.
@@ -74,22 +74,49 @@ public sealed class LimitOperator : IQueryOperator
 
         int skipped = 0;
         int emitted = 0;
+        RowBatch? outputBatch = null;
 
-        await foreach (Row row in _source.ExecuteAsync(limitedContext).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(limitedContext).ConfigureAwait(false))
         {
-            if (skipped < _offset)
+            for (int index = 0; index < inputBatch.Count; index++)
             {
-                skipped++;
-                continue;
+                Row row = inputBatch[index];
+
+                if (skipped < _offset)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                if (emitted >= _limit)
+                {
+                    inputBatch.Return();
+
+                    if (outputBatch is not null)
+                    {
+                        yield return outputBatch;
+                    }
+
+                    yield break;
+                }
+
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(row);
+                emitted++;
+
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
             }
 
-            if (emitted >= _limit)
-            {
-                yield break;
-            }
+            inputBatch.Return();
+        }
 
-            yield return row;
-            emitted++;
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 }

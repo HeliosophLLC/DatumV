@@ -1,8 +1,67 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
 namespace DatumIngest.Execution;
+
+/// <summary>
+/// A <see cref="ConcurrentQueue{T}"/> paired with an atomic approximate count.
+/// <see cref="ConcurrentQueue{T}.Count"/> traverses internal segments with memory
+/// barriers on every call — O(segments), not O(1). At 65 million returns per query
+/// this dominated 24% of wall-clock time. The atomic counter eliminates that cost
+/// at the expense of a slight over-count race (harmless: we may enqueue a few items
+/// past the cap, which is only a soft limit).
+/// </summary>
+internal sealed class CountedPool<T>
+{
+    private readonly ConcurrentQueue<T> _queue = new();
+    private int _approximateCount;
+
+    /// <summary>Approximate number of items in the pool. May briefly over- or under-count.</summary>
+    public int ApproximateCount => Volatile.Read(ref _approximateCount);
+
+    /// <summary>Attempts to dequeue an item. Decrements the counter on success.</summary>
+    public bool TryDequeue([MaybeNullWhen(false)] out T result)
+    {
+        if (_queue.TryDequeue(out result))
+        {
+            Interlocked.Decrement(ref _approximateCount);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Enqueues an item if the approximate count is below <paramref name="limit"/>.
+    /// Uses a racy read — may slightly exceed the limit, which is acceptable for a soft cap.
+    /// </summary>
+    public void EnqueueIfUnderLimit(T item, int limit)
+    {
+        if (Volatile.Read(ref _approximateCount) < limit)
+        {
+            _queue.Enqueue(item);
+            Interlocked.Increment(ref _approximateCount);
+        }
+    }
+
+    /// <summary>Unconditionally enqueues an item.</summary>
+    public void Enqueue(T item)
+    {
+        _queue.Enqueue(item);
+        Interlocked.Increment(ref _approximateCount);
+    }
+
+    /// <summary>Drains all items from the pool.</summary>
+    public void Clear()
+    {
+        while (_queue.TryDequeue(out _))
+        {
+            Interlocked.Decrement(ref _approximateCount);
+        }
+    }
+}
 
 /// <summary>
 /// Process-wide static pool of <see cref="Row"/> objects and <see cref="DataValue"/> arrays,
@@ -11,8 +70,9 @@ namespace DatumIngest.Execution;
 /// </summary>
 /// <remarks>
 /// <para>
-/// All pools use <see cref="ConcurrentQueue{T}"/> for lock-free, thread-safe rent/return
-/// across producer and consumer threads (e.g. JOIN produces rows, GROUP BY returns them).
+/// All pools use <see cref="CountedPool{T}"/> (a <see cref="ConcurrentQueue{T}"/> with an
+/// atomic counter) for lock-free, thread-safe rent/return across producer and consumer
+/// threads (e.g. JOIN produces rows, GROUP BY returns them).
 /// </para>
 /// <para>
 /// Call <see cref="Warmup"/> after planning a query to burst-allocate rows of the expected
@@ -22,17 +82,21 @@ namespace DatumIngest.Execution;
 /// </remarks>
 public static class GlobalBufferPool
 {
-    private static readonly ConcurrentDictionary<int, ConcurrentQueue<DataValue[]>> ArrayPools = new();
-    private static readonly ConcurrentDictionary<int, ConcurrentQueue<Row>> RowPools = new();
-    private static readonly ConcurrentDictionary<int, ConcurrentQueue<GroupState>> GroupStatePools = new();
-    private static readonly ConcurrentDictionary<int, ConcurrentQueue<IAggregateAccumulator[]>> AccumulatorArrayPools = new();
+    private static readonly ConcurrentDictionary<int, CountedPool<DataValue[]>> ArrayPools = new();
+    private static readonly ConcurrentDictionary<int, CountedPool<Row>> RowPools = new();
+    private static readonly ConcurrentDictionary<int, CountedPool<GroupState>> GroupStatePools = new();
+    private static readonly ConcurrentDictionary<int, CountedPool<IAggregateAccumulator[]>> AccumulatorArrayPools = new();
     private static readonly ConcurrentQueue<LocalBufferPool> LocalBufferPools = new();
 
     /// <summary>
     /// Maximum number of items per bucket. Prevents unbounded growth when queries of
-    /// varying widths are executed. Defaults to 2 million per bucket.
+    /// varying widths are executed. A lower cap reduces gen2 reference density and
+    /// therefore GC card-table scanning cost during ephemeral collections. The pool
+    /// only needs enough rows to cover the in-flight batch pipeline
+    /// (<c>BatchSize × pipeline_depth</c>); anything beyond that adds gen2 scan
+    /// overhead without improving hit rates. Defaults to 8192 per bucket.
     /// </summary>
-    private static int _maxItemsPerBucket = 2_000_000;
+    private static int _maxItemsPerBucket = 8_192;
 
     /// <summary>
     /// Configures the maximum number of items retained per bucket. Must be called before
@@ -60,7 +124,7 @@ public static class GlobalBufferPool
     /// <param name="count">Number of rows to pre-allocate.</param>
     public static void Warmup(int fieldCount, int count)
     {
-        ConcurrentQueue<Row> rowPool = RowPools.GetOrAdd(fieldCount, static _ => new ConcurrentQueue<Row>());
+        CountedPool<Row> rowPool = RowPools.GetOrAdd(fieldCount, static _ => new CountedPool<Row>());
         Dictionary<string, int> sharedEmptyIndex = new(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < count; i++)
@@ -78,7 +142,7 @@ public static class GlobalBufferPool
     /// </summary>
     public static DataValue[] Rent(int length)
     {
-        if (ArrayPools.TryGetValue(length, out ConcurrentQueue<DataValue[]>? pool)
+        if (ArrayPools.TryGetValue(length, out CountedPool<DataValue[]>? pool)
             && pool.TryDequeue(out DataValue[]? buffer))
         {
             return buffer;
@@ -93,12 +157,8 @@ public static class GlobalBufferPool
     /// </summary>
     public static void Return(DataValue[] buffer)
     {
-        ConcurrentQueue<DataValue[]> pool = ArrayPools.GetOrAdd(buffer.Length, static _ => new ConcurrentQueue<DataValue[]>());
-
-        if (pool.Count < _maxItemsPerBucket)
-        {
-            pool.Enqueue(buffer);
-        }
+        CountedPool<DataValue[]> pool = ArrayPools.GetOrAdd(buffer.Length, static _ => new CountedPool<DataValue[]>());
+        pool.EnqueueIfUnderLimit(buffer, _maxItemsPerBucket);
     }
 
     /// <summary>
@@ -108,7 +168,7 @@ public static class GlobalBufferPool
     /// </summary>
     public static Row RentRow(int fieldCount)
     {
-        if (RowPools.TryGetValue(fieldCount, out ConcurrentQueue<Row>? pool)
+        if (RowPools.TryGetValue(fieldCount, out CountedPool<Row>? pool)
             && pool.TryDequeue(out Row? row))
         {
             return row;
@@ -124,12 +184,8 @@ public static class GlobalBufferPool
     /// </summary>
     public static void ReturnRow(Row row)
     {
-        ConcurrentQueue<Row> pool = RowPools.GetOrAdd(row.FieldCount, static _ => new ConcurrentQueue<Row>());
-
-        if (pool.Count < _maxItemsPerBucket)
-        {
-            pool.Enqueue(row);
-        }
+        CountedPool<Row> pool = RowPools.GetOrAdd(row.FieldCount, static _ => new CountedPool<Row>());
+        pool.EnqueueIfUnderLimit(row, _maxItemsPerBucket);
     }
 
     /// <summary>
@@ -148,7 +204,7 @@ public static class GlobalBufferPool
     {
         GroupState state;
 
-        if (GroupStatePools.TryGetValue(accumulatorCount, out ConcurrentQueue<GroupState>? pool)
+        if (GroupStatePools.TryGetValue(accumulatorCount, out CountedPool<GroupState>? pool)
             && pool.TryDequeue(out GroupState? pooled))
         {
             state = pooled;
@@ -158,7 +214,7 @@ public static class GlobalBufferPool
             state = new GroupState();
         }
 
-        if (AccumulatorArrayPools.TryGetValue(accumulatorCount, out ConcurrentQueue<IAggregateAccumulator[]>? arrayPool)
+        if (AccumulatorArrayPools.TryGetValue(accumulatorCount, out CountedPool<IAggregateAccumulator[]>? arrayPool)
             && arrayPool.TryDequeue(out IAggregateAccumulator[]? array))
         {
             state.Accumulators = array;
@@ -187,25 +243,18 @@ public static class GlobalBufferPool
         IAggregateAccumulator[] array = state.Accumulators;
         int accumulatorCount = state.AccumulatorCount;
 
-        ConcurrentQueue<IAggregateAccumulator[]> arrayPool = AccumulatorArrayPools.GetOrAdd(
-            accumulatorCount, static _ => new ConcurrentQueue<IAggregateAccumulator[]>());
-        if (arrayPool.Count < _maxItemsPerBucket)
-        {
-            arrayPool.Enqueue(array);
-        }
+        CountedPool<IAggregateAccumulator[]> arrayPool = AccumulatorArrayPools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<IAggregateAccumulator[]>());
+        arrayPool.EnqueueIfUnderLimit(array, _maxItemsPerBucket);
 
         state.Accumulators = [];
         state.AccumulatorCount = 0;
         state.KeyValues = null;
         state.OrderedBuffers = null;
 
-        ConcurrentQueue<GroupState> pool = GroupStatePools.GetOrAdd(
-            accumulatorCount, static _ => new ConcurrentQueue<GroupState>());
-
-        if (pool.Count < _maxItemsPerBucket)
-        {
-            pool.Enqueue(state);
-        }
+        CountedPool<GroupState> pool = GroupStatePools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<GroupState>());
+        pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
     }
 
     /// <summary>
@@ -213,31 +262,21 @@ public static class GlobalBufferPool
     /// </summary>
     public static void ReturnGroupStates(IEnumerable<GroupState> groups, int accumulatorCount)
     {
-        ConcurrentQueue<GroupState> pool = GroupStatePools.GetOrAdd(
-            accumulatorCount, static _ => new ConcurrentQueue<GroupState>());
-        ConcurrentQueue<IAggregateAccumulator[]> arrayPool = AccumulatorArrayPools.GetOrAdd(
-            accumulatorCount, static _ => new ConcurrentQueue<IAggregateAccumulator[]>());
+        CountedPool<GroupState> pool = GroupStatePools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<GroupState>());
+        CountedPool<IAggregateAccumulator[]> arrayPool = AccumulatorArrayPools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<IAggregateAccumulator[]>());
 
         foreach (GroupState state in groups)
         {
-            IAggregateAccumulator[] array = state.Accumulators;
-
-            if (arrayPool.Count < _maxItemsPerBucket)
-            {
-                arrayPool.Enqueue(array);
-            }
+            arrayPool.EnqueueIfUnderLimit(state.Accumulators, _maxItemsPerBucket);
 
             state.Accumulators = [];
             state.AccumulatorCount = 0;
             state.KeyValues = null;
             state.OrderedBuffers = null;
 
-            if (pool.Count >= _maxItemsPerBucket)
-            {
-                break;
-            }
-
-            pool.Enqueue(state);
+            pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
         }
     }
 
@@ -273,9 +312,13 @@ public static class GlobalBufferPool
     /// </summary>
     public static void Clear()
     {
+        foreach (CountedPool<DataValue[]> pool in ArrayPools.Values) pool.Clear();
         ArrayPools.Clear();
+        foreach (CountedPool<Row> pool in RowPools.Values) pool.Clear();
         RowPools.Clear();
+        foreach (CountedPool<GroupState> pool in GroupStatePools.Values) pool.Clear();
         GroupStatePools.Clear();
+        foreach (CountedPool<IAggregateAccumulator[]> pool in AccumulatorArrayPools.Values) pool.Clear();
         AccumulatorArrayPools.Clear();
         while (LocalBufferPools.TryDequeue(out _)) { }
     }

@@ -14,6 +14,9 @@ namespace DatumIngest.Catalog.Providers;
 /// </summary>
 public sealed class JsonTableProvider : IMultiTableSource
 {
+    /// <summary>Number of rows accumulated before yielding a batch.</summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -75,7 +78,7 @@ public sealed class JsonTableProvider : IMultiTableSource
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -119,6 +122,8 @@ public sealed class JsonTableProvider : IMultiTableSource
                 nameIndex[names[index]] = index;
             }
 
+            RowBatch? batch = null;
+
             // Primitive array: yield single-column rows.
             if (IsPrimitiveArray(array))
             {
@@ -130,7 +135,19 @@ public sealed class JsonTableProvider : IMultiTableSource
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     DataValue[] primitiveValues = new[] { JsonTypeInference.ConvertElement(element, kind) };
-                    yield return new Row(primitiveNames, primitiveValues, primitiveNameIndex);
+                    Row primitiveRow = new(primitiveNames, primitiveValues, primitiveNameIndex);
+                    batch ??= RowBatch.Rent(DefaultBatchSize);
+                    batch.Add(primitiveRow);
+                    if (batch.IsFull)
+                    {
+                        yield return batch;
+                        batch = null;
+                    }
+                }
+
+                if (batch is not null)
+                {
+                    yield return batch;
                 }
 
                 yield break;
@@ -161,7 +178,18 @@ public sealed class JsonTableProvider : IMultiTableSource
                     }
                 }
 
-                yield return row;
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(row);
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
+            }
+
+            if (batch is not null)
+            {
+                yield return batch;
             }
         }
     }

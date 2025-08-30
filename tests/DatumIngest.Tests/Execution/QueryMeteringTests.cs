@@ -160,7 +160,7 @@ public class QueryMeteringTests
                     OrderBy: null)
             ]);
 
-        await foreach (Row _ in groupBy.ExecuteAsync(context)) { }
+        await foreach (RowBatch batch in groupBy.ExecuteAsync(context)) { _ = batch.Count; }
 
         // 3 rows × SUM (QU 1 each) = 3 QU.
         Assert.Equal(3, meter.QueryUnits);
@@ -200,7 +200,7 @@ public class QueryMeteringTests
                     OrderBy: null)
             ]);
 
-        await foreach (Row _ in groupBy.ExecuteAsync(context)) { }
+        await foreach (RowBatch batch in groupBy.ExecuteAsync(context)) { _ = batch.Count; }
 
         // 4 rows × MEDIAN (QU 2 each) = 8 QU.
         Assert.Equal(8, meter.QueryUnits);
@@ -240,7 +240,7 @@ public class QueryMeteringTests
                     FromLast: false)
             ]);
 
-        await foreach (Row _ in window.ExecuteAsync(context)) { }
+        await foreach (RowBatch batch in window.ExecuteAsync(context)) { _ = batch.Count; }
 
         // 3 rows in partition × ROW_NUMBER (QU 1 per row) = 3 QU.
         Assert.Equal(3, meter.QueryUnits);

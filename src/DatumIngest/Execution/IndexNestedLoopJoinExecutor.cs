@@ -80,7 +80,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// </param>
     /// <param name="context">Execution context.</param>
     /// <returns>Combined rows from the join.</returns>
-    internal async IAsyncEnumerable<Row> ExecuteAsync(
+    internal async IAsyncEnumerable<RowBatch> ExecuteAsync(
         IQueryOperator probeOperator,
         IQueryOperator buildOperator,
         ExecutionContext context)
@@ -106,8 +106,13 @@ internal sealed class IndexNestedLoopJoinExecutor
         // seekable provider returns with raw (unqualified) column names.
         BuildAliasSchema? buildAliasSchema = null;
 
-        await foreach (Row probeRow in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
+        RowBatch? outputBatch = null;
+
+        await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
+            for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
+            {
+            Row probeRow = probeBatch[probeBatchIndex];
             cancellationToken.ThrowIfCancellationRequested();
 
             // Evaluate the probe-side key.
@@ -133,7 +138,9 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // but we need to verify residual if present.
                 if (residual is null)
                 {
-                    yield return probeRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(probeRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     continue;
                 }
 
@@ -163,7 +170,9 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                 if (semiMatch)
                 {
-                    yield return probeRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(probeRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
                 continue;
@@ -189,8 +198,17 @@ internal sealed class IndexNestedLoopJoinExecutor
                     continue;
                 }
 
-                yield return combined;
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(combined);
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
+            }
+            probeBatch.Return();
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 
@@ -205,11 +223,14 @@ internal sealed class IndexNestedLoopJoinExecutor
     {
         long absoluteRow = _buildChunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-        await foreach (Row row in seekable.ReadRowRangeAsync(
+        await foreach (RowBatch batch in seekable.ReadRowRangeAsync(
             _buildDescriptor, requiredColumns: null, absoluteRow, 1, cancellationToken)
             .ConfigureAwait(false))
         {
-            return row;
+            if (batch.Count > 0)
+            {
+                return batch[0];
+            }
         }
 
         return null;

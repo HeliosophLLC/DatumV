@@ -89,13 +89,31 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         if (!_isMaterialized)
         {
-            await foreach (Row row in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
+            RowBatch? outputBatch = null;
+            await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
-                yield return RenameColumnsIfNeeded(row);
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    Row row = inputBatch[i];
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(RenameColumnsIfNeeded(row));
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
+                }
+
+                inputBatch.Return();
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
 
             yield break;
@@ -110,16 +128,28 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
         // Replay from disk if spilled, otherwise from memory.
         if (_spillFilePath is not null)
         {
-            await foreach (Row row in ReplayFromDiskAsync(context.CancellationToken).ConfigureAwait(false))
+            await foreach (RowBatch batch in ReplayFromDiskAsync(context).ConfigureAwait(false))
             {
-                yield return RenameColumnsIfNeeded(row);
+                yield return batch;
             }
         }
         else if (_materializedRows is not null)
         {
+            RowBatch? outputBatch = null;
             foreach (Row row in _materializedRows)
             {
-                yield return RenameColumnsIfNeeded(row);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(RenameColumnsIfNeeded(row));
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
     }
@@ -138,48 +168,54 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
 
         try
         {
-            await foreach (Row row in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch inputBatch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
-                context.CancellationToken.ThrowIfCancellationRequested();
-                context.QueryMeter?.ThrowIfExceeded();
-
-                if (_spillFilePath is not null)
+                for (int i = 0; i < inputBatch.Count; i++)
                 {
-                    // Already spilling — write directly to disk.
-                    if (!schemaWritten)
+                    Row row = inputBatch[i];
+                    context.CancellationToken.ThrowIfCancellationRequested();
+                    context.QueryMeter?.ThrowIfExceeded();
+
+                    if (_spillFilePath is not null)
                     {
-                        RowSerializer.WriteSchema(spillWriter!, row);
-                        CacheSpillSchema(row);
-                        schemaWritten = true;
+                        // Already spilling — write directly to disk.
+                        if (!schemaWritten)
+                        {
+                            RowSerializer.WriteSchema(spillWriter!, row);
+                            CacheSpillSchema(row);
+                            schemaWritten = true;
+                        }
+
+                        RowSerializer.WriteRow(spillWriter!, row);
                     }
-
-                    RowSerializer.WriteRow(spillWriter!, row);
-                }
-                else
-                {
-                    _materializedRows.Add(row);
-
-                    if (estimator is not null)
+                    else
                     {
-                        if (estimator.ShouldSample())
-                        {
-                            estimator.RecordSample(row);
-                        }
+                        _materializedRows.Add(row);
 
-                        estimator.IncrementRowCount();
-                        long estimatedMemory = estimator.EstimateTotalBytes();
+                        if (estimator is not null)
+                        {
+                            if (estimator.ShouldSample())
+                            {
+                                estimator.RecordSample(row);
+                            }
 
-                        if (estimatedMemory > memoryBudget!.Value)
-                        {
-                            // Spill everything buffered so far plus future rows to disk.
-                            SpillToDisk(ref spillWriter, ref schemaWritten);
-                        }
-                        else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
-                        {
-                            estimator.EscalateToEveryRow();
+                            estimator.IncrementRowCount();
+                            long estimatedMemory = estimator.EstimateTotalBytes();
+
+                            if (estimatedMemory > memoryBudget!.Value)
+                            {
+                                // Spill everything buffered so far plus future rows to disk.
+                                SpillToDisk(ref spillWriter, ref schemaWritten);
+                            }
+                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                            {
+                                estimator.EscalateToEveryRow();
+                            }
                         }
                     }
                 }
+
+                inputBatch.Return();
             }
         }
         finally
@@ -260,8 +296,7 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
     /// <summary>
     /// Replays rows from a spill file.
     /// </summary>
-    private async IAsyncEnumerable<Row> ReplayFromDiskAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    private async IAsyncEnumerable<RowBatch> ReplayFromDiskAsync(ExecutionContext context)
     {
         FileStream fileStream = new(
             _spillFilePath!, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
@@ -272,10 +307,23 @@ internal sealed class CommonTableExpressionOperator : IQueryOperator, IDisposabl
 
             RowSerializer.ReadSchema(reader, out string[] names, out Dictionary<string, int> nameIndex);
 
+            RowBatch? outputBatch = null;
             while (fileStream.Position < fileStream.Length)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return RowSerializer.ReadRow(reader, names, nameIndex);
+                context.CancellationToken.ThrowIfCancellationRequested();
+                Row row = RowSerializer.ReadRow(reader, names, nameIndex);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(RenameColumnsIfNeeded(row));
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
     }

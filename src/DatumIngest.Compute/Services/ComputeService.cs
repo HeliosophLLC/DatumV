@@ -161,49 +161,54 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
             try
             {
-                await foreach (Row row in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
+                await foreach (RowBatch batch in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
                 {
-                    rowCount++;
-
-                    if (maxRows.HasValue && rowCount > maxRows.Value)
+                    for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
                     {
-                        throw new RpcException(new Status(
-                            StatusCode.ResourceExhausted,
-                            $"Row budget exceeded (limit: {maxRows.Value})."));
+                        Row row = batch[rowIndex];
+                        rowCount++;
+
+                        if (maxRows.HasValue && rowCount > maxRows.Value)
+                        {
+                            throw new RpcException(new Status(
+                                StatusCode.ResourceExhausted,
+                                $"Row budget exceeded (limit: {maxRows.Value})."));
+                        }
+
+                        if (meter.IsBudgetExceeded)
+                        {
+                            throw new RpcException(new Status(
+                                StatusCode.ResourceExhausted,
+                                $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
+                        }
+
+                        QueryRow queryRow = new()
+                        {
+                            QueryId = queryIdString,
+                        };
+
+                        // Attach schema to the first row only.
+                        if (!schemaWritten)
+                        {
+                            queryRow.Schema = ProtoConverter.ToProto(result.Schema);
+                            schemaWritten = true;
+                        }
+
+                        for (int i = 0; i < row.FieldCount; i++)
+                        {
+                            queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
+                        }
+
+                        queryRow.QueryUnits = meter.QueryUnits;
+
+                        await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
+
+                        if (throttleMilliseconds.HasValue && rowCount % QueryGovernor.ThrottleBatchSize == 0)
+                        {
+                            await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
+                        }
                     }
-
-                    if (meter.IsBudgetExceeded)
-                    {
-                        throw new RpcException(new Status(
-                            StatusCode.ResourceExhausted,
-                            $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
-                    }
-
-                    QueryRow queryRow = new()
-                    {
-                        QueryId = queryIdString,
-                    };
-
-                    // Attach schema to the first row only.
-                    if (!schemaWritten)
-                    {
-                        queryRow.Schema = ProtoConverter.ToProto(result.Schema);
-                        schemaWritten = true;
-                    }
-
-                    for (int i = 0; i < row.FieldCount; i++)
-                    {
-                        queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
-                    }
-
-                    queryRow.QueryUnits = meter.QueryUnits;
-
-                    await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
-
-                    if (throttleMilliseconds.HasValue && rowCount % QueryGovernor.ThrottleBatchSize == 0)
-                    {
-                        await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
-                    }
+                    batch.Return();
                 }
             }
             catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)

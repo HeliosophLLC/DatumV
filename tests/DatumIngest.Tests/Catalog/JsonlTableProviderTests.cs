@@ -21,12 +21,15 @@ public sealed class JsonlTableProviderTests
         return new TableDescriptor("jsonl", "test", FixturePath(fileName), new Dictionary<string, string>());
     }
 
-    private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<Row> source)
+    private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<RowBatch> source)
     {
         List<Row> rows = new();
-        await foreach (Row row in source)
+        await foreach (RowBatch batch in source)
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
         return rows;
     }
@@ -215,7 +218,7 @@ public sealed class JsonlTableProviderTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
-            await foreach (Row _ in provider.OpenAsync(
+            await foreach (RowBatch _ in provider.OpenAsync(
                 Descriptor("simple.jsonl"), null, cancellationTokenSource.Token))
             {
             }

@@ -309,11 +309,15 @@ internal static class SemiJoinRewriter
         IQueryOperator innerPlan = planner.Plan(innerQuery);
         List<Expression> values = new();
 
-        await foreach (Row row in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            DataValue value = row[0];
-            values.Add(new LiteralExpression(value));
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Row row = inputBatch[i];
+                DataValue value = row[0];
+                values.Add(new LiteralExpression(value));
+            }
         }
 
         return values;
@@ -330,10 +334,14 @@ internal static class SemiJoinRewriter
     {
         IQueryOperator innerPlan = planner.Plan(innerQuery);
 
-        await foreach (Row _ in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return true;
+
+            if (inputBatch.Count > 0)
+            {
+                return true;
+            }
         }
 
         return false;

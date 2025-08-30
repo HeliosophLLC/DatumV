@@ -877,14 +877,27 @@ public sealed class SourceIndexBuilderTests
                 ColumnCosts: new Dictionary<string, ColumnCost>()));
         }
 
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (Row row in _rows)
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;

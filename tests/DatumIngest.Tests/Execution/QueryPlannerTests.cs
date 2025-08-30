@@ -341,9 +341,12 @@ public class QueryPlannerTests
                 catalog, new LocalBufferPool());
 
             List<Row> rows = new();
-            await foreach (Row row in plan.ExecuteAsync(context))
+            await foreach (RowBatch batch in plan.ExecuteAsync(context))
             {
-                rows.Add(row);
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    rows.Add(batch[i]);
+                }
             }
 
             Assert.Equal(2, rows.Count);
@@ -389,9 +392,12 @@ public class QueryPlannerTests
                 catalog, new LocalBufferPool());
 
             List<Row> rows = new();
-            await foreach (Row row in plan.ExecuteAsync(context))
+            await foreach (RowBatch batch in plan.ExecuteAsync(context))
             {
-                rows.Add(row);
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    rows.Add(batch[i]);
+                }
             }
 
             Assert.Equal(3, rows.Count);
@@ -2202,12 +2208,12 @@ internal sealed class StubKeyedProvider : IKeyedTableProvider
         return Task.FromResult(new Schema(columns));
     }
 
-    public IAsyncEnumerable<Row> OpenAsync(
+    public IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         CancellationToken cancellationToken)
     {
-        return AsyncEnumerable.Empty<Row>();
+        return AsyncEnumerable.Empty<RowBatch>();
     }
 
     public Task<ProviderCapabilities> GetCapabilitiesAsync(
@@ -2227,7 +2233,7 @@ internal sealed class StubKeyedProvider : IKeyedTableProvider
             KeyColumn: _keyColumn));
     }
 
-    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+    public async IAsyncEnumerable<RowBatch> FetchByKeysAsync(
         TableDescriptor descriptor,
         string keyColumn,
         IReadOnlySet<DataValue> keyValues,
@@ -2263,12 +2269,12 @@ internal sealed class StubRowCountProvider : ITableProvider
         return Task.FromResult(new Schema(columns));
     }
 
-    public IAsyncEnumerable<Row> OpenAsync(
+    public IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         CancellationToken cancellationToken)
     {
-        return AsyncEnumerable.Empty<Row>();
+        return AsyncEnumerable.Empty<RowBatch>();
     }
 
     public Task<ProviderCapabilities> GetCapabilitiesAsync(
@@ -2302,12 +2308,12 @@ internal sealed class SeekableStubProvider : ISeekableTableProvider
         return Task.FromResult(new Schema([]));
     }
 
-    public IAsyncEnumerable<Row> OpenAsync(
+    public IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         CancellationToken cancellationToken)
     {
-        return AsyncEnumerable.Empty<Row>();
+        return AsyncEnumerable.Empty<RowBatch>();
     }
 
     public Task<ProviderCapabilities> GetCapabilitiesAsync(
@@ -2321,13 +2327,13 @@ internal sealed class SeekableStubProvider : ISeekableTableProvider
             ColumnCosts: new Dictionary<string, ColumnCost>()));
     }
 
-    public IAsyncEnumerable<Row> ReadRowRangeAsync(
+    public IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
         int count,
         CancellationToken cancellationToken)
     {
-        return AsyncEnumerable.Empty<Row>();
+        return AsyncEnumerable.Empty<RowBatch>();
     }
 }

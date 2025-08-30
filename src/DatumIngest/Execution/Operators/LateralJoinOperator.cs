@@ -81,48 +81,81 @@ public sealed class LateralJoinOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         JoinOperator.CombinedRowSchema? schema = null;
         Row? cachedNullRight = null;
+        RowBatch? outputBatch = null;
 
-        await foreach (Row leftRow in _left.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
         {
-            context.CancellationToken.ThrowIfCancellationRequested();
-
-            // Execute the right side with the current left row as correlation context.
-            ExecutionContext lateralContext = context.WithOuterRow(leftRow);
-            bool matched = false;
-
-            await foreach (Row rightRow in _right.ExecuteAsync(lateralContext).ConfigureAwait(false))
+            for (int leftIndex = 0; leftIndex < leftBatch.Count; leftIndex++)
             {
-                schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, rightRow);
-                Row combined = schema.Combine(leftRow, rightRow);
+                Row leftRow = leftBatch[leftIndex];
+                context.CancellationToken.ThrowIfCancellationRequested();
 
-                if (_onCondition is not null && !evaluator.EvaluateAsBoolean(_onCondition, combined))
+                // Execute the right side with the current left row as correlation context.
+                ExecutionContext lateralContext = context.WithOuterRow(leftRow);
+                bool matched = false;
+
+                await foreach (RowBatch rightBatch in _right.ExecuteAsync(lateralContext).ConfigureAwait(false))
                 {
-                    continue;
+                    for (int rightIndex = 0; rightIndex < rightBatch.Count; rightIndex++)
+                    {
+                        Row rightRow = rightBatch[rightIndex];
+                        schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, rightRow);
+                        Row combined = schema.Combine(leftRow, rightRow);
+
+                        if (_onCondition is not null && !evaluator.EvaluateAsBoolean(_onCondition, combined))
+                        {
+                            continue;
+                        }
+
+                        matched = true;
+                        cachedNullRight ??= JoinOperator.CreateNullRow(rightRow);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(combined);
+
+                        if (outputBatch.IsFull)
+                        {
+                            yield return outputBatch;
+                            outputBatch = null;
+                        }
+                    }
+                    rightBatch.Return();
                 }
 
-                matched = true;
-                cachedNullRight ??= JoinOperator.CreateNullRow(rightRow);
-                yield return combined;
+                // LEFT LATERAL: emit left + NULLs when no right rows matched.
+                if (!matched && _joinType == JoinType.Left)
+                {
+                    Row unmatched;
+                    if (cachedNullRight is not null)
+                    {
+                        schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, cachedNullRight);
+                        unmatched = schema.Combine(leftRow, cachedNullRight);
+                    }
+                    else
+                    {
+                        unmatched = leftRow;
+                    }
+
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(unmatched);
+
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
+                }
             }
+            leftBatch.Return();
+        }
 
-            // LEFT LATERAL: emit left + NULLs when no right rows matched.
-            if (!matched && _joinType == JoinType.Left)
-            {
-                if (cachedNullRight is not null)
-                {
-                    schema ??= JoinOperator.CombinedRowSchema.Build(leftRow, cachedNullRight);
-                    yield return schema.Combine(leftRow, cachedNullRight);
-                }
-                else
-                {
-                    yield return leftRow;
-                }
-            }
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 }

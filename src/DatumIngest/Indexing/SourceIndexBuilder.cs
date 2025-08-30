@@ -160,10 +160,13 @@ public sealed class SourceIndexBuilder
 
         try
         {
-            await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+            await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
                 .ConfigureAwait(false))
             {
-                if (schema is null)
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    Row row = batch[i];
+                    if (schema is null)
                 {
                     schema = BuildSchemaFromRow(row);
                     currentAccumulators = CreateAccumulators(row);
@@ -335,6 +338,9 @@ public sealed class SourceIndexBuilder
                         }
                     }
                 }
+                }
+
+                batch.Return();
             }
 
             // Finalize the last partial chunk.

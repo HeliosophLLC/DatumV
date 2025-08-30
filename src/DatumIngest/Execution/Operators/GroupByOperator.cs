@@ -120,7 +120,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         if (_streamingSorted)
         {
@@ -153,7 +153,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// GROUP BY key changes. Requires input sorted on the GROUP BY keys.
     /// Memory usage is O(1) per group — no hash table or spill infrastructure.
     /// </summary>
-    private async IAsyncEnumerable<Row> ExecuteStreamingAsync(ExecutionContext context)
+    private async IAsyncEnumerable<RowBatch> ExecuteStreamingAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
@@ -174,8 +174,13 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         int keyCount = _groupByExpressions.Count;
         DataValue[]? compositeKeyScratch = (!useSingleKey) ? new DataValue[keyCount] : null;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        RowBatch? outputBatch = null;
+
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+            Row row = inputBatch[i];
             context.CancellationToken.ThrowIfCancellationRequested();
             context.QueryMeter?.ThrowIfExceeded();
 
@@ -187,10 +192,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 if (currentGroup is not null && !key.Equals(currentSingleKey!))
                 {
                     FlushOrderedBuffersForGroup(currentGroup, context);
-                    yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                        ref outputNames, ref outputNameIndex);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
+                        ref outputNames, ref outputNameIndex));
                     GlobalBufferPool.ReturnGroupState(currentGroup);
                     currentGroup = null;
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
                 }
 
                 if (currentGroup is null)
@@ -210,10 +221,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
                 {
                     FlushOrderedBuffersForGroup(currentGroup, context);
-                    yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                        ref outputNames, ref outputNameIndex);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
+                        ref outputNames, ref outputNameIndex));
                     GlobalBufferPool.ReturnGroupState(currentGroup);
                     currentGroup = null;
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
                 }
 
                 if (currentGroup is null)
@@ -233,15 +250,24 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // Row values have been fully extracted — return the row to
             // the pool so the upstream operator can reuse it.
             context.LocalBufferPool.ReturnRow(row);
+            }
+
+            inputBatch.Return();
         }
 
         // Emit the final group.
         if (currentGroup is not null)
         {
             FlushOrderedBuffersForGroup(currentGroup, context);
-            yield return EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                ref outputNames, ref outputNameIndex);
+            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
+                ref outputNames, ref outputNameIndex));
             GlobalBufferPool.ReturnGroupState(currentGroup);
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 
@@ -249,7 +275,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// Hash-based aggregation path: materializes all groups in a hash table before
     /// emitting any output rows. Supports spill-to-disk when memory budget is exceeded.
     /// </summary>
-    private async IAsyncEnumerable<Row> ExecuteHashAsync(ExecutionContext context)
+    private async IAsyncEnumerable<RowBatch> ExecuteHashAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
@@ -305,8 +331,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // Counts input rows for throughput tracing (guarded by IsEnabled — zero cost when off).
             long inputRowCount = 0;
 
-            await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                Row row = inputBatch[i];
                 context.CancellationToken.ThrowIfCancellationRequested();
                 context.QueryMeter?.ThrowIfExceeded();
 
@@ -458,6 +487,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 // Row values have been fully extracted — return the row
                 // to the pool so the upstream join can reuse it.
                 context.LocalBufferPool.ReturnRow(row);
+                }
+
+                inputBatch.Return();
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -490,9 +522,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     ? singleKeyGroups!.Values
                     : compositeKeyGroups!.Values;
 
+            RowBatch? outputBatch = null;
             foreach (GroupState group in allGroups)
             {
-                yield return EmitGroupRow(group, isGlobalAggregation, ref outputNames, ref outputNameIndex);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(EmitGroupRow(group, isGlobalAggregation, ref outputNames, ref outputNameIndex));
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
             }
 
             // Return completed in-memory GroupState objects to the static pool.
@@ -523,9 +562,20 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         singleKeyGroups, compositeKeyGroups, hasOrderedAggregates, context,
                         ref outputNames, ref outputNameIndex))
                     {
-                        yield return groupRow;
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(groupRow);
+                        if (outputBatch.IsFull)
+                        {
+                            yield return outputBatch;
+                            outputBatch = null;
+                        }
                     }
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
         finally
@@ -587,7 +637,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// skipping groups already complete in the worker's in-memory table.
     /// </para>
     /// </summary>
-    private async IAsyncEnumerable<Row> ExecuteParallelHashAsync(ExecutionContext context)
+    private async IAsyncEnumerable<RowBatch> ExecuteParallelHashAsync(ExecutionContext context)
     {
         bool useSingleKey = _groupByExpressions.Count == 1;
         bool isGlobalAggregation = _groupByExpressions.Count == 0;
@@ -635,10 +685,15 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 {
                     try
                     {
-                        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+                        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
                         {
-                            await globalChannel.Writer.WriteAsync(row, cancellationToken)
-                                .ConfigureAwait(false);
+                            for (int i = 0; i < inputBatch.Count; i++)
+                            {
+                                await globalChannel.Writer.WriteAsync(inputBatch[i], cancellationToken)
+                                    .ConfigureAwait(false);
+                            }
+
+                            inputBatch.Return();
                         }
                     }
                     finally
@@ -689,9 +744,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     FlushOrderedBuffers([workerGlobalGroups[0]], context);
                 }
 
-                yield return EmitGroupRow(
+                RowBatch globalOutputBatch = RowBatch.Rent(context.BatchSize);
+                globalOutputBatch.Add(EmitGroupRow(
                     workerGlobalGroups[0], isGlobalAggregation: true,
-                    ref globalOutputNames, ref globalOutputNameIndex);
+                    ref globalOutputNames, ref globalOutputNameIndex));
+                yield return globalOutputBatch;
 
                 yield break;
             }
@@ -763,8 +820,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                 try
                 {
-                    await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+                    await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
                     {
+                        for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
+                        {
+                        Row row = inputBatch[batchIndex];
                         int partition;
 
                         if (useSingleKey)
@@ -785,6 +845,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                         await inputChannels[partition].Writer.WriteAsync(row, cancellationToken)
                             .ConfigureAwait(false);
+                        }
+
+                        inputBatch.Return();
                     }
                 }
                 finally
@@ -951,6 +1014,8 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             bool hasOrderedAggregates = _aggregateColumns.Any(
                 column => column.OrderBy is not null);
 
+            RowBatch? outputBatch = null;
+
             for (int i = 0; i < workerCount; i++)
             {
                 IEnumerable<GroupState> workerGroups = useSingleKey
@@ -964,8 +1029,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 foreach (GroupState group in workerGroups)
                 {
-                    yield return EmitGroupRow(
-                        group, isGlobalAggregation: false, ref outputNames, ref outputNameIndex);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(EmitGroupRow(
+                        group, isGlobalAggregation: false, ref outputNames, ref outputNameIndex));
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
                 }
 
                 // Return completed in-memory GroupState objects to the static pool.
@@ -992,10 +1063,21 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             hasOrderedAggregates, context,
                             ref outputNames, ref outputNameIndex))
                         {
-                            yield return groupRow;
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(groupRow);
+                            if (outputBatch.IsFull)
+                            {
+                                yield return outputBatch;
+                                outputBatch = null;
+                            }
                         }
                     }
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
         finally

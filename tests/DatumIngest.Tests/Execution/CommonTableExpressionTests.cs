@@ -328,9 +328,10 @@ public sealed class CommonTableExpressionTests
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await foreach (Row row in plan.ExecuteAsync(context))
+            await foreach (RowBatch batch in plan.ExecuteAsync(context))
             {
                 // Drain the stream.
+                _ = batch.Count;
             }
         });
 
@@ -663,9 +664,12 @@ public sealed class CommonTableExpressionTests
         IQueryOperator plan = planner.Plan(query);
 
         List<Row> rows = [];
-        await foreach (Row row in plan.ExecuteAsync(context))
+        await foreach (RowBatch batch in plan.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -674,9 +678,12 @@ public sealed class CommonTableExpressionTests
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
     {
         List<Row> rows = [];
-        await foreach (Row row in op.ExecuteAsync(context))
+        await foreach (RowBatch batch in op.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -705,14 +712,18 @@ public sealed class CommonTableExpressionTests
         public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
 
         /// <inheritdoc/>
-        public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
             _onExecute();
+            RowBatch? outputBatch = null;
             foreach (Row row in _rows)
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(64);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
+            if (outputBatch is not null) yield return outputBatch;
             await Task.CompletedTask;
         }
     }
@@ -761,14 +772,27 @@ public sealed class CommonTableExpressionTests
         }
 
         /// <inheritdoc/>
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (Row row in _rows)
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;
@@ -794,13 +818,17 @@ public sealed class CommonTableExpressionTests
         public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
         /// <inheritdoc/>
-        public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
+            RowBatch? outputBatch = null;
             foreach (Row row in _rows)
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(64);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
+            if (outputBatch is not null) yield return outputBatch;
             await Task.CompletedTask;
         }
     }

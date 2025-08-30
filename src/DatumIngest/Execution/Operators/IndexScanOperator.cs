@@ -90,7 +90,7 @@ public sealed class IndexScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
@@ -110,9 +110,10 @@ public sealed class IndexScanOperator : IQueryOperator
                 ? _columnIndex.TraverseBackward()
                 : _columnIndex.TraverseForward();
 
-            List<ValueIndexEntry> batch = new();
-            int batchChunkIndex = -1;
+            List<ValueIndexEntry> indexEntries = new();
+            int currentChunkIndex = -1;
             long indexScanRowsYielded = 0;
+            RowBatch? outputBatch = null;
 
             if (ExecutionTracer.IsEnabled)
             {
@@ -122,11 +123,11 @@ public sealed class IndexScanOperator : IQueryOperator
 
             foreach (ValueIndexEntry entry in traversal)
             {
-                if (batch.Count > 0 && entry.ChunkIndex != batchChunkIndex)
+                if (indexEntries.Count > 0 && entry.ChunkIndex != currentChunkIndex)
                 {
-                    // Chunk boundary: flush the accumulated batch.
-                    await foreach (Row row in FlushBatchAsync(
-                        seekable, batch, cancellationToken).ConfigureAwait(false))
+                    // Chunk boundary: flush the accumulated entries.
+                    await foreach (Row row in FlushIndexEntriesAsync(
+                        seekable, indexEntries, cancellationToken).ConfigureAwait(false))
                     {
                         if (ExecutionTracer.IsEnabled)
                         {
@@ -139,21 +140,28 @@ public sealed class IndexScanOperator : IQueryOperator
                             }
                         }
 
-                        yield return row;
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(row);
+
+                        if (outputBatch.IsFull)
+                        {
+                            yield return outputBatch;
+                            outputBatch = null;
+                        }
                     }
 
-                    batch.Clear();
+                    indexEntries.Clear();
                 }
 
-                batch.Add(entry);
-                batchChunkIndex = entry.ChunkIndex;
+                indexEntries.Add(entry);
+                currentChunkIndex = entry.ChunkIndex;
             }
 
             // Flush any remaining entries.
-            if (batch.Count > 0)
+            if (indexEntries.Count > 0)
             {
-                await foreach (Row row in FlushBatchAsync(
-                    seekable, batch, cancellationToken).ConfigureAwait(false))
+                await foreach (Row row in FlushIndexEntriesAsync(
+                    seekable, indexEntries, cancellationToken).ConfigureAwait(false))
                 {
                     if (ExecutionTracer.IsEnabled)
                     {
@@ -166,8 +174,20 @@ public sealed class IndexScanOperator : IQueryOperator
                         }
                     }
 
-                    yield return row;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(row);
+
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -187,21 +207,26 @@ public sealed class IndexScanOperator : IQueryOperator
     /// Single-entry batches fetch exactly one row; larger batches read the covering
     /// range and yield rows in the order they appear in the batch.
     /// </summary>
-    private async IAsyncEnumerable<Row> FlushBatchAsync(
+    private async IAsyncEnumerable<Row> FlushIndexEntriesAsync(
         ISeekableTableProvider seekable,
-        List<ValueIndexEntry> batch,
+        List<ValueIndexEntry> indexEntries,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (batch.Count == 1)
+        if (indexEntries.Count == 1)
         {
-            ValueIndexEntry entry = batch[0];
+            ValueIndexEntry entry = indexEntries[0];
             long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-            await foreach (Row row in seekable.ReadRowRangeAsync(
+            await foreach (RowBatch inputBatch in seekable.ReadRowRangeAsync(
                 _descriptor, _requiredColumns, absoluteRow, 1,
                 cancellationToken).ConfigureAwait(false))
             {
-                yield return row;
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    yield return inputBatch[i];
+                }
+
+                inputBatch.Return();
             }
 
             yield break;
@@ -211,7 +236,7 @@ public sealed class IndexScanOperator : IQueryOperator
         long minRow = long.MaxValue;
         long maxRow = long.MinValue;
 
-        foreach (ValueIndexEntry entry in batch)
+        foreach (ValueIndexEntry entry in indexEntries)
         {
             long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
             minRow = Math.Min(minRow, absoluteRow);
@@ -219,24 +244,31 @@ public sealed class IndexScanOperator : IQueryOperator
         }
 
         int rangeCount = (int)(maxRow - minRow + 1);
-        Dictionary<long, Row> rowsByOffset = new(batch.Count);
+        Dictionary<long, Row> rowsByOffset = new(indexEntries.Count);
+        long totalFetched = 0;
 
-        await foreach (Row row in seekable.ReadRowRangeAsync(
+        await foreach (RowBatch inputBatch in seekable.ReadRowRangeAsync(
             _descriptor, _requiredColumns, minRow, rangeCount,
             cancellationToken).ConfigureAwait(false))
         {
-            long fetchedRow = minRow + rowsByOffset.Count;
-            rowsByOffset[fetchedRow] = row;
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+                long fetchedRow = minRow + totalFetched;
+                rowsByOffset[fetchedRow] = inputBatch[i];
+                totalFetched++;
+            }
+
+            inputBatch.Return();
         }
 
         // Yield rows in index order (the batch order from the traversal).
-        foreach (ValueIndexEntry entry in batch)
+        foreach (ValueIndexEntry entry in indexEntries)
         {
             long absoluteRow = _chunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
 
-            if (rowsByOffset.TryGetValue(absoluteRow, out Row? batchRow))
+            if (rowsByOffset.TryGetValue(absoluteRow, out Row? indexRow))
             {
-                yield return batchRow;
+                yield return indexRow;
             }
         }
     }

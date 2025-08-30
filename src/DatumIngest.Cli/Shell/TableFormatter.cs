@@ -21,29 +21,34 @@ internal sealed class TableFormatter
     /// <param name="rows">Asynchronous stream of rows to display.</param>
     /// <param name="schema">Schema describing the column names and types.</param>
     /// <param name="writer">Target text writer (typically <see cref="Console.Out"/>).</param>
-    public async Task FormatAsync(IAsyncEnumerable<Row> rows, Schema schema, TextWriter writer)
+    public async Task FormatAsync(IAsyncEnumerable<RowBatch> rows, Schema schema, TextWriter writer)
     {
         List<string[]> bufferedCells = new();
         int columnCount = schema.Columns.Count;
         bool truncated = false;
 
         // Buffer all rows (up to limit) and format cell values.
-        await foreach (Row row in rows.ConfigureAwait(false))
+        await foreach (RowBatch batch in rows.ConfigureAwait(false))
         {
-            if (bufferedCells.Count >= MaxBufferedRows)
+            for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
             {
-                truncated = true;
-                continue;
-            }
+                Row row = batch[rowIndex];
+                if (bufferedCells.Count >= MaxBufferedRows)
+                {
+                    truncated = true;
+                    continue;
+                }
 
-            string[] cells = new string[columnCount];
-            for (int i = 0; i < columnCount; i++)
-            {
-                DataValue value = row[i];
-                cells[i] = value.IsNull ? "NULL" : FormatValue(value);
-            }
+                string[] cells = new string[columnCount];
+                for (int i = 0; i < columnCount; i++)
+                {
+                    DataValue value = row[i];
+                    cells[i] = value.IsNull ? "NULL" : FormatValue(value);
+                }
 
-            bufferedCells.Add(cells);
+                bufferedCells.Add(cells);
+            }
+            batch.Return();
         }
 
         if (columnCount == 0)

@@ -109,7 +109,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
 
@@ -128,8 +128,11 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
         try
         {
-            await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
+                for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
+                {
+                Row row = inputBatch[batchIndex];
                 context.CancellationToken.ThrowIfCancellationRequested();
                 context.QueryMeter?.ThrowIfExceeded();
 
@@ -196,6 +199,9 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                         }
                     }
                 }
+            }
+
+            inputBatch.Return();
             }
 
             // Close the spill writer before reading.
@@ -296,6 +302,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                     : compositeKeyGroups.Values;
 
             LocalBufferPool pool = context.LocalBufferPool;
+            RowBatch? outputBatch = null;
 
             foreach (PivotGroupState group in allGroups)
             {
@@ -314,7 +321,19 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                     values[keyCount + cellIndex] = group.CellAccumulators[cellIndex].Result;
                 }
 
-                yield return new Row(outputNames, values, outputNameIndex);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(new Row(outputNames, values, outputNameIndex));
+
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
         finally

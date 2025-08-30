@@ -42,19 +42,39 @@ public sealed class SkipOperator : IQueryOperator
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         long skipped = 0;
+        RowBatch? outputBatch = null;
 
-        await foreach (Row row in _child.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _child.ExecuteAsync(context).ConfigureAwait(false))
         {
-            if (skipped < _count)
+            for (int i = 0; i < inputBatch.Count; i++)
             {
-                skipped++;
-                continue;
+                Row row = inputBatch[i];
+
+                if (skipped < _count)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(row);
+
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
             }
 
-            yield return row;
+            inputBatch.Return();
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 }

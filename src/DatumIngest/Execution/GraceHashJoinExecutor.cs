@@ -104,7 +104,7 @@ internal sealed class GraceHashJoinExecutor
     /// <param name="rightOperator">The build-side (right) operator.</param>
     /// <param name="context">The execution context.</param>
     /// <returns>An async enumerable of joined rows.</returns>
-    internal async IAsyncEnumerable<Row> ExecuteAsync(
+    internal async IAsyncEnumerable<RowBatch> ExecuteAsync(
         IQueryOperator leftOperator,
         IQueryOperator rightOperator,
         ExecutionContext context)
@@ -139,8 +139,11 @@ internal sealed class GraceHashJoinExecutor
             bool hasNullKey = false;
             long inMemoryRowCount = 0;
 
-            await foreach (Row buildRow in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch buildBatch in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
+                for (int buildBatchIndex = 0; buildBatchIndex < buildBatch.Count; buildBatchIndex++)
+                {
+                Row buildRow = buildBatch[buildBatchIndex];
                 buildRowCount++;
                 firstBuildRow ??= buildRow;
 
@@ -192,6 +195,8 @@ internal sealed class GraceHashJoinExecutor
                 {
                     buildEstimator.EscalateToEveryRow();
                 }
+                }
+                buildBatch.Return();
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -240,8 +245,13 @@ internal sealed class GraceHashJoinExecutor
                     }
                 }
 
-                await foreach (Row probeRow in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
+                RowBatch? outputBatch = null;
+
+                await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
+                    for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
+                    {
+                    Row probeRow = probeBatch[probeBatchIndex];
                     bool isFirst = firstProbeRow is null;
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
@@ -256,7 +266,9 @@ internal sealed class GraceHashJoinExecutor
                         foreach (Row result in ProbePartitionRow(
                             buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool))
                         {
-                            yield return result;
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(result);
+                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
 
                         // The probe row has been fully consumed — return it to the pool
@@ -279,15 +291,22 @@ internal sealed class GraceHashJoinExecutor
 
                         partition.AddProbeRow(probeRow);
                     }
+                    }
+                    probeBatch.Return();
                 }
+
+                if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
             }
             else
             {
                 // Non-hybrid path: buffer all probe rows before joining.
                 // Required when unmatched build rows must be emitted after the
                 // complete probe set has been consumed.
-                await foreach (Row probeRow in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
+                await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
                 {
+                    for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
+                    {
+                    Row probeRow = probeBatch[probeBatchIndex];
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
                     int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight);
@@ -306,6 +325,8 @@ internal sealed class GraceHashJoinExecutor
                     {
                         partition.AddProbeRow(probeRow);
                     }
+                    }
+                    probeBatch.Return();
                 }
             }
 
@@ -333,12 +354,12 @@ internal sealed class GraceHashJoinExecutor
             Row? nullLeftTemplate = _flipped ? nullBuildTemplate : nullProbeTemplate;
             Row? nullRightTemplate = _flipped ? nullProbeTemplate : nullBuildTemplate;
 
-            await foreach (Row row in JoinAllPartitionsAsync(
+            await foreach (RowBatch joinBatch in JoinAllPartitionsAsync(
                 partitions, useSingleKey, recursionDepth: 0, nullLeftTemplate, nullRightTemplate, context,
                 skipInMemory: useHybrid)
                 .ConfigureAwait(false))
             {
-                yield return row;
+                yield return joinBatch;
             }
         }
         finally
@@ -547,7 +568,7 @@ internal sealed class GraceHashJoinExecutor
         }
     }
 
-    private async IAsyncEnumerable<Row> JoinAllPartitionsAsync(
+    private async IAsyncEnumerable<RowBatch> JoinAllPartitionsAsync(
         SpillPartition[] partitions,
         bool useSingleKey,
         int recursionDepth,
@@ -556,6 +577,7 @@ internal sealed class GraceHashJoinExecutor
         ExecutionContext context,
         bool skipInMemory = false)
     {
+        RowBatch? outputBatch = null;
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool buildKeyIsRight = !_flipped;
 
@@ -639,11 +661,13 @@ internal sealed class GraceHashJoinExecutor
             // If partition is still too large after initial partitioning, recursively re-partition.
             if (buildSizeEstimate > _memoryBudgetBytes && recursionDepth < MaxRecursionDepth)
             {
-                await foreach (Row row in RecursivelyRepartitionAsync(
+                if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
+
+                await foreach (RowBatch recursionBatch in RecursivelyRepartitionAsync(
                     buildRowList, probeRows, useSingleKey, recursionDepth + 1,
                     nullLeftTemplate, nullRightTemplate, context).ConfigureAwait(false))
                 {
-                    yield return row;
+                    yield return recursionBatch;
                 }
 
                 continue;
@@ -718,7 +742,10 @@ internal sealed class GraceHashJoinExecutor
                             schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         }
 
-                        yield return schema!.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
+                        Row combinedResult = schema!.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(combinedResult);
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                 }
 
@@ -727,7 +754,9 @@ internal sealed class GraceHashJoinExecutor
                     if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                         (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                     {
-                        yield return probeRow;
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(probeRow);
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
 
                     // Semi-join may yield probeRow directly — skip the ReturnRow below.
@@ -749,13 +778,18 @@ internal sealed class GraceHashJoinExecutor
                         Row leftRow = _flipped ? nullBuild : probeRow;
                         Row rightRow = _flipped ? probeRow : nullBuild;
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        yield return schema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
+                        Row unmatchedProbeResult = schema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(unmatchedProbeResult);
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                     else
                     {
                         // No null template — yield the probe row directly.
                         // Cannot return it to the pool since the caller still owns it.
-                        yield return probeRow;
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(probeRow);
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         continue;
                     }
                 }
@@ -786,19 +820,29 @@ internal sealed class GraceHashJoinExecutor
                             Row leftRow = _flipped ? buildRowList[index] : nullPad;
                             Row rightRow = _flipped ? nullPad : buildRowList[index];
                             buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                            yield return buildUnmatchedSchema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
+                            Row unmatchedBuildResult = buildUnmatchedSchema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(unmatchedBuildResult);
+                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
                         else
                         {
-                            yield return buildRowList[index];
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(buildRowList[index]);
+                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
                     }
                 }
             }
         }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
+        }
     }
 
-    private async IAsyncEnumerable<Row> RecursivelyRepartitionAsync(
+    private async IAsyncEnumerable<RowBatch> RecursivelyRepartitionAsync(
         List<Row> buildRows,
         IEnumerable<Row> probeRows,
         bool useSingleKey,
@@ -855,11 +899,11 @@ internal sealed class GraceHashJoinExecutor
                 partition.AddProbeRow(probeRow);
             }
 
-            await foreach (Row row in JoinAllPartitionsAsync(
+            await foreach (RowBatch joinBatch in JoinAllPartitionsAsync(
                 subPartitions, useSingleKey, recursionDepth, nullLeftTemplate, nullRightTemplate, context)
                 .ConfigureAwait(false))
             {
-                yield return row;
+                yield return joinBatch;
             }
         }
         finally

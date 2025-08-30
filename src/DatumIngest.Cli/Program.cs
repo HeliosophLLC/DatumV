@@ -274,9 +274,14 @@ static async Task BuildGroupedIndexAsync(
             ITableProvider provider = catalog.CreateProvider(descriptor);
             IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
 
-            await foreach (Row row in provider.OpenAsync(descriptor, requiredColumns: null, CancellationToken.None))
+            await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, CancellationToken.None))
             {
-                indexBuilder.AddRow(row);
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    Row row = batch[i];
+                    indexBuilder.AddRow(row);
+                }
+                batch.Return();
             }
 
             SourceIndex index = indexBuilder.Finalize();
@@ -394,22 +399,27 @@ static async Task BuildGroupedIndexAndManifestAsync(
             Dictionary<string, DataKind> columnKinds = new();
             long rowCount = 0;
 
-            await foreach (Row row in provider.OpenAsync(
+            await foreach (RowBatch batch in provider.OpenAsync(
                 descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
             {
-                if (rowCount == 0)
+                for (int i = 0; i < batch.Count; i++)
                 {
-                    foreach (string columnName in row.ColumnNames)
+                    Row row = batch[i];
+                    if (rowCount == 0)
                     {
-                        columnKinds[columnName] = row[columnName].Kind;
+                        foreach (string columnName in row.ColumnNames)
+                        {
+                            columnKinds[columnName] = row[columnName].Kind;
+                        }
                     }
-                }
 
-                indexBuilder.AddRow(row);
-                statisticsCollector.AddRow(row);
-                interactionCollector?.AddRow(row);
-                rowCount++;
-                progress.ReportRow();
+                    indexBuilder.AddRow(row);
+                    statisticsCollector.AddRow(row);
+                    interactionCollector?.AddRow(row);
+                    rowCount++;
+                    progress.ReportRow();
+                }
+                batch.Return();
             }
 
             progress.WriteSummary();
@@ -527,19 +537,24 @@ static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions optio
         Dictionary<string, DataKind> columnKinds = new();
         long rowCount = 0;
 
-        await foreach (Row row in provider.OpenAsync(
+        await foreach (RowBatch batch in provider.OpenAsync(
             descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
         {
-            if (rowCount == 0)
+            for (int i = 0; i < batch.Count; i++)
             {
-                foreach (string columnName in row.ColumnNames)
+                Row row = batch[i];
+                if (rowCount == 0)
                 {
-                    columnKinds[columnName] = row[columnName].Kind;
+                    foreach (string columnName in row.ColumnNames)
+                    {
+                        columnKinds[columnName] = row[columnName].Kind;
+                    }
                 }
-            }
 
-            statisticsCollector.AddRow(row);
-            rowCount++;
+                statisticsCollector.AddRow(row);
+                rowCount++;
+            }
+            batch.Return();
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
@@ -806,17 +821,22 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
 
         // Infer schema from first row, write all rows
         bool schemaInitialized = false;
-        await foreach (Row row in plan.ExecuteAsync(context))
+        await foreach (RowBatch batch in plan.ExecuteAsync(context))
         {
-            if (!schemaInitialized)
+            for (int i = 0; i < batch.Count; i++)
             {
-                Schema schema = InferSchema(row);
-                await writer.InitializeAsync(schema);
-                schemaInitialized = true;
-            }
+                Row row = batch[i];
+                if (!schemaInitialized)
+                {
+                    Schema schema = InferSchema(row);
+                    await writer.InitializeAsync(schema);
+                    schemaInitialized = true;
+                }
 
-            await writer.WriteRowAsync(row);
-            progress.ReportRow();
+                await writer.WriteRowAsync(row);
+                progress.ReportRow();
+            }
+            batch.Return();
         }
 
         if (!schemaInitialized)
@@ -844,10 +864,15 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
     else
     {
         // No INTO clause: print rows to stdout
-        await foreach (Row row in plan.ExecuteAsync(context))
+        await foreach (RowBatch batch in plan.ExecuteAsync(context))
         {
-            PrintRow(row);
-            progress.ReportRow();
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                PrintRow(row);
+                progress.ReportRow();
+            }
+            batch.Return();
         }
         progress.WriteSummary();
     }
@@ -874,18 +899,30 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
     bool headerPrinted = false;
     Stopwatch stopwatch = Stopwatch.StartNew();
 
-    await foreach (Row row in plan.ExecuteAsync(context))
+    bool limitReached = false;
+    await foreach (RowBatch batch in plan.ExecuteAsync(context))
     {
-        if (!headerPrinted)
+        for (int i = 0; i < batch.Count; i++)
         {
-            PrintHeader(row);
-            headerPrinted = true;
+            Row row = batch[i];
+            if (!headerPrinted)
+            {
+                PrintHeader(row);
+                headerPrinted = true;
+            }
+
+            PrintRow(row);
+            count++;
+
+            if (count >= limit)
+            {
+                limitReached = true;
+                break;
+            }
         }
+        batch.Return();
 
-        PrintRow(row);
-        count++;
-
-        if (count >= limit)
+        if (limitReached)
         {
             break;
         }
@@ -913,10 +950,15 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
     StatisticsCollector collector = new();
     ProgressReporter progress = new();
 
-    await foreach (Row row in plan.ExecuteAsync(context))
+    await foreach (RowBatch batch in plan.ExecuteAsync(context))
     {
-        collector.AddRow(row);
-        progress.ReportRow();
+        for (int i = 0; i < batch.Count; i++)
+        {
+            Row row = batch[i];
+            collector.AddRow(row);
+            progress.ReportRow();
+        }
+        batch.Return();
     }
 
     progress.WriteSummary();
@@ -961,7 +1003,7 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
             localBufferPool);
 
         // Consume all rows to collect timing.
-        await foreach (Row _ in instrumentedRoot.ExecuteAsync(context))
+        await foreach (RowBatch _ in instrumentedRoot.ExecuteAsync(context))
         {
         }
 
@@ -992,21 +1034,26 @@ static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog cata
     Dictionary<string, DataKind> columnKinds = new();
     long rowCount = 0;
 
-    await foreach (Row row in plan.ExecuteAsync(context))
+    await foreach (RowBatch batch in plan.ExecuteAsync(context))
     {
-        // Capture column kinds from the first row
-        if (rowCount == 0)
+        for (int i = 0; i < batch.Count; i++)
         {
-            foreach (string columnName in row.ColumnNames)
+            Row row = batch[i];
+            // Capture column kinds from the first row
+            if (rowCount == 0)
             {
-                columnKinds[columnName] = row[columnName].Kind;
+                foreach (string columnName in row.ColumnNames)
+                {
+                    columnKinds[columnName] = row[columnName].Kind;
+                }
             }
-        }
 
-        collector.AddRow(row);
-        interactionCollector.AddRow(row);
-        rowCount++;
-        progress.ReportRow();
+            collector.AddRow(row);
+            interactionCollector.AddRow(row);
+            rowCount++;
+            progress.ReportRow();
+        }
+        batch.Return();
     }
 
     progress.WriteSummary();

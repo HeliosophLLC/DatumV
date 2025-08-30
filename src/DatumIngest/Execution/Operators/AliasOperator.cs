@@ -43,14 +43,22 @@ public sealed class AliasOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         AliasSchema? schema = null;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            schema ??= AliasSchema.Build(_alias, row);
-            yield return schema.Apply(row);
+            RowBatch outputBatch = RowBatch.Rent(inputBatch.Count);
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+                Row row = inputBatch[i];
+                schema ??= AliasSchema.Build(_alias, row);
+                outputBatch.Add(schema.Apply(row));
+            }
+
+            inputBatch.Return();
+            yield return outputBatch;
         }
     }
 

@@ -211,7 +211,7 @@ public sealed class ScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
@@ -228,10 +228,10 @@ public sealed class ScanOperator : IQueryOperator
 
         if (hasIndexPruning)
         {
-            await foreach (Row row in ExecuteWithIndexPruningAsync(
-                provider, cancellationToken).ConfigureAwait(false))
+            await foreach (RowBatch batch in ExecuteWithIndexPruningAsync(
+                provider, context).ConfigureAwait(false))
             {
-                yield return row;
+                yield return batch;
             }
         }
         else
@@ -247,7 +247,7 @@ public sealed class ScanOperator : IQueryOperator
                 && _filterHint is null
                 && provider is IPartitionedTableProvider partitionedProvider)
             {
-                IReadOnlyList<IAsyncEnumerable<Row>>? partitions =
+                IReadOnlyList<IAsyncEnumerable<RowBatch>>? partitions =
                     await partitionedProvider.OpenPartitionsAsync(
                         _descriptor, _requiredColumns,
                         context.DegreeOfParallelism,
@@ -255,17 +255,17 @@ public sealed class ScanOperator : IQueryOperator
 
                 if (partitions is { Count: > 1 })
                 {
-                    await foreach (Row row in MergePartitionsAsync(
+                    await foreach (RowBatch batch in MergePartitionsAsync(
                         partitions, context).ConfigureAwait(false))
                     {
-                        yield return row;
+                        yield return batch;
                     }
 
                     yield break;
                 }
             }
 
-            IAsyncEnumerable<Row> rows;
+            IAsyncEnumerable<RowBatch> rows;
 
             if (_filterHint is not null && provider is IFilterableTableProvider filterable)
             {
@@ -278,17 +278,18 @@ public sealed class ScanOperator : IQueryOperator
                 rows = provider.OpenAsync(_descriptor, _requiredColumns, cancellationToken);
             }
 
-            await foreach (Row row in rows.ConfigureAwait(false))
+            await foreach (RowBatch batch in rows.ConfigureAwait(false))
             {
-                yield return row;
+                yield return batch;
             }
         }
     }
 
-    private async IAsyncEnumerable<Row> ExecuteWithIndexPruningAsync(
+    private async IAsyncEnumerable<RowBatch> ExecuteWithIndexPruningAsync(
         ITableProvider provider,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        ExecutionContext context)
     {
+        CancellationToken cancellationToken = context.CancellationToken;
         IReadOnlyList<IndexChunk> chunks = _sourceIndex!.Chunks;
         BloomFilterSet? bloomFilters = _sourceIndex.BloomFilters;
         TotalIndexChunks = chunks.Count;
@@ -412,15 +413,33 @@ public sealed class ScanOperator : IQueryOperator
             if (exactPositions is not null)
             {
                 ExactSeekRowsFetched = exactPositions.Count;
+                RowBatch? outputBatch = null;
 
                 foreach (long rowPosition in exactPositions)
                 {
-                    await foreach (Row row in seekable.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in seekable.ReadRowRangeAsync(
                         _descriptor, _requiredColumns, rowPosition, 1,
                         cancellationToken).ConfigureAwait(false))
                     {
-                        yield return row;
+                        for (int i = 0; i < inputBatch.Count; i++)
+                        {
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(inputBatch[i]);
+
+                            if (outputBatch.IsFull)
+                            {
+                                yield return outputBatch;
+                                outputBatch = null;
+                            }
+                        }
+
+                        inputBatch.Return();
                     }
+                }
+
+                if (outputBatch is not null)
+                {
+                    yield return outputBatch;
                 }
 
                 yield break;
@@ -428,9 +447,9 @@ public sealed class ScanOperator : IQueryOperator
         }
 
         // Open the source stream (needed for non-seekable fallback and no-pruning path).
-        IAsyncEnumerable<Row>? rows = null;
+        IAsyncEnumerable<RowBatch>? rows = null;
 
-        IAsyncEnumerable<Row> OpenStream()
+        IAsyncEnumerable<RowBatch> OpenStream()
         {
             if (_filterHint is not null && provider is IFilterableTableProvider filterable)
             {
@@ -451,9 +470,9 @@ public sealed class ScanOperator : IQueryOperator
         {
             rows = OpenStream();
 
-            await foreach (Row row in rows.ConfigureAwait(false))
+            await foreach (RowBatch batch in rows.ConfigureAwait(false))
             {
-                yield return row;
+                yield return batch;
             }
 
             yield break;
@@ -463,6 +482,8 @@ public sealed class ScanOperator : IQueryOperator
         // instead of streaming all rows and discarding pruned ones.
         if (provider is ISeekableTableProvider chunkSeekable)
         {
+            RowBatch? outputBatch = null;
+
             foreach ((long start, long end, int activeChunkIndex) in activeRanges)
             {
                 int count = (int)(end - start);
@@ -473,27 +494,56 @@ public sealed class ScanOperator : IQueryOperator
                 {
                     int rowInChunk = 0;
 
-                    await foreach (Row row in chunkSeekable.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in chunkSeekable.ReadRowRangeAsync(
                         _descriptor, _requiredColumns, start, count,
                         cancellationToken).ConfigureAwait(false))
                     {
-                        if (IsBitmapBitSet(bitmapMask, rowInChunk))
+                        for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            yield return row;
+                            if (IsBitmapBitSet(bitmapMask, rowInChunk))
+                            {
+                                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                                outputBatch.Add(inputBatch[i]);
+
+                                if (outputBatch.IsFull)
+                                {
+                                    yield return outputBatch;
+                                    outputBatch = null;
+                                }
+                            }
+
+                            rowInChunk++;
                         }
 
-                        rowInChunk++;
+                        inputBatch.Return();
                     }
                 }
                 else
                 {
-                    await foreach (Row row in chunkSeekable.ReadRowRangeAsync(
+                    await foreach (RowBatch inputBatch in chunkSeekable.ReadRowRangeAsync(
                         _descriptor, _requiredColumns, start, count,
                         cancellationToken).ConfigureAwait(false))
                     {
-                        yield return row;
+                        for (int i = 0; i < inputBatch.Count; i++)
+                        {
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(inputBatch[i]);
+
+                            if (outputBatch.IsFull)
+                            {
+                                yield return outputBatch;
+                                outputBatch = null;
+                            }
+                        }
+
+                        inputBatch.Return();
                     }
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
 
             yield break;
@@ -506,6 +556,7 @@ public sealed class ScanOperator : IQueryOperator
         int rangeIndex = 0;
         byte[]? fallbackBitmapMask = null;
         int fallbackRowInChunk = 0;
+        RowBatch? fallbackOutputBatch = null;
 
         // Pre-compute bitmap mask for the first active chunk.
         if (rangeIndex < activeRanges.Count)
@@ -516,36 +567,55 @@ public sealed class ScanOperator : IQueryOperator
                 (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
         }
 
-        await foreach (Row row in rows.ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in rows.ConfigureAwait(false))
         {
-            // Advance past ranges we've gone beyond.
-            while (rangeIndex < activeRanges.Count && rowIndex >= activeRanges[rangeIndex].End)
+            for (int i = 0; i < inputBatch.Count; i++)
             {
-                rangeIndex++;
-                fallbackRowInChunk = 0;
+                Row row = inputBatch[i];
 
-                if (rangeIndex < activeRanges.Count)
+                // Advance past ranges we've gone beyond.
+                while (rangeIndex < activeRanges.Count && rowIndex >= activeRanges[rangeIndex].End)
                 {
-                    fallbackBitmapMask = EvaluateBitmapFilter(
-                        _filterHint, _sourceIndex.BitmapIndexes,
-                        activeRanges[rangeIndex].ChunkIndex,
-                        (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
-                }
-            }
+                    rangeIndex++;
+                    fallbackRowInChunk = 0;
 
-            if (rangeIndex < activeRanges.Count
-                && rowIndex >= activeRanges[rangeIndex].Start
-                && rowIndex < activeRanges[rangeIndex].End)
-            {
-                if (fallbackBitmapMask is null || IsBitmapBitSet(fallbackBitmapMask, fallbackRowInChunk))
-                {
-                    yield return row;
+                    if (rangeIndex < activeRanges.Count)
+                    {
+                        fallbackBitmapMask = EvaluateBitmapFilter(
+                            _filterHint, _sourceIndex.BitmapIndexes,
+                            activeRanges[rangeIndex].ChunkIndex,
+                            (int)(activeRanges[rangeIndex].End - activeRanges[rangeIndex].Start));
+                    }
                 }
 
-                fallbackRowInChunk++;
+                if (rangeIndex < activeRanges.Count
+                    && rowIndex >= activeRanges[rangeIndex].Start
+                    && rowIndex < activeRanges[rangeIndex].End)
+                {
+                    if (fallbackBitmapMask is null || IsBitmapBitSet(fallbackBitmapMask, fallbackRowInChunk))
+                    {
+                        fallbackOutputBatch ??= RowBatch.Rent(context.BatchSize);
+                        fallbackOutputBatch.Add(row);
+
+                        if (fallbackOutputBatch.IsFull)
+                        {
+                            yield return fallbackOutputBatch;
+                            fallbackOutputBatch = null;
+                        }
+                    }
+
+                    fallbackRowInChunk++;
+                }
+
+                rowIndex++;
             }
 
-            rowIndex++;
+            inputBatch.Return();
+        }
+
+        if (fallbackOutputBatch is not null)
+        {
+            yield return fallbackOutputBatch;
         }
     }
 
@@ -1275,12 +1345,12 @@ public sealed class ScanOperator : IQueryOperator
     /// when every partition finishes (or faults). On fault, the first exception is
     /// surfaced to the consumer via the channel's completion state.
     /// </summary>
-    private static async IAsyncEnumerable<Row> MergePartitionsAsync(
-        IReadOnlyList<IAsyncEnumerable<Row>> partitions,
+    private static async IAsyncEnumerable<RowBatch> MergePartitionsAsync(
+        IReadOnlyList<IAsyncEnumerable<RowBatch>> partitions,
         ExecutionContext context)
     {
         int capacity = partitions.Count * 64;
-        Channel<Row> output = Channel.CreateBounded<Row>(
+        Channel<RowBatch> output = Channel.CreateBounded<RowBatch>(
             new BoundedChannelOptions(capacity)
             {
                 SingleWriter = false,
@@ -1289,19 +1359,19 @@ public sealed class ScanOperator : IQueryOperator
 
         int remaining = partitions.Count;
 
-        foreach (IAsyncEnumerable<Row> partition in partitions)
+        foreach (IAsyncEnumerable<RowBatch> partition in partitions)
         {
-            IAsyncEnumerable<Row> captured = partition;
+            IAsyncEnumerable<RowBatch> captured = partition;
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await foreach (Row row in captured
+                    await foreach (RowBatch batch in captured
                         .WithCancellation(context.CancellationToken)
                         .ConfigureAwait(false))
                     {
-                        await output.Writer.WriteAsync(row, context.CancellationToken)
+                        await output.Writer.WriteAsync(batch, context.CancellationToken)
                             .ConfigureAwait(false);
                     }
                 }
@@ -1320,11 +1390,11 @@ public sealed class ScanOperator : IQueryOperator
             }, context.CancellationToken);
         }
 
-        await foreach (Row row in output.Reader
+        await foreach (RowBatch batch in output.Reader
             .ReadAllAsync(context.CancellationToken)
             .ConfigureAwait(false))
         {
-            yield return row;
+            yield return batch;
         }
     }
 }

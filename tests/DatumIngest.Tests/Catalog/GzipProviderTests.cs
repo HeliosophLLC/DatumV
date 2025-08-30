@@ -51,12 +51,15 @@ public sealed class GzipProviderTests : IDisposable
         return new TableDescriptor(provider, "test", filePath, new Dictionary<string, string>(), CompressionKind.Gzip);
     }
 
-    private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<Row> source)
+    private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<RowBatch> source)
     {
         List<Row> rows = new();
-        await foreach (Row row in source)
+        await foreach (RowBatch batch in source)
         {
-            rows.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
         }
 
         return rows;

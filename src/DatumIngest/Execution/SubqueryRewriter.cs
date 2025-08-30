@@ -418,17 +418,26 @@ internal static class SubqueryRewriter
         Row? firstRow = null;
         bool hasMultipleRows = false;
 
-        await foreach (Row row in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in innerPlan.ExecuteAsync(context).ConfigureAwait(false))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (firstRow is not null)
+            for (int i = 0; i < inputBatch.Count; i++)
             {
-                hasMultipleRows = true;
-                break;
+                cancellationToken.ThrowIfCancellationRequested();
+                Row row = inputBatch[i];
+
+                if (firstRow is not null)
+                {
+                    hasMultipleRows = true;
+                    break;
+                }
+
+                firstRow = row;
             }
 
-            firstRow = row;
+            if (hasMultipleRows)
+            {
+                break;
+            }
         }
 
         if (hasMultipleRows)

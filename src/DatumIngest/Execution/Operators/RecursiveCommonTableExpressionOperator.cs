@@ -76,7 +76,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         if (!_materialized)
         {
@@ -86,16 +86,28 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         // Replay from disk if spilled, otherwise from memory.
         if (_spillFilePath is not null)
         {
-            await foreach (Row row in ReplayFromDiskAsync(context.CancellationToken).ConfigureAwait(false))
+            await foreach (RowBatch batch in ReplayFromDiskAsync(context).ConfigureAwait(false))
             {
-                yield return RenameColumnsIfNeeded(row);
+                yield return batch;
             }
         }
         else if (_allRows is not null)
         {
+            RowBatch? outputBatch = null;
             foreach (Row row in _allRows)
             {
-                yield return RenameColumnsIfNeeded(row);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(RenameColumnsIfNeeded(row));
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
     }
@@ -117,13 +129,19 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
         {
             // Execute anchor member.
             List<Row> workingTable = new();
-            await foreach (Row row in _anchorOperator.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch inputBatch in _anchorOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
-                context.CancellationToken.ThrowIfCancellationRequested();
-                context.QueryMeter?.ThrowIfExceeded();
+                for (int i = 0; i < inputBatch.Count; i++)
+                {
+                    Row row = inputBatch[i];
+                    context.CancellationToken.ThrowIfCancellationRequested();
+                    context.QueryMeter?.ThrowIfExceeded();
 
-                workingTable.Add(row);
-                AddRow(row, estimator, memoryBudget, ref spillWriter, ref schemaWritten);
+                    workingTable.Add(row);
+                    AddRow(row, estimator, memoryBudget, ref spillWriter, ref schemaWritten);
+                }
+
+                inputBatch.Return();
             }
 
             // Iterate recursive member.
@@ -138,13 +156,19 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 IQueryOperator recursiveMember = _recursiveMemberFactory(workingTableOperator);
 
                 List<Row> nextWorkingTable = new();
-                await foreach (Row row in recursiveMember.ExecuteAsync(context).ConfigureAwait(false))
+                await foreach (RowBatch inputBatch in recursiveMember.ExecuteAsync(context).ConfigureAwait(false))
                 {
-                    context.CancellationToken.ThrowIfCancellationRequested();
-                    context.QueryMeter?.ThrowIfExceeded();
+                    for (int i = 0; i < inputBatch.Count; i++)
+                    {
+                        Row row = inputBatch[i];
+                        context.CancellationToken.ThrowIfCancellationRequested();
+                        context.QueryMeter?.ThrowIfExceeded();
 
-                    nextWorkingTable.Add(row);
-                    AddRow(row, estimator, memoryBudget, ref spillWriter, ref schemaWritten);
+                        nextWorkingTable.Add(row);
+                        AddRow(row, estimator, memoryBudget, ref spillWriter, ref schemaWritten);
+                    }
+
+                    inputBatch.Return();
                 }
 
                 workingTable = nextWorkingTable;
@@ -251,8 +275,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// <summary>
     /// Replays rows from a spill file.
     /// </summary>
-    private async IAsyncEnumerable<Row> ReplayFromDiskAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    private async IAsyncEnumerable<RowBatch> ReplayFromDiskAsync(ExecutionContext context)
     {
         FileStream fileStream = new(
             _spillFilePath!, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
@@ -263,10 +286,23 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
 
             RowSerializer.ReadSchema(reader, out string[] names, out Dictionary<string, int> nameIndex);
 
+            RowBatch? outputBatch = null;
             while (fileStream.Position < fileStream.Length)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                yield return RowSerializer.ReadRow(reader, names, nameIndex);
+                context.CancellationToken.ThrowIfCancellationRequested();
+                Row row = RowSerializer.ReadRow(reader, names, nameIndex);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(RenameColumnsIfNeeded(row));
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
     }
@@ -345,11 +381,23 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
 
 #pragma warning disable CS1998 // Async method lacks 'await' operators
         /// <inheritdoc/>
-        public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
+            RowBatch? outputBatch = null;
             foreach (Row row in _rows)
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
 #pragma warning restore CS1998

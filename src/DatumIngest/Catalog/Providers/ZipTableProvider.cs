@@ -42,6 +42,12 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
     /// </summary>
     private const int ParallelThreshold = 8;
 
+    /// <summary>
+    /// Number of rows to accumulate in each <see cref="RowBatch"/> before
+    /// yielding to the consumer.
+    /// </summary>
+    private const int DefaultBatchSize = 1024;
+
     private static readonly Schema ZipSchema = new(new ColumnInfo[]
     {
         new("file_name", DataKind.String, nullable: false),
@@ -57,7 +63,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -96,6 +102,8 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
             StreamBufferSize, FileOptions.SequentialScan);
         using ZipArchive archive = new(fileStream, ZipArchiveMode.Read);
 
+        RowBatch? batch = null;
+
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -126,7 +134,18 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
                 values[valueIndex++] = DataValue.FromUInt8Array(bytes);
             }
 
-            yield return resultRow;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(resultRow);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 
@@ -228,7 +247,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
     /// consumption.
     /// </para>
     /// </remarks>
-    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+    public async IAsyncEnumerable<RowBatch> FetchByKeysAsync(
         TableDescriptor descriptor,
         string keyColumn,
         IReadOnlySet<DataValue> keyValues,
@@ -320,12 +339,12 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
         if (workerCount <= 1)
         {
             // Sequential: single archive pass.
-            await foreach (Row row in DecompressEntriesAsync(
+            await foreach (RowBatch decompressedBatch in DecompressEntriesAsync(
                 descriptor, names, nameIndex, matchedEntries,
                 includeFileName, includeFileBytes, cancellationToken)
                 .ConfigureAwait(false))
             {
-                yield return row;
+                yield return decompressedBatch;
             }
 
             yield break;
@@ -355,9 +374,21 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
         // Complete the channel when all workers finish (or fault).
         _ = CompleteChannelWhenDoneAsync(workers, channel.Writer);
 
+        RowBatch? batch = null;
         await foreach (Row row in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
-            yield return row;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 
@@ -365,7 +396,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
     /// Sequential decompression path: opens a single archive and iterates
     /// the pre-ordered entry names, decompressing each match in turn.
     /// </summary>
-    private static async IAsyncEnumerable<Row> DecompressEntriesAsync(
+    private static async IAsyncEnumerable<RowBatch> DecompressEntriesAsync(
         TableDescriptor descriptor,
         string[] names,
         Dictionary<string, int> nameIndex,
@@ -381,6 +412,8 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
             StreamBufferSize, FileOptions.SequentialScan);
         using ZipArchive archive = new(fileStream, ZipArchiveMode.Read);
 
+        RowBatch? batch = null;
+
         foreach (string entryName in entryNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -391,7 +424,19 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
                 continue;
             }
 
-            yield return BuildRow(entry, names, nameIndex, includeFileName, includeFileBytes);
+            Row row = BuildRow(entry, names, nameIndex, includeFileName, includeFileBytes);
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 

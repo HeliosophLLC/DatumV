@@ -525,9 +525,9 @@ public class ExplainTests
             catalog, new LocalBufferPool());
 
         long actualRows = 0;
-        await foreach (Row _ in instrumented.ExecuteAsync(context))
+        await foreach (RowBatch batch in instrumented.ExecuteAsync(context))
         {
-            actualRows++;
+            actualRows += batch.Count;
         }
 
         Assert.Equal(actualRows, instrumented.RowsProduced);
@@ -564,8 +564,9 @@ public class ExplainTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        await foreach (Row _ in instrumented.ExecuteAsync(context))
+        await foreach (RowBatch batch in instrumented.ExecuteAsync(context))
         {
+            _ = batch.Count;
         }
 
         // The filter should produce fewer or equal rows than its child (scan).
@@ -602,8 +603,9 @@ public class ExplainTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        await foreach (Row _ in instrumented.ExecuteAsync(context))
+        await foreach (RowBatch batch in instrumented.ExecuteAsync(context))
         {
+            _ = batch.Count;
         }
 
         // Self time should be <= total time.
@@ -670,8 +672,9 @@ public class ExplainTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        await foreach (Row _ in instrumentedRoot.ExecuteAsync(context))
+        await foreach (RowBatch batch in instrumentedRoot.ExecuteAsync(context))
         {
+            _ = batch.Count;
         }
 
         InstrumentedOperator.PopulateMetrics(staticPlan, instrumentedRoot);

@@ -25,7 +25,7 @@ public sealed class CommandResult
     public string? Message { get; private init; }
 
     /// <summary>Gets the streaming row sequence for <see cref="CommandResultKind.StreamingRows"/> results.</summary>
-    public IAsyncEnumerable<Row>? Rows { get; private init; }
+    public IAsyncEnumerable<RowBatch>? Rows { get; private init; }
 
     /// <summary>Gets the result schema for <see cref="CommandResultKind.StreamingRows"/> and <see cref="CommandResultKind.SchemaResult"/> results.</summary>
     public Schema? Schema { get; private init; }
@@ -56,7 +56,7 @@ public sealed class CommandResult
     /// <param name="rows">The async enumerable of result rows.</param>
     /// <param name="schema">The schema describing the row columns.</param>
     /// <returns>A streaming rows result.</returns>
-    public static CommandResult StreamingRows(IAsyncEnumerable<Row> rows, Schema schema) =>
+    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema) =>
         new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema };
 
     /// <summary>Creates a schema inspection result.</summary>

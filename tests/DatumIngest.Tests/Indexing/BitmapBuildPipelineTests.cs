@@ -379,14 +379,27 @@ public sealed class BitmapBuildPipelineTests
                 ColumnCosts: new Dictionary<string, ColumnCost>()));
         }
 
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (DataValue[] values in _rows)
             {
-                yield return new Row(_columnNames, values);
+                batch.Add(new Row(_columnNames, values));
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;

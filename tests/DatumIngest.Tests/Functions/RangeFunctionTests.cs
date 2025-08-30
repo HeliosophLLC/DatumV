@@ -157,16 +157,22 @@ public class RangeFunctionTests
         CancellationTokenSource cancellationTokenSource = new();
         List<Row> rows = [];
 
+        // Range must span multiple batches (DefaultBatchSize = 1024) so that
+        // cancellation is checked on the next MoveNextAsync after the first batch.
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
-            await foreach (Row row in _function.ExecuteAsync(
-                [DataValue.FromFloat32(0), DataValue.FromFloat32(1000)],
+            await foreach (RowBatch batch in _function.ExecuteAsync(
+                [DataValue.FromFloat32(0), DataValue.FromFloat32(2048)],
                 cancellationTokenSource.Token))
             {
-                rows.Add(row);
-                if (rows.Count == 5)
+                for (int index = 0; index < batch.Count; index++)
                 {
-                    cancellationTokenSource.Cancel();
+                    rows.Add(batch[index]);
+                    if (rows.Count == 5)
+                    {
+                        cancellationTokenSource.Cancel();
+                        break;
+                    }
                 }
             }
         });
@@ -177,9 +183,12 @@ public class RangeFunctionTests
     private async Task<List<Row>> CollectRows(DataValue[] arguments)
     {
         List<Row> rows = [];
-        await foreach (Row row in _function.ExecuteAsync(arguments, CancellationToken.None))
+        await foreach (RowBatch batch in _function.ExecuteAsync(arguments, CancellationToken.None))
         {
-            rows.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
         }
         return rows;
     }

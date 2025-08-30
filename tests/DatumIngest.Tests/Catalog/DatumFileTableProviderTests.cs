@@ -442,13 +442,16 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         Expression? filter = null)
     {
         List<Row> rows = new();
-        IAsyncEnumerable<Row> source = filter is not null
+        IAsyncEnumerable<RowBatch> source = filter is not null
             ? provider.OpenAsync(descriptor, requiredColumns, filter, CancellationToken.None)
             : provider.OpenAsync(descriptor, requiredColumns, CancellationToken.None);
 
-        await foreach (Row row in source)
+        await foreach (RowBatch batch in source)
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -462,10 +465,13 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         int count)
     {
         List<Row> rows = new();
-        await foreach (Row row in provider.ReadRowRangeAsync(
+        await foreach (RowBatch batch in provider.ReadRowRangeAsync(
             descriptor, requiredColumns, startRow, count, CancellationToken.None))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         // Dispose closes the cached DatumFileReader so the file is not held open

@@ -552,9 +552,12 @@ public sealed class BitmapPruningTests
         ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
         List<Row> rows = new();
-        await foreach (Row row in scan.ExecuteAsync(context))
+        await foreach (RowBatch batch in scan.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -591,14 +594,27 @@ public sealed class BitmapPruningTests
                 ColumnCosts: new Dictionary<string, ColumnCost>()));
         }
 
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (Row row in _rows)
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;

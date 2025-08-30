@@ -22,6 +22,7 @@ public sealed class ExecutionContext
         LocalBufferPool = context.LocalBufferPool;
         QueryMeter = context.QueryMeter;
         MemoryBudgetBytes = context.MemoryBudgetBytes;
+        BatchSize = context.BatchSize;
     }
 
     /// <summary>
@@ -124,6 +125,12 @@ public sealed class ExecutionContext
     public ParallelismBudget? ParallelismBudget { get; init; }
 
     /// <summary>
+    /// Maximum number of rows per <see cref="Model.RowBatch"/>. Operators fill
+    /// batches up to this size before yielding. Defaults to <c>1024</c>.
+    /// </summary>
+    public int BatchSize { get; init; } = 1024;
+
+    /// <summary>
     /// Pool for reusing <see cref="Model.Row"/> objects and their backing
     /// <see cref="Model.DataValue"/> arrays in join operators. Join operators
     /// rent rows from this pool instead of allocating, and downstream consumers
@@ -152,6 +159,7 @@ public sealed class ExecutionContext
             MaxRecursionDepth = MaxRecursionDepth,
             DegreeOfParallelism = DegreeOfParallelism,
             ParallelismBudget = ParallelismBudget,
+            BatchSize = BatchSize,
         };
     }
 }

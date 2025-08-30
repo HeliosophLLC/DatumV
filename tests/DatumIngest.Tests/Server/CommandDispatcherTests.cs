@@ -396,10 +396,13 @@ public sealed class CommandDispatcherTests : IDisposable
 
         // Consuming rows must not throw an ordinal mismatch.
         List<Row> rows = new();
-        await foreach (Row row in result.Rows!)
+        await foreach (RowBatch batch in result.Rows!)
         {
-            Assert.Equal(1, row.FieldCount);
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Assert.Equal(1, batch[i].FieldCount);
+                rows.Add(batch[i]);
+            }
         }
 
         Assert.Equal(3, rows.Count);
@@ -494,9 +497,12 @@ public sealed class CommandDispatcherTests : IDisposable
         List<string> schemaNames = result.Schema!.Columns.Select(column => column.Name).ToList();
 
         List<Row> rows = new();
-        await foreach (Row row in result.Rows!)
+        await foreach (RowBatch batch in result.Rows!)
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         Assert.Single(rows);
@@ -571,14 +577,27 @@ internal sealed class FixedRowProvider : ITableProvider
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        RowBatch batch = RowBatch.Rent(64);
+
         foreach (Row row in _rows)
         {
-            yield return row;
+            batch.Add(row);
+
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = RowBatch.Rent(64);
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;

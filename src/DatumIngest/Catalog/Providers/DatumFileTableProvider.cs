@@ -13,6 +13,8 @@ namespace DatumIngest.Catalog.Providers;
 /// </summary>
 public sealed class DatumFileTableProvider : ITableProvider, IFilterableTableProvider, ISeekableTableProvider, IDisposable
 {
+    private const int DefaultBatchSize = 1024;
+
     // Reused across multiple ReadRowRangeAsync calls within the same scan session.
     // Opening a DatumFileReader re-reads and decompresses all row-group metadata;
     // amortising that cost over the full index traversal is critical for B+Tree scans.
@@ -32,14 +34,14 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<Row> OpenAsync(
+    public IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         CancellationToken cancellationToken)
         => OpenCoreAsync(descriptor, requiredColumns, filterHint: null, cancellationToken);
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<Row> OpenAsync(
+    public IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression filterHint,
@@ -59,7 +61,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             ColumnCosts: new Dictionary<string, ColumnCost>()));
     }
 
-    private async IAsyncEnumerable<Row> OpenCoreAsync(
+    private async IAsyncEnumerable<RowBatch> OpenCoreAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression? filterHint,
@@ -87,6 +89,8 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
 
         TotalRowGroups = reader.RowGroupCount;
         PrunedRowGroups = 0;
+
+        RowBatch? batch = null;
 
         for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
         {
@@ -122,22 +126,31 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
-                yield return row;
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
             }
+        }
+
+        if (batch is not null && batch.Count > 0)
+        {
+            yield return batch;
         }
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+    public async IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
         int count,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // Reuse the open reader across repeated calls within the same scan session.
-        // Opening a new DatumFileReader decompresses all row-group metadata each time,
-        // which is prohibitive when called once per index entry during a B+Tree scan.
         if (_cachedReader is null || _cachedReaderPath != descriptor.FilePath)
         {
             _cachedReader?.Dispose();
@@ -155,6 +168,8 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         long endRow = startRow + count;
         long cumulativeRow = 0;
         int emitted = 0;
+
+        RowBatch? batch = null;
 
         for (int rgIndex = 0; rgIndex < reader.RowGroupCount && emitted < count; rgIndex++)
         {
@@ -195,11 +210,23 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
-                yield return row;
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(row);
                 emitted++;
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
             }
 
             cumulativeRow = rgEnd;
+        }
+
+        if (batch is not null && batch.Count > 0)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;

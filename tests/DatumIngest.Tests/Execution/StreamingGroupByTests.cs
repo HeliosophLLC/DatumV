@@ -36,9 +36,12 @@ public sealed class StreamingGroupByTests
     {
         context ??= CreateContext();
         List<Row> rows = [];
-        await foreach (Row row in op.ExecuteAsync(context))
+        await foreach (RowBatch batch in op.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
         }
 
         return rows;
@@ -221,7 +224,21 @@ public sealed class StreamingGroupByTests
 
         LimitOperator limit = new(groupBy, 5, 0);
 
-        List<Row> results = await CollectAsync(limit);
+        // Use a small output BatchSize so the streaming GROUP BY yields an output
+        // batch after 8 groups, allowing LimitOperator to terminate before all
+        // source rows are consumed. With default BatchSize (1024) all 100 groups
+        // fit in one batch and the entire input would be read before any output
+        // is yielded.
+        ExecutionContext context = new(
+            CancellationToken.None,
+            FunctionRegistry.CreateDefault(),
+            new TableCatalog(),
+            new LocalBufferPool())
+        {
+            BatchSize = 8,
+        };
+
+        List<Row> results = await CollectAsync(limit, context);
 
         Assert.Equal(5, results.Count);
 
@@ -232,10 +249,12 @@ public sealed class StreamingGroupByTests
             Assert.Equal(10f, results[index]["COUNT(*)"].AsFloat32());
         }
 
-        // The source should have read rows for groups 0 through 4, plus at most one row
-        // into the 6th group to detect the key change. Much less than the full 1000.
-        Assert.True(rowsRead <= 61,
-            $"Expected at most ~61 rows read with LIMIT 5, but read {rowsRead}");
+        // The source should read enough rows to fill the first output batch of 8
+        // groups (80 rows), rounded up to CountingOperator's source batch size of
+        // 64. That means at most 2-3 source batches (128-192 rows), far less than
+        // the full 1000.
+        Assert.True(rowsRead <= 200,
+            $"Expected at most ~200 rows read with LIMIT 5 (batch-aware), but read {rowsRead}");
     }
 
     // ─────────────── Edge cases ───────────────

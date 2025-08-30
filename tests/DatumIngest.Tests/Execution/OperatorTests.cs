@@ -24,13 +24,17 @@ internal sealed class MockOperator : IQueryOperator
 
     public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        RowBatch? outputBatch = null;
         foreach (Row row in _rows)
         {
-            yield return row;
+            outputBatch ??= RowBatch.Rent(64);
+            outputBatch.Add(row);
+            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
         }
 
+        if (outputBatch is not null) yield return outputBatch;
         await Task.CompletedTask;
     }
 }
@@ -52,14 +56,18 @@ internal sealed class CountingOperator : IQueryOperator
 
     public OperatorPlanDescription DescribeForExplain() => new("Counting Mock");
 
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        RowBatch? outputBatch = null;
         foreach (Row row in _rows)
         {
             _onRowYielded();
-            yield return row;
+            outputBatch ??= RowBatch.Rent(64);
+            outputBatch.Add(row);
+            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
         }
 
+        if (outputBatch is not null) yield return outputBatch;
         await Task.CompletedTask;
     }
 }
@@ -86,9 +94,12 @@ public class OperatorTests
     {
         context ??= CreateContext();
         List<Row> rows = new();
-        await foreach (Row row in op.ExecuteAsync(context))
+        await foreach (RowBatch batch in op.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -1294,7 +1305,7 @@ internal sealed class MockKeyedProvider : IKeyedTableProvider
         throw new NotImplementedException();
     }
 
-    public IAsyncEnumerable<Row> OpenAsync(
+    public IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         CancellationToken cancellationToken)
@@ -1308,7 +1319,7 @@ internal sealed class MockKeyedProvider : IKeyedTableProvider
         return Task.FromResult<ProviderCapabilities>(null!);
     }
 
-    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+    public async IAsyncEnumerable<RowBatch> FetchByKeysAsync(
         TableDescriptor descriptor,
         string keyColumn,
         IReadOnlySet<DataValue> keyValues,
@@ -1316,14 +1327,26 @@ internal sealed class MockKeyedProvider : IKeyedTableProvider
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         WasCalled = true;
+        RowBatch batch = RowBatch.Rent(64);
 
         foreach (DataValue keyValue in keyValues)
         {
             string key = keyValue.AsString();
             if (_rowsByKey.TryGetValue(key, out Row? row))
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
             }
+        }
+
+        if (batch.Count > 0)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;

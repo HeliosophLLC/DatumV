@@ -158,8 +158,9 @@ public class PivotBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 

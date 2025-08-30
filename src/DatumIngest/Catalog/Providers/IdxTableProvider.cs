@@ -38,6 +38,12 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
     private const byte TypeCodeFloat32 = 0x0D;
     private const byte TypeCodeFloat64 = 0x0E;
 
+    /// <summary>
+    /// Number of rows to accumulate in each <see cref="RowBatch"/> before
+    /// yielding to the consumer.
+    /// </summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -50,7 +56,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -84,6 +90,8 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
         int itemByteSize = header.ItemByteSize;
         byte[] itemBuffer = new byte[itemByteSize];
 
+        RowBatch? batch = null;
+
         for (int rowIndex = 0; rowIndex < header.ItemCount; rowIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -113,7 +121,18 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 values[valueIndex] = CreateDataValue(header, itemBuffer);
             }
 
-            yield return resultRow;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(resultRow);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;
@@ -142,7 +161,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+    public async IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
@@ -190,6 +209,8 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
 
         byte[] itemBuffer = new byte[itemByteSize];
 
+        RowBatch? batch = null;
+
         for (int i = 0; i < rowsToRead; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -218,14 +239,25 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 values[valueIndex] = CreateDataValue(header, itemBuffer);
             }
 
-            yield return resultRow;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(resultRow);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> FetchByKeysAsync(
+    public async IAsyncEnumerable<RowBatch> FetchByKeysAsync(
         TableDescriptor descriptor,
         string keyColumn,
         IReadOnlySet<DataValue> keyValues,
@@ -270,6 +302,8 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
         int itemByteSize = header.ItemByteSize;
         byte[] itemBuffer = new byte[itemByteSize];
 
+        RowBatch? batch = null;
+
         foreach (int rowIndex in sortedIndices)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -288,7 +322,18 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 values[1] = CreateDataValue(header, itemBuffer);
             }
 
-            yield return resultRow;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(resultRow);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;

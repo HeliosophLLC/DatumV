@@ -836,12 +836,15 @@ public sealed class IndexNestedLoopJoinTests
             new Dictionary<string, string>());
     }
 
-    private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<Row> source)
+    private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<RowBatch> source)
     {
         List<Row> rows = new();
-        await foreach (Row row in source)
+        await foreach (RowBatch batch in source)
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -850,9 +853,12 @@ public sealed class IndexNestedLoopJoinTests
     private static async Task<List<Row>> CollectAsync(IQueryOperator queryOperator, ExecutionContext context)
     {
         List<Row> rows = new();
-        await foreach (Row row in queryOperator.ExecuteAsync(context))
+        await foreach (RowBatch batch in queryOperator.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -872,13 +878,17 @@ public sealed class IndexNestedLoopJoinTests
 
         public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
-        public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
+            RowBatch? outputBatch = null;
             foreach (Row row in _rows)
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(64);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
+            if (outputBatch is not null) yield return outputBatch;
             await Task.CompletedTask;
         }
     }
@@ -906,14 +916,27 @@ public sealed class IndexNestedLoopJoinTests
         }
 
         /// <inheritdoc />
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (Row row in _rows)
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;
@@ -931,7 +954,7 @@ public sealed class IndexNestedLoopJoinTests
         }
 
         /// <inheritdoc />
-        public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+        public async IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             long startRow,
@@ -939,10 +962,22 @@ public sealed class IndexNestedLoopJoinTests
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             long end = Math.Min(startRow + count, _rows.Length);
+            RowBatch batch = RowBatch.Rent(64);
 
             for (long i = startRow; i < end; i++)
             {
-                yield return _rows[i];
+                batch.Add(_rows[i]);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;

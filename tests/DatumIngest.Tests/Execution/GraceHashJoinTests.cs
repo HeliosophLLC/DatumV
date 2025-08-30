@@ -390,7 +390,10 @@ public sealed class GraceHashJoinTests
 
         // Memory budget large enough that NO partitions spill — all are in-memory,
         // so the hybrid streaming path fires for every probe row.
+        // Use a small BatchSize so the join yields an output batch after 32 matches
+        // instead of buffering all 1000 matches into one batch.
         long generousBudget = 1024 * 1024; // 1 MB
+        int outputBatchSize = 32;
 
         JoinOperator join = new(
             probeOperator,
@@ -403,9 +406,17 @@ public sealed class GraceHashJoinTests
 
         // Only take the first 3 results — simulates LIMIT 3.
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(CreateContext(generousBudget)))
+        await foreach (RowBatch batch in join.ExecuteAsync(CreateContext(generousBudget, outputBatchSize)))
         {
-            results.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                results.Add(batch[index]);
+                if (results.Count >= 3)
+                {
+                    break;
+                }
+            }
+
             if (results.Count >= 3)
             {
                 break;
@@ -414,9 +425,10 @@ public sealed class GraceHashJoinTests
 
         Assert.Equal(3, results.Count);
 
-        // The hybrid path should have stopped pulling probe rows immediately after
-        // 3 matches were found.  We allow a small slack (one batch's worth) but
-        // the probe count must be far less than 1 000 — not all rows were read.
+        // The hybrid path should have stopped pulling probe rows after the first
+        // output batch (32 matches) was yielded and the consumer broke. The probe
+        // count includes all rows in the CountingOperator source batch (64) that
+        // was in-flight when the output batch filled.
         Assert.True(probeRowsConsumed < 100,
             $"Expected far fewer than 100 probe rows consumed for LIMIT 3, but got {probeRowsConsumed}. " +
             "This suggests Phase 1b is still buffering all probe rows instead of streaming.");
@@ -488,7 +500,10 @@ public sealed class GraceHashJoinTests
 
         // Budget is ~88% of build size — borderline, not catastrophically small.
         // With correct in-memory accounting, only ~1 of 4 partitions needs to spill.
+        // Use a small BatchSize so the join yields an output batch before consuming
+        // all 500 probe rows.
         long borderlineBudget = 12_000;
+        int outputBatchSize = 32;
 
         JoinOperator join = new(
             probeOperator,
@@ -501,9 +516,17 @@ public sealed class GraceHashJoinTests
 
         // Take only 3 results — simulates LIMIT 3.
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(CreateContext(borderlineBudget)))
+        await foreach (RowBatch batch in join.ExecuteAsync(CreateContext(borderlineBudget, outputBatchSize)))
         {
-            results.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                results.Add(batch[index]);
+                if (results.Count >= 3)
+                {
+                    break;
+                }
+            }
+
             if (results.Count >= 3)
             {
                 break;
@@ -522,14 +545,17 @@ public sealed class GraceHashJoinTests
             "partitions were spilled despite the build side only slightly exceeding the budget.");
     }
 
-    private static ExecutionContext CreateContext(long memoryBudgetBytes)
+    private static ExecutionContext CreateContext(long memoryBudgetBytes, int batchSize = 1024)
     {
         return new ExecutionContext(
             CancellationToken.None,
             FunctionRegistry.CreateDefault(),
             new TableCatalog(),
             new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes);
+            memoryBudgetBytes: memoryBudgetBytes)
+        {
+            BatchSize = batchSize,
+        };
     }
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
@@ -548,9 +574,12 @@ public sealed class GraceHashJoinTests
             new LocalBufferPool());
 
         List<Row> rows = new();
-        await foreach (Row row in op.ExecuteAsync(context))
+        await foreach (RowBatch batch in op.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
         }
 
         return rows;

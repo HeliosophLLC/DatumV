@@ -51,16 +51,36 @@ public sealed class FilterOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        RowBatch? outputBatch = null;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            if (evaluator.EvaluateAsBoolean(_predicate, row))
+            for (int index = 0; index < inputBatch.Count; index++)
             {
-                yield return row;
+                Row row = inputBatch[index];
+
+                if (evaluator.EvaluateAsBoolean(_predicate, row))
+                {
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(row);
+
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
+                }
             }
+
+            inputBatch.Return();
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 }

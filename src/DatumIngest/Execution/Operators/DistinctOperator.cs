@@ -46,7 +46,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
@@ -65,106 +65,121 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
         HashSet<CompositeKey>? compositeKeySet = null;
         int columnCount = -1;
 
+        RowBatch? outputBatch = null;
+
         try
         {
-            await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                context.CancellationToken.ThrowIfCancellationRequested();
-
-                // Initialise key structure on first row.
-                if (columnCount == -1)
+                for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
                 {
-                    columnCount = row.FieldCount;
+                    Row row = inputBatch[batchIndex];
+                    context.CancellationToken.ThrowIfCancellationRequested();
+
+                    // Initialise key structure on first row.
+                    if (columnCount == -1)
+                    {
+                        columnCount = row.FieldCount;
+                        if (columnCount == 1)
+                        {
+                            singleKeySet = new HashSet<DataValue>();
+                        }
+                        else
+                        {
+                            compositeKeySet = new HashSet<CompositeKey>();
+                        }
+                    }
+
+                    // Build the key for this row.
+                    bool isNew;
+                    int hashCode;
+
                     if (columnCount == 1)
                     {
-                        singleKeySet = new HashSet<DataValue>();
+                        DataValue key = row[0];
+                        isNew = singleKeySet!.Add(key);
+                        hashCode = key.GetHashCode();
                     }
                     else
                     {
-                        compositeKeySet = new HashSet<CompositeKey>();
-                    }
-                }
-
-                // Build the key for this row.
-                bool isNew;
-                int hashCode;
-
-                if (columnCount == 1)
-                {
-                    DataValue key = row[0];
-                    isNew = singleKeySet!.Add(key);
-                    hashCode = key.GetHashCode();
-                }
-                else
-                {
-                    DataValue[] parts = new DataValue[columnCount];
-                    for (int index = 0; index < columnCount; index++)
-                    {
-                        parts[index] = row[index];
-                    }
-
-                    CompositeKey compositeKey = new(parts);
-                    isNew = compositeKeySet!.Add(compositeKey);
-                    hashCode = compositeKey.GetHashCode();
-                }
-
-                if (isNew)
-                {
-                    // Memory estimation and spill check.
-                    if (estimator is not null)
-                    {
-                        if (estimator.ShouldSample())
+                        DataValue[] parts = new DataValue[columnCount];
+                        for (int index = 0; index < columnCount; index++)
                         {
-                            estimator.RecordSample(row);
+                            parts[index] = row[index];
                         }
 
-                        estimator.IncrementRowCount();
-                        long estimatedMemory = estimator.EstimateTotalBytes();
+                        CompositeKey compositeKey = new(parts);
+                        isNew = compositeKeySet!.Add(compositeKey);
+                        hashCode = compositeKey.GetHashCode();
+                    }
 
-                        if (estimatedMemory > memoryBudget!.Value)
+                    if (isNew)
+                    {
+                        // Memory estimation and spill check.
+                        if (estimator is not null)
                         {
-                            // Transition to spill mode: stop adding to the in-memory set
-                            // and start writing new-but-unverified rows to disk partitions.
-                            if (!spilling)
+                            if (estimator.ShouldSample())
                             {
-                                spilling = true;
-                                _spillDirectory = Path.Combine(
-                                    Path.GetTempPath(),
-                                    $"datum-distinct-{Guid.NewGuid():N}");
-                                Directory.CreateDirectory(_spillDirectory);
-                                spillWriters = new BinaryWriter[SpillPartitionCount];
-                                spillSchemaWritten = new bool[SpillPartitionCount];
-                                spillPaths = new string[SpillPartitionCount];
-
-                                // Cache schema from first row for serialization.
-                                schemaNames = new string[row.FieldCount];
-                                for (int index = 0; index < row.FieldCount; index++)
-                                {
-                                    schemaNames[index] = row.ColumnNames[index];
-                                }
+                                estimator.RecordSample(row);
                             }
 
-                            // Write the row that just exceeded the budget to a spill partition.
-                            // It is already in the in-memory set so it won't be re-emitted,
-                            // but future rows that hash to the same partition can be deduplicated
-                            // against it during the drain phase.
-                            WriteToSpillPartition(
-                                row, hashCode, spillWriters!, spillSchemaWritten!, spillPaths!, schemaNames!);
+                            estimator.IncrementRowCount();
+                            long estimatedMemory = estimator.EstimateTotalBytes();
+
+                            if (estimatedMemory > memoryBudget!.Value)
+                            {
+                                // Transition to spill mode: stop adding to the in-memory set
+                                // and start writing new-but-unverified rows to disk partitions.
+                                if (!spilling)
+                                {
+                                    spilling = true;
+                                    _spillDirectory = Path.Combine(
+                                        Path.GetTempPath(),
+                                        $"datum-distinct-{Guid.NewGuid():N}");
+                                    Directory.CreateDirectory(_spillDirectory);
+                                    spillWriters = new BinaryWriter[SpillPartitionCount];
+                                    spillSchemaWritten = new bool[SpillPartitionCount];
+                                    spillPaths = new string[SpillPartitionCount];
+
+                                    // Cache schema from first row for serialization.
+                                    schemaNames = new string[row.FieldCount];
+                                    for (int index = 0; index < row.FieldCount; index++)
+                                    {
+                                        schemaNames[index] = row.ColumnNames[index];
+                                    }
+                                }
+
+                                // Write the row that just exceeded the budget to a spill partition.
+                                // It is already in the in-memory set so it won't be re-emitted,
+                                // but future rows that hash to the same partition can be deduplicated
+                                // against it during the drain phase.
+                                WriteToSpillPartition(
+                                    row, hashCode, spillWriters!, spillSchemaWritten!, spillPaths!, schemaNames!);
+                            }
+                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                            {
+                                estimator.EscalateToEveryRow();
+                            }
                         }
-                        else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(row);
+
+                        if (outputBatch.IsFull)
                         {
-                            estimator.EscalateToEveryRow();
+                            yield return outputBatch;
+                            outputBatch = null;
                         }
                     }
+                    else if (spilling)
+                    {
+                        // Row was already in-memory set — no action needed.
+                        // But if the row is NOT in the in-memory set *and* we are spilling,
+                        // that case is handled above (isNew == true, spilling == true).
+                    }
+                }
 
-                    yield return row;
-                }
-                else if (spilling)
-                {
-                    // Row was already in-memory set — no action needed.
-                    // But if the row is NOT in the in-memory set *and* we are spilling,
-                    // that case is handled above (isNew == true, spilling == true).
-                }
+                inputBatch.Return();
             }
 
             // Drain phase: if we spilled, read each partition back and deduplicate.
@@ -241,10 +256,22 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
 
                         if (spilledIsNew)
                         {
-                            yield return spilledRow;
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(spilledRow);
+
+                            if (outputBatch.IsFull)
+                            {
+                                yield return outputBatch;
+                                outputBatch = null;
+                            }
                         }
                     }
                 }
+            }
+
+            if (outputBatch is not null)
+            {
+                yield return outputBatch;
             }
         }
         finally

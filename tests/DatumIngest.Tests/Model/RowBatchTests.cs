@@ -2,169 +2,195 @@ using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
+/// <summary>
+/// Tests for the <see cref="RowBatch"/> pooled row-major batch.
+/// </summary>
 public class RowBatchTests
 {
-    [Fact]
-    public void BatchStoresColumnarData()
+    private static Row MakeRow(string name, float value)
     {
-        Schema schema = new Schema([
-            new ColumnInfo("x", DataKind.Float32, nullable: false),
-            new ColumnInfo("y", DataKind.Float32, nullable: false),
-        ]);
-
-        DataValue[][] columns =
-        [
-            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)],
-            [DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f)],
-        ];
-
-        RowBatch batch = new(schema, columns);
-
-        Assert.Equal(2, batch.RowCount);
-        Assert.Equal(2, batch.ColumnCount);
+        return new Row([name], [DataValue.FromFloat32(value)]);
     }
 
-    [Fact]
-    public void BatchAccessByRowIndex()
+    private static Row MakeRow(string nameColumn, string nameValue, string ageColumn, float ageValue)
     {
-        Schema schema = new Schema([
-            new ColumnInfo("name", DataKind.String, nullable: false),
-            new ColumnInfo("age", DataKind.Float32, nullable: false),
-        ]);
-
-        DataValue[][] columns =
-        [
-            [DataValue.FromString("Alice"), DataValue.FromString("Bob")],
-            [DataValue.FromFloat32(30.0f), DataValue.FromFloat32(25.0f)],
-        ];
-
-        RowBatch batch = new(schema, columns);
-
-        Row row0 = batch.GetRow(0);
-        Assert.Equal("Alice", row0["name"].AsString());
-        Assert.Equal(30.0f, row0["age"].AsFloat32());
-
-        Row row1 = batch.GetRow(1);
-        Assert.Equal("Bob", row1["name"].AsString());
-        Assert.Equal(25.0f, row1["age"].AsFloat32());
+        return new Row([nameColumn, ageColumn], [DataValue.FromString(nameValue), DataValue.FromFloat32(ageValue)]);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.Rent"/> creates a batch with the
+    /// requested capacity and an initial count of zero.
+    /// </summary>
     [Fact]
-    public void BatchAccessColumnByName()
+    public void RentCreatesBatchWithCorrectCapacityAndZeroCount()
     {
-        Schema schema = new Schema([
-            new ColumnInfo("values", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(8);
 
-        DataValue[][] columns =
-        [
-            [DataValue.FromFloat32(10.0f), DataValue.FromFloat32(20.0f), DataValue.FromFloat32(30.0f)],
-        ];
+        Assert.Equal(8, batch.Capacity);
+        Assert.Equal(0, batch.Count);
 
-        RowBatch batch = new(schema, columns);
-
-        ReadOnlySpan<DataValue> column = batch.GetColumn("values");
-        Assert.Equal(3, column.Length);
-        Assert.Equal(10.0f, column[0].AsFloat32());
-        Assert.Equal(30.0f, column[2].AsFloat32());
+        batch.Return();
     }
 
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.Add"/> increments the count and
+    /// stores the row so it can be retrieved by the indexer.
+    /// </summary>
     [Fact]
-    public void BatchAccessColumnByOrdinal()
+    public void AddIncrementsCountAndStoresRow()
     {
-        Schema schema = new Schema([
-            new ColumnInfo("a", DataKind.Float32, nullable: false),
-            new ColumnInfo("b", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(4);
+        Row row = MakeRow("value", 42.0f);
 
-        DataValue[][] columns =
-        [
-            [DataValue.FromFloat32(1.0f)],
-            [DataValue.FromFloat32(2.0f)],
-        ];
+        batch.Add(row);
 
-        RowBatch batch = new(schema, columns);
+        Assert.Equal(1, batch.Count);
+        Assert.Equal(42.0f, batch[0]["value"].AsFloat32());
 
-        ReadOnlySpan<DataValue> col = batch.GetColumn(1);
-        Assert.Equal(2.0f, col[0].AsFloat32());
+        batch.Return();
     }
 
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.IsFull"/> returns <c>true</c> once
+    /// the count equals the capacity.
+    /// </summary>
     [Fact]
-    public void BatchSliceReturnsSubset()
+    public void IsFullReturnsTrueWhenCountEqualsCapacity()
     {
-        Schema schema = new Schema([
-            new ColumnInfo("id", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(2);
 
-        DataValue[][] columns =
-        [
-            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f), DataValue.FromFloat32(3.0f), DataValue.FromFloat32(4.0f)],
-        ];
+        Assert.False(batch.IsFull);
 
-        RowBatch batch = new(schema, columns);
-        RowBatch sliced = batch.Slice(1, 2);
+        batch.Add(MakeRow("x", 1.0f));
+        Assert.False(batch.IsFull);
 
-        Assert.Equal(2, sliced.RowCount);
-        Assert.Equal(2.0f, sliced.GetRow(0)["id"].AsFloat32());
-        Assert.Equal(3.0f, sliced.GetRow(1)["id"].AsFloat32());
+        batch.Add(MakeRow("x", 2.0f));
+        Assert.True(batch.IsFull);
+
+        batch.Return();
     }
 
+    /// <summary>
+    /// Verifies that the indexer returns the correct row for each position
+    /// after multiple adds.
+    /// </summary>
     [Fact]
-    public void BatchRejectsColumnCountMismatch()
+    public void IndexerReturnsCorrectRows()
     {
-        Schema schema = new Schema([
-            new ColumnInfo("a", DataKind.Float32, nullable: false),
-            new ColumnInfo("b", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(3);
 
-        DataValue[][] columns =
-        [
-            [DataValue.FromFloat32(1.0f)],
-        ];
+        Row first = MakeRow("name", "Alice", "age", 30.0f);
+        Row second = MakeRow("name", "Bob", "age", 25.0f);
+        Row third = MakeRow("name", "Carol", "age", 28.0f);
 
-        Assert.Throws<ArgumentException>(() => new RowBatch(schema, columns));
+        batch.Add(first);
+        batch.Add(second);
+        batch.Add(third);
+
+        Assert.Equal("Alice", batch[0]["name"].AsString());
+        Assert.Equal("Bob", batch[1]["name"].AsString());
+        Assert.Equal("Carol", batch[2]["name"].AsString());
+
+        batch.Return();
     }
 
+    /// <summary>
+    /// Verifies that the indexer throws <see cref="ArgumentOutOfRangeException"/>
+    /// when given a negative index.
+    /// </summary>
     [Fact]
-    public void BatchRejectsJaggedColumns()
+    public void IndexerThrowsForNegativeIndex()
     {
-        Schema schema = new Schema([
-            new ColumnInfo("a", DataKind.Float32, nullable: false),
-            new ColumnInfo("b", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(4);
+        batch.Add(MakeRow("x", 1.0f));
 
-        DataValue[][] columns =
-        [
-            [DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)],
-            [DataValue.FromFloat32(3.0f)],
-        ];
+        Assert.Throws<ArgumentOutOfRangeException>(() => batch[-1]);
 
-        Assert.Throws<ArgumentException>(() => new RowBatch(schema, columns));
+        batch.Return();
     }
 
-    [Fact]
-    public void EmptyBatchHasZeroRows()
+    /// <summary>
+    /// Verifies that the indexer throws <see cref="ArgumentOutOfRangeException"/>
+    /// when the index equals or exceeds the current count.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    public void IndexerThrowsForOutOfRangeIndex(int index)
     {
-        Schema schema = new Schema([
-            new ColumnInfo("id", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(8);
+        batch.Add(MakeRow("x", 1.0f));
 
-        DataValue[][] columns = [[]];
+        Assert.Throws<ArgumentOutOfRangeException>(() => batch[index]);
 
-        RowBatch batch = new(schema, columns);
-        Assert.Equal(0, batch.RowCount);
+        batch.Return();
     }
 
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.Add"/> throws
+    /// <see cref="InvalidOperationException"/> when the batch is already full.
+    /// </summary>
     [Fact]
-    public void BatchExposesSchema()
+    public void AddThrowsWhenBatchIsFull()
     {
-        Schema schema = new Schema([
-            new ColumnInfo("id", DataKind.Float32, nullable: false),
-        ]);
+        RowBatch batch = RowBatch.Rent(1);
+        batch.Add(MakeRow("x", 1.0f));
 
-        DataValue[][] columns = [[DataValue.FromFloat32(1.0f)]];
+        Assert.Throws<InvalidOperationException>(() => batch.Add(MakeRow("x", 2.0f)));
 
-        RowBatch batch = new(schema, columns);
-        Assert.Same(schema, batch.Schema);
+        batch.Return();
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.Return"/> returns the backing array
+    /// to the pool and resets the count to zero.
+    /// </summary>
+    [Fact]
+    public void ReturnResetsCountToZero()
+    {
+        RowBatch batch = RowBatch.Rent(4);
+        batch.Add(MakeRow("x", 1.0f));
+        batch.Add(MakeRow("x", 2.0f));
+
+        Assert.Equal(2, batch.Count);
+
+        batch.Return();
+
+        Assert.Equal(0, batch.Count);
+    }
+
+    /// <summary>
+    /// Verifies that calling <see cref="RowBatch.Return"/> twice does not
+    /// throw — the operation is idempotent.
+    /// </summary>
+    [Fact]
+    public void ReturnIsIdempotent()
+    {
+        RowBatch batch = RowBatch.Rent(4);
+        batch.Add(MakeRow("x", 1.0f));
+
+        batch.Return();
+        batch.Return();
+
+        Assert.Equal(0, batch.Count);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.CreateSingleRow"/> creates a batch
+    /// with exactly one row and a count of 1.
+    /// </summary>
+    [Fact]
+    public void CreateSingleRowCreatesBatchWithCountOne()
+    {
+        Row row = MakeRow("name", "Alice", "age", 30.0f);
+
+        RowBatch batch = RowBatch.CreateSingleRow(row);
+
+        Assert.Equal(1, batch.Count);
+        Assert.Equal(1, batch.Capacity);
+        Assert.Equal("Alice", batch[0]["name"].AsString());
+        Assert.Equal(30.0f, batch[0]["age"].AsFloat32());
+
+        batch.Return();
     }
 }

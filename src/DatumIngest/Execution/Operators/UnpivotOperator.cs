@@ -85,7 +85,7 @@ public sealed class UnpivotOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         // Output schema is derived from the first row: key columns + value + name.
         // The schema is built lazily on the first row.
@@ -95,9 +95,13 @@ public sealed class UnpivotOperator : IQueryOperator
         int[]? keyFieldOrdinals = null;
         string[]? keyFieldNames = null;
         LocalBufferPool pool = context.LocalBufferPool;
+        RowBatch? outputBatch = null;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
+            for (int i = 0; i < inputBatch.Count; i++)
+            {
+            Row row = inputBatch[i];
             context.CancellationToken.ThrowIfCancellationRequested();
             context.QueryMeter?.ThrowIfExceeded();
 
@@ -175,8 +179,23 @@ public sealed class UnpivotOperator : IQueryOperator
                 // Name column — the source column name as a string.
                 values[keyFieldOrdinals.Length + 1] = DataValue.FromString(sourceColumnName);
 
-                yield return new Row(outputNames, values, outputNameIndex!);
+                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
+
+                if (outputBatch.IsFull)
+                {
+                    yield return outputBatch;
+                    outputBatch = null;
+                }
             }
+            }
+
+            inputBatch.Return();
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 }

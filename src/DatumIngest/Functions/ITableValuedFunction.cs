@@ -16,8 +16,8 @@ public interface ITableValuedFunction
     /// </summary>
     /// <param name="arguments">The argument values.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async stream of rows produced by the function.</returns>
-    IAsyncEnumerable<Row> ExecuteAsync(
+    /// <returns>An async stream of row batches produced by the function.</returns>
+    IAsyncEnumerable<RowBatch> ExecuteAsync(
         DataValue[] arguments,
         CancellationToken cancellationToken);
 }

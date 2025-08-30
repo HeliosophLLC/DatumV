@@ -37,12 +37,15 @@ public sealed class ParquetTableProviderTests : IDisposable
         return new TableDescriptor("parquet", "test", filePath, options ?? new Dictionary<string, string>());
     }
 
-    private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<Row> source)
+    private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<RowBatch> source)
     {
         List<Row> rows = new();
-        await foreach (Row row in source)
+        await foreach (RowBatch batch in source)
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
         return rows;
     }

@@ -93,7 +93,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         CancellationToken cancellationToken = context.CancellationToken;
 
@@ -105,14 +105,20 @@ public sealed class LateMaterializationOperator : IQueryOperator
         List<Row> bufferedRows = new();
         HashSet<DataValue> keyValues = new();
 
-        await foreach (Row row in _child.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _child.ExecuteAsync(context).ConfigureAwait(false))
         {
-            bufferedRows.Add(row);
-
-            if (row.TryGetValue(childKeyColumn, out DataValue keyValue) && !keyValue.IsNull)
+            for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
             {
-                keyValues.Add(keyValue);
+                Row row = inputBatch[batchIndex];
+                bufferedRows.Add(row);
+
+                if (row.TryGetValue(childKeyColumn, out DataValue keyValue) && !keyValue.IsNull)
+                {
+                    keyValues.Add(keyValue);
+                }
             }
+
+            inputBatch.Return();
         }
 
         if (bufferedRows.Count == 0)
@@ -135,18 +141,26 @@ public sealed class LateMaterializationOperator : IQueryOperator
 
         Dictionary<DataValue, Row> fetchedByKey = new();
 
-        await foreach (Row fetchedRow in keyedProvider.FetchByKeysAsync(
+        await foreach (RowBatch fetchedBatch in keyedProvider.FetchByKeysAsync(
             _descriptor, _keyColumn, keyValues, fetchColumns, cancellationToken)
             .ConfigureAwait(false))
         {
-            if (fetchedRow.TryGetValue(_keyColumn, out DataValue key) && !key.IsNull)
+            for (int batchIndex = 0; batchIndex < fetchedBatch.Count; batchIndex++)
             {
-                fetchedByKey[key] = fetchedRow;
+                Row fetchedRow = fetchedBatch[batchIndex];
+
+                if (fetchedRow.TryGetValue(_keyColumn, out DataValue key) && !key.IsNull)
+                {
+                    fetchedByKey[key] = fetchedRow;
+                }
             }
+
+            fetchedBatch.Return();
         }
 
         // 3. Re-emit rows with deferred columns merged in.
         MergedRowSchema? schema = null;
+        RowBatch? outputBatch = null;
 
         foreach (Row row in bufferedRows)
         {
@@ -158,7 +172,20 @@ public sealed class LateMaterializationOperator : IQueryOperator
             }
 
             schema ??= MergedRowSchema.Build(row, _deferredColumns, _alias);
-            yield return schema.Merge(row, deferredRow);
+
+            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch.Add(schema.Merge(row, deferredRow));
+
+            if (outputBatch.IsFull)
+            {
+                yield return outputBatch;
+                outputBatch = null;
+            }
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 

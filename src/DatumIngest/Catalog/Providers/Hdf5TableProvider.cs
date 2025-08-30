@@ -18,6 +18,9 @@ namespace DatumIngest.Catalog.Providers;
 /// </summary>
 public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 {
+    /// <summary>Number of rows accumulated before yielding a batch.</summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -39,7 +42,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -92,6 +95,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         }
 
         // Yield rows by zipping columns.
+        RowBatch? batch = null;
         for (long rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -104,7 +108,18 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
-            yield return row;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;
@@ -149,7 +164,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ReadRowRangeAsync(
+    public async IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,
@@ -211,6 +226,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
             nameIndex[columnNames[columnIndex]] = columnIndex;
         }
 
+        RowBatch? batch = null;
         for (long rowIndex = 0; rowIndex < effectiveCount; rowIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -223,7 +239,18 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
             }
 
-            yield return row;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;

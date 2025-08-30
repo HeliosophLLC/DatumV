@@ -66,15 +66,15 @@ public sealed class InstrumentedOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         _stopwatch.Start();
 
-        await foreach (Row row in _inner.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in _inner.ExecuteAsync(context).ConfigureAwait(false))
         {
             _stopwatch.Stop();
-            _rowsProduced++;
-            yield return row;
+            _rowsProduced += batch.Count;
+            yield return batch;
             _stopwatch.Start();
         }
 

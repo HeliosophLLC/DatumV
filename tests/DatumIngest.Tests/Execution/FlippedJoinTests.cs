@@ -236,9 +236,12 @@ public sealed class FlippedJoinTests
             new LocalBufferPool());
 
         List<Row> rows = new();
-        await foreach (Row row in op.ExecuteAsync(context))
+        await foreach (RowBatch batch in op.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
         }
 
         return rows;

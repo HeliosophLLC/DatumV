@@ -27,8 +27,8 @@ public interface ISeekableTableProvider : ITableProvider
     /// <param name="startRow">Zero-based index of the first row to read.</param>
     /// <param name="count">Maximum number of rows to read. The stream may yield fewer rows if the source is exhausted.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async enumerable of rows from the specified range.</returns>
-    IAsyncEnumerable<Row> ReadRowRangeAsync(
+    /// <returns>An async enumerable of row batches from the specified range.</returns>
+    IAsyncEnumerable<RowBatch> ReadRowRangeAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         long startRow,

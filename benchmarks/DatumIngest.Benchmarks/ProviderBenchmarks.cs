@@ -44,8 +44,9 @@ public class ProviderBenchmarks
         CsvTableProvider provider = new();
         TableDescriptor descriptor = new("csv", "data", _csvPath1K, new Dictionary<string, string>());
 
-        await foreach (Row _ in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
         {
+            batch.Return();
         }
     }
 
@@ -55,8 +56,9 @@ public class ProviderBenchmarks
         CsvTableProvider provider = new();
         TableDescriptor descriptor = new("csv", "data", _csvPath10K, new Dictionary<string, string>());
 
-        await foreach (Row _ in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
         {
+            batch.Return();
         }
     }
 
@@ -67,8 +69,9 @@ public class ProviderBenchmarks
         TableDescriptor descriptor = new("csv", "data", _csvPath1K, new Dictionary<string, string>());
         HashSet<string> requiredColumns = ["id", "value"];
 
-        await foreach (Row _ in provider.OpenAsync(descriptor, requiredColumns, CancellationToken.None))
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns, CancellationToken.None))
         {
+            batch.Return();
         }
     }
 
@@ -78,8 +81,9 @@ public class ProviderBenchmarks
         JsonTableProvider provider = new();
         TableDescriptor descriptor = new("json", "data", _jsonPath1K, new Dictionary<string, string>());
 
-        await foreach (Row _ in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
         {
+            batch.Return();
         }
     }
 
@@ -89,8 +93,9 @@ public class ProviderBenchmarks
         JsonTableProvider provider = new();
         TableDescriptor descriptor = new("json", "data", _jsonPath10K, new Dictionary<string, string>());
 
-        await foreach (Row _ in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
         {
+            batch.Return();
         }
     }
 }

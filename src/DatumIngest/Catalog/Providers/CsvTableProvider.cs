@@ -42,6 +42,11 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
     /// </summary>
     private const int ReaderBufferSize = 65536;
 
+    /// <summary>
+    /// Number of rows per <see cref="RowBatch"/> emitted by streaming read methods.
+    /// </summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public async Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
@@ -327,7 +332,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -398,6 +403,8 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             nameIndex[projectedNames[index]] = index;
         }
 
+        RowBatch? batch = null;
+
         // If headerless, the first line is data — emit it as a row.
         if (!hasHeader)
         {
@@ -411,7 +418,13 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 firstValues[projectionIndex] = ParseField(field, projectedKinds[projectionIndex]);
             }
 
-            yield return firstRow;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(firstRow);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
         }
 
         while (!cancellationToken.IsCancellationRequested)
@@ -472,7 +485,18 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 }
             }
 
-            yield return row;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 
@@ -1186,7 +1210,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
     private const long MinPartitionBytes = 256 * 1024;
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<IAsyncEnumerable<Row>>?> OpenPartitionsAsync(
+    public async Task<IReadOnlyList<IAsyncEnumerable<RowBatch>>?> OpenPartitionsAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         int maxPartitions,
@@ -1303,7 +1327,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             return null;
         }
 
-        List<IAsyncEnumerable<Row>> partitions = new(workablePartitions);
+        List<IAsyncEnumerable<RowBatch>> partitions = new(workablePartitions);
 
         for (int partitionIndex = 0; partitionIndex < workablePartitions; partitionIndex++)
         {
@@ -1408,7 +1432,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
     /// (the byte after the terminating '\n'). Schema metadata is provided by the
     /// caller and shared across all concurrent partitions.
     /// </summary>
-    private static async IAsyncEnumerable<Row> OpenPartitionCoreAsync(
+    private static async IAsyncEnumerable<RowBatch> OpenPartitionCoreAsync(
         string filePath,
         string[] projectedNames,
         int[] projectedIndices,
@@ -1441,6 +1465,8 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             detectEncodingFromByteOrderMarks: false,
             bufferSize: ReaderBufferSize,
             leaveOpen: true);
+
+        RowBatch? batch = null;
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -1497,7 +1523,18 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 }
             }
 
-            yield return row;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 

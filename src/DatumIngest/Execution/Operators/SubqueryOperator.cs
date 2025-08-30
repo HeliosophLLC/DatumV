@@ -43,13 +43,13 @@ public sealed class SubqueryOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         // The inner operator already produces correctly-named rows.
         // Pass them through without copying.
-        await foreach (Row row in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in _innerOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
-            yield return row;
+            yield return batch;
         }
     }
 }

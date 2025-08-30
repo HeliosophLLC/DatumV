@@ -74,16 +74,25 @@ public sealed class ProjectOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         ProjectionSchema? schema = null;
         LocalBufferPool pool = context.LocalBufferPool;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            schema ??= ProjectionSchema.Build(_columns, _letBindings, row);
-            yield return schema.Project(row, evaluator, pool);
+            RowBatch outputBatch = RowBatch.Rent(inputBatch.Count);
+
+            for (int index = 0; index < inputBatch.Count; index++)
+            {
+                Row row = inputBatch[index];
+                schema ??= ProjectionSchema.Build(_columns, _letBindings, row);
+                outputBatch.Add(schema.Project(row, evaluator, pool));
+            }
+
+            inputBatch.Return();
+            yield return outputBatch;
         }
     }
 

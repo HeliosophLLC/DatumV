@@ -51,7 +51,7 @@ public sealed class FunctionSourceOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         Row emptyRow = new([], []);
@@ -62,10 +62,10 @@ public sealed class FunctionSourceOperator : IQueryOperator
             evaluatedArguments[index] = evaluator.Evaluate(_arguments[index], emptyRow);
         }
 
-        await foreach (Row row in _function.ExecuteAsync(
+        await foreach (RowBatch batch in _function.ExecuteAsync(
             evaluatedArguments, context.CancellationToken).ConfigureAwait(false))
         {
-            yield return row;
+            yield return batch;
         }
     }
 }

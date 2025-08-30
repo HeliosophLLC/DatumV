@@ -19,6 +19,18 @@ public interface IOutputWriter : IAsyncDisposable
     Task WriteRowAsync(Row row, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Writes all rows in a batch to the output. The default implementation
+    /// iterates the batch and delegates to <see cref="WriteRowAsync"/>.
+    /// </summary>
+    async Task WriteBatchAsync(RowBatch batch, CancellationToken cancellationToken = default)
+    {
+        for (int index = 0; index < batch.Count; index++)
+        {
+            await WriteRowAsync(batch[index], cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Finalizes the output, flushing any buffered data.
     /// Returns a summary of what was written.
     /// </summary>

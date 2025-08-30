@@ -26,8 +26,8 @@ public interface IKeyedTableProvider : ITableProvider
     /// included regardless of this set. When null, all columns are returned.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async enumerable of rows for matching entries.</returns>
-    IAsyncEnumerable<Row> FetchByKeysAsync(
+    /// <returns>An async enumerable of row batches for matching entries.</returns>
+    IAsyncEnumerable<RowBatch> FetchByKeysAsync(
         TableDescriptor descriptor,
         string keyColumn,
         IReadOnlySet<DataValue> keyValues,

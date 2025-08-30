@@ -26,8 +26,8 @@ public interface ITableProvider
     /// When null, all columns are returned.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async enumerable of rows from the data source.</returns>
-    IAsyncEnumerable<Row> OpenAsync(
+    /// <returns>An async enumerable of row batches from the data source.</returns>
+    IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         CancellationToken cancellationToken);

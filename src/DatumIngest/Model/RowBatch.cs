@@ -1,130 +1,111 @@
+using System.Buffers;
+
 namespace DatumIngest.Model;
 
 /// <summary>
-/// A columnar batch of rows sharing a common <see cref="Model.Schema"/>.
-/// Data is stored column-major: each inner array holds all values for one column.
+/// A row-major batch of <see cref="Row"/> objects backed by an array rented
+/// from <see cref="ArrayPool{T}"/>. Batching amortises async state-machine
+/// overhead by yielding many rows per <c>MoveNextAsync</c> call.
 /// </summary>
 public sealed class RowBatch
 {
-    private readonly DataValue[][] _columns;
+    private Row[] _rows;
+    private bool _returned;
+
+    private RowBatch(Row[] rows, int capacity)
+    {
+        _rows = rows;
+        Capacity = capacity;
+    }
+
+    /// <summary>Maximum number of rows this batch can hold.</summary>
+    public int Capacity { get; }
+
+    /// <summary>Current number of rows in this batch.</summary>
+    public int Count { get; private set; }
+
+    /// <summary>Whether the batch has reached its capacity.</summary>
+    public bool IsFull => Count >= Capacity;
 
     /// <summary>
-    /// Creates a batch from a schema and column-major data arrays.
+    /// Returns the row at the given index.
     /// </summary>
-    /// <exception cref="ArgumentException">
-    /// Thrown when the number of column arrays does not match the schema,
-    /// or when column arrays have different lengths (jagged).
+    /// <param name="index">Zero-based row index within the batch.</param>
+    /// <returns>The row at position <paramref name="index"/>.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Count"/>.
     /// </exception>
-    public RowBatch(Schema schema, DataValue[][] columns)
+    public Row this[int index]
     {
-        if (columns.Length != schema.Columns.Count)
+        get
         {
-            throw new ArgumentException(
-                $"Expected {schema.Columns.Count} columns but received {columns.Length}.");
-        }
-
-        // All column arrays must have the same length.
-        if (columns.Length > 0)
-        {
-            int expectedRowCount = columns[0].Length;
-            for (int columnIndex = 1; columnIndex < columns.Length; columnIndex++)
+            if ((uint)index >= (uint)Count)
             {
-                if (columns[columnIndex].Length != expectedRowCount)
-                {
-                    throw new ArgumentException(
-                        $"Column {columnIndex} has {columns[columnIndex].Length} rows "
-                        + $"but column 0 has {expectedRowCount} rows.");
-                }
-            }
-        }
-
-        Schema = schema;
-        _columns = columns;
-    }
-
-    /// <summary>The schema describing every column in this batch.</summary>
-    public Schema Schema { get; }
-
-    /// <summary>The number of rows across all columns.</summary>
-    public int RowCount => _columns.Length == 0 ? 0 : _columns[0].Length;
-
-    /// <summary>The number of columns.</summary>
-    public int ColumnCount => _columns.Length;
-
-    /// <summary>
-    /// Cached column names and index, built lazily on the first <see cref="GetRow"/> call
-    /// and shared across all materialised rows.
-    /// </summary>
-    private string[]? _cachedNames;
-    private Dictionary<string, int>? _cachedNameIndex;
-
-    /// <summary>
-    /// Materialises a single row by gathering values from each column at the given index.
-    /// </summary>
-    public Row GetRow(int rowIndex)
-    {
-        if (_cachedNames is null)
-        {
-            _cachedNames = new string[_columns.Length];
-            for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
-            {
-                _cachedNames[columnIndex] = Schema.Columns[columnIndex].Name;
+                throw new ArgumentOutOfRangeException(nameof(index));
             }
 
-            _cachedNameIndex = new Dictionary<string, int>(_cachedNames.Length, StringComparer.OrdinalIgnoreCase);
-            for (int columnIndex = 0; columnIndex < _cachedNames.Length; columnIndex++)
-            {
-                _cachedNameIndex[_cachedNames[columnIndex]] = columnIndex;
-            }
+            return _rows[index];
         }
-
-        DataValue[] values = new DataValue[_columns.Length];
-        for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
-        {
-            values[columnIndex] = _columns[columnIndex][rowIndex];
-        }
-
-        return new Row(_cachedNames, values, _cachedNameIndex!);
     }
 
     /// <summary>
-    /// Returns a read-only span over all values in the column identified by name.
+    /// Appends a row to this batch.
     /// </summary>
-    public ReadOnlySpan<DataValue> GetColumn(string name)
+    /// <param name="row">The row to add.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the batch is already full.</exception>
+    public void Add(Row row)
     {
-        for (int columnIndex = 0; columnIndex < Schema.Columns.Count; columnIndex++)
+        if (Count >= Capacity)
         {
-            if (string.Equals(Schema.Columns[columnIndex].Name, name, StringComparison.OrdinalIgnoreCase))
-            {
-                return _columns[columnIndex];
-            }
+            throw new InvalidOperationException("RowBatch is full.");
         }
 
-        throw new KeyNotFoundException($"Column '{name}' not found.");
+        _rows[Count] = row;
+        Count++;
     }
 
     /// <summary>
-    /// Returns a read-only span over all values in the column at the given ordinal.
+    /// Rents a new batch with the given capacity. The backing array is rented
+    /// from <see cref="ArrayPool{T}.Shared"/>.
     /// </summary>
-    public ReadOnlySpan<DataValue> GetColumn(int ordinal)
+    /// <param name="capacity">The maximum number of rows the batch can hold.</param>
+    /// <returns>An empty batch ready for <see cref="Add"/> calls.</returns>
+    public static RowBatch Rent(int capacity)
     {
-        return _columns[ordinal];
+        Row[] rows = ArrayPool<Row>.Shared.Rent(capacity);
+        return new RowBatch(rows, capacity);
     }
 
     /// <summary>
-    /// Returns a new batch containing a contiguous sub-range of rows.
+    /// Returns the backing array to <see cref="ArrayPool{T}.Shared"/>.
+    /// The batch must not be used after calling this method.
+    /// Individual <see cref="Row"/> objects are not returned to any pool;
+    /// their lifecycle is managed separately by operators.
     /// </summary>
-    public RowBatch Slice(int offset, int count)
+    public void Return()
     {
-        DataValue[][] slicedColumns = new DataValue[_columns.Length][];
-
-        for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
+        if (_returned)
         {
-            slicedColumns[columnIndex] = _columns[columnIndex]
-                .AsSpan(offset, count)
-                .ToArray();
+            return;
         }
 
-        return new RowBatch(Schema, slicedColumns);
+        _returned = true;
+        Array.Clear(_rows, 0, Count);
+        ArrayPool<Row>.Shared.Return(_rows);
+        _rows = Array.Empty<Row>();
+        Count = 0;
+    }
+
+    /// <summary>
+    /// Creates a batch containing exactly one row. Useful for operators
+    /// that yield a single result (e.g. scalar subquery, empty-row source).
+    /// </summary>
+    /// <param name="row">The single row.</param>
+    /// <returns>A batch with <see cref="Count"/> equal to 1.</returns>
+    public static RowBatch CreateSingleRow(Row row)
+    {
+        RowBatch batch = Rent(1);
+        batch.Add(row);
+        return batch;
     }
 }

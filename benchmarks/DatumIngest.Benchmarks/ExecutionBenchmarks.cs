@@ -83,8 +83,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -98,8 +99,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -113,8 +115,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -129,8 +132,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -144,8 +148,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -160,8 +165,9 @@ public class ExecutionBenchmarks
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -177,8 +183,9 @@ public class ExecutionBenchmarks
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -194,8 +201,9 @@ public class ExecutionBenchmarks
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -210,8 +218,9 @@ public class ExecutionBenchmarks
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
         IQueryOperator root = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -225,8 +234,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -240,8 +250,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -256,8 +267,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -272,8 +284,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -289,8 +302,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -307,8 +321,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -323,8 +338,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -339,8 +355,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -355,8 +372,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -371,8 +389,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -387,8 +406,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -403,8 +423,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -421,8 +442,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 
@@ -439,8 +461,9 @@ public class ExecutionBenchmarks
         IQueryOperator root = planner.Plan(query);
         ExecutionContext context = new(CancellationToken.None, functions, catalog, new LocalBufferPool());
 
-        await foreach (Row _ in root.ExecuteAsync(context))
+        await foreach (RowBatch batch in root.ExecuteAsync(context))
         {
+            batch.Return();
         }
     }
 }

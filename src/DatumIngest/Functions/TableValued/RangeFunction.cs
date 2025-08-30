@@ -17,6 +17,11 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
     private static readonly Schema OutputSchema = new(
         [new ColumnInfo("Value", DataKind.Float32, nullable: false)]);
 
+    /// <summary>
+    /// Number of rows accumulated before yielding a batch.
+    /// </summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <inheritdoc />
     public string Name => "range";
 
@@ -27,7 +32,7 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> ExecuteAsync(
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         DataValue[] arguments,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -60,6 +65,8 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
 
         // Use an integer counter to avoid floating-point drift accumulation.
         // Each value is computed as start + i * step, keeping precision stable.
+        RowBatch? batch = null;
+
         if (step > 0)
         {
             for (int i = 0; ; i++)
@@ -71,7 +78,13 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new Row(names, [DataValue.FromFloat32(current)], nameIndex);
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(new Row(names, [DataValue.FromFloat32(current)], nameIndex));
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
             }
         }
         else
@@ -85,8 +98,19 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new Row(names, [DataValue.FromFloat32(current)], nameIndex);
+                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch.Add(new Row(names, [DataValue.FromFloat32(current)], nameIndex));
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = null;
+                }
             }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
 
         await Task.CompletedTask;

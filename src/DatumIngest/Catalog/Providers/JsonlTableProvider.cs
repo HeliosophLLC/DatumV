@@ -17,6 +17,9 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
     /// <summary>Maximum number of lines sampled for schema inference.</summary>
     private const int SchemaSampleSize = 100;
 
+    /// <summary>Number of rows accumulated before yielding a batch.</summary>
+    private const int DefaultBatchSize = 1024;
+
     /// <summary>
     /// Byte-level scan buffer size for chunk measurement.
     /// </summary>
@@ -82,7 +85,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<Row> OpenAsync(
+    public async IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -122,6 +125,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
 
         using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
 
+        RowBatch? batch = null;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -161,7 +165,18 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
                 }
             }
 
-            yield return row;
+            batch ??= RowBatch.Rent(DefaultBatchSize);
+            batch.Add(row);
+            if (batch.IsFull)
+            {
+                yield return batch;
+                batch = null;
+            }
+        }
+
+        if (batch is not null)
+        {
+            yield return batch;
         }
     }
 

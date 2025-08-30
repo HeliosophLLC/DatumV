@@ -9,11 +9,11 @@ namespace DatumIngest.Execution;
 public interface IQueryOperator
 {
     /// <summary>
-    /// Executes this operator and streams rows asynchronously.
+    /// Executes this operator and streams row batches asynchronously.
     /// </summary>
     /// <param name="context">Execution context with cancellation, functions, and catalog.</param>
-    /// <returns>An async stream of result rows.</returns>
-    IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context);
+    /// <returns>An async stream of row batches.</returns>
+    IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context);
 
     /// <summary>
     /// Returns plan metadata describing this operator for EXPLAIN output.

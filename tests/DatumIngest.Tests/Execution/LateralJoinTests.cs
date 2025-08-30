@@ -241,9 +241,12 @@ public sealed class LateralJoinTests
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
         List<Row> rows = [];
-        await foreach (Row row in plan.ExecuteAsync(context))
+        await foreach (RowBatch batch in plan.ExecuteAsync(context))
         {
-            rows.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                rows.Add(batch[i]);
+            }
         }
 
         return rows;
@@ -290,14 +293,27 @@ public sealed class LateralJoinTests
         }
 
         /// <inheritdoc/>
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (Row row in _rows)
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;

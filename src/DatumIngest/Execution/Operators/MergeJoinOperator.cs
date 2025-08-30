@@ -103,7 +103,7 @@ public sealed class MergeJoinOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         Expression leftKeyExpression = _extraction.KeyPairs[0].Left;
@@ -121,11 +121,76 @@ public sealed class MergeJoinOperator : IQueryOperator
         // the right-side group for each left row — so we buffer the right group.
         List<Row> rightGroup = new();
 
-        await using IAsyncEnumerator<Row> leftEnumerator = _left.ExecuteAsync(context).GetAsyncEnumerator(context.CancellationToken);
-        await using IAsyncEnumerator<Row> rightEnumerator = _right.ExecuteAsync(context).GetAsyncEnumerator(context.CancellationToken);
+        await using IAsyncEnumerator<RowBatch> leftBatchEnumerator = _left.ExecuteAsync(context).GetAsyncEnumerator(context.CancellationToken);
+        RowBatch? currentLeftBatch = null;
+        int leftRowIndex = -1;
 
-        bool hasLeft = await leftEnumerator.MoveNextAsync().ConfigureAwait(false);
-        bool hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+        await using IAsyncEnumerator<RowBatch> rightBatchEnumerator = _right.ExecuteAsync(context).GetAsyncEnumerator(context.CancellationToken);
+        RowBatch? currentRightBatch = null;
+        int rightRowIndex = -1;
+
+        RowBatch? outputBatch = null;
+
+        // Advance the left cursor to the next row, fetching new batches as needed.
+        async ValueTask<bool> AdvanceLeftCursorAsync()
+        {
+            leftRowIndex++;
+
+            if (currentLeftBatch is not null && leftRowIndex < currentLeftBatch.Count)
+            {
+                return true;
+            }
+
+            currentLeftBatch?.Return();
+            currentLeftBatch = null;
+
+            if (await leftBatchEnumerator.MoveNextAsync().ConfigureAwait(false))
+            {
+                currentLeftBatch = leftBatchEnumerator.Current;
+                leftRowIndex = 0;
+                return true;
+            }
+
+            return false;
+        }
+
+        // Advance the right cursor to the next row, fetching new batches as needed.
+        async ValueTask<bool> AdvanceRightCursorAsync()
+        {
+            rightRowIndex++;
+
+            if (currentRightBatch is not null && rightRowIndex < currentRightBatch.Count)
+            {
+                return true;
+            }
+
+            currentRightBatch?.Return();
+            currentRightBatch = null;
+
+            if (await rightBatchEnumerator.MoveNextAsync().ConfigureAwait(false))
+            {
+                currentRightBatch = rightBatchEnumerator.Current;
+                rightRowIndex = 0;
+                return true;
+            }
+
+            return false;
+        }
+
+        // Retrieve the current row from the left batch cursor.
+        Row GetCurrentLeftRow()
+        {
+            return (currentLeftBatch ?? throw new InvalidOperationException("Left batch cursor is null when hasLeft is true."))[leftRowIndex];
+        }
+
+        // Retrieve the current row from the right batch cursor.
+        Row GetCurrentRightRow()
+        {
+            return (currentRightBatch ?? throw new InvalidOperationException("Right batch cursor is null when hasRight is true."))[rightRowIndex];
+        }
+
+        bool hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
+        bool hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
 
         if (ExecutionTracer.IsEnabled)
         {
@@ -137,8 +202,8 @@ public sealed class MergeJoinOperator : IQueryOperator
         {
             context.CancellationToken.ThrowIfCancellationRequested();
 
-            Row leftRow = leftEnumerator.Current;
-            Row rightRow = rightEnumerator.Current;
+            Row leftRow = GetCurrentLeftRow();
+            Row rightRow = GetCurrentRightRow();
 
             DataValue leftKey = evaluator.Evaluate(leftKeyExpression, leftRow);
             DataValue rightKey = evaluator.Evaluate(rightKeyExpression, rightRow);
@@ -150,10 +215,12 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullRight ??= CreateNullRow(rightRow);
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
-                    yield return schema.Combine(leftRow, cachedNullRight);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
-                hasLeft = await leftEnumerator.MoveNextAsync().ConfigureAwait(false);
+                hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
                 continue;
             }
 
@@ -163,10 +230,12 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullLeft ??= CreateNullRow(leftRow);
                     schema ??= CombinedRowSchema.Build(cachedNullLeft, rightRow);
-                    yield return schema.Combine(cachedNullLeft, rightRow);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.Combine(cachedNullLeft, rightRow));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
-                hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+                hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
                 continue;
             }
 
@@ -179,10 +248,12 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullRight ??= CreateNullRow(rightRow);
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
-                    yield return schema.Combine(leftRow, cachedNullRight);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
-                hasLeft = await leftEnumerator.MoveNextAsync().ConfigureAwait(false);
+                hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
             }
             else if (comparison > 0)
             {
@@ -191,10 +262,12 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullLeft ??= CreateNullRow(leftRow);
                     schema ??= CombinedRowSchema.Build(cachedNullLeft, rightRow);
-                    yield return schema.Combine(cachedNullLeft, rightRow);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.Combine(cachedNullLeft, rightRow));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
 
-                hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+                hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
             }
             else
             {
@@ -206,21 +279,21 @@ public sealed class MergeJoinOperator : IQueryOperator
                 // Advance right to collect all duplicates.
                 while (true)
                 {
-                    hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+                    hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
 
                     if (!hasRight)
                     {
                         break;
                     }
 
-                    DataValue nextRightKey = evaluator.Evaluate(rightKeyExpression, rightEnumerator.Current);
+                    DataValue nextRightKey = evaluator.Evaluate(rightKeyExpression, GetCurrentRightRow());
 
                     if (nextRightKey.IsNull || CompareValues(rightKey, nextRightKey) != 0)
                     {
                         break;
                     }
 
-                    rightGroup.Add(rightEnumerator.Current);
+                    rightGroup.Add(GetCurrentRightRow());
                 }
 
                 // Cross-product all left rows with the buffered right group.
@@ -242,13 +315,17 @@ public sealed class MergeJoinOperator : IQueryOperator
                             }
 
                             leftRowMatched = true;
-                            yield return candidateRow;
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(candidateRow);
+                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
                         else
                         {
                             leftRowMatched = true;
                             schema ??= CombinedRowSchema.Build(leftRow, matchedRight);
-                            yield return schema.Combine(leftRow, matchedRight);
+                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch.Add(schema.Combine(leftRow, matchedRight));
+                            if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
                     }
 
@@ -257,18 +334,20 @@ public sealed class MergeJoinOperator : IQueryOperator
                         // All right-group rows filtered out by residual — emit unmatched left.
                         cachedNullRight ??= CreateNullRow(rightGroup[0]);
                         schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
-                        yield return schema.Combine(leftRow, cachedNullRight);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                        if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
 
                     // Advance left and check if the next left row shares the same key.
-                    hasLeft = await leftEnumerator.MoveNextAsync().ConfigureAwait(false);
+                    hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
 
                     if (!hasLeft)
                     {
                         break;
                     }
 
-                    leftRow = leftEnumerator.Current;
+                    leftRow = GetCurrentLeftRow();
                     DataValue nextLeftKey = evaluator.Evaluate(leftKeyExpression, leftRow);
 
                     if (nextLeftKey.IsNull || CompareValues(leftKey, nextLeftKey) != 0)
@@ -286,21 +365,25 @@ public sealed class MergeJoinOperator : IQueryOperator
 
             if (leftMustAppear)
             {
-                Row leftRow = leftEnumerator.Current;
+                Row leftRow = GetCurrentLeftRow();
 
                 if (cachedNullRight is not null)
                 {
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight);
-                    yield return schema.Combine(leftRow, cachedNullRight);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.Combine(leftRow, cachedNullRight));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
                     // No right rows were ever seen — emit left row alone.
-                    yield return leftRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(leftRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
 
-            hasLeft = await leftEnumerator.MoveNextAsync().ConfigureAwait(false);
+            hasLeft = await AdvanceLeftCursorAsync().ConfigureAwait(false);
         }
 
         // Drain remaining right rows (no match on the left side).
@@ -310,21 +393,30 @@ public sealed class MergeJoinOperator : IQueryOperator
 
             if (rightMustAppear)
             {
-                Row rightRow = rightEnumerator.Current;
+                Row rightRow = GetCurrentRightRow();
 
                 if (cachedNullLeft is not null)
                 {
                     schema ??= CombinedRowSchema.Build(cachedNullLeft, rightRow);
-                    yield return schema.Combine(cachedNullLeft, rightRow);
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(schema.Combine(cachedNullLeft, rightRow));
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
                     // No left rows were ever seen — emit right row alone.
-                    yield return rightRow;
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(rightRow);
+                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
             }
 
-            hasRight = await rightEnumerator.MoveNextAsync().ConfigureAwait(false);
+            hasRight = await AdvanceRightCursorAsync().ConfigureAwait(false);
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
 
         if (ExecutionTracer.IsEnabled)

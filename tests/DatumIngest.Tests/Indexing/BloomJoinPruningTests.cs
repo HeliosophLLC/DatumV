@@ -107,9 +107,12 @@ public sealed class BloomJoinPruningTests
 
         // Act
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         // Assert: only row with id=3 should match.
@@ -178,9 +181,12 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         Assert.Single(results);
@@ -234,9 +240,12 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         Assert.Empty(results);
@@ -319,9 +328,12 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         Assert.Single(results);
@@ -426,9 +438,12 @@ public sealed class BloomJoinPruningTests
 
         // Act
         List<Row> results = new();
-        await foreach (Row row in outerJoin.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in outerJoin.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         // Assert: the orders scan should show bloom pruning from the outer join's build side.
@@ -566,9 +581,12 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         // Only row with id=4 should match.
@@ -656,9 +674,12 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         List<Row> results = new();
-        await foreach (Row row in join.ExecuteAsync(context).ConfigureAwait(false))
+        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
         {
-            results.Add(row);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                results.Add(batch[i]);
+            }
         }
 
         Assert.Equal(2, results.Count);
@@ -687,13 +708,17 @@ public sealed class BloomJoinPruningTests
 
         public OperatorPlanDescription DescribeForExplain() => new("Mock");
 
-        public async IAsyncEnumerable<Row> ExecuteAsync(ExecutionContext context)
+        public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
         {
+            RowBatch? outputBatch = null;
             foreach (Row row in _rows)
             {
-                yield return row;
+                outputBatch ??= RowBatch.Rent(64);
+                outputBatch.Add(row);
+                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
+            if (outputBatch is not null) yield return outputBatch;
             await Task.CompletedTask;
         }
     }
@@ -736,14 +761,27 @@ public sealed class BloomJoinPruningTests
                 ColumnCosts: new Dictionary<string, ColumnCost>()));
         }
 
-        public async IAsyncEnumerable<Row> OpenAsync(
+        public async IAsyncEnumerable<RowBatch> OpenAsync(
             TableDescriptor descriptor,
             IReadOnlySet<string>? requiredColumns,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            RowBatch batch = RowBatch.Rent(64);
+
             foreach (Row row in _rows)
             {
-                yield return row;
+                batch.Add(row);
+
+                if (batch.IsFull)
+                {
+                    yield return batch;
+                    batch = RowBatch.Rent(64);
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                yield return batch;
             }
 
             await Task.CompletedTask;

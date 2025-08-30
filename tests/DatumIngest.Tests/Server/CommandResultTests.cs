@@ -104,7 +104,7 @@ public sealed class CommandResultTests
         Assert.Same(plan, result.ExplainPlan);
     }
 
-    private static async IAsyncEnumerable<Row> EmptyRows()
+    private static async IAsyncEnumerable<RowBatch> EmptyRows()
     {
         await Task.CompletedTask;
         yield break;

@@ -37,7 +37,7 @@ public interface IPartitionedTableProvider
     /// A list of independent enumerables (one per partition), or <see langword="null"/>
     /// if partitioning is not available.
     /// </returns>
-    Task<IReadOnlyList<IAsyncEnumerable<Row>>?> OpenPartitionsAsync(
+    Task<IReadOnlyList<IAsyncEnumerable<RowBatch>>?> OpenPartitionsAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         int maxPartitions,

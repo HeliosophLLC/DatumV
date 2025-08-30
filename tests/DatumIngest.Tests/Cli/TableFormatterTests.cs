@@ -169,13 +169,21 @@ public sealed class TableFormatterTests
         Assert.Contains("3", formatted);
     }
 
-    private static async IAsyncEnumerable<Row> ToAsyncEnumerable(params Row[] rows)
+    private static async IAsyncEnumerable<RowBatch> ToAsyncEnumerable(params Row[] rows)
     {
-        foreach (Row row in rows)
+        if (rows.Length == 0)
         {
-            yield return row;
+            await Task.CompletedTask;
+            yield break;
         }
 
+        RowBatch batch = RowBatch.Rent(rows.Length);
+        foreach (Row row in rows)
+        {
+            batch.Add(row);
+        }
+
+        yield return batch;
         await Task.CompletedTask;
     }
 }

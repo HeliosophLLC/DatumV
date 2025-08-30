@@ -149,23 +149,29 @@ public sealed class SourceAnalyzer
             List<ColumnInfo> columnInfos = new();
             long rowCount = 0;
 
-            await foreach (Row row in provider.OpenAsync(
+            await foreach (RowBatch batch in provider.OpenAsync(
                 descriptor, requiredColumns: null, cancellationToken).ConfigureAwait(false))
             {
-                if (rowCount == 0)
+                for (int i = 0; i < batch.Count; i++)
                 {
-                    foreach (string columnName in row.ColumnNames)
+                    Row row = batch[i];
+                    if (rowCount == 0)
                     {
-                        DataKind kind = row[columnName].Kind;
-                        columnKinds[columnName] = kind;
-                        columnInfos.Add(new ColumnInfo(columnName, kind, nullable: true));
+                        foreach (string columnName in row.ColumnNames)
+                        {
+                            DataKind kind = row[columnName].Kind;
+                            columnKinds[columnName] = kind;
+                            columnInfos.Add(new ColumnInfo(columnName, kind, nullable: true));
+                        }
                     }
+
+                    incremental.AddRow(row);
+                    statisticsCollector.AddRow(row);
+                    interactionCollector?.AddRow(row);
+                    rowCount++;
                 }
 
-                incremental.AddRow(row);
-                statisticsCollector.AddRow(row);
-                interactionCollector?.AddRow(row);
-                rowCount++;
+                batch.Return();
             }
 
             SourceIndex index = incremental.Finalize();

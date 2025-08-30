@@ -76,7 +76,7 @@ public sealed class SampleScanOperator : IQueryOperator
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<Row> ExecuteAsync(
+    public async IAsyncEnumerable<RowBatch> ExecuteAsync(
         ExecutionContext context)
     {
         // 0% → emit nothing; 100% → pass through unfiltered
@@ -87,9 +87,9 @@ public sealed class SampleScanOperator : IQueryOperator
 
         if (_percentage >= 100.0)
         {
-            await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                yield return row;
+                yield return inputBatch;
             }
 
             yield break;
@@ -103,12 +103,33 @@ public sealed class SampleScanOperator : IQueryOperator
         Random random = _seed.HasValue ? new Random(_seed.Value) : Random.Shared;
         double threshold = _percentage / 100.0;
 
-        await foreach (Row row in _source.ExecuteAsync(context).ConfigureAwait(false))
+        RowBatch? outputBatch = null;
+
+        await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            if (random.NextDouble() < threshold)
+            for (int batchIndex = 0; batchIndex < inputBatch.Count; batchIndex++)
             {
-                yield return row;
+                Row row = inputBatch[batchIndex];
+
+                if (random.NextDouble() < threshold)
+                {
+                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch.Add(row);
+
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
+                }
             }
+
+            inputBatch.Return();
+        }
+
+        if (outputBatch is not null)
+        {
+            yield return outputBatch;
         }
     }
 }

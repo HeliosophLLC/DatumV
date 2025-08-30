@@ -146,7 +146,7 @@ public sealed class CommandDispatcher
         // Wrap the deferred execution so the pool is disposed after the stream
         // is fully consumed (or abandoned). The pool cannot be scoped with `using`
         // here because the IAsyncEnumerable outlives this method.
-        IAsyncEnumerable<Row> rows = StreamWithDisposal(plan.ExecuteAsync(context), localBufferPool);
+        IAsyncEnumerable<RowBatch> rows = StreamWithDisposal(plan.ExecuteAsync(context), localBufferPool);
 
         // We need the schema before streaming. Use the leftmost SELECT for column metadata.
         SelectStatement schemaStatement = ExtractLeftmostStatement(query);
@@ -423,9 +423,10 @@ public sealed class CommandDispatcher
                 ParallelismBudget = _parallelismBudget,
             };
 
-            await foreach (Row _ in instrumentedRoot.ExecuteAsync(context).ConfigureAwait(false))
+            await foreach (RowBatch batch in instrumentedRoot.ExecuteAsync(context).ConfigureAwait(false))
             {
                 // Drain the stream to collect runtime metrics.
+                batch.Return();
             }
 
             InstrumentedOperator.PopulateMetrics(explainPlan, instrumentedRoot);
@@ -629,14 +630,14 @@ public sealed class CommandDispatcher
     /// (or is abandoned). This ensures owned objects are returned even when
     /// the enumerable outlives the method that created the pool.
     /// </summary>
-    private static async IAsyncEnumerable<Row> StreamWithDisposal(
-        IAsyncEnumerable<Row> source, LocalBufferPool pool)
+    private static async IAsyncEnumerable<RowBatch> StreamWithDisposal(
+        IAsyncEnumerable<RowBatch> source, LocalBufferPool pool)
     {
         try
         {
-            await foreach (Row row in source.ConfigureAwait(false))
+            await foreach (RowBatch batch in source.ConfigureAwait(false))
             {
-                yield return row;
+                yield return batch;
             }
         }
         finally

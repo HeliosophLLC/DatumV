@@ -33,8 +33,8 @@ public interface IFilterableTableProvider : ITableProvider
     /// suppress individual rows — the caller applies the filter for correctness.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An async enumerable of rows, possibly with non-matching partitions skipped.</returns>
-    IAsyncEnumerable<Row> OpenAsync(
+    /// <returns>An async enumerable of row batches, possibly with non-matching partitions skipped.</returns>
+    IAsyncEnumerable<RowBatch> OpenAsync(
         TableDescriptor descriptor,
         IReadOnlySet<string>? requiredColumns,
         Expression filterHint,
