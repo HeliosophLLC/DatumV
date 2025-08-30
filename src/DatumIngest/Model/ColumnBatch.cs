@@ -15,7 +15,7 @@ namespace DatumIngest.Model;
 /// operator pipeline the consumer is responsible for disposal.
 /// </para>
 /// <para>
-/// The <see cref="GetRow"/> method produces a <see cref="Row"/> adapter for legacy
+/// The <see cref="GetRow(int)"/> method produces a <see cref="Row"/> adapter for legacy
 /// output paths (CLI display, gRPC streaming) — it allocates a <see cref="DataValue"/>
 /// array per row and is not intended for hot loops.
 /// </para>
@@ -215,6 +215,11 @@ public sealed class ColumnBatch : IDisposable
     /// </summary>
     /// <param name="rowIndex">Zero-based row index.</param>
     /// <returns>A self-contained row.</returns>
+    /// <remarks>
+    /// This allocates a new <see cref="DataValue"/> array per call. For hot paths
+    /// where the caller manages buffer lifetimes, use <see cref="GetRow(int, DataValue[])"/>
+    /// with a pre-allocated or pooled buffer instead.
+    /// </remarks>
     public Row GetRow(int rowIndex)
     {
         DataValue[] values = new DataValue[ColumnCount];
@@ -234,6 +239,30 @@ public sealed class ColumnBatch : IDisposable
         }
 
         return new Row(_columnNames, values, _nameIndex);
+    }
+
+    /// <summary>
+    /// Produces a <see cref="Row"/> view of a single row using a caller-provided
+    /// <see cref="DataValue"/> buffer, avoiding per-row array allocations.
+    /// Arena-backed strings are materialised so the <see cref="Row"/> is self-contained.
+    /// </summary>
+    /// <param name="rowIndex">Zero-based row index.</param>
+    /// <param name="buffer">
+    /// Pre-allocated <see cref="DataValue"/> array with at least <see cref="ColumnCount"/>
+    /// elements.  The caller owns the buffer lifetime.
+    /// </param>
+    /// <returns>A row that shares <paramref name="buffer"/> for its values.</returns>
+    public Row GetRow(int rowIndex, DataValue[] buffer)
+    {
+        for (int column = 0; column < ColumnCount; column++)
+        {
+            DataValue value = _columns[column][rowIndex];
+            buffer[column] = value.IsArenaBacked
+                ? value.Materialize(StringArena, DataArena)
+                : value;
+        }
+
+        return new Row(_columnNames, buffer, _nameIndex);
     }
 
     // ───────────────────────── Arena merging ─────────────────────────
@@ -256,6 +285,26 @@ public sealed class ColumnBatch : IDisposable
                 column[row] = column[row].WithArenaOffset(baseOffset);
             }
         }
+    }
+
+    // ───────────────────────── Column renaming ─────────────────────────
+
+    /// <summary>
+    /// Returns a new <see cref="ColumnBatch"/> that shares the same column arrays
+    /// and arenas as this batch but uses different column names and index.
+    /// The returned batch borrows all storage from this batch; disposing either
+    /// one invalidates the shared arrays.  The caller must ensure only one batch
+    /// is disposed — typically the renamed batch is yielded and this batch is
+    /// abandoned (not disposed).
+    /// </summary>
+    /// <param name="names">New column names array (must have <see cref="ColumnCount"/> elements).</param>
+    /// <param name="nameIndex">New case-insensitive name-to-ordinal dictionary.</param>
+    /// <returns>A column batch sharing storage with new column names.</returns>
+    internal ColumnBatch WithColumnNames(string[] names, Dictionary<string, int> nameIndex)
+    {
+        _columnNames = names;
+        _nameIndex = nameIndex;
+        return this;
     }
 
     // ───────────────────────── Adapter ─────────────────────────

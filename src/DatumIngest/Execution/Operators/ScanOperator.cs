@@ -267,6 +267,21 @@ public sealed class ScanOperator : IQueryOperator
 
             IAsyncEnumerable<RowBatch> rows;
 
+            // Columnar path: when the provider natively produces column batches,
+            // decode into ColumnBatch and convert to RowBatch using pooled buffers.
+            // This exercises the same decode pipeline as the fully columnar operators
+            // and avoids per-cell string allocations for arena-backed columns.
+            if (provider is IColumnBatchProvider columnBatchProvider)
+            {
+                await foreach (RowBatch batch in ExecuteViaColumnBatchAsync(
+                    columnBatchProvider, context).ConfigureAwait(false))
+                {
+                    yield return batch;
+                }
+
+                yield break;
+            }
+
             if (_filterHint is not null && provider is IFilterableTableProvider filterable)
             {
                 LastFilterableProvider = filterable;
@@ -1395,6 +1410,37 @@ public sealed class ScanOperator : IQueryOperator
             .ConfigureAwait(false))
         {
             yield return batch;
+        }
+    }
+
+    /// <summary>
+    /// Decodes data via <see cref="IColumnBatchProvider"/> and converts each
+    /// <see cref="ColumnBatch"/> to a <see cref="RowBatch"/> using pooled buffers.
+    /// This path uses the same column decoder pipeline as the fully columnar
+    /// operators, including arena-backed string storage during decode.
+    /// </summary>
+    private async IAsyncEnumerable<RowBatch> ExecuteViaColumnBatchAsync(
+        IColumnBatchProvider columnBatchProvider,
+        ExecutionContext context)
+    {
+        CancellationToken cancellationToken = context.CancellationToken;
+        LocalBufferPool pool = context.LocalBufferPool;
+
+        await foreach (ColumnBatch columnBatch in columnBatchProvider.OpenColumnBatchAsync(
+            _descriptor, _requiredColumns, _filterHint, cancellationToken).ConfigureAwait(false))
+        {
+            int rowCount = columnBatch.RowCount;
+            int columnCount = columnBatch.ColumnCount;
+            RowBatch rowBatch = RowBatch.Rent(rowCount);
+
+            for (int row = 0; row < rowCount; row++)
+            {
+                DataValue[] buffer = pool.RentOwned(columnCount);
+                rowBatch.Add(columnBatch.GetRow(row, buffer));
+            }
+
+            columnBatch.Dispose();
+            yield return rowBatch;
         }
     }
 }

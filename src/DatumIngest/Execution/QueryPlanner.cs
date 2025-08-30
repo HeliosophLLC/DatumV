@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using DatumIngest.Catalog;
+using DatumIngest.Catalog.Providers;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Functions;
@@ -268,12 +269,135 @@ public sealed class QueryPlanner
     /// into the CTE dictionary so the recursive member's FROM clause resolves the self-reference
     /// to the working table operator.
     /// </param>
+
+    /// <summary>
+    /// Attempts to build a fully columnar pipeline for simple queries that scan a single
+    /// table, optionally filter, project, and limit — with no joins, aggregation, window
+    /// functions, or other complex features.  Returns <c>false</c> when the query is too
+    /// complex or the provider does not support <see cref="IColumnBatchProvider"/>.
+    /// </summary>
+    /// <param name="result">The columnar plan if successful, or <c>null</c>.</param>
+    private bool TryPlanColumnar(
+        SelectStatement statement,
+        IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
+        Func<IQueryOperator, IQueryOperator>? sourceTransform,
+        IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators,
+        out IQueryOperator? result)
+    {
+        result = null;
+
+        // Guard: only simple single-table scans qualify.
+        if (statement.CommonTableExpressions is { Count: > 0 }) return false;
+        if (externalCommonTableExpressionOperators is { Count: > 0 }) return false;
+        if (statement.From is null) return false;
+        if (statement.From.Source is not TableReference tableRef) return false;
+        if (tableRef.Tablesample is not null) return false;
+        if (statement.Joins is { Count: > 0 }) return false;
+        if (statement.GroupBy is not null) return false;
+        if (HasAggregateFunction(statement.Columns, _functionRegistry)) return false;
+        if (HasWindowFunction(statement.Columns, _functionRegistry)) return false;
+        if (statement.Pivot is not null) return false;
+        if (statement.Unpivot is not null) return false;
+        if (statement.Distinct) return false;
+        if (statement.OrderBy is not null) return false;
+        if (statement.LetBindings is { Count: > 0 }) return false;
+        if (statement.Having is not null) return false;
+        if (statement.Qualify is not null) return false;
+        if (sourceTransform is not null) return false;
+        if (deferredColumns is { Count: > 0 }) return false;
+
+        // Guard: must be a concrete table (not a CTE name).
+        if (!_catalog.TryResolve(tableRef.Name, out TableDescriptor? descriptor) || descriptor is null) return false;
+
+        // Guard: provider must support columnar output.
+        ITableProvider provider = _catalog.CreateProvider(descriptor);
+        if (provider is not IColumnBatchProvider) return false;
+
+        // Projection pushdown.
+        string effectiveAlias = tableRef.Alias ?? tableRef.Name;
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns =
+            CollectAllReferencedColumns(statement);
+        IReadOnlySet<string>? requiredColumns =
+            ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
+
+        // Build columnar scan.
+        Operators.ColumnBatchScanOperator scan = new(descriptor, requiredColumns);
+
+        ProviderCapabilities capabilities = provider
+            .GetCapabilitiesAsync(descriptor, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        scan.EstimatedRowCount = capabilities.EstimatedRowCount;
+
+        if (_catalog.TryGetManifest(descriptor.Name, out Manifest.QueryResultsManifest? manifest)
+            && manifest is not null)
+        {
+            scan.EstimatedRowCount = manifest.RowCount;
+
+            Dictionary<string, Manifest.FeatureManifest> columnStatistics =
+                new(StringComparer.OrdinalIgnoreCase);
+            foreach (Manifest.FeatureManifest feature in manifest.Features)
+            {
+                columnStatistics[feature.Name] = feature;
+            }
+
+            scan.ColumnStatistics = columnStatistics;
+        }
+
+        IColumnBatchOperator columnBatchOperator = scan;
+
+        // Alias: prefix column names when an explicit alias is given.
+        if (tableRef.Alias is not null)
+        {
+            columnBatchOperator = new Operators.ColumnBatchAliasOperator(columnBatchOperator, tableRef.Alias);
+        }
+
+        // WHERE filter.
+        if (statement.Where is not null)
+        {
+            // Push the predicate to the scan as a filter hint for zone-map pruning,
+            // then also apply as a columnar filter for row-level evaluation.
+            scan.AddFilterHint(statement.Where);
+            columnBatchOperator = new Operators.ColumnBatchFilterOperator(columnBatchOperator, statement.Where);
+        }
+
+        // SELECT projection (skip if SELECT *).
+        bool hasStarOnly = statement.Columns.Count == 1
+            && statement.Columns[0] is SelectAllColumns;
+        if (!hasStarOnly)
+        {
+            columnBatchOperator = new Operators.ColumnBatchProjectOperator(columnBatchOperator, statement.Columns);
+        }
+
+        // LIMIT/OFFSET.
+        if (statement.Limit is not null)
+        {
+            columnBatchOperator = new Operators.ColumnBatchLimitOperator(
+                columnBatchOperator, statement.Limit.Value, statement.Offset ?? 0);
+        }
+
+        // Convert to IQueryOperator at the pipeline boundary.
+        result = new Operators.ColumnBatchToRowBatchAdapter(columnBatchOperator);
+        ExecutionTracer.Write("Simple query planned with fully columnar pipeline");
+        return true;
+    }
+
     private IQueryOperator PlanCore(
         SelectStatement statement,
         IReadOnlyDictionary<string, DeferredTableColumns>? deferredColumns,
         Func<IQueryOperator, IQueryOperator>? sourceTransform = null,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? externalCommonTableExpressionOperators = null)
     {
+        // Fast path: for simple queries on columnar-capable providers (no joins,
+        // no groupby, no window, no CTE, etc.), build a fully columnar pipeline
+        // that avoids per-row array allocations entirely.
+        if (TryPlanColumnar(statement, deferredColumns, sourceTransform,
+            externalCommonTableExpressionOperators, out IQueryOperator? columnarPlan)
+            && columnarPlan is not null)
+        {
+            return columnarPlan;
+        }
+
         // 0. Plan Common Table Expressions (WITH clause).
         Dictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators =
             PlanCommonTableExpressions(statement);
