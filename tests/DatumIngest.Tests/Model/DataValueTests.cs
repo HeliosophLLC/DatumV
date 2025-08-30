@@ -217,6 +217,63 @@ public class DataValueTests
     }
 
     [Fact]
+    public void UuidValueStoresGuid()
+    {
+        Guid guid = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        DataValue value = DataValue.FromUuid(guid);
+
+        Assert.Equal(DataKind.Uuid, value.Kind);
+        Assert.Equal(guid, value.AsUuid());
+    }
+
+    [Fact]
+    public void UuidEquality()
+    {
+        Guid guid = Guid.NewGuid();
+        DataValue a = DataValue.FromUuid(guid);
+        DataValue b = DataValue.FromUuid(guid);
+        DataValue c = DataValue.FromUuid(Guid.NewGuid());
+
+        Assert.Equal(a, b);
+        Assert.NotEqual(a, c);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
+    [Fact]
+    public void DateTimeWithNonZeroOffsetRoundTrips()
+    {
+        DateTimeOffset dateTime = new(2026, 4, 6, 14, 30, 0, TimeSpan.FromHours(5));
+        DataValue value = DataValue.FromDateTime(dateTime);
+
+        Assert.Equal(DataKind.DateTime, value.Kind);
+        Assert.Equal(dateTime, value.AsDateTime());
+        Assert.Equal(TimeSpan.FromHours(5), value.AsDateTime().Offset);
+    }
+
+    [Fact]
+    public void DateTimeWithNegativeOffsetRoundTrips()
+    {
+        DateTimeOffset dateTime = new(2026, 4, 6, 8, 0, 0, TimeSpan.FromHours(-8));
+        DataValue value = DataValue.FromDateTime(dateTime);
+
+        Assert.Equal(dateTime, value.AsDateTime());
+        Assert.Equal(TimeSpan.FromHours(-8), value.AsDateTime().Offset);
+    }
+
+    [Fact]
+    public void DateTimeEquality()
+    {
+        DateTimeOffset dateTime = new(2026, 4, 6, 12, 0, 0, TimeSpan.FromHours(2));
+        DataValue a = DataValue.FromDateTime(dateTime);
+        DataValue b = DataValue.FromDateTime(dateTime);
+        DataValue c = DataValue.FromDateTime(dateTime.ToUniversalTime());
+
+        Assert.Equal(a, b);
+        Assert.NotEqual(a, c);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
+    [Fact]
     public void JsonValueStoresString()
     {
         string json = "{\"key\": \"value\"}";

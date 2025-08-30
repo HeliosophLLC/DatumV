@@ -5,7 +5,7 @@ namespace DatumIngest.Model;
 /// Values 0–15 are the original type set. Values 16+ are extended numeric types
 /// added for precise integer and double-precision support.
 /// </summary>
-public enum DataKind
+public enum DataKind : byte
 {
     /// <summary>A single unsigned 8-bit integer.</summary>
     UInt8 = 0,

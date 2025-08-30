@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DatumIngest.Functions.Image;
 
 namespace DatumIngest.Model;
@@ -47,17 +48,22 @@ public readonly struct DataValue : IEquatable<DataValue>
     //   Date      → (long)value.DayNumber
     //   Time      → value.Ticks
     //   Duration  → value.Ticks
+    //   Uuid (low half)    → low 8 bytes of the 128-bit Guid
+    //   DateTime (ticks)   → DateTimeOffset.Ticks (local time)
     private readonly long _numericBits;
 
-    // Stores reference-type payloads and large value types that do not fit in 8 bytes:
+    // Second value slot for types that need more than 8 bytes of inline storage:
+    //   Uuid (high half)   → high 8 bytes of the 128-bit Guid
+    //   DateTime (offset)  → UTC offset in minutes
+    private readonly long _bits1;
+
+    // Stores reference-type payloads:
     //   String, JsonValue  → string (no extra allocation)
     //   Vector             → float[] (no extra allocation)
     //   Matrix, Tensor     → float[] (shape in _shape)
     //   UInt8Array         → byte[] (no extra allocation)
     //   Image              → byte[] or ImageHandle (no extra allocation)
     //   Array              → DataValue[] (element kind in _shape[0])
-    //   Uuid               → Guid boxed once
-    //   DateTime           → DateTimeOffset boxed once
     private readonly object? _reference;
 
     // Shape metadata:
@@ -66,11 +72,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     //   Array   → [(int)elementKind]
     private readonly int[]? _shape;
 
-    private DataValue(DataKind kind, long numericBits, object? reference, int[]? shape, bool isNull)
+    private DataValue(DataKind kind, long numericBits, object? reference, int[]? shape, bool isNull, long bits1 = 0L)
     {
         _kind = kind;
         _isNull = isNull;
         _numericBits = numericBits;
+        _bits1 = bits1;
         _reference = reference;
         _shape = shape;
     }
@@ -220,15 +227,20 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Creates a value from a date and time with UTC offset.</summary>
     public static DataValue FromDateTime(DateTimeOffset value) =>
-        new(DataKind.DateTime, numericBits: 0L, reference: value, shape: null, isNull: false);
+        new(DataKind.DateTime, numericBits: value.Ticks, reference: null, shape: null, isNull: false,
+            bits1: value.Offset.Ticks / TimeSpan.TicksPerMinute);
 
     /// <summary>Creates a value from a raw JSON string.</summary>
     public static DataValue FromJsonValue(string value) =>
         new(DataKind.JsonValue, numericBits: 0L, reference: value, shape: null, isNull: false);
 
     /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
-    public static DataValue FromUuid(Guid value) =>
-        new(DataKind.Uuid, numericBits: 0L, reference: value, shape: null, isNull: false);
+    public static DataValue FromUuid(Guid value)
+    {
+        ref long pair = ref Unsafe.As<Guid, long>(ref value);
+        return new(DataKind.Uuid, numericBits: pair, reference: null, shape: null, isNull: false,
+                   bits1: Unsafe.Add(ref pair, 1));
+    }
 
     /// <summary>Creates a boolean value.</summary>
     public static DataValue FromBoolean(bool value) =>
@@ -454,7 +466,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DateTimeOffset AsDateTime()
     {
         ThrowIfNullOrWrongKind(DataKind.DateTime);
-        return (DateTimeOffset)_reference!;
+        return new DateTimeOffset(_numericBits, new TimeSpan(_bits1 * TimeSpan.TicksPerMinute));
     }
 
     /// <summary>Returns the raw JSON string payload.</summary>
@@ -470,7 +482,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     public Guid AsUuid()
     {
         ThrowIfNullOrWrongKind(DataKind.Uuid);
-        return (Guid)_reference!;
+        Guid result = default;
+        Unsafe.As<Guid, long>(ref result) = _numericBits;
+        Unsafe.Add(ref Unsafe.As<Guid, long>(ref result), 1) = _bits1;
+        return result;
     }
 
     /// <summary>Returns the boolean payload.</summary>
@@ -620,9 +635,9 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.String or DataKind.JsonValue
                 => (string)_reference! == (string)other._reference!,
             DataKind.Uuid
-                => (Guid)_reference! == (Guid)other._reference!,
+                => _numericBits == other._numericBits && _bits1 == other._bits1,
             DataKind.DateTime
-                => (DateTimeOffset)_reference! == (DateTimeOffset)other._reference!,
+                => _numericBits == other._numericBits && _bits1 == other._bits1,
             DataKind.Vector
                 => ((float[])_reference!).AsSpan().SequenceEqual((float[])other._reference!),
             DataKind.Matrix
@@ -665,9 +680,9 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.String or DataKind.JsonValue
                 => HashCode.Combine(_kind, (string)_reference!),
             DataKind.DateTime
-                => HashCode.Combine(_kind, (DateTimeOffset)_reference!),
+                => HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.Uuid
-                => HashCode.Combine(_kind, (Guid)_reference!),
+                => HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.Vector
                 => CombineFloatArrayHash(_kind, (float[])_reference!, _shape),
             DataKind.Matrix
@@ -783,9 +798,9 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Float64 => BitConverter.Int64BitsToDouble(_numericBits).ToString("G"),
             DataKind.String => (string)_reference!,
             DataKind.Date => DateOnly.FromDayNumber((int)_numericBits).ToString("yyyy-MM-dd"),
-            DataKind.DateTime => ((DateTimeOffset)_reference!).ToString("O"),
+            DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.JsonValue => (string)_reference!,
-            DataKind.Uuid => ((Guid)_reference!).ToString("D"),
+            DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _numericBits != 0L ? "true" : "false",
             DataKind.Time => new TimeOnly(_numericBits).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(_numericBits).ToString("c"),
