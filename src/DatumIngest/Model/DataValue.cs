@@ -169,6 +169,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromString(string value) =>
         new(DataKind.String, numericBits: 0L, reference: value, shape: null, isNull: false);
 
+    /// <summary>
+    /// Creates an arena-backed string value from an offset and length within a
+    /// <see cref="StringArena"/>.  The actual bytes are not stored in this struct;
+    /// callers must resolve via <see cref="AsString(StringArena)"/>.
+    /// </summary>
+    /// <param name="offset">Byte offset into the owning <see cref="StringArena"/>.</param>
+    /// <param name="length">Byte length of the UTF-8 encoded string.</param>
+    public static DataValue FromStringSlice(int offset, int length) =>
+        new(DataKind.String, numericBits: offset, reference: null, shape: null, isNull: false, bits1: length);
+
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
     public static DataValue FromVector(float[] value) =>
         new(DataKind.Vector, numericBits: 0L, reference: value, shape: null, isNull: false);
@@ -253,6 +263,34 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from a duration (elapsed time span).</summary>
     public static DataValue FromDuration(TimeSpan value) =>
         new(DataKind.Duration, numericBits: value.Ticks, reference: null, shape: null, isNull: false);
+
+    // ───────────────────────── Arena state ─────────────────────────
+
+    /// <summary>
+    /// Whether this value stores an arena offset rather than a direct reference.
+    /// True for string/JSON values created via <see cref="FromStringSlice"/>.
+    /// </summary>
+    public bool IsArenaBacked =>
+        (_kind is DataKind.String or DataKind.JsonValue) && _reference is null && !_isNull;
+
+    /// <summary>
+    /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
+    /// into self-contained managed objects.  Non-arena values are returned unchanged.
+    /// </summary>
+    /// <param name="stringArena">Arena for string data.</param>
+    /// <param name="dataArena">Arena for float/byte blob data.</param>
+    /// <returns>A self-contained value that does not reference any arena.</returns>
+    public DataValue Materialize(StringArena stringArena, DataArena dataArena)
+    {
+        if (!IsArenaBacked) return this;
+
+        return _kind switch
+        {
+            DataKind.String => FromString(stringArena.GetString((int)_numericBits, (int)_bits1)),
+            DataKind.JsonValue => FromJsonValue(stringArena.GetString((int)_numericBits, (int)_bits1)),
+            _ => this,
+        };
+    }
 
     /// <summary>
     /// Creates a typed array value from an element kind and an array of elements.
@@ -376,7 +414,44 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsString()
     {
         ThrowIfNullOrWrongKind(DataKind.String);
+        if (_reference is null)
+        {
+            throw new InvalidOperationException(
+                "This string value is arena-backed. Use AsString(StringArena) to materialise it.");
+        }
+
         return (string)_reference!;
+    }
+
+    /// <summary>
+    /// Returns the text string payload, resolving arena-backed values from the
+    /// given <see cref="StringArena"/>.  Falls back to the stored reference for
+    /// non-arena values.
+    /// </summary>
+    /// <param name="arena">The arena that owns the UTF-8 bytes.</param>
+    /// <returns>The decoded string.</returns>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public string AsString(StringArena arena)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        if (_reference is string stored)
+        {
+            return stored;
+        }
+
+        return arena.GetString((int)_numericBits, (int)_bits1);
+    }
+
+    /// <summary>
+    /// Returns the raw UTF-8 bytes for an arena-backed string without allocating.
+    /// </summary>
+    /// <param name="arena">The arena that owns the UTF-8 bytes.</param>
+    /// <returns>A span of UTF-8 bytes.  Valid only while the arena is alive.</returns>
+    /// <exception cref="InvalidOperationException">Wrong kind, null, or not arena-backed.</exception>
+    public ReadOnlySpan<byte> GetArenaStringSpan(StringArena arena)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        return arena.GetSpan((int)_numericBits, (int)_bits1);
     }
 
     /// <summary>Returns the vector (rank-1) float array payload.</summary>
@@ -633,7 +708,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
             // Reference types:
             DataKind.String or DataKind.JsonValue
-                => (string)_reference! == (string)other._reference!,
+                => CompareStrings(in this, in other),
             DataKind.Uuid
                 => _numericBits == other._numericBits && _bits1 == other._bits1,
             DataKind.DateTime
@@ -678,7 +753,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
             // Reference types:
             DataKind.String or DataKind.JsonValue
-                => HashCode.Combine(_kind, (string)_reference!),
+                => _reference is string s ? HashCode.Combine(_kind, s) : HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.DateTime
                 => HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.Uuid
@@ -706,6 +781,33 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static bool operator !=(DataValue left, DataValue right) => !left.Equals(right);
 
     // ───────────────────────── Helpers ─────────────────────────
+
+    /// <summary>
+    /// Compares two string or JSON values, handling the case where one or both
+    /// are arena-backed (no <c>_reference</c>).  Arena-backed values from the
+    /// same batch share offset/length identity; cross-arena comparison requires
+    /// materialisation before calling <see cref="Equals(DataValue)"/>.
+    /// </summary>
+    private static bool CompareStrings(in DataValue left, in DataValue right)
+    {
+        bool leftArena = left._reference is null;
+        bool rightArena = right._reference is null;
+
+        if (!leftArena && !rightArena)
+        {
+            return (string)left._reference! == (string)right._reference!;
+        }
+
+        if (leftArena && rightArena)
+        {
+            // Same arena, same offset+length → same content.
+            return left._numericBits == right._numericBits && left._bits1 == right._bits1;
+        }
+
+        // Mixed arena/non-arena: cannot compare without arena context.
+        // Materialise before comparing.
+        return false;
+    }
 
     private void ThrowIfNullOrWrongKind(DataKind expected)
     {
@@ -796,10 +898,10 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Int64 => _numericBits.ToString(),
             DataKind.UInt64 => unchecked((ulong)_numericBits).ToString(),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(_numericBits).ToString("G"),
-            DataKind.String => (string)_reference!,
+            DataKind.String => _reference is string s ? s : $"String[arena@{_numericBits}+{_bits1}]",
             DataKind.Date => DateOnly.FromDayNumber((int)_numericBits).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
-            DataKind.JsonValue => (string)_reference!,
+            DataKind.JsonValue => _reference is string j ? j : $"JsonValue[arena@{_numericBits}+{_bits1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _numericBits != 0L ? "true" : "false",
             DataKind.Time => new TimeOnly(_numericBits).ToString("HH:mm:ss.FFFFFFF"),
