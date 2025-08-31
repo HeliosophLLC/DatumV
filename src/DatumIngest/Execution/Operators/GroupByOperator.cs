@@ -281,13 +281,22 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         bool useSingleKey = _groupByExpressions.Count == 1;
         bool isGlobalAggregation = _groupByExpressions.Count == 0;
 
+        // Estimate the number of distinct groups so we can pre-size the hash maps
+        // and avoid repeated LOH-crossing doublings that drive Gen2 GC pressure.
+        // The source row count is an upper bound; true cardinality is usually lower
+        // but we accept minor over-allocation to eliminate resize-induced Gen2 deaths.
+        long? estimatedSourceRows = isGlobalAggregation ? null : GetEstimatedSourceRowCount();
+        int initialCapacity = estimatedSourceRows.HasValue
+            ? (int)Math.Min(estimatedSourceRows.Value, int.MaxValue / 2)
+            : 16;
+
         // Custom open-addressing hash maps enable Sse.Prefetch0 hints that
         // hide L3 miss latency when the number of distinct groups far exceeds
         // L3 cache capacity (e.g. 6M groups × ~24-byte entry ≫ 19MB L3).
         DataValueHashMap<GroupState>? singleKeyGroups =
-            useSingleKey ? new() : null;
+            useSingleKey ? new(initialCapacity) : null;
         CompositeKeyHashMap<GroupState>? compositeKeyGroups =
-            !useSingleKey && !isGlobalAggregation ? new() : null;
+            !useSingleKey && !isGlobalAggregation ? new(initialCapacity) : null;
 
         // For global aggregation (no GROUP BY), use a single group.
         GroupState? globalGroup = isGlobalAggregation ? CreateGroupState() : null;
@@ -773,6 +782,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     break;
                 case FilterOperator filter:
                     current = filter.Source;
+                    break;
+                case JoinOperator join:
+                    // The probe (left) side determines the output row count for
+                    // INNER/LEFT joins. Use it as a conservative lower bound.
+                    current = join.Left;
+                    break;
+                case ProjectOperator project:
+                    current = project.Source;
                     break;
                 default:
                     return null;
