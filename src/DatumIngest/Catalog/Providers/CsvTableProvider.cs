@@ -48,15 +48,16 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
     private const int DefaultBatchSize = 1024;
 
     /// <inheritdoc />
-    public async Task<Schema> GetSchemaAsync(
+    public Task<Schema> GetSchemaAsync(
         TableDescriptor descriptor,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         char delimiter = GetDelimiter(descriptor);
         bool? headerOverride = GetHeaderOverride(descriptor);
 
         using StreamReader reader = new(CompressionStreamFactory.OpenRead(descriptor));
-        string? firstLine = await reader.ReadLineAsync(cancellationToken);
+        string? firstLine = reader.ReadLine();
         if (firstLine is null)
         {
             throw new InvalidOperationException($"CSV file '{descriptor.FilePath}' is empty.");
@@ -69,7 +70,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
         int sampledRows = 0;
         while (sampledRows < 100)
         {
-            string? line = await reader.ReadLineAsync(cancellationToken);
+            string? line = reader.ReadLine();
             if (line is null)
             {
                 break;
@@ -328,7 +329,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             columns.Add(new ColumnInfo(headers[columnIndex].Trim(), kinds[columnIndex], nullable: true));
         }
 
-        return new Schema(columns);
+        return Task.FromResult(new Schema(columns));
     }
 
     /// <inheritdoc />

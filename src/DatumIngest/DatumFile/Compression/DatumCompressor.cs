@@ -69,7 +69,21 @@ public static class DatumCompressor
     {
         Compressor compressor = (_threadCompressor ??= new Compressor(level));
         compressor.Level = level;
-        return compressor.Wrap(source).ToArray();
+
+        int bound = Compressor.GetCompressBound(source.Length);
+        byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(bound);
+
+        try
+        {
+            int compressedLength = compressor.Wrap(source, rentedBuffer);
+            byte[] result = new byte[compressedLength];
+            Buffer.BlockCopy(rentedBuffer, 0, result, 0, compressedLength);
+            return result;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rentedBuffer);
+        }
     }
 
     private static byte[] DecompressZstd(ReadOnlySpan<byte> source, int uncompressedLength)

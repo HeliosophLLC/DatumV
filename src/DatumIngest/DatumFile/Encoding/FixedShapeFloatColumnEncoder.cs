@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 
@@ -34,52 +35,63 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
 
         // Determine elements-per-row from the descriptor or from the first non-null value.
         int elementsPerRow = ResolveElementsPerRow(values, descriptor);
+        int totalFloats = rowCount * elementsPerRow;
+        int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
+        int shuffledLength = totalFloats * sizeof(float);
+        int rawLength = bitmapLength + shuffledLength;
 
-        float[] floatData = new float[rowCount * elementsPerRow];
-        // Pre-fill with NaN so null rows are already correct.
-        floatData.AsSpan().Fill(float.NaN);
+        float[] floatData = ArrayPool<float>.Shared.Rent(totalFloats);
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-        float minimum = float.MaxValue;
-        float maximum = float.MinValue;
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
+            // Pre-fill with NaN so null rows are already correct.
+            floatData.AsSpan(0, totalFloats).Fill(float.NaN);
 
-            if (value.IsNull)
+            float minimum = float.MaxValue;
+            float maximum = float.MinValue;
+
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                nullCount++;
-                continue;
-            }
+                DataValue value = values[rowIndex];
 
-            ReadOnlySpan<float> elements = ExtractElements(value);
-            Span<float> destination = floatData.AsSpan(rowIndex * elementsPerRow, elementsPerRow);
-            elements.CopyTo(destination);
-
-            foreach (float element in elements)
-            {
-                if (!float.IsNaN(element))
+                if (value.IsNull)
                 {
-                    if (element < minimum) minimum = element;
-                    if (element > maximum) maximum = element;
+                    nullBitmap.SetNull(rowIndex);
+                    nullCount++;
+                    continue;
+                }
+
+                ReadOnlySpan<float> elements = ExtractElements(value);
+                Span<float> destination = floatData.AsSpan(rowIndex * elementsPerRow, elementsPerRow);
+                elements.CopyTo(destination);
+
+                foreach (float element in elements)
+                {
+                    if (!float.IsNaN(element))
+                    {
+                        if (element < minimum) minimum = element;
+                        if (element > maximum) maximum = element;
+                    }
                 }
             }
+
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, minimum, maximum);
+
+            Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
+            FloatByteShuffle.Shuffle(
+                floatData.AsSpan(0, totalFloats),
+                raw.AsSpan(bitmapLength, shuffledLength));
+
+            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+            return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat32, DatumCompression.Zstd, rawLength, zoneMap);
         }
-
-        DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, minimum, maximum);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        byte[] shuffledFloats = new byte[floatData.Length * sizeof(float)];
-        FloatByteShuffle.Shuffle(floatData, shuffledFloats);
-
-        byte[] raw = new byte[bitmapBytes.Length + shuffledFloats.Length];
-        bitmapBytes.CopyTo(raw, 0);
-        shuffledFloats.CopyTo(raw, bitmapBytes.Length);
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat32, DatumCompression.Zstd, raw.Length, zoneMap);
+        finally
+        {
+            ArrayPool<float>.Shared.Return(floatData);
+            ArrayPool<byte>.Shared.Return(raw);
+        }
     }
 
     private static int ResolveElementsPerRow(IReadOnlyList<DataValue> values, DatumColumnDescriptor descriptor)

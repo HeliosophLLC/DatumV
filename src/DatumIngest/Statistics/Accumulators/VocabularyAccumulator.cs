@@ -18,6 +18,13 @@ public sealed class VocabularyAccumulator : IStatisticAccumulator
     /// <summary>Default maximum number of distinct values to collect.</summary>
     public const int DefaultMaxDistinctValues = 10_000_000;
 
+    /// <summary>
+    /// Initial capacity for numeric hash sets. Sized to keep the first allocation under the
+    /// Large Object Heap threshold (~85 KB) while skipping the early resize chain that would
+    /// otherwise produce many short-lived intermediate arrays.
+    /// </summary>
+    private const int NumericInitialCapacity = 4_096;
+
     private readonly int _maxDistinctValues;
     private readonly DataKind _kind;
     private readonly HashSet<string>? _stringValues;
@@ -48,13 +55,13 @@ public sealed class VocabularyAccumulator : IStatisticAccumulator
 
         if (kind is DataKind.Int64 or DataKind.UInt64 or DataKind.Float64)
         {
-            _wideNumericValues = new();
+            _wideNumericValues = new(NumericInitialCapacity);
         }
         else if (kind is DataKind.Float32 or DataKind.UInt8
             or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32)
         {
-            _numericValues = new();
+            _numericValues = new(NumericInitialCapacity);
         }
         else
         {

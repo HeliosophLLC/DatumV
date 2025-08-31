@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
@@ -28,71 +29,72 @@ internal sealed class DateTimeColumnEncoder : DatumColumnEncoder
         DatumEncoderContext context)
     {
         int rowCount = values.Count;
+        int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
+        int tickDeltasSize = rowCount * 8;
+        int tzOffsetsSize = rowCount * 2;
+        // bitmap | baseline(8) | tickDeltas[N](8 each) | tzOffsets[N](2 each)
+        int rawLength = bitmapLength + 8 + tickDeltasSize + tzOffsetsSize;
+
         DatumNullBitmap nullBitmap = new(rowCount);
-        long[] tickDeltas = new long[rowCount];
-        short[] tzOffsets = new short[rowCount];
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-        long baseline = 0;
-        bool baselineSet = false;
-        long minimumTick = long.MaxValue;
-        long maximumTick = long.MinValue;
-        uint nullCount = 0;
-
-        foreach (DataValue value in values)
+        try
         {
-            if (!value.IsNull)
+            int deltasOffset = bitmapLength + 8;
+            int tzOffset = deltasOffset + tickDeltasSize;
+
+            // Zero the deltas and tz regions; null rows must store zero.
+            Array.Clear(raw, deltasOffset, tickDeltasSize + tzOffsetsSize);
+
+            long baseline = 0;
+            bool baselineSet = false;
+            long minimumTick = long.MaxValue;
+            long maximumTick = long.MinValue;
+            uint nullCount = 0;
+
+            foreach (DataValue value in values)
             {
-                baseline = value.AsDateTime().Ticks;
-                baselineSet = true;
-                break;
+                if (!value.IsNull)
+                {
+                    baseline = value.AsDateTime().Ticks;
+                    baselineSet = true;
+                    break;
+                }
             }
-        }
 
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
-        {
-            DataValue value = values[rowIndex];
-
-            if (value.IsNull)
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                tickDeltas[rowIndex] = 0;
-                tzOffsets[rowIndex] = 0;
-                nullCount++;
+                DataValue value = values[rowIndex];
+
+                if (value.IsNull)
+                {
+                    nullBitmap.SetNull(rowIndex);
+                    nullCount++;
+                }
+                else
+                {
+                    DateTimeOffset dto = value.AsDateTime();
+                    long delta = dto.Ticks - baseline;
+                    BinaryPrimitives.WriteInt64LittleEndian(raw.AsSpan(deltasOffset + rowIndex * 8), delta);
+                    BinaryPrimitives.WriteInt16LittleEndian(raw.AsSpan(tzOffset + rowIndex * 2), (short)dto.Offset.TotalMinutes);
+                    if (delta < minimumTick) minimumTick = delta;
+                    if (delta > maximumTick) maximumTick = delta;
+                }
             }
-            else
-            {
-                DateTimeOffset dto = value.AsDateTime();
-                long delta = dto.Ticks - baseline;
-                tickDeltas[rowIndex] = delta;
-                tzOffsets[rowIndex] = (short)dto.Offset.TotalMinutes;
-                if (delta < minimumTick) minimumTick = delta;
-                if (delta > maximumTick) maximumTick = delta;
-            }
+
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, baseline, minimumTick, maximumTick, baselineSet);
+
+            Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
+            BinaryPrimitives.WriteInt64LittleEndian(raw.AsSpan(bitmapLength), baseline);
+
+            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+            return new DatumEncodedPage(compressed, DatumEncoding.DeltaInt64, DatumCompression.Zstd, rawLength, zoneMap);
         }
-
-        DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, baseline, minimumTick, maximumTick, tzOffsets, baselineSet);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        // baseline(8) + tickDeltas[N](8 each) + tzOffsets[N](2 each)
-        byte[] raw = new byte[bitmapBytes.Length + 8 + rowCount * 8 + rowCount * 2];
-        bitmapBytes.CopyTo(raw, 0);
-        int writeOffset = bitmapBytes.Length;
-        BinaryPrimitives.WriteInt64LittleEndian(raw.AsSpan(writeOffset), baseline);
-        writeOffset += 8;
-        foreach (long delta in tickDeltas)
+        finally
         {
-            BinaryPrimitives.WriteInt64LittleEndian(raw.AsSpan(writeOffset), delta);
-            writeOffset += 8;
+            ArrayPool<byte>.Shared.Return(raw);
         }
-        foreach (short tz in tzOffsets)
-        {
-            BinaryPrimitives.WriteInt16LittleEndian(raw.AsSpan(writeOffset), tz);
-            writeOffset += 2;
-        }
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.DeltaInt64, DatumCompression.Zstd, raw.Length, zoneMap);
     }
 
     private static DatumZoneMap BuildZoneMap(
@@ -101,7 +103,6 @@ internal sealed class DateTimeColumnEncoder : DatumColumnEncoder
         long baseline,
         long minimumTick,
         long maximumTick,
-        short[] tzOffsets,
         bool baselineSet)
     {
         if (!baselineSet || nullCount == (uint)rowCount)

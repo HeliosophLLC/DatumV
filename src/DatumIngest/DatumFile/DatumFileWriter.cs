@@ -202,14 +202,21 @@ public sealed class DatumFileWriter : IDisposable
             RowGroupIndex = _rowGroupDescriptors.Count,
         };
 
-        DatumColumnChunkDescriptor[] chunks = new DatumColumnChunkDescriptor[columnCount];
-
-        for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
+        // Encode all columns in parallel — encoders are stateless singletons and
+        // compression uses [ThreadStatic] pools, so concurrent Encode calls are safe.
+        DatumEncodedPage[] pages = new DatumEncodedPage[columnCount];
+        Parallel.For(0, columnCount, columnIndex =>
         {
             DatumColumnDescriptor descriptor = _descriptors[columnIndex];
             DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(descriptor);
-            DatumEncodedPage page = encoder.Encode(_columnBuffers[columnIndex], descriptor, context);
+            pages[columnIndex] = encoder.Encode(_columnBuffers[columnIndex], descriptor, context);
+        });
 
+        // Write encoded pages sequentially — stream offsets must be ordered.
+        DatumColumnChunkDescriptor[] chunks = new DatumColumnChunkDescriptor[columnCount];
+        for (int columnIndex = 0; columnIndex < columnCount; columnIndex++)
+        {
+            DatumEncodedPage page = pages[columnIndex];
             long pageOffset = _stream.Position;
             _stream.Write(page.Payload);
 

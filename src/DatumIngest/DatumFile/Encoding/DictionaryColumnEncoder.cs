@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile.Compression;
@@ -46,72 +47,89 @@ internal sealed class DictionaryColumnEncoder : DatumColumnEncoder
         DatumNullBitmap nullBitmap = new(rowCount);
         uint nullCount = 0;
 
-        // Build the dictionary in insertion order.
-        Dictionary<DataValue, int> codeMap = new(rowCount);
+        // Build the dictionary in insertion order. Capacity matches the max dictionary
+        // size rather than rowCount — this encoder is only used for low-cardinality columns.
+        Dictionary<DataValue, int> codeMap = new(MaxDictionarySize);
         List<DataValue> dictionary = new();
-        int[] codes = new int[rowCount];
+        int[] codes = ArrayPool<int>.Shared.Rent(rowCount);
 
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
-
-            if (value.IsNull)
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                codes[rowIndex] = 0; // null sentinel code; ignored by decoder due to null bitmap
-                nullCount++;
-                continue;
+                DataValue value = values[rowIndex];
+
+                if (value.IsNull)
+                {
+                    nullBitmap.SetNull(rowIndex);
+                    codes[rowIndex] = 0; // null sentinel code; ignored by decoder due to null bitmap
+                    nullCount++;
+                    continue;
+                }
+
+                if (!codeMap.TryGetValue(value, out int code))
+                {
+                    code = dictionary.Count + 1; // codes start at 1; 0 is the null sentinel
+                    codeMap[value] = code;
+                    dictionary.Add(value);
+                }
+
+                codes[rowIndex] = code;
             }
 
-            if (!codeMap.TryGetValue(value, out int code))
-            {
-                code = dictionary.Count + 1; // codes start at 1; 0 is the null sentinel
-                codeMap[value] = code;
-                dictionary.Add(value);
-            }
+            DatumZoneMap zoneMap = new(nullCount, null, null);
 
-            codes[rowIndex] = code;
+            // Serialize using BinaryWriter for the DataValue entries.
+            using MemoryStream dictStream = new();
+            using BinaryWriter dictWriter = new(dictStream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+            // Write dictionary: entry count + each DataValue
+            dictWriter.Write((ushort)dictionary.Count);
+            foreach (DataValue entry in dictionary)
+            {
+                IndexWriter.WriteDataValue(dictWriter, entry);
+            }
+            dictWriter.Flush();
+            byte[] dictBytes = dictStream.ToArray();
+
+            byte[] bitmapBytes = nullBitmap.ToBytes();
+            bool wideCode = dictionary.Count > 255;
+            int codesSize = rowCount * (wideCode ? 2 : 1);
+
+            int rawLength = bitmapBytes.Length + dictBytes.Length + codesSize;
+            byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
+
+            try
+            {
+                Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
+                Buffer.BlockCopy(dictBytes, 0, raw, bitmapBytes.Length, dictBytes.Length);
+
+                int codeWrite = bitmapBytes.Length + dictBytes.Length;
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    if (wideCode)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(raw.AsSpan(codeWrite), (ushort)codes[rowIndex]);
+                        codeWrite += 2;
+                    }
+                    else
+                    {
+                        raw[codeWrite++] = (byte)codes[rowIndex];
+                    }
+                }
+
+                byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+                return new DatumEncodedPage(compressed, DatumEncoding.DictionaryRLE, DatumCompression.Zstd, rawLength, zoneMap);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(raw);
+            }
         }
-
-        DatumZoneMap zoneMap = new(nullCount, null, null);
-
-        // Serialize using BinaryWriter for the DataValue entries.
-        using MemoryStream dictStream = new();
-        using BinaryWriter dictWriter = new(dictStream, System.Text.Encoding.UTF8, leaveOpen: true);
-
-        // Write dictionary: entry count + each DataValue
-        dictWriter.Write((ushort)dictionary.Count);
-        foreach (DataValue entry in dictionary)
+        finally
         {
-            IndexWriter.WriteDataValue(dictWriter, entry);
+            ArrayPool<int>.Shared.Return(codes);
         }
-        dictWriter.Flush();
-        byte[] dictBytes = dictStream.ToArray();
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        bool wideCode = dictionary.Count > 255;
-        int codesSize = rowCount * (wideCode ? 2 : 1);
-
-        byte[] raw = new byte[bitmapBytes.Length + dictBytes.Length + codesSize];
-        bitmapBytes.CopyTo(raw, 0);
-        dictBytes.CopyTo(raw, bitmapBytes.Length);
-
-        int codeWrite = bitmapBytes.Length + dictBytes.Length;
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
-        {
-            if (wideCode)
-            {
-                BinaryPrimitives.WriteUInt16LittleEndian(raw.AsSpan(codeWrite), (ushort)codes[rowIndex]);
-                codeWrite += 2;
-            }
-            else
-            {
-                raw[codeWrite++] = (byte)codes[rowIndex];
-            }
-        }
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.DictionaryRLE, DatumCompression.Zstd, raw.Length, zoneMap);
     }
 }

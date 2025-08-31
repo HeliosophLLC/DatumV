@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
@@ -25,38 +26,47 @@ internal sealed class UuidColumnEncoder : DatumColumnEncoder
         DatumEncoderContext context)
     {
         int rowCount = values.Count;
+        int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
+        int guidDataLength = rowCount * GuidByteSize;
+        int rawLength = bitmapLength + guidDataLength;
+
         DatumNullBitmap nullBitmap = new(rowCount);
-        byte[] guidBytes = new byte[rowCount * GuidByteSize];
-        uint nullCount = 0;
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
+            // Zero the GUID region; null rows must store 16 zero bytes.
+            Array.Clear(raw, bitmapLength, guidDataLength);
+            uint nullCount = 0;
 
-            if (value.IsNull)
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                nullCount++;
-                // Destination bytes are already zeroed by array initialisation.
+                DataValue value = values[rowIndex];
+
+                if (value.IsNull)
+                {
+                    nullBitmap.SetNull(rowIndex);
+                    nullCount++;
+                }
+                else
+                {
+                    Guid guid = value.AsUuid();
+                    MemoryMarshal.TryWrite(raw.AsSpan(bitmapLength + rowIndex * GuidByteSize), in guid);
+                }
             }
-            else
-            {
-                Guid guid = value.AsUuid();
-                // MemoryMarshal.TryWrite gives a direct 16-byte copy without heap allocation.
-                MemoryMarshal.TryWrite(guidBytes.AsSpan(rowIndex * GuidByteSize), in guid);
-            }
+
+            // UUIDs are effectively random — zone map min/max would have no predicate pushdown value.
+            DatumZoneMap zoneMap = new(nullCount, null, null);
+
+            Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
+
+            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+            return new DatumEncodedPage(compressed, DatumEncoding.Raw, DatumCompression.Zstd, rawLength, zoneMap);
         }
-
-        // UUIDs are effectively random — zone map min/max would have no predicate pushdown value.
-        DatumZoneMap zoneMap = new(nullCount, null, null);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        byte[] raw = new byte[bitmapBytes.Length + guidBytes.Length];
-        bitmapBytes.CopyTo(raw, 0);
-        guidBytes.CopyTo(raw, bitmapBytes.Length);
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.Raw, DatumCompression.Zstd, raw.Length, zoneMap);
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(raw);
+        }
     }
 }

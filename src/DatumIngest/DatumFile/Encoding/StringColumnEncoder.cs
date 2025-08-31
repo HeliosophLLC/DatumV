@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile.Compression;
@@ -31,64 +32,78 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
     {
         int rowCount = values.Count;
         DatumNullBitmap nullBitmap = new(rowCount);
-        byte[][] encoded = new byte[rowCount][];
+        byte[][] encoded = ArrayPool<byte[]>.Shared.Rent(rowCount);
         uint nullCount = 0;
         int totalPoolBytes = 0;
 
         bool isJson = descriptor.Kind == DataKind.JsonValue;
 
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            {
+                DataValue value = values[rowIndex];
 
-            if (value.IsNull)
-            {
-                nullBitmap.SetNull(rowIndex);
-                encoded[rowIndex] = [];
-                nullCount++;
+                if (value.IsNull)
+                {
+                    nullBitmap.SetNull(rowIndex);
+                    encoded[rowIndex] = [];
+                    nullCount++;
+                }
+                else
+                {
+                    string text = isJson ? value.AsJsonValue() : value.AsString();
+                    encoded[rowIndex] = System.Text.Encoding.UTF8.GetBytes(text);
+                    totalPoolBytes += encoded[rowIndex].Length;
+                }
             }
-            else
+
+            // Zone map for strings: min and max by ordinal comparison.
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, values, isJson);
+
+            byte[] bitmapBytes = nullBitmap.ToBytes();
+            int offsetsSize = (rowCount + 1) * 4;
+            int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;
+            byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
+
+            try
             {
-                string text = isJson ? value.AsJsonValue() : value.AsString();
-                encoded[rowIndex] = System.Text.Encoding.UTF8.GetBytes(text);
-                totalPoolBytes += encoded[rowIndex].Length;
+                Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
+
+                int offsetWrite = bitmapBytes.Length;
+                int poolWrite = bitmapBytes.Length + offsetsSize;
+                uint runningOffset = 0;
+
+                BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
+                offsetWrite += 4;
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    byte[] rowBytes = encoded[rowIndex];
+                    runningOffset += (uint)rowBytes.Length;
+                    BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
+                    offsetWrite += 4;
+
+                    if (rowBytes.Length > 0)
+                    {
+                        Buffer.BlockCopy(rowBytes, 0, raw, poolWrite, rowBytes.Length);
+                        poolWrite += rowBytes.Length;
+                    }
+                }
+
+                byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+                return new DatumEncodedPage(compressed, DatumEncoding.VariableBytes, DatumCompression.Zstd, rawLength, zoneMap);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(raw);
             }
         }
-
-        // Zone map for strings: min and max by ordinal comparison.
-        DatumZoneMap zoneMap = BuildZoneMap(nullCount, values, isJson);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        // offsets: (N+1) * 4 bytes
-        // pool: totalPoolBytes bytes
-        int offsetsSize = (rowCount + 1) * 4;
-        byte[] raw = new byte[bitmapBytes.Length + offsetsSize + totalPoolBytes];
-        bitmapBytes.CopyTo(raw, 0);
-
-        int offsetWrite = bitmapBytes.Length;
-        int poolWrite = bitmapBytes.Length + offsetsSize;
-        uint runningOffset = 0;
-
-        BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-        offsetWrite += 4;
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        finally
         {
-            byte[] rowBytes = encoded[rowIndex];
-            runningOffset += (uint)rowBytes.Length;
-            BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-            offsetWrite += 4;
-
-            if (rowBytes.Length > 0)
-            {
-                rowBytes.CopyTo(raw, poolWrite);
-                poolWrite += rowBytes.Length;
-            }
+            ArrayPool<byte[]>.Shared.Return(encoded, clearArray: true);
         }
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.VariableBytes, DatumCompression.Zstd, raw.Length, zoneMap);
     }
 
     private static DatumZoneMap BuildZoneMap(uint nullCount, IReadOnlyList<DataValue> values, bool isJson)

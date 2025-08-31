@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
@@ -28,64 +29,68 @@ internal sealed class DateColumnEncoder : DatumColumnEncoder
         DatumEncoderContext context)
     {
         int rowCount = values.Count;
+        int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
+        // bitmap | baseline(4) | deltas[N](4 each)
+        int rawLength = bitmapLength + 4 + rowCount * 4;
+
         DatumNullBitmap nullBitmap = new(rowCount);
-        int[] deltas = new int[rowCount];
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-        int baseline = 0;
-        bool baselineSet = false;
-        int minimum = int.MaxValue;
-        int maximum = int.MinValue;
-        uint nullCount = 0;
-
-        // First pass: determine baseline from first non-null row.
-        foreach (DataValue value in values)
+        try
         {
-            if (!value.IsNull)
-            {
-                baseline = value.AsDate().DayNumber;
-                baselineSet = true;
-                break;
-            }
-        }
+            int baseline = 0;
+            bool baselineSet = false;
+            int minimum = int.MaxValue;
+            int maximum = int.MinValue;
+            uint nullCount = 0;
+            int deltaOffset = bitmapLength + 4;
 
-        // Second pass: compute deltas.
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            // Zero the delta region; null rows must store zero.
+            Array.Clear(raw, deltaOffset, rowCount * 4);
+
+            // First pass: determine baseline from first non-null row.
+            foreach (DataValue value in values)
+            {
+                if (!value.IsNull)
+                {
+                    baseline = value.AsDate().DayNumber;
+                    baselineSet = true;
+                    break;
+                }
+            }
+
+            // Second pass: write deltas directly into raw.
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            {
+                DataValue value = values[rowIndex];
+
+                if (value.IsNull)
+                {
+                    nullBitmap.SetNull(rowIndex);
+                    nullCount++;
+                }
+                else
+                {
+                    int delta = value.AsDate().DayNumber - baseline;
+                    BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(deltaOffset + rowIndex * 4), delta);
+                    if (delta < minimum) minimum = delta;
+                    if (delta > maximum) maximum = delta;
+                }
+            }
+
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, baseline, minimum, maximum, baselineSet);
+
+            Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
+            BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(bitmapLength), baseline);
+
+            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+            return new DatumEncodedPage(compressed, DatumEncoding.DeltaInt32, DatumCompression.Zstd, rawLength, zoneMap);
+        }
+        finally
         {
-            DataValue value = values[rowIndex];
-
-            if (value.IsNull)
-            {
-                nullBitmap.SetNull(rowIndex);
-                deltas[rowIndex] = 0;
-                nullCount++;
-            }
-            else
-            {
-                int delta = value.AsDate().DayNumber - baseline;
-                deltas[rowIndex] = delta;
-                if (delta < minimum) minimum = delta;
-                if (delta > maximum) maximum = delta;
-            }
+            ArrayPool<byte>.Shared.Return(raw);
         }
-
-        DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, baseline, minimum, maximum, baselineSet);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        // baseline(4) + deltas[N](4 each)
-        byte[] raw = new byte[bitmapBytes.Length + 4 + rowCount * 4];
-        bitmapBytes.CopyTo(raw, 0);
-        int writeOffset = bitmapBytes.Length;
-        BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(writeOffset), baseline);
-        writeOffset += 4;
-        foreach (int delta in deltas)
-        {
-            BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(writeOffset), delta);
-            writeOffset += 4;
-        }
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.DeltaInt32, DatumCompression.Zstd, raw.Length, zoneMap);
     }
 
     private static DatumZoneMap BuildZoneMap(uint nullCount, int rowCount, int baseline, int minimum, int maximum, bool baselineSet)

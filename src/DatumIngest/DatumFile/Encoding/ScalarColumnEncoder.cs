@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 
@@ -23,48 +24,59 @@ internal sealed class ScalarColumnEncoder : DatumColumnEncoder
         DatumEncoderContext context)
     {
         int rowCount = values.Count;
+        int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
+        int shuffledLength = rowCount * sizeof(float);
+        int rawLength = bitmapLength + shuffledLength;
+
         DatumNullBitmap nullBitmap = new(rowCount);
-        float[] floatData = new float[rowCount];
+        float[] floatData = ArrayPool<float>.Shared.Rent(rowCount);
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-        float minimum = float.MaxValue;
-        float maximum = float.MinValue;
-        uint nullCount = 0;
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
+            float minimum = float.MaxValue;
+            float maximum = float.MinValue;
+            uint nullCount = 0;
 
-            if (value.IsNull)
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                floatData[rowIndex] = float.NaN;
-                nullCount++;
-            }
-            else
-            {
-                float scalar = value.AsFloat32();
-                floatData[rowIndex] = scalar;
+                DataValue value = values[rowIndex];
 
-                // Skip NaN values in min/max so that intentionally-stored NaN user data
-                // does not corrupt the zone map. Null rows are already excluded via IsNull.
-                if (!float.IsNaN(scalar))
+                if (value.IsNull)
                 {
-                    if (scalar < minimum) minimum = scalar;
-                    if (scalar > maximum) maximum = scalar;
+                    nullBitmap.SetNull(rowIndex);
+                    floatData[rowIndex] = float.NaN;
+                    nullCount++;
+                }
+                else
+                {
+                    float scalar = value.AsFloat32();
+                    floatData[rowIndex] = scalar;
+
+                    // Skip NaN values in min/max so that intentionally-stored NaN user data
+                    // does not corrupt the zone map. Null rows are already excluded via IsNull.
+                    if (!float.IsNaN(scalar))
+                    {
+                        if (scalar < minimum) minimum = scalar;
+                        if (scalar > maximum) maximum = scalar;
+                    }
                 }
             }
+
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, minimum, maximum);
+
+            Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
+            FloatByteShuffle.Shuffle(floatData.AsSpan(0, rowCount), raw.AsSpan(bitmapLength, shuffledLength));
+
+            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+            return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat32, DatumCompression.Zstd, rawLength, zoneMap);
         }
-
-        DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, minimum, maximum);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        byte[] shuffledFloats = new byte[rowCount * sizeof(float)];
-        FloatByteShuffle.Shuffle(floatData, shuffledFloats);
-
-        byte[] raw = Combine(bitmapBytes, shuffledFloats);
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat32, DatumCompression.Zstd, raw.Length, zoneMap);
+        finally
+        {
+            ArrayPool<float>.Shared.Return(floatData);
+            ArrayPool<byte>.Shared.Return(raw);
+        }
     }
 
     private static DatumZoneMap BuildZoneMap(uint nullCount, int rowCount, float minimum, float maximum)
@@ -82,13 +94,5 @@ internal sealed class ScalarColumnEncoder : DatumColumnEncoder
         }
 
         return new DatumZoneMap(nullCount, DataValue.FromFloat32(minimum), DataValue.FromFloat32(maximum));
-    }
-
-    private static byte[] Combine(byte[] first, byte[] second)
-    {
-        byte[] combined = new byte[first.Length + second.Length];
-        first.CopyTo(combined, 0);
-        second.CopyTo(combined, first.Length);
-        return combined;
     }
 }

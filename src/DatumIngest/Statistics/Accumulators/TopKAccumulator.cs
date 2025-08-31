@@ -14,6 +14,12 @@ using DatumIngest.Model;
 /// </remarks>
 public sealed class TopKAccumulator : IStatisticAccumulator
 {
+    /// <summary>
+    /// Initial capacity for numeric frequency dictionaries. Sized to keep the first
+    /// allocation under the Large Object Heap threshold while skipping the early resize chain.
+    /// </summary>
+    private const int NumericInitialCapacity = 4_096;
+
     private readonly int _k;
     private readonly DataKind _kind;
     private readonly Dictionary<string, long>? _stringFrequencies;
@@ -46,13 +52,13 @@ public sealed class TopKAccumulator : IStatisticAccumulator
 
         if (kind is DataKind.Int64 or DataKind.UInt64 or DataKind.Float64)
         {
-            _wideNumericFrequencies = new();
+            _wideNumericFrequencies = new(NumericInitialCapacity);
         }
         else if (kind is DataKind.Float32 or DataKind.UInt8
             or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32)
         {
-            _numericFrequencies = new();
+            _numericFrequencies = new(NumericInitialCapacity);
         }
         else
         {

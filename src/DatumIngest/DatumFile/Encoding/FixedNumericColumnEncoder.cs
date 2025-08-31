@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
@@ -23,48 +24,60 @@ internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
     {
         int rowCount = values.Count;
         int bytesPerElement = BytesPerElement(descriptor.Kind);
+        int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
+        int dataLength = rowCount * bytesPerElement;
+        int rawLength = bitmapLength + dataLength;
+
         DatumNullBitmap nullBitmap = new(rowCount);
-        byte[] data = new byte[rowCount * bytesPerElement];
+        byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-        uint nullCount = 0;
-        double minimum = double.PositiveInfinity;
-        double maximum = double.NegativeInfinity;
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
+            // Zero the data portion; null rows must be stored as zeroed bytes.
+            Array.Clear(raw, bitmapLength, dataLength);
 
-            if (value.IsNull)
+            uint nullCount = 0;
+            double minimum = double.PositiveInfinity;
+            double maximum = double.NegativeInfinity;
+
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                nullCount++;
-            }
-            else
-            {
-                double numericValue = WriteValue(descriptor.Kind, value, data, rowIndex * bytesPerElement);
+                DataValue value = values[rowIndex];
 
-                if (numericValue < minimum)
+                if (value.IsNull)
                 {
-                    minimum = numericValue;
+                    nullBitmap.SetNull(rowIndex);
+                    nullCount++;
                 }
-
-                if (numericValue > maximum)
+                else
                 {
-                    maximum = numericValue;
+                    double numericValue = WriteValue(
+                        descriptor.Kind, value, raw, bitmapLength + rowIndex * bytesPerElement);
+
+                    if (numericValue < minimum)
+                    {
+                        minimum = numericValue;
+                    }
+
+                    if (numericValue > maximum)
+                    {
+                        maximum = numericValue;
+                    }
                 }
             }
+
+            DatumZoneMap zoneMap = BuildZoneMap(descriptor.Kind, nullCount, rowCount, minimum, maximum);
+
+            Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
+
+            byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+            return new DatumEncodedPage(compressed, DatumEncoding.Raw, DatumCompression.Zstd, rawLength, zoneMap);
         }
-
-        DatumZoneMap zoneMap = BuildZoneMap(descriptor.Kind, nullCount, rowCount, minimum, maximum);
-
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        byte[] raw = new byte[bitmapBytes.Length + data.Length];
-        bitmapBytes.CopyTo(raw, 0);
-        data.CopyTo(raw, bitmapBytes.Length);
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.Raw, DatumCompression.Zstd, raw.Length, zoneMap);
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(raw);
+        }
     }
 
     /// <summary>

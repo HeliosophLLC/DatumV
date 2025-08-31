@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile.Compression;
@@ -34,65 +35,81 @@ internal sealed class ArrayColumnEncoder : DatumColumnEncoder
     {
         int rowCount = values.Count;
         DatumNullBitmap nullBitmap = new(rowCount);
-        byte[][] rowPools = new byte[rowCount][];
+        byte[][] rowPools = ArrayPool<byte[]>.Shared.Rent(rowCount);
         uint nullCount = 0;
         int totalPoolBytes = 0;
 
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        try
         {
-            DataValue value = values[rowIndex];
-
-            if (value.IsNull)
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                nullBitmap.SetNull(rowIndex);
-                rowPools[rowIndex] = [];
-                nullCount++;
-                continue;
+                DataValue value = values[rowIndex];
+
+                if (value.IsNull)
+                {
+                    nullBitmap.SetNull(rowIndex);
+                    rowPools[rowIndex] = [];
+                    nullCount++;
+                    continue;
+                }
+
+                DataValue[] elements = value.AsArray();
+                using MemoryStream rowStream = new();
+                using BinaryWriter rowWriter = new(rowStream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+                foreach (DataValue element in elements)
+                {
+                    IndexWriter.WriteDataValue(rowWriter, element);
+                }
+
+                rowWriter.Flush();
+                rowPools[rowIndex] = rowStream.ToArray();
+                totalPoolBytes += rowPools[rowIndex].Length;
             }
 
-            DataValue[] elements = value.AsArray();
-            using MemoryStream rowStream = new();
-            using BinaryWriter rowWriter = new(rowStream, System.Text.Encoding.UTF8, leaveOpen: true);
+            DatumZoneMap zoneMap = new(nullCount, null, null);
+            byte[] bitmapBytes = nullBitmap.ToBytes();
+            int offsetsSize = (rowCount + 1) * 4;
+            int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;
+            byte[] raw = ArrayPool<byte>.Shared.Rent(rawLength);
 
-            foreach (DataValue element in elements)
+            try
             {
-                IndexWriter.WriteDataValue(rowWriter, element);
-            }
+                Buffer.BlockCopy(bitmapBytes, 0, raw, 0, bitmapBytes.Length);
 
-            rowWriter.Flush();
-            rowPools[rowIndex] = rowStream.ToArray();
-            totalPoolBytes += rowPools[rowIndex].Length;
+                int offsetWrite = bitmapBytes.Length;
+                int poolWrite = bitmapBytes.Length + offsetsSize;
+                uint runningOffset = 0;
+
+                BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
+                offsetWrite += 4;
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    byte[] pool = rowPools[rowIndex];
+                    runningOffset += (uint)pool.Length;
+                    BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
+                    offsetWrite += 4;
+
+                    if (pool.Length > 0)
+                    {
+                        Buffer.BlockCopy(pool, 0, raw, poolWrite, pool.Length);
+                        poolWrite += pool.Length;
+                    }
+                }
+
+                byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
+
+                return new DatumEncodedPage(compressed, DatumEncoding.VariableDataValue, DatumCompression.Zstd, rawLength, zoneMap);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(raw);
+            }
         }
-
-        DatumZoneMap zoneMap = new(nullCount, null, null);
-        byte[] bitmapBytes = nullBitmap.ToBytes();
-        int offsetsSize = (rowCount + 1) * 4;
-        byte[] raw = new byte[bitmapBytes.Length + offsetsSize + totalPoolBytes];
-        bitmapBytes.CopyTo(raw, 0);
-
-        int offsetWrite = bitmapBytes.Length;
-        int poolWrite = bitmapBytes.Length + offsetsSize;
-        uint runningOffset = 0;
-
-        BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-        offsetWrite += 4;
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        finally
         {
-            byte[] pool = rowPools[rowIndex];
-            runningOffset += (uint)pool.Length;
-            BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(offsetWrite), runningOffset);
-            offsetWrite += 4;
-
-            if (pool.Length > 0)
-            {
-                pool.CopyTo(raw, poolWrite);
-                poolWrite += pool.Length;
-            }
+            ArrayPool<byte[]>.Shared.Return(rowPools, clearArray: true);
         }
-
-        byte[] compressed = DatumCompressor.Compress(raw, DatumCompression.Zstd);
-
-        return new DatumEncodedPage(compressed, DatumEncoding.VariableDataValue, DatumCompression.Zstd, raw.Length, zoneMap);
     }
 }
