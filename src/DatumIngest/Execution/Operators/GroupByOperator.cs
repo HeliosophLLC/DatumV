@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using DatumIngest.Diagnostics;
@@ -282,13 +281,13 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         bool useSingleKey = _groupByExpressions.Count == 1;
         bool isGlobalAggregation = _groupByExpressions.Count == 0;
 
-        // Each group maps to accumulators for all aggregate functions.
-        Dictionary<DataValue, GroupState>? singleKeyGroups =
+        // Custom open-addressing hash maps enable Sse.Prefetch0 hints that
+        // hide L3 miss latency when the number of distinct groups far exceeds
+        // L3 cache capacity (e.g. 6M groups × ~24-byte entry ≫ 19MB L3).
+        DataValueHashMap<GroupState>? singleKeyGroups =
             useSingleKey ? new() : null;
-        Dictionary<CompositeKey, GroupState>? compositeKeyGroups =
-            !useSingleKey && !isGlobalAggregation
-                ? new Dictionary<CompositeKey, GroupState>(CompositeKeyComparer.Instance)
-                : null;
+        CompositeKeyHashMap<GroupState>? compositeKeyGroups =
+            !useSingleKey && !isGlobalAggregation ? new() : null;
 
         // For global aggregation (no GROUP BY), use a single group.
         GroupState? globalGroup = isGlobalAggregation ? CreateGroupState() : null;
@@ -312,18 +311,43 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         // Pre-allocate reusable scratch buffers for aggregate argument evaluation.
         (DataValue[][] argumentScratch, DataValue[]?[]? sortKeyScratch) = CreateAggregateArgumentScratch();
 
-        // A single buffer rented once per execution and reused for every composite-key row.
-        // GetAlternateLookup<ReadOnlySpan<DataValue>> probes the dictionary directly from this
-        // buffer, avoiding the per-row DataValue[] heap allocation that a plain
-        // new CompositeKey(keyValues) lookup would otherwise incur on every probe row.
         int keyCount = _groupByExpressions.Count;
-        DataValue[]? compositeKeyScratch = (!useSingleKey && !isGlobalAggregation)
-            ? ArrayPool<DataValue>.Shared.Rent(keyCount)
-            : null;
-        Dictionary<CompositeKey, GroupState>.AlternateLookup<ReadOnlySpan<DataValue>> compositeKeyLookup = default;
-        if (compositeKeyGroups is not null)
+
+        // Pre-resolved ordinals: when all GROUP BY expressions are simple
+        // ColumnReferences, we resolve their ordinals once on the first batch
+        // and use direct Row.RawValues[ordinal] access in the hot loop —
+        // eliminating per-row ExpressionEvaluator dispatch and Dictionary<string,int>
+        // lookups in Row.TryGetValue.
+        int[]? keyOrdinals = null;
+        bool useDirectKeyAccess = false;
+        bool ordinalsResolved = false;
+
+        // Software-pipelined prefetch ring buffers. Keys for PrefetchDistance
+        // future rows are evaluated ahead of their hash table probe so that
+        // PrefetchEntry() can issue a cache-line hint well before the actual
+        // lookup, hiding L3 miss latency behind useful key evaluation work.
+        const int PrefetchDistance = 32;
+
+        DataValue[]? singleKeyRing = useSingleKey
+            ? new DataValue[PrefetchDistance] : null;
+        int[]? singleHashRing = useSingleKey
+            ? new int[PrefetchDistance] : null;
+
+        DataValue[][]? compositeKeyRing = null;
+        int[]? compositeHashRing = null;
+        DataValue[]? compositeKeyScratch = null;
+
+        if (!useSingleKey && !isGlobalAggregation)
         {
-            compositeKeyLookup = compositeKeyGroups.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+            compositeKeyRing = new DataValue[PrefetchDistance][];
+            for (int ringIndex = 0; ringIndex < PrefetchDistance; ringIndex++)
+                compositeKeyRing[ringIndex] = new DataValue[keyCount];
+
+            compositeHashRing = new int[PrefetchDistance];
+
+            // Scratch buffer for spill path key evaluation (not needed in
+            // the prefetch pipeline which uses the ring buffers directly).
+            compositeKeyScratch = new DataValue[keyCount];
         }
 
         try
@@ -333,17 +357,57 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
             {
-                for (int i = 0; i < inputBatch.Count; i++)
-                {
-                Row row = inputBatch[i];
+                int batchCount = inputBatch.Count;
                 context.CancellationToken.ThrowIfCancellationRequested();
                 context.QueryMeter?.ThrowIfExceeded();
 
+                // Resolve key ordinals on the first batch.
+                if (!ordinalsResolved && !isGlobalAggregation && batchCount > 0)
+                {
+                    ordinalsResolved = true;
+                    Dictionary<string, int> nameIndex = inputBatch[0].RawNameIndex;
+                    int[] candidateOrdinals = new int[keyCount];
+                    bool allResolved = true;
+
+                    for (int k = 0; k < keyCount; k++)
+                    {
+                        if (_groupByExpressions[k] is ColumnReference columnReference)
+                        {
+                            string lookupName = columnReference.QualifiedName ?? columnReference.ColumnName;
+                            if (nameIndex.TryGetValue(lookupName, out int ordinal))
+                            {
+                                candidateOrdinals[k] = ordinal;
+                            }
+                            else if (columnReference.QualifiedName is not null
+                                     && nameIndex.TryGetValue(columnReference.ColumnName, out ordinal))
+                            {
+                                candidateOrdinals[k] = ordinal;
+                            }
+                            else
+                            {
+                                allResolved = false;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            allResolved = false;
+                            break;
+                        }
+                    }
+
+                    if (allResolved)
+                    {
+                        keyOrdinals = candidateOrdinals;
+                        useDirectKeyAccess = true;
+                    }
+                }
+
                 if (ExecutionTracer.IsEnabled)
                 {
-                    inputRowCount++;
+                    inputRowCount += batchCount;
 
-                    if (inputRowCount % 1_000_000 == 0)
+                    if (inputRowCount % 1_000_000 < (uint)batchCount)
                     {
                         long groupCount = isGlobalAggregation ? 1
                             : useSingleKey ? singleKeyGroups!.Count
@@ -353,141 +417,247 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     }
                 }
 
-                // Evaluate group keys.
-                DataValue singleKey = default;
-
                 if (isGlobalAggregation)
                 {
-                    // No keys to evaluate.
-                }
-                else if (useSingleKey)
-                {
-                    singleKey = evaluator.Evaluate(_groupByExpressions[0], row);
-                }
-                else
-                {
-                    // Write directly into the reusable scratch buffer; no heap allocation.
-                    for (int index = 0; index < keyCount; index++)
+                    // Global aggregation: no keys, no prefetch pipeline.
+                    for (int i = 0; i < batchCount; i++)
                     {
-                        compositeKeyScratch![index] = evaluator.Evaluate(_groupByExpressions[index], row);
+                        Row row = inputBatch[i];
+                        EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+                        AccumulateRow(globalGroup!, argumentScratch, sortKeyScratch, context);
+                        context.LocalBufferPool.ReturnValues(row);
                     }
                 }
-
-                // Evaluate aggregate arguments into reusable scratch buffers.
-                EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
-
-                if (spilling)
+                else if (spilling)
                 {
-                    // Already spilling — write to a partition file based on the group key hash.
-                    int hashCode = useSingleKey
-                        ? singleKey.GetHashCode()
-                        : CompositeKeyComparer.Instance.GetHashCode(
-                            compositeKeyScratch!.AsSpan(0, keyCount));
-
-                    WriteSpillRow(
-                        hashCode,
-                        useSingleKey ? [singleKey] : compositeKeyScratch!.AsSpan(0, keyCount).ToArray(),
-                        argumentScratch, sortKeyScratch, spillWriters!, spillSchemaWritten!, spillPaths!,
-                        spillSchema, _spillDirectory!);
-
-                    // Continue accumulating in-memory for groups that existed before
-                    // spilling started. Their in-memory accumulators already hold
-                    // pre-spill data, and this ensures they also see post-spill rows.
-                    // During re-aggregation, spill rows for these keys are skipped.
-                    GroupState? existingGroup = null;
-
-                    if (useSingleKey)
+                    // Already spilling — process row-by-row without prefetch.
+                    for (int i = 0; i < batchCount; i++)
                     {
-                        singleKeyGroups!.TryGetValue(singleKey, out existingGroup);
-                    }
-                    else
-                    {
-                        compositeKeyLookup.TryGetValue(
-                            compositeKeyScratch!.AsSpan(0, keyCount), out existingGroup);
-                    }
+                        Row row = inputBatch[i];
+                        DataValue singleKey = default;
 
-                    if (existingGroup is not null)
-                    {
-                        AccumulateRow(existingGroup, argumentScratch, sortKeyScratch, context);
-                    }
-                }
-                else
-                {
-                    // Accumulate in memory.
-                    GroupState group;
-
-                    if (isGlobalAggregation)
-                    {
-                        group = globalGroup!;
-                    }
-                    else if (useSingleKey)
-                    {
-                        if (!singleKeyGroups!.TryGetValue(singleKey, out group!))
+                        if (useSingleKey)
                         {
-                            group = CreateGroupState();
-                            group.KeyValues = [singleKey];
-                            singleKeyGroups![singleKey] = group;
+                            singleKey = useDirectKeyAccess
+                                ? row.RawValues[keyOrdinals![0]]
+                                : evaluator.Evaluate(_groupByExpressions[0], row);
                         }
-                    }
-                    else
-                    {
-                        // Hot path: probe with span — zero allocation on a cache hit.
-                        if (!compositeKeyLookup.TryGetValue(
-                            compositeKeyScratch!.AsSpan(0, keyCount), out group!))
+                        else
                         {
-                            // New group — copy scratch into permanent storage only on a miss.
-                            DataValue[] permanentKey = compositeKeyScratch.AsSpan(0, keyCount).ToArray();
-                            CompositeKey compositeKey = new(permanentKey);
-                            group = CreateGroupState();
-                            group.KeyValues = permanentKey;
-                            compositeKeyGroups![compositeKey] = group;
-                        }
-                    }
-
-                    AccumulateRow(group, argumentScratch, sortKeyScratch, context);
-
-                    // Memory estimation.
-                    if (estimator is not null)
-                    {
-                        if (estimator.ShouldSample())
-                        {
-                            estimator.RecordSample(row);
-                        }
-
-                        estimator.IncrementRowCount();
-                        long groupCount = useSingleKey
-                            ? singleKeyGroups!.Count
-                            : compositeKeyGroups!.Count;
-                        long estimatedMemory = estimator.EstimateBytesForRowCount(groupCount);
-
-                        if (estimatedMemory > memoryBudget!.Value)
-                        {
-                            // Transition to spill mode.
-                            spilling = true;
-                            _spillDirectory = Path.Combine(
-                                Path.GetTempPath(), $"datum-groupby-{Guid.NewGuid():N}");
-                            Directory.CreateDirectory(_spillDirectory);
-                            spillWriters = new BinaryWriter[SpillPartitionCount];
-                            spillSchemaWritten = new bool[SpillPartitionCount];
-                            spillPaths = new string[SpillPartitionCount];
-
-                            if (ExecutionTracer.IsEnabled)
+                            if (useDirectKeyAccess)
                             {
-                                ExecutionTracer.Write(
-                                    $"GROUP BY spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={groupCount}");
+                                DataValue[] rawValues = row.RawValues;
+                                for (int k = 0; k < keyCount; k++)
+                                    compositeKeyScratch![k] = rawValues[keyOrdinals![k]];
+                            }
+                            else
+                            {
+                                for (int k = 0; k < keyCount; k++)
+                                    compositeKeyScratch![k] = evaluator.Evaluate(
+                                        _groupByExpressions[k], row);
                             }
                         }
-                        else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+
+                        EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+
+                        int hashCode = useSingleKey
+                            ? singleKey.GetHashCode()
+                            : CompositeKeyHashMap<GroupState>.ComputeHash(
+                                compositeKeyScratch!.AsSpan(0, keyCount));
+
+                        WriteSpillRow(
+                            hashCode,
+                            useSingleKey ? [singleKey] : compositeKeyScratch!.AsSpan(0, keyCount).ToArray(),
+                            argumentScratch, sortKeyScratch, spillWriters!, spillSchemaWritten!, spillPaths!,
+                            spillSchema, _spillDirectory!);
+
+                        // Accumulate into pre-existing in-memory groups so pre-spill
+                        // data is not lost. ReaggregatePartition skips these during drain.
+                        GroupState? existingGroup = null;
+
+                        if (useSingleKey)
+                            singleKeyGroups!.TryGetValue(singleKey, out existingGroup);
+                        else
+                            compositeKeyGroups!.TryGetValue(
+                                compositeKeyScratch!.AsSpan(0, keyCount), out existingGroup);
+
+                        if (existingGroup is not null)
+                            AccumulateRow(existingGroup, argumentScratch, sortKeyScratch, context);
+
+                        context.LocalBufferPool.ReturnValues(row);
+                    }
+                }
+                else
+                {
+                    // ─── Prefetch pipeline hot path ───
+                    //
+                    // Pre-resolved ordinals: GROUP BY keys that are simple ColumnReferences
+                    // are extracted via direct Row.RawValues[ordinal] access, bypassing the
+                    // ExpressionEvaluator dispatch and per-row Dictionary<string,int> lookup.
+                    //
+                    // Software-pipelined prefetch: keys for PrefetchDistance future rows are
+                    // evaluated ahead of their hash table probe so PrefetchEntry() can issue
+                    // a cache-line hint well before the actual lookup.
+
+                    // Prologue: fill ring buffers for the first PrefetchDistance rows.
+                    int prologueCount = Math.Min(PrefetchDistance, batchCount);
+                    for (int j = 0; j < prologueCount; j++)
+                    {
+                        Row prologueRow = inputBatch[j];
+                        if (useSingleKey)
                         {
-                            estimator.EscalateToEveryRow();
+                            singleKeyRing![j] = useDirectKeyAccess
+                                ? prologueRow.RawValues[keyOrdinals![0]]
+                                : evaluator.Evaluate(_groupByExpressions[0], prologueRow);
+                            singleHashRing![j] = singleKeyRing[j].GetHashCode();
+                            singleKeyGroups!.PrefetchEntry(singleHashRing[j]);
                         }
+                        else
+                        {
+                            DataValue[] ringKeys = compositeKeyRing![j];
+                            if (useDirectKeyAccess)
+                            {
+                                DataValue[] rawValues = prologueRow.RawValues;
+                                for (int k = 0; k < keyCount; k++)
+                                    ringKeys[k] = rawValues[keyOrdinals![k]];
+                            }
+                            else
+                            {
+                                for (int k = 0; k < keyCount; k++)
+                                    ringKeys[k] = evaluator.Evaluate(
+                                        _groupByExpressions[k], prologueRow);
+                            }
+
+                            compositeHashRing![j] = CompositeKeyHashMap<GroupState>.ComputeHash(
+                                ringKeys.AsSpan(0, keyCount));
+                            compositeKeyGroups!.PrefetchEntry(compositeHashRing[j]);
+                        }
+                    }
+
+                    // Main loop: probe with pre-evaluated key, accumulate, prepare future.
+                    for (int i = 0; i < batchCount; i++)
+                    {
+                        Row row = inputBatch[i];
+                        int slot = i % PrefetchDistance;
+
+                        // Probe the hash table with the key evaluated PrefetchDistance
+                        // iterations ago (or in the prologue). The entry's cache line
+                        // has had time to arrive from L3/DRAM.
+                        GroupState group;
+
+                        if (useSingleKey)
+                        {
+                            ref GroupState groupRef = ref singleKeyGroups!.GetOrAdd(
+                                singleKeyRing![slot], singleHashRing![slot], out bool exists);
+                            if (!exists)
+                            {
+                                groupRef = CreateGroupState();
+                                groupRef.KeyValues = [singleKeyRing[slot]];
+                            }
+
+                            group = groupRef;
+                        }
+                        else
+                        {
+                            ReadOnlySpan<DataValue> keySpan =
+                                compositeKeyRing![slot].AsSpan(0, keyCount);
+                            ref GroupState groupRef = ref compositeKeyGroups!.GetOrAddDefault(
+                                keySpan, compositeHashRing![slot],
+                                out bool exists, out DataValue[] storedKey);
+                            if (!exists)
+                            {
+                                groupRef = CreateGroupState();
+                                groupRef.KeyValues = storedKey;
+                            }
+
+                            group = groupRef;
+                        }
+
+                        EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+                        AccumulateRow(group, argumentScratch, sortKeyScratch, context);
+
+                        // Memory estimation.
+                        if (estimator is not null)
+                        {
+                            if (estimator.ShouldSample())
+                                estimator.RecordSample(row);
+
+                            estimator.IncrementRowCount();
+                            long groupCount = useSingleKey
+                                ? singleKeyGroups!.Count
+                                : compositeKeyGroups!.Count;
+                            long estimatedMemory = estimator.EstimateBytesForRowCount(groupCount);
+
+                            if (estimatedMemory > memoryBudget!.Value)
+                            {
+                                spilling = true;
+                                _spillDirectory = Path.Combine(
+                                    Path.GetTempPath(), $"datum-groupby-{Guid.NewGuid():N}");
+                                Directory.CreateDirectory(_spillDirectory);
+                                spillWriters = new BinaryWriter[SpillPartitionCount];
+                                spillSchemaWritten = new bool[SpillPartitionCount];
+                                spillPaths = new string[SpillPartitionCount];
+
+                                if (ExecutionTracer.IsEnabled)
+                                {
+                                    ExecutionTracer.Write(
+                                        $"GROUP BY spill start  budget={ExecutionTracer.FormatBytes(memoryBudget.Value)}  estimated={ExecutionTracer.FormatBytes(estimatedMemory)}  groups={groupCount}");
+                                }
+                            }
+                            else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
+                            {
+                                estimator.EscalateToEveryRow();
+                            }
+                        }
+
+                        // Pipeline: evaluate keys for a future row and prefetch its
+                        // hash table entry so it will be cache-resident when we probe
+                        // it PrefetchDistance iterations from now.
+                        int futureIndex = i + PrefetchDistance;
+                        if (futureIndex < batchCount)
+                        {
+                            Row futureRow = inputBatch[futureIndex];
+                            if (useSingleKey)
+                            {
+                                singleKeyRing![slot] = useDirectKeyAccess
+                                    ? futureRow.RawValues[keyOrdinals![0]]
+                                    : evaluator.Evaluate(
+                                        _groupByExpressions[0], futureRow);
+                                singleHashRing![slot] = singleKeyRing[slot].GetHashCode();
+                                singleKeyGroups!.PrefetchEntry(singleHashRing[slot]);
+                            }
+                            else
+                            {
+                                DataValue[] futureKeys = compositeKeyRing![slot];
+                                if (useDirectKeyAccess)
+                                {
+                                    DataValue[] rawValues = futureRow.RawValues;
+                                    for (int k = 0; k < keyCount; k++)
+                                        futureKeys[k] = rawValues[keyOrdinals![k]];
+                                }
+                                else
+                                {
+                                    for (int k = 0; k < keyCount; k++)
+                                        futureKeys[k] = evaluator.Evaluate(
+                                            _groupByExpressions[k], futureRow);
+                                }
+
+                                compositeHashRing![slot] =
+                                    CompositeKeyHashMap<GroupState>.ComputeHash(
+                                        futureKeys.AsSpan(0, keyCount));
+                                compositeKeyGroups!.PrefetchEntry(compositeHashRing[slot]);
+                            }
+                        }
+
+                        // Return the row to the pool so upstream can reuse it.
+                        context.LocalBufferPool.ReturnValues(row);
                     }
                 }
 
-                // Row values have been fully extracted — return the row
-                // to the pool so the upstream join can reuse it.
-                context.LocalBufferPool.ReturnValues(row);
-                }
+                // Re-check the budget after processing the batch so that query-unit
+                // costs incurred by function calls within the batch are caught
+                // before we move on to the next one.
+                context.QueryMeter?.ThrowIfExceeded();
 
                 inputBatch.Return();
             }
@@ -581,11 +751,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         finally
         {
             CleanupSpillFiles(spillWriters);
-
-            if (compositeKeyScratch is not null)
-            {
-                ArrayPool<DataValue>.Shared.Return(compositeKeyScratch);
-            }
         }
     }
 
@@ -1517,11 +1682,62 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// Reads back a spill partition and re-aggregates its rows, returning one output
     /// row per group. Groups that were already aggregated in memory are skipped.
     /// </summary>
+    /// <summary>
+    /// Re-aggregates a single spill partition file, skipping groups that
+    /// already exist in the caller's in-memory hash table (Dictionary-based).
+    /// Used by the parallel aggregation path.
+    /// </summary>
     private List<Row> ReaggregatePartition(
         string path,
         bool useSingleKey,
         Dictionary<DataValue, GroupState>? inMemorySingleKeyGroups,
         Dictionary<CompositeKey, GroupState>? inMemoryCompositeKeyGroups,
+        bool hasOrderedAggregates,
+        ExecutionContext context,
+        ref string[]? outputNames,
+        ref Dictionary<string, int>? outputNameIndex)
+    {
+        Func<DataValue[], bool> isKeyInMemory = useSingleKey
+            ? keyValues => inMemorySingleKeyGroups!.ContainsKey(keyValues[0])
+            : keyValues => inMemoryCompositeKeyGroups!.ContainsKey(new CompositeKey(keyValues));
+
+        return ReaggregatePartitionCore(
+            path, useSingleKey, isKeyInMemory, hasOrderedAggregates,
+            context, ref outputNames, ref outputNameIndex);
+    }
+
+    /// <summary>
+    /// Re-aggregates a single spill partition file, skipping groups that
+    /// already exist in the caller's in-memory custom hash maps.
+    /// Used by the serial aggregation path.
+    /// </summary>
+    private List<Row> ReaggregatePartition(
+        string path,
+        bool useSingleKey,
+        DataValueHashMap<GroupState>? inMemorySingleKeyGroups,
+        CompositeKeyHashMap<GroupState>? inMemoryCompositeKeyGroups,
+        bool hasOrderedAggregates,
+        ExecutionContext context,
+        ref string[]? outputNames,
+        ref Dictionary<string, int>? outputNameIndex)
+    {
+        Func<DataValue[], bool> isKeyInMemory = useSingleKey
+            ? keyValues => inMemorySingleKeyGroups!.ContainsKey(keyValues[0])
+            : keyValues => inMemoryCompositeKeyGroups!.ContainsKey(keyValues.AsSpan());
+
+        return ReaggregatePartitionCore(
+            path, useSingleKey, isKeyInMemory, hasOrderedAggregates,
+            context, ref outputNames, ref outputNameIndex);
+    }
+
+    /// <summary>
+    /// Core spill-partition re-aggregation logic shared by both the
+    /// <see cref="Dictionary{TKey,TValue}"/>-based and custom hash map overloads.
+    /// </summary>
+    private List<Row> ReaggregatePartitionCore(
+        string path,
+        bool useSingleKey,
+        Func<DataValue[], bool> isKeyInMemory,
         bool hasOrderedAggregates,
         ExecutionContext context,
         ref string[]? outputNames,
@@ -1552,20 +1768,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
 
             // Skip rows whose group was already aggregated in memory.
-            if (useSingleKey)
+            if (isKeyInMemory(keyValues))
             {
-                if (inMemorySingleKeyGroups!.ContainsKey(keyValues[0]))
-                {
-                    continue;
-                }
-            }
-            else
-            {
-                CompositeKey compositeKey = new(keyValues);
-                if (inMemoryCompositeKeyGroups!.ContainsKey(compositeKey))
-                {
-                    continue;
-                }
+                continue;
             }
 
             // Resolve or create the group for this partition.

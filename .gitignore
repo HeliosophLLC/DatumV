@@ -11,3 +11,4 @@ docs-site/.jekyll-metadata
 docs-site/.sass-cache/
 docs-site/docs/
 benchmark-output.log
+traces/
