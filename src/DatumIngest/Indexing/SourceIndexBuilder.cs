@@ -158,6 +158,9 @@ public sealed class SourceIndexBuilder
         List<ValueIndexEntry>?[]? ordinalSpillEntries = null;
         BitmapChunkAccumulator?[]? ordinalBitmapAccumulators = null;
 
+        Dictionary<string, IndexHintType>? hintLookup = null;
+        List<string>? deferredReindexColumns = null;
+
         try
         {
             await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
@@ -186,6 +189,7 @@ public sealed class SourceIndexBuilder
                     ordinalSpillEntries = spillWriter is not null ? new List<ValueIndexEntry>?[columnCount] : null;
 
                     bitmapAccumulators = CreateBitmapAccumulators(schema, _indexHints);
+                    hintLookup = BuildHintLookup(_indexHints);
                     ordinalBitmapAccumulators = bitmapAccumulators is not null
                         ? new BitmapChunkAccumulator?[columnCount]
                         : null;
@@ -254,8 +258,18 @@ public sealed class SourceIndexBuilder
                             if (value.Kind == DataKind.String
                                 && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
                             {
-                                spillWriter!.DropColumn(resolvedColumnNames![ordinal]);
+                                string droppedName = resolvedColumnNames![ordinal];
+                                spillWriter!.DropColumn(droppedName);
                                 ordinalSpillEntries[ordinal] = null;
+
+                                // Sorted/BTree-hinted column failed its hint — defer for reindex.
+                                if (hintLookup is not null
+                                    && hintLookup.TryGetValue(droppedName, out IndexHintType droppedHint)
+                                    && droppedHint is IndexHintType.Sorted or IndexHintType.BTree)
+                                {
+                                    deferredReindexColumns ??= new();
+                                    deferredReindexColumns.Add(droppedName);
+                                }
                             }
                             else
                             {
@@ -277,6 +291,15 @@ public sealed class SourceIndexBuilder
                             if (bitmapAccumulator.IsAbandoned)
                             {
                                 ordinalBitmapAccumulators[ordinal] = null;
+
+                                // Bitmap-hinted column exceeded cardinality threshold — defer for reindex.
+                                if (hintLookup is not null
+                                    && hintLookup.TryGetValue(resolvedColumnNames![ordinal], out IndexHintType abandonedHint)
+                                    && abandonedHint == IndexHintType.Bitmap)
+                                {
+                                    deferredReindexColumns ??= new();
+                                    deferredReindexColumns.Add(resolvedColumnNames[ordinal]);
+                                }
                             }
                         }
                     }
@@ -372,7 +395,34 @@ public sealed class SourceIndexBuilder
                 ? BuildBitmapIndexSet(bitmapAccumulators)
                 : null;
 
+            // When sorted columns were auto-selected (not explicitly requested), exclude
+            // columns that have a successful bitmap index to avoid duplicate coverage.
+            // Explicit indexColumns/indexAllColumns are respected as-is.
+            bool sortedColumnsAreAutoSelected = _autoIndexColumns
+                && !_indexAllColumns
+                && (_indexColumns is null || _indexColumns.Count == 0);
+
+            if (sortedColumnsAreAutoSelected && bitmapIndexSet is not null && spillWriter is not null)
+            {
+                foreach (string bitmapColumn in bitmapIndexSet.ColumnNames)
+                {
+                    spillWriter.DropColumn(bitmapColumn);
+                }
+            }
+
             SortedValueIndexSet? sortedIndexSet = spillWriter?.BuildSortedValueIndexSet();
+
+            // Second pass: rebuild indexes for columns whose hints failed during the primary scan.
+            if (deferredReindexColumns is { Count: > 0 })
+            {
+                (BitmapIndexSet? deferredBitmaps, SortedValueIndexSet? deferredSorted) =
+                    await RebuildDeferredColumnsAsync(
+                        deferredReindexColumns, descriptor, provider, schema, cancellationToken)
+                        .ConfigureAwait(false);
+
+                bitmapIndexSet = MergeBitmapIndexSets(bitmapIndexSet, deferredBitmaps);
+                sortedIndexSet = MergeSortedValueIndexSets(sortedIndexSet, deferredSorted);
+            }
 
             IndexSchema indexSchema = new(schema, totalRowCount);
             return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet,
@@ -471,7 +521,7 @@ public sealed class SourceIndexBuilder
     /// </summary>
     public IncrementalIndexBuilder CreateIncrementalBuilder(SourceFingerprint fingerprint)
     {
-        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns, _bloomAllColumns, _indexAllColumns, _autoIndexColumns, _maxIndexedColumns);
+        return new IncrementalIndexBuilder(_chunkSize, fingerprint, _bloomColumns, _indexColumns, _bloomAllColumns, _indexAllColumns, _autoIndexColumns, _maxIndexedColumns, _indexHints);
     }
 
     /// <summary>
@@ -527,7 +577,8 @@ public sealed class SourceIndexBuilder
             return null;
         }
 
-        result = AugmentWithIndexHints(result, schema);
+        result = AugmentWithIndexHints(result, schema, _indexHints);
+        result = ExcludeHintedColumnsFromSortedIndex(result, _indexHints);
 
         return ApplyMaxIndexedColumns(result);
     }
@@ -537,9 +588,12 @@ public sealed class SourceIndexBuilder
     /// that recommend <see cref="IndexHintType.Sorted"/> or <see cref="IndexHintType.BTree"/>.
     /// Returns the original set unchanged when no hints apply.
     /// </summary>
-    private IReadOnlySet<string>? AugmentWithIndexHints(IReadOnlySet<string>? columns, Schema schema)
+    internal static IReadOnlySet<string>? AugmentWithIndexHints(
+        IReadOnlySet<string>? columns,
+        Schema schema,
+        IReadOnlyList<ColumnIndexHint>? indexHints)
     {
-        if (_indexHints is null || _indexHints.Count == 0)
+        if (indexHints is null || indexHints.Count == 0)
         {
             return columns;
         }
@@ -553,7 +607,7 @@ public sealed class SourceIndexBuilder
 
         HashSet<string>? augmented = null;
 
-        foreach (ColumnIndexHint hint in _indexHints)
+        foreach (ColumnIndexHint hint in indexHints)
         {
             if (hint.PreferredType is IndexHintType.Sorted or IndexHintType.BTree or IndexHintType.Auto
                 && schemaColumns.Contains(hint.ColumnName)
@@ -567,6 +621,36 @@ public sealed class SourceIndexBuilder
         }
 
         return augmented ?? columns;
+    }
+
+    /// <summary>
+    /// Removes columns from the sorted index column set that are hinted as
+    /// <see cref="IndexHintType.Bitmap"/> or <see cref="IndexHintType.None"/>.
+    /// These columns should not participate in sorted or B+Tree indexing.
+    /// Returns the original set unchanged when no exclusions apply.
+    /// </summary>
+    internal static IReadOnlySet<string>? ExcludeHintedColumnsFromSortedIndex(
+        IReadOnlySet<string>? columns,
+        IReadOnlyList<ColumnIndexHint>? indexHints)
+    {
+        if (columns is null || indexHints is null || indexHints.Count == 0)
+        {
+            return columns;
+        }
+
+        HashSet<string>? filtered = null;
+
+        foreach (ColumnIndexHint hint in indexHints)
+        {
+            if (hint.PreferredType is IndexHintType.Bitmap or IndexHintType.None
+                && columns.Contains(hint.ColumnName))
+            {
+                filtered ??= new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
+                filtered.Remove(hint.ColumnName);
+            }
+        }
+
+        return filtered ?? columns;
     }
 
     /// <summary>
@@ -638,6 +722,29 @@ public sealed class SourceIndexBuilder
             or DataKind.Duration
             or DataKind.Uuid
             or DataKind.String; // String is tentatively included; dropped later if values exceed 16 chars.
+    }
+
+    /// <summary>
+    /// Builds a column-name-to-hint-type lookup dictionary from manifest hints.
+    /// Returns <c>null</c> when no hints are provided.
+    /// </summary>
+    internal static Dictionary<string, IndexHintType>? BuildHintLookup(
+        IReadOnlyList<ColumnIndexHint>? indexHints)
+    {
+        if (indexHints is null || indexHints.Count == 0)
+        {
+            return null;
+        }
+
+        Dictionary<string, IndexHintType> lookup = new(
+            indexHints.Count, StringComparer.OrdinalIgnoreCase);
+
+        foreach (ColumnIndexHint hint in indexHints)
+        {
+            lookup[hint.ColumnName] = hint.PreferredType;
+        }
+
+        return lookup;
     }
 
     private static Schema BuildSchemaFromRow(Row row)
@@ -714,6 +821,200 @@ public sealed class SourceIndexBuilder
         }
 
         return (-1, -1);
+    }
+
+    /// <summary>
+    /// Re-scans the source data to build indexes for columns whose hint-assigned index
+    /// type failed during the primary pass (e.g. bitmap hint on a column that exceeded
+    /// the cardinality threshold, or sorted hint on a column with strings too long).
+    /// Uses auto-cascade (both bitmap + sorted accumulators) for the deferred columns, then
+    /// deduplicates at the end. Requires a re-openable provider.
+    /// </summary>
+    private async Task<(BitmapIndexSet? Bitmaps, SortedValueIndexSet? Sorted)> RebuildDeferredColumnsAsync(
+        IReadOnlyList<string> deferredColumns,
+        TableDescriptor descriptor,
+        ITableProvider provider,
+        Schema schema,
+        CancellationToken cancellationToken)
+    {
+        HashSet<string> deferredSet = new(deferredColumns, StringComparer.OrdinalIgnoreCase);
+
+        // Create bitmap accumulators for all deferred columns (auto-eligible kinds only, no hints).
+        Dictionary<string, BitmapChunkAccumulator> bitmapAccumulators = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            if (deferredSet.Contains(column.Name) && IsAutoIndexableKind(column.Kind))
+            {
+                bitmapAccumulators[column.Name] = new BitmapChunkAccumulator();
+            }
+        }
+
+        // Create a spill writer for sorted index entries on deferred columns.
+        SortedIndexSpillWriter deferredSpillWriter = new();
+        deferredSpillWriter.Initialize(deferredSet);
+
+        foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
+        {
+            accumulator.BeginChunk(_chunkSize);
+        }
+
+        int rowsInChunk = 0;
+        int chunkIndex = 0;
+
+        try
+        {
+            await foreach (RowBatch batch in provider.OpenAsync(descriptor, requiredColumns: null, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                for (int batchRow = 0; batchRow < batch.Count; batchRow++)
+                {
+                    Row row = batch[batchRow];
+
+                    foreach (string column in deferredColumns)
+                    {
+                        if (!row.TryGetValue(column, out DataValue value))
+                        {
+                            continue;
+                        }
+
+                        if (bitmapAccumulators.TryGetValue(column, out BitmapChunkAccumulator? bitmapAccumulator)
+                            && !bitmapAccumulator.IsAbandoned)
+                        {
+                            bitmapAccumulator.Add(value, rowsInChunk);
+                        }
+
+                        if (!value.IsNull)
+                        {
+                            if (value.Kind == DataKind.String
+                                && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
+                            {
+                                deferredSpillWriter.DropColumn(column);
+                            }
+                            else
+                            {
+                                deferredSpillWriter.AddEntry(column, new ValueIndexEntry(value, chunkIndex, rowsInChunk));
+                            }
+                        }
+                    }
+
+                    rowsInChunk++;
+
+                    if (rowsInChunk >= _chunkSize)
+                    {
+                        deferredSpillWriter.FlushChunk();
+
+                        foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
+                        {
+                            accumulator.FinalizeChunk(rowsInChunk);
+                            accumulator.BeginChunk(_chunkSize);
+                        }
+
+                        rowsInChunk = 0;
+                        chunkIndex++;
+                    }
+                }
+
+                batch.Return();
+            }
+
+            // Finalize the last partial chunk.
+            if (rowsInChunk > 0)
+            {
+                foreach (BitmapChunkAccumulator accumulator in bitmapAccumulators.Values)
+                {
+                    accumulator.FinalizeChunk(rowsInChunk);
+                }
+            }
+
+            BitmapIndexSet? bitmapResult = BuildBitmapIndexSet(bitmapAccumulators);
+
+            // Exclude successful bitmap columns from sorted to avoid dual coverage.
+            if (bitmapResult is not null)
+            {
+                foreach (string column in bitmapResult.ColumnNames)
+                {
+                    deferredSpillWriter.DropColumn(column);
+                }
+            }
+
+            SortedValueIndexSet? sortedResult = deferredSpillWriter.BuildSortedValueIndexSet();
+
+            return (bitmapResult, sortedResult);
+        }
+        finally
+        {
+            deferredSpillWriter.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Merges two <see cref="BitmapIndexSet"/> instances into one. Returns <c>null</c> if
+    /// both inputs are <c>null</c>.
+    /// </summary>
+    private static BitmapIndexSet? MergeBitmapIndexSets(BitmapIndexSet? primary, BitmapIndexSet? deferred)
+    {
+        if (deferred is null)
+        {
+            return primary;
+        }
+
+        if (primary is null)
+        {
+            return deferred;
+        }
+
+        Dictionary<string, BitmapColumnIndex> merged = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string column in primary.ColumnNames)
+        {
+            if (primary.TryGetIndex(column, out BitmapColumnIndex? index))
+            {
+                merged[column] = index;
+            }
+        }
+
+        foreach (string column in deferred.ColumnNames)
+        {
+            if (deferred.TryGetIndex(column, out BitmapColumnIndex? index))
+            {
+                merged[column] = index;
+            }
+        }
+
+        return new BitmapIndexSet(merged);
+    }
+
+    /// <summary>
+    /// Merges two <see cref="SortedValueIndexSet"/> instances into one. Returns <c>null</c>
+    /// if both inputs are <c>null</c>.
+    /// </summary>
+    private static SortedValueIndexSet? MergeSortedValueIndexSets(
+        SortedValueIndexSet? primary, SortedValueIndexSet? deferred)
+    {
+        if (deferred is null)
+        {
+            return primary;
+        }
+
+        if (primary is null)
+        {
+            return deferred;
+        }
+
+        Dictionary<string, SortedValueIndex> merged = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (KeyValuePair<string, SortedValueIndex> entry in primary.Indexes)
+        {
+            merged[entry.Key] = entry.Value;
+        }
+
+        foreach (KeyValuePair<string, SortedValueIndex> entry in deferred.Indexes)
+        {
+            merged[entry.Key] = entry.Value;
+        }
+
+        return new SortedValueIndexSet(merged);
     }
 
     /// <summary>
@@ -996,6 +1297,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     private readonly bool _indexAllColumns;
     private readonly bool _autoIndexColumns;
     private readonly int? _maxIndexedColumns;
+    private readonly IReadOnlyList<ColumnIndexHint>? _indexHints;
     private IReadOnlySet<string>? _effectiveBloomColumns;
     private Schema? _schema;
     private readonly List<IndexChunk> _chunks = new();
@@ -1025,6 +1327,16 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// <summary>Ordinal-indexed bitmap accumulators, resolved once from the first row's schema.</summary>
     private BitmapChunkAccumulator?[]? _ordinalBitmapAccumulators;
 
+    /// <summary>Per-column hint-type lookup, built once from <c>_indexHints</c>.</summary>
+    private Dictionary<string, IndexHintType>? _hintLookup;
+
+    /// <summary>
+    /// Columns whose hint-assigned index type failed during the scan. Exposed via
+    /// <see cref="DeferredReindexColumns"/> for diagnostic logging. No automatic recovery
+    /// is possible in the incremental path because rows are not retained.
+    /// </summary>
+    private List<string>? _deferredReindexColumns;
+
     private int _rowsInCurrentChunk;
     private long _totalRowCount;
     private long _currentChunkRowOffset;
@@ -1039,7 +1351,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
         bool bloomAllColumns = false,
         bool indexAllColumns = false,
         bool autoIndexColumns = false,
-        int? maxIndexedColumns = null)
+        int? maxIndexedColumns = null,
+        IReadOnlyList<ColumnIndexHint>? indexHints = null)
     {
         _chunkSize = chunkSize;
         _fingerprint = fingerprint;
@@ -1049,6 +1362,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
         _indexAllColumns = indexAllColumns;
         _autoIndexColumns = autoIndexColumns;
         _maxIndexedColumns = maxIndexedColumns;
+        _indexHints = indexHints;
         bool needsBloom = bloomAllColumns || (bloomColumns is not null && bloomColumns.Count > 0);
         bool needsIndex = indexAllColumns || (indexColumns is not null && indexColumns.Count > 0) || autoIndexColumns;
         _allChunkBloomFilters = needsBloom ? new() : null;
@@ -1075,7 +1389,8 @@ public sealed class IncrementalIndexBuilder : IDisposable
                 _spillWriter.Initialize(effectiveIndexColumns);
             }
 
-            _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema);  // Incremental path has no manifest hints.
+            _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema, _indexHints);
+            _hintLookup = SourceIndexBuilder.BuildHintLookup(_indexHints);
 
             if (_bitmapAccumulators is not null)
             {
@@ -1121,8 +1436,18 @@ public sealed class IncrementalIndexBuilder : IDisposable
                     if (value.Kind == DataKind.String
                         && value.AsString().Length > SortedIndexSpillWriter.AutoIndexMaxStringLength)
                     {
-                        _spillWriter!.DropColumn(_resolvedColumnNames![ordinal]);
+                        string droppedName = _resolvedColumnNames![ordinal];
+                        _spillWriter!.DropColumn(droppedName);
                         spillEntries[ordinal] = null;
+
+                        // Sorted/BTree-hinted column failed its hint — record for diagnostics.
+                        if (_hintLookup is not null
+                            && _hintLookup.TryGetValue(droppedName, out IndexHintType droppedHint)
+                            && droppedHint is IndexHintType.Sorted or IndexHintType.BTree)
+                        {
+                            _deferredReindexColumns ??= new();
+                            _deferredReindexColumns.Add(droppedName);
+                        }
                     }
                     else
                     {
@@ -1144,6 +1469,15 @@ public sealed class IncrementalIndexBuilder : IDisposable
                     if (bitmapAccumulator.IsAbandoned)
                     {
                         bitmapAccs[ordinal] = null;
+
+                        // Bitmap-hinted column exceeded cardinality threshold — record for diagnostics.
+                        if (_hintLookup is not null
+                            && _hintLookup.TryGetValue(_resolvedColumnNames![ordinal], out IndexHintType abandonedHint)
+                            && abandonedHint == IndexHintType.Bitmap)
+                        {
+                            _deferredReindexColumns ??= new();
+                            _deferredReindexColumns.Add(_resolvedColumnNames[ordinal]);
+                        }
                     }
                 }
             }
@@ -1164,6 +1498,15 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// <see cref="IndexWriter"/>. Disposed when this builder is disposed.
     /// </summary>
     internal SortedIndexSpillWriter? SpillWriter => _spillWriter;
+
+    /// <summary>
+    /// Columns whose hint-assigned index type failed during the scan (e.g. bitmap hint
+    /// on a column that exceeded cardinality, or sorted hint on a column with strings too
+    /// long). Available for diagnostic logging after <see cref="Finalize"/>. Empty when all
+    /// hints were respected or no hints were provided.
+    /// </summary>
+    public IReadOnlyList<string> DeferredReindexColumns =>
+        (IReadOnlyList<string>?)_deferredReindexColumns ?? Array.Empty<string>();
 
     /// <summary>
     /// Optional callback invoked when a chunk is finalized and flushed.
@@ -1196,6 +1539,22 @@ public sealed class IncrementalIndexBuilder : IDisposable
         BitmapIndexSet? bitmapIndexSet = _bitmapAccumulators is not null
             ? SourceIndexBuilder.BuildBitmapIndexSet(_bitmapAccumulators)
             : null;
+
+        // When sorted columns were auto-selected (not explicitly requested), exclude
+        // bitmap-covered columns from the spill writer before serialization to avoid
+        // duplicate coverage. The spill writer is handed to IndexWriter which serializes
+        // it directly — this is the incremental builder's only chance to dedup.
+        bool sortedColumnsAreAutoSelected = _autoIndexColumns
+            && !_indexAllColumns
+            && (_indexColumns is null || _indexColumns.Count == 0);
+
+        if (sortedColumnsAreAutoSelected && bitmapIndexSet is not null && _spillWriter is not null)
+        {
+            foreach (string bitmapColumn in bitmapIndexSet.ColumnNames)
+            {
+                _spillWriter.DropColumn(bitmapColumn);
+            }
+        }
 
         _spillWriter?.PrepareForReading();
 
@@ -1364,7 +1723,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
     /// <summary>
     /// Resolves the effective index column set considering explicit columns,
-    /// all-columns mode, and auto-index mode (in priority order).
+    /// all-columns mode, auto-index mode, and manifest hints (in priority order).
     /// </summary>
     private IReadOnlySet<string>? ResolveEffectiveIndexColumns(Schema schema)
     {
@@ -1386,6 +1745,9 @@ public sealed class IncrementalIndexBuilder : IDisposable
         {
             return null;
         }
+
+        result = SourceIndexBuilder.AugmentWithIndexHints(result, schema, _indexHints);
+        result = SourceIndexBuilder.ExcludeHintedColumnsFromSortedIndex(result, _indexHints);
 
         if (result is not null && _maxIndexedColumns is int max && result.Count > max)
         {

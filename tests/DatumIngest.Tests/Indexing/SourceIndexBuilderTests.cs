@@ -623,35 +623,33 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildAsync_AutoIndex_IndexesCompactColumnsOnly()
     {
-        Row[] rows =
-        [
+        // Use >256 rows so high-cardinality columns exceed bitmap threshold and get sorted.
+        // Boolean has inherently ≤2 distinct values → always gets bitmap under auto-cascade.
+        int count = 300;
+        Row[] rows = Enumerable.Range(0, count).Select(i =>
             MakeRow(
-                ("id", DataValue.FromFloat32(1.0f)),
-                ("name", DataValue.FromString("alice")),
-                ("data", DataValue.FromVector(new float[] { 1.0f, 2.0f })),
-                ("active", DataValue.FromBoolean(true)),
-                ("created", DataValue.FromDate(new DateOnly(2024, 1, 1)))),
-            MakeRow(
-                ("id", DataValue.FromFloat32(2.0f)),
-                ("name", DataValue.FromString("bob")),
-                ("data", DataValue.FromVector(new float[] { 3.0f, 4.0f })),
-                ("active", DataValue.FromBoolean(false)),
-                ("created", DataValue.FromDate(new DateOnly(2024, 2, 1)))),
-        ];
+                ("id", DataValue.FromFloat32((float)i)),
+                ("name", DataValue.FromString($"user_{i}")),
+                ("data", DataValue.FromVector(new float[] { (float)i })),
+                ("active", DataValue.FromBoolean(i % 2 == 0)),
+                ("created", DataValue.FromDate(new DateOnly(2024, 1, 1).AddDays(i))))).ToArray();
 
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("auto");
         SourceIndexBuilder builder = new(
-            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: count, autoIndexColumns: true);
 
         SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
         Assert.NotNull(index.SortedIndexes);
-        // Compact types should be indexed.
+        // High-cardinality compact types should get sorted indexes.
         Assert.True(index.SortedIndexes.HasColumn("id"));
         Assert.True(index.SortedIndexes.HasColumn("name"));
-        Assert.True(index.SortedIndexes.HasColumn("active"));
         Assert.True(index.SortedIndexes.HasColumn("created"));
+        // Boolean (≤2 distinct) gets bitmap, not sorted.
+        Assert.False(index.SortedIndexes.HasColumn("active"));
+        Assert.NotNull(index.BitmapIndexes);
+        Assert.True(index.BitmapIndexes.TryGetIndex("active", out _));
         // Vectors should NOT be indexed.
         Assert.False(index.SortedIndexes.HasColumn("data"));
     }
@@ -659,22 +657,18 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildAsync_AutoIndex_DropsLongStringColumns()
     {
-        Row[] rows =
-        [
+        // >256 distinct values so id and short_text get sorted indexes (not bitmap).
+        int count = 300;
+        Row[] rows = Enumerable.Range(0, count).Select(i =>
             MakeRow(
-                ("id", DataValue.FromFloat32(1.0f)),
-                ("short_text", DataValue.FromString("ok")),
-                ("long_text", DataValue.FromString("this is way too long for auto-indexing"))),
-            MakeRow(
-                ("id", DataValue.FromFloat32(2.0f)),
-                ("short_text", DataValue.FromString("fine")),
-                ("long_text", DataValue.FromString("another long value exceeding the limit"))),
-        ];
+                ("id", DataValue.FromFloat32((float)i)),
+                ("short_text", DataValue.FromString($"s{i}")),
+                ("long_text", DataValue.FromString($"this is way too long for auto-indexing {i}")))).ToArray();
 
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("auto-drop");
         SourceIndexBuilder builder = new(
-            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: count, autoIndexColumns: true);
 
         SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
@@ -688,7 +682,9 @@ public sealed class SourceIndexBuilderTests
     [Fact]
     public async Task BuildAsync_AutoIndex_SpillsAcrossMultipleChunks()
     {
-        Row[] rows = Enumerable.Range(0, 25).Select(i =>
+        // >256 distinct values for id so it gets a sorted index (not bitmap).
+        int count = 300;
+        Row[] rows = Enumerable.Range(0, count).Select(i =>
             MakeRow(
                 ("id", DataValue.FromFloat32((float)i)),
                 ("tag", DataValue.FromString($"t{i % 5}")))).ToArray();
@@ -696,19 +692,19 @@ public sealed class SourceIndexBuilderTests
         InMemoryTableProvider provider = new(rows);
         TableDescriptor descriptor = CreateDescriptor("spill");
         SourceIndexBuilder builder = new(
-            bloomAllColumns: false, indexAllColumns: false, chunkSize: 5, autoIndexColumns: true);
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 50, autoIndexColumns: true);
 
         SourceIndex index = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
         Assert.NotNull(index.SortedIndexes);
         Assert.True(index.SortedIndexes.TryGetIndex("id", out SortedValueIndex? idIndex));
-        Assert.Equal(25, idIndex!.Count);
+        Assert.Equal(count, idIndex!.Count);
 
         // Verify correct chunk assignment after spill+merge.
-        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromFloat32(12.0f));
+        IReadOnlyList<ValueIndexEntry> found = idIndex.FindExact(DataValue.FromFloat32(112.0f));
         Assert.Single(found);
-        Assert.Equal(2, found[0].ChunkIndex); // rows 10-14 are chunk 2
-        Assert.Equal(2, found[0].RowOffsetInChunk);
+        Assert.Equal(2, found[0].ChunkIndex); // rows 100-149 are chunk 2
+        Assert.Equal(12, found[0].RowOffsetInChunk);
     }
 
     [Fact]
@@ -716,15 +712,16 @@ public sealed class SourceIndexBuilderTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         SourceIndexBuilder builder = new(
-            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 500, autoIndexColumns: true);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
-        incremental.AddRow(MakeRow(
-            ("id", DataValue.FromFloat32(3.0f)),
-            ("vec", DataValue.FromVector(new float[] { 1.0f }))));
-        incremental.AddRow(MakeRow(
-            ("id", DataValue.FromFloat32(1.0f)),
-            ("vec", DataValue.FromVector(new float[] { 2.0f }))));
+        // >256 distinct values so id stays in spill writer (not deduped by bitmap).
+        for (int i = 0; i < 300; i++)
+        {
+            incremental.AddRow(MakeRow(
+                ("id", DataValue.FromFloat32((float)i)),
+                ("vec", DataValue.FromVector(new float[] { (float)i }))));
+        }
 
         SourceIndex result = incremental.Finalize();
         Assert.Null(result.SortedIndexes);
@@ -741,15 +738,16 @@ public sealed class SourceIndexBuilderTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         SourceIndexBuilder builder = new(
-            bloomAllColumns: false, indexAllColumns: false, chunkSize: 100, autoIndexColumns: true);
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 500, autoIndexColumns: true);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
-        incremental.AddRow(MakeRow(
-            ("code", DataValue.FromString("AB")),
-            ("description", DataValue.FromString("A very long description that exceeds the limit"))));
-        incremental.AddRow(MakeRow(
-            ("code", DataValue.FromString("CD")),
-            ("description", DataValue.FromString("Another long one for sure and certain"))));
+        // >256 distinct short codes so code stays in spill writer.
+        for (int i = 0; i < 300; i++)
+        {
+            incremental.AddRow(MakeRow(
+                ("code", DataValue.FromString($"C{i}")),
+                ("description", DataValue.FromString($"A very long description that exceeds the limit {i}"))));
+        }
 
         SourceIndex result = incremental.Finalize();
         Assert.Null(result.SortedIndexes);
@@ -766,10 +764,12 @@ public sealed class SourceIndexBuilderTests
     {
         SourceFingerprint fingerprint = new(0, new byte[32]);
         SourceIndexBuilder builder = new(
-            bloomAllColumns: false, indexAllColumns: false, chunkSize: 5, autoIndexColumns: true);
+            bloomAllColumns: false, indexAllColumns: false, chunkSize: 50, autoIndexColumns: true);
         IncrementalIndexBuilder incremental = builder.CreateIncrementalBuilder(fingerprint);
 
-        for (int i = 0; i < 15; i++)
+        // >256 distinct values so bitmap doesn't capture them.
+        int count = 300;
+        for (int i = 0; i < count; i++)
         {
             incremental.AddRow(MakeRow(("value", DataValue.FromFloat32((float)i))));
         }
@@ -780,13 +780,13 @@ public sealed class SourceIndexBuilderTests
         SortedValueIndexSet? sortedIndexes = incremental.SpillWriter?.BuildSortedValueIndexSet();
         Assert.NotNull(sortedIndexes);
         Assert.True(sortedIndexes.TryGetIndex("value", out SortedValueIndex? sortedIndex));
-        Assert.Equal(15, sortedIndex!.Count);
+        Assert.Equal(count, sortedIndex!.Count);
 
-        // Value 7.0 should be in chunk 1, row 2.
-        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromFloat32(7.0f));
+        // Value 57.0 should be in chunk 1, row 7.
+        IReadOnlyList<ValueIndexEntry> found = sortedIndex.FindExact(DataValue.FromFloat32(57.0f));
         Assert.Single(found);
         Assert.Equal(1, found[0].ChunkIndex);
-        Assert.Equal(2, found[0].RowOffsetInChunk);
+        Assert.Equal(7, found[0].RowOffsetInChunk);
         incremental.Dispose();
     }
 
