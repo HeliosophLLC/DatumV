@@ -397,8 +397,8 @@ internal sealed class GraceHashJoinExecutor
     private sealed class PartitionBuildTable
     {
         internal readonly List<Row> BuildRows;
-        internal readonly Dictionary<DataValue, List<(int Index, Row Row)>>? SingleKeyTable;
-        internal readonly Dictionary<CompositeKey, List<(int Index, Row Row)>>? CompositeKeyTable;
+        internal readonly DataValueHashMap<List<(int Index, Row Row)>>? SingleKeyTable;
+        internal readonly CompositeKeyHashMap<List<(int Index, Row Row)>>? CompositeKeyTable;
         internal CombinedRowSchema? JoinSchema;
         internal Row? CachedNullBuild;
 
@@ -433,10 +433,10 @@ internal sealed class GraceHashJoinExecutor
                 DataValue key = _evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
                 if (!key.IsNull)
                 {
-                    if (!table.SingleKeyTable!.TryGetValue(key, out List<(int, Row)>? bucket))
+                    ref List<(int, Row)> bucket = ref table.SingleKeyTable!.GetOrAdd(key, out bool exists);
+                    if (!exists)
                     {
                         bucket = new List<(int, Row)>();
-                        table.SingleKeyTable[key] = bucket;
                     }
 
                     bucket.Add((buildIndex, buildRow));
@@ -447,11 +447,10 @@ internal sealed class GraceHashJoinExecutor
                 DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
                 if (!HasNull(parts))
                 {
-                    CompositeKey compositeKey = new(parts);
-                    if (!table.CompositeKeyTable!.TryGetValue(compositeKey, out List<(int, Row)>? bucket))
+                    ref List<(int, Row)> bucket = ref table.CompositeKeyTable!.GetOrAddDefault(parts, out bool exists);
+                    if (!exists)
                     {
                         bucket = new List<(int, Row)>();
-                        table.CompositeKeyTable[compositeKey] = bucket;
                     }
 
                     bucket.Add((buildIndex, buildRow));
@@ -493,8 +492,7 @@ internal sealed class GraceHashJoinExecutor
             DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: !buildKeyIsRight);
             if (!HasNull(parts))
             {
-                CompositeKey compositeKey = new(parts);
-                table.CompositeKeyTable!.TryGetValue(compositeKey, out matches);
+                table.CompositeKeyTable!.TryGetValue(parts.AsSpan(), out matches);
             }
         }
 
@@ -617,9 +615,9 @@ internal sealed class GraceHashJoinExecutor
                 ? partition.TotalBuildRowCount
                 : partition.InMemoryBuildRowCount;
             List<Row> buildRowList = new(Math.Max(buildRowEstimate, 4));
-            Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable =
+            DataValueHashMap<List<(int Index, Row Row)>>? singleKeyTable =
                 useSingleKey ? new(buildRowEstimate) : null;
-            Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable =
+            CompositeKeyHashMap<List<(int Index, Row Row)>>? compositeKeyTable =
                 useSingleKey ? null : new(buildRowEstimate);
 
             long buildSizeEstimate = 0;
@@ -644,10 +642,10 @@ internal sealed class GraceHashJoinExecutor
                         buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow);
                     if (!keyValue.IsNull)
                     {
-                        if (!singleKeyTable!.TryGetValue(keyValue, out List<(int, Row)>? bucket))
+                        ref List<(int, Row)> bucket = ref singleKeyTable!.GetOrAdd(keyValue, out bool exists);
+                        if (!exists)
                         {
                             bucket = new List<(int, Row)>();
-                            singleKeyTable[keyValue] = bucket;
                         }
 
                         bucket.Add((buildIndex, buildRow));
@@ -658,11 +656,10 @@ internal sealed class GraceHashJoinExecutor
                     DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
                     if (!HasNull(parts))
                     {
-                        CompositeKey compositeKey = new(parts);
-                        if (!compositeKeyTable!.TryGetValue(compositeKey, out List<(int, Row)>? bucket))
+                        ref List<(int, Row)> bucket = ref compositeKeyTable!.GetOrAddDefault(parts, out bool exists);
+                        if (!exists)
                         {
                             bucket = new List<(int, Row)>();
-                            compositeKeyTable[compositeKey] = bucket;
                         }
 
                         bucket.Add((buildIndex, buildRow));
@@ -714,8 +711,7 @@ internal sealed class GraceHashJoinExecutor
                     DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: !buildKeyIsRight);
                     if (!HasNull(parts))
                     {
-                        CompositeKey compositeKey = new(parts);
-                        compositeKeyTable!.TryGetValue(compositeKey, out matches);
+                        compositeKeyTable!.TryGetValue(parts.AsSpan(), out matches);
                     }
                 }
 
