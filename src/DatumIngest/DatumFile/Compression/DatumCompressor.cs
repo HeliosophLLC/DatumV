@@ -63,6 +63,29 @@ public static class DatumCompressor
         };
     }
 
+    /// <summary>
+    /// Decompresses <paramref name="source"/> into <paramref name="destination"/> without
+    /// allocating an output array. Returns the number of bytes written.
+    /// </summary>
+    /// <param name="source">Compressed bytes.</param>
+    /// <param name="destination">
+    /// Caller-owned buffer that receives the decompressed bytes. Must be at least
+    /// <paramref name="uncompressedLength"/> bytes long; excess capacity is ignored.
+    /// </param>
+    /// <param name="uncompressedLength">Expected decompressed byte count.</param>
+    /// <param name="kind">Codec that was used to compress the bytes.</param>
+    public static int DecompressInto(ReadOnlySpan<byte> source, byte[] destination, int uncompressedLength, DatumCompression kind)
+    {
+        return kind switch
+        {
+            DatumCompression.None => CopySourceInto(source, destination),
+            DatumCompression.Zstd => DecompressZstdInto(source, destination),
+            DatumCompression.Zlib => DecompressZlibInto(source, destination, uncompressedLength),
+            DatumCompression.Brotli => DecompressBrotliInto(source, destination, uncompressedLength),
+            _ => throw new NotSupportedException($"Unsupported compression kind: {kind}."),
+        };
+    }
+
     // ──────────────────── Zstd ────────────────────
 
     private static byte[] CompressZstd(ReadOnlySpan<byte> source, int level)
@@ -100,6 +123,12 @@ public static class DatumCompressor
         return output;
     }
 
+    private static int DecompressZstdInto(ReadOnlySpan<byte> source, byte[] destination)
+    {
+        Decompressor decompressor = (_threadDecompressor ??= new Decompressor());
+        return decompressor.Unwrap(source, destination);
+    }
+
     // ──────────────────── Zlib (Deflate) ────────────────────
 
     private static byte[] CompressZlib(ReadOnlySpan<byte> source)
@@ -122,6 +151,14 @@ public static class DatumCompressor
         return output;
     }
 
+    private static int DecompressZlibInto(ReadOnlySpan<byte> source, byte[] destination, int uncompressedLength)
+    {
+        using MemoryStream inputStream = new(source.ToArray());
+        using DeflateStream deflate = new(inputStream, CompressionMode.Decompress, leaveOpen: true);
+        deflate.ReadExactly(destination.AsSpan(0, uncompressedLength));
+        return uncompressedLength;
+    }
+
     // ──────────────────── Brotli ────────────────────
 
     private static byte[] CompressBrotli(ReadOnlySpan<byte> source)
@@ -142,5 +179,19 @@ public static class DatumCompressor
         byte[] output = new byte[uncompressedLength];
         brotli.ReadExactly(output);
         return output;
+    }
+
+    private static int DecompressBrotliInto(ReadOnlySpan<byte> source, byte[] destination, int uncompressedLength)
+    {
+        using MemoryStream inputStream = new(source.ToArray());
+        using BrotliStream brotli = new(inputStream, CompressionMode.Decompress, leaveOpen: true);
+        brotli.ReadExactly(destination.AsSpan(0, uncompressedLength));
+        return uncompressedLength;
+    }
+
+    private static int CopySourceInto(ReadOnlySpan<byte> source, byte[] destination)
+    {
+        source.CopyTo(destination);
+        return source.Length;
     }
 }

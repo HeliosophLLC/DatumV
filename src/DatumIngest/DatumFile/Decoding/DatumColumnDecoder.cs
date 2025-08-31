@@ -48,7 +48,10 @@ public abstract class DatumColumnDecoder
     /// back to <see cref="Decode(byte[], DatumEncoding, DatumCompression, int, int, DatumColumnDescriptor, DatumDecoderContext)"/> plus a copy, producing materialised values safe for use
     /// outside any arena lifetime.
     /// </summary>
-    /// <param name="payload">Compressed page bytes as written to the <c>.datum</c> file.</param>
+    /// <param name="payload">
+    /// Buffer containing compressed page bytes. May be larger than the actual payload when
+    /// a shared buffer is reused; <paramref name="payloadLength"/> specifies the valid region.
+    /// </param>
     /// <param name="encoding">Encoding applied before compression.</param>
     /// <param name="compression">Compression algorithm used.</param>
     /// <param name="uncompressedByteLength">Expected byte count after decompression.</param>
@@ -56,6 +59,17 @@ public abstract class DatumColumnDecoder
     /// <param name="descriptor">Column schema descriptor.</param>
     /// <param name="context">Decoder context carrying the datum file path for sidecar blob resolution.</param>
     /// <param name="target">Pre-allocated column buffer with at least <paramref name="rowCount"/> slots.</param>
+    /// <param name="payloadLength">
+    /// Number of valid bytes in <paramref name="payload"/>. When negative, the entire
+    /// array is used. Pass this when the payload buffer is a shared rental larger than the
+    /// actual compressed page.
+    /// </param>
+    /// <param name="decompressedBuffer">
+    /// Optional caller-owned buffer for decompressed page bytes. When non-null, decompression
+    /// writes into this buffer instead of allocating a fresh array, avoiding Gen 2 deaths from
+    /// repeated short-lived allocations. Must be at least <paramref name="uncompressedByteLength"/>
+    /// bytes long.
+    /// </param>
     public virtual void DecodeInto(
         byte[] payload,
         DatumEncoding encoding,
@@ -64,9 +78,14 @@ public abstract class DatumColumnDecoder
         int rowCount,
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context,
-        DataValue[] target)
+        DataValue[] target,
+        int payloadLength = -1,
+        byte[]? decompressedBuffer = null)
     {
-        DataValue[] decoded = Decode(payload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
+        byte[] exactPayload = payloadLength >= 0 && payloadLength < payload.Length
+            ? payload[..payloadLength]
+            : payload;
+        DataValue[] decoded = Decode(exactPayload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
         decoded.AsSpan(0, rowCount).CopyTo(target);
     }
 
@@ -112,6 +131,20 @@ public abstract class DatumColumnDecoder
     /// <summary>Decompresses the page payload using the given codec.</summary>
     protected static byte[] DecompressPayload(byte[] payload, int uncompressedByteLength, DatumCompression compression)
         => DatumCompressor.Decompress(payload, uncompressedByteLength, compression);
+
+    /// <summary>
+    /// Decompresses a region of the page payload using the given codec.
+    /// Avoids array allocation when the buffer is shared and larger than the actual payload.
+    /// </summary>
+    protected static byte[] DecompressPayload(byte[] payload, int payloadLength, int uncompressedByteLength, DatumCompression compression)
+        => DatumCompressor.Decompress(payload.AsSpan(0, payloadLength), uncompressedByteLength, compression);
+
+    /// <summary>
+    /// Decompresses a region of the page payload into a caller-provided buffer,
+    /// avoiding output array allocation when the same buffer is reused across pages.
+    /// </summary>
+    protected static int DecompressPayloadInto(byte[] payload, int payloadLength, byte[] destination, int uncompressedByteLength, DatumCompression compression)
+        => DatumCompressor.DecompressInto(payload.AsSpan(0, payloadLength), destination, uncompressedByteLength, compression);
 
     /// <summary>
     /// Reads the null bitmap from the start of the uncompressed page bytes.

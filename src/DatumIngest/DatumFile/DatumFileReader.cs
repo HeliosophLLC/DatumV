@@ -133,10 +133,23 @@ public sealed class DatumFileReader : IDisposable
     /// Pre-allocated column buffers. <c>target[i]</c> must have at least as many elements as the
     /// row group's row count. Reused across row groups to avoid LOH churn.
     /// </param>
+    /// <param name="compressedBuffer">
+    /// Caller-owned buffer reused for reading compressed page bytes. Must be at least as
+    /// large as the largest compressed page across all row groups and columns being read.
+    /// Passing a single buffer avoids per-column <see cref="ArrayPool{T}"/> rent/return
+    /// churn that leads to Gen 2 deaths from pool trimming.
+    /// </param>
+    /// <param name="decompressedBuffer">
+    /// Caller-owned buffer reused for page decompression output. Must be at least as large
+    /// as the largest uncompressed page. Eliminates repeated <c>new byte[]</c> allocations
+    /// inside the decompressor.
+    /// </param>
     internal void ReadColumnsInto(
         int rowGroupIndex,
         int[] columnIndices,
-        DataValue[][] target)
+        DataValue[][] target,
+        byte[] compressedBuffer,
+        byte[] decompressedBuffer)
     {
         DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
         int rowCount = (int)rowGroup.RowCount;
@@ -147,28 +160,26 @@ public sealed class DatumFileReader : IDisposable
             int columnIndex = columnIndices[i];
             DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
             DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
+            int compressedLength = (int)chunk.CompressedByteLength;
 
-            byte[] compressedBuffer = ArrayPool<byte>.Shared.Rent((int)chunk.CompressedByteLength);
-            try
-            {
-                _stream.Seek(chunk.PageOffset, SeekOrigin.Begin);
-                _stream.ReadExactly(compressedBuffer.AsSpan(0, (int)chunk.CompressedByteLength));
+            _stream.Seek(chunk.PageOffset, SeekOrigin.Begin);
+            _stream.ReadExactly(compressedBuffer.AsSpan(0, compressedLength));
 
-                DatumColumnDecoder decoder = DatumDecoderFactory.GetDecoder(descriptor, chunk.Encoding);
-                decoder.DecodeInto(
-                    compressedBuffer[..(int)chunk.CompressedByteLength],
-                    chunk.Encoding,
-                    chunk.Compression,
-                    (int)chunk.UncompressedByteLength,
-                    rowCount,
-                    descriptor,
-                    context,
-                    target[i]);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(compressedBuffer);
-            }
+            DatumColumnDecoder decoder = DatumDecoderFactory.GetDecoder(descriptor, chunk.Encoding);
+
+            // Pass the full rented buffer — decompressors are frame-aware and
+            // ignore trailing bytes beyond the compressed frame.
+            decoder.DecodeInto(
+                compressedBuffer,
+                chunk.Encoding,
+                chunk.Compression,
+                (int)chunk.UncompressedByteLength,
+                rowCount,
+                descriptor,
+                context,
+                target[i],
+                payloadLength: compressedLength,
+                decompressedBuffer: decompressedBuffer);
         }
     }
 

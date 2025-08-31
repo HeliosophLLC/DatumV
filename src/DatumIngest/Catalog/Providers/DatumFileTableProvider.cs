@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using DatumIngest.DatumFile;
 using DatumIngest.Execution;
@@ -91,13 +92,27 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         PrunedRowGroups = 0;
 
         // Pre-allocate column buffers for the maximum row group size so that
-        // DecodeIntoColumn writes directly into reused arrays, eliminating ~1,980
+        // DecodeInto writes directly into reused arrays, eliminating ~1,980
         // LOH DataValue[] allocations (one per column per row group).
+        // Also find the largest compressed page so a single byte[] can be reused
+        // across all columns and row groups instead of renting/returning per page.
         int maxRowGroupSize = 0;
+        int maxCompressedPageSize = 0;
+        int maxUncompressedPageSize = 0;
         for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
         {
-            int rowCount = (int)reader.GetRowGroupDescriptor(rgIndex).RowCount;
+            DatumRowGroupDescriptor rgDescriptor = reader.GetRowGroupDescriptor(rgIndex);
+            int rowCount = (int)rgDescriptor.RowCount;
             if (rowCount > maxRowGroupSize) maxRowGroupSize = rowCount;
+
+            for (int colIndex = 0; colIndex < projectedIndices.Length; colIndex++)
+            {
+                DatumColumnChunkDescriptor chunk = rgDescriptor.ColumnChunks[projectedIndices[colIndex]];
+                int compressedSize = (int)chunk.CompressedByteLength;
+                if (compressedSize > maxCompressedPageSize) maxCompressedPageSize = compressedSize;
+                int uncompressedSize = (int)chunk.UncompressedByteLength;
+                if (uncompressedSize > maxUncompressedPageSize) maxUncompressedPageSize = uncompressedSize;
+            }
         }
 
         DataValue[][] columns = new DataValue[projectedIndices.Length][];
@@ -106,8 +121,12 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             columns[colIndex] = new DataValue[maxRowGroupSize];
         }
 
+        byte[] compressedBuffer = ArrayPool<byte>.Shared.Rent(maxCompressedPageSize);
+        byte[] decompressedBuffer = ArrayPool<byte>.Shared.Rent(maxUncompressedPageSize);
         RowBatch? batch = null;
 
+        try
+        {
         for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -128,7 +147,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             }
 
             int rowCount = (int)rowGroupDescriptor.RowCount;
-            reader.ReadColumnsInto(rgIndex, projectedIndices, columns);
+            reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
 
             for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
@@ -154,6 +173,12 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         if (batch is not null && batch.Count > 0)
         {
             yield return batch;
+        }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(compressedBuffer);
+            ArrayPool<byte>.Shared.Return(decompressedBuffer);
         }
     }
 

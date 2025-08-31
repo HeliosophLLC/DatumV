@@ -57,9 +57,21 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
         int rowCount,
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context,
-        DataValue[] target)
+        DataValue[] target,
+        int payloadLength = -1,
+        byte[]? decompressedBuffer = null)
     {
-        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int effectiveLength = payloadLength >= 0 ? payloadLength : payload.Length;
+        byte[] raw;
+        if (decompressedBuffer is not null)
+        {
+            DecompressPayloadInto(payload, effectiveLength, decompressedBuffer, uncompressedByteLength, compression);
+            raw = decompressedBuffer;
+        }
+        else
+        {
+            raw = DecompressPayload(payload, effectiveLength, uncompressedByteLength, compression);
+        }
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
         int bytesPerElement = FixedNumericColumnEncoder.BytesPerElement(descriptor.Kind);
