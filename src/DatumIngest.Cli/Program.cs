@@ -42,6 +42,11 @@ try
         return await RunIndexManifestAsync(catalog, options);
     }
 
+    if (options.Command == "ingest")
+    {
+        return await RunIngestAsync(catalog, options);
+    }
+
     if (options.Command == "manifest-schema")
     {
         return await RunManifestSchemaAsync(catalog, options.OutputPath);
@@ -88,7 +93,7 @@ try
         "explain" => await RunExplainAsync(query, catalog, options.Analyze, options.MemoryBudgetBytes),
         "manifest" => await RunManifestAsync(query, catalog, options.OutputPath),
         "schema" => await RunSchemaAsync(query, catalog),
-        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', or 'star-schema'.")
+        _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', 'ingest', or 'star-schema'.")
     };
 }
 catch (ArgumentException ex)
@@ -492,6 +497,169 @@ static async Task BuildGroupedIndexAndManifestAsync(
             await sourceStream.DisposeAsync();
         }
     }
+}
+
+static async Task<int> RunIngestAsync(TableCatalog catalog, CliOptions options)
+{
+    List<TableDescriptor> descriptors = new();
+
+    foreach (string source in options.Sources)
+    {
+        if (Directory.Exists(source))
+        {
+            continue;
+        }
+
+        TableDescriptor descriptor = ParseSourceDefinition(source);
+
+        if (!catalog.TryResolve(descriptor.Name, out _))
+        {
+            catalog.Register(descriptor);
+        }
+
+        descriptors.Add(descriptor);
+    }
+
+    // When no explicit sources are given, ingest every table in the catalog.
+    if (descriptors.Count == 0)
+    {
+        foreach (string tableName in catalog.TableNames)
+        {
+            descriptors.Add(catalog.Resolve(tableName));
+        }
+    }
+
+    if (descriptors.Count == 0)
+    {
+        throw new ArgumentException("The 'ingest' command requires at least one --source definition or a --catalog with tables.");
+    }
+
+    bool withIndex = options.WithIndex || options.AutoIndexColumns
+        || options.IndexAllColumns || options.IndexColumns.Count > 0
+        || options.BloomAllColumns || options.BloomColumns.Count > 0
+        || options.BitmapAllColumns || options.BitmapColumns.Count > 0;
+
+    SourceIndexBuilder? indexBuilder = withIndex ? CreateIndexBuilder(options) : null;
+
+    foreach (TableDescriptor descriptor in descriptors)
+    {
+        await IngestTableAsync(descriptor, catalog, indexBuilder, options);
+    }
+
+    return 0;
+}
+
+static async Task IngestTableAsync(
+    TableDescriptor descriptor,
+    TableCatalog catalog,
+    SourceIndexBuilder? indexBuilder,
+    CliOptions options)
+{
+    ITableProvider provider = catalog.CreateProvider(descriptor);
+    StatisticsCollector statisticsCollector = new();
+    ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
+
+    // Compute fingerprint from source file.
+    DatumIngest.Indexing.SourceFingerprint fingerprint;
+    if (File.Exists(descriptor.FilePath))
+    {
+        await using FileStream sourceStream = File.OpenRead(descriptor.FilePath);
+        fingerprint = await DatumIngest.Indexing.SourceFingerprint.ComputeAsync(
+            sourceStream, CancellationToken.None).ConfigureAwait(false);
+    }
+    else
+    {
+        fingerprint = new DatumIngest.Indexing.SourceFingerprint(0, Array.Empty<byte>());
+    }
+
+    IncrementalIndexBuilder? incrementalBuilder = indexBuilder?.CreateIncrementalBuilder(fingerprint);
+
+    // Determine output path.
+    string outputDirectory = options.OutputDirectory
+        ?? Path.GetDirectoryName(descriptor.FilePath)
+        ?? Directory.GetCurrentDirectory();
+    Directory.CreateDirectory(outputDirectory);
+
+    string tableName = GetSidecarTableName(descriptor);
+    string datumPath = Path.Combine(outputDirectory, tableName + ".datum");
+
+    Console.WriteLine($"Ingesting '{descriptor.Name}' → {datumPath}");
+
+    FusedDatumPipelineWriter datumWriter = new(datumPath, incrementalBuilder, statisticsCollector);
+
+    Dictionary<string, DataKind> columnKinds = new(StringComparer.OrdinalIgnoreCase);
+    ProgressReporter progress = new();
+    long rowCount = 0;
+
+    await foreach (RowBatch batch in provider.OpenAsync(
+        descriptor, requiredColumns: null, CancellationToken.None).ConfigureAwait(false))
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            Row row = batch[i];
+            if (rowCount == 0)
+            {
+                // Initialize the writer with the inferred schema from the first row.
+                Schema schema = InferSchema(row);
+                await datumWriter.InitializeAsync(schema).ConfigureAwait(false);
+
+                foreach (string columnName in row.ColumnNames)
+                {
+                    columnKinds[columnName] = row[columnName].Kind;
+                }
+            }
+
+            datumWriter.WriteRow(row);
+            interactionCollector?.AddRow(row);
+            rowCount++;
+            progress.ReportRow();
+        }
+        batch.Return();
+    }
+
+    if (rowCount == 0)
+    {
+        Console.WriteLine($"  No rows — skipping.");
+        await datumWriter.DisposeAsync().ConfigureAwait(false);
+        return;
+    }
+
+    OutputSummary summary = await datumWriter.FinalizeAsync().ConfigureAwait(false);
+    progress.WriteSummary();
+
+    Console.WriteLine($"  {rowCount:N0} rows, {summary.BytesWritten:N0} bytes");
+
+    foreach (string file in summary.FilesCreated)
+    {
+        Console.WriteLine($"  Created: {file}");
+    }
+
+    // Build and write manifest sidecar.
+    IReadOnlyDictionary<string, ColumnStatistics> statistics = datumWriter.Statistics
+        ?? statisticsCollector.GetStatistics();
+    IReadOnlyList<ColumnInteractionResult>? interactions = interactionCollector?.GetInteractions();
+    QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, rowCount, interactions);
+    SourceManifest sourceManifest = SourceManifest.Create(tableName, manifest);
+    string manifestPath = Path.Combine(outputDirectory, tableName + ".datum-manifest");
+    await ManifestSerializer.WriteToFileAsync(sourceManifest, manifestPath).ConfigureAwait(false);
+    Console.WriteLine($"  Manifest: {manifestPath}");
+
+    if (interactions is { Count: > 0 })
+    {
+        Console.WriteLine($"    Interactions: {interactions.Count} pairs");
+    }
+
+    // Write vocabulary sidecar when any columns have attached vocabularies.
+    SourceVocabularySet? vocabularySet = SourceVocabularySet.ExtractFrom(sourceManifest);
+    if (vocabularySet is not null)
+    {
+        string vocabularyPath = Path.Combine(outputDirectory, tableName + ".datum-vocabulary");
+        await ManifestSerializer.WriteVocabularyToFileAsync(vocabularySet, vocabularyPath).ConfigureAwait(false);
+        int columnCount = vocabularySet.Tables.Values.Sum(table => table.Columns.Count);
+        Console.WriteLine($"  Vocabulary: {vocabularyPath} ({columnCount} column(s))");
+    }
+
+    await datumWriter.DisposeAsync().ConfigureAwait(false);
 }
 
 static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions options)

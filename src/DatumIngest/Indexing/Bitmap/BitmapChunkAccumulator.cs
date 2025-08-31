@@ -16,6 +16,12 @@ internal sealed class BitmapChunkAccumulator
     private readonly int _cardinalityThreshold;
 
     /// <summary>
+    /// Thread-local reusable Zstd compressor context for bitmap chunk compression.
+    /// </summary>
+    [ThreadStatic]
+    private static Compressor? _threadCompressor;
+
+    /// <summary>
     /// Persistent dictionary mapping each known distinct value to its reusable byte[] bitset.
     /// Retained across chunks — bits are cleared to zero at each <see cref="BeginChunk"/> call
     /// rather than reallocating. This eliminates per-chunk dictionary and byte[] allocation.
@@ -144,8 +150,8 @@ internal sealed class BitmapChunkAccumulator
         _chunkRowCounts.Add(actualRowCount);
         int trimmedByteCount = (actualRowCount + 7) / 8;
 
-        // Single compression context for all bitmaps in this chunk.
-        using Compressor compressor = new(DatumFileConstants.DefaultZstdCompressionLevel);
+        // Reusable compression context — avoids native ZSTD_CCtx allocation per chunk.
+        Compressor compressor = (_threadCompressor ??= new Compressor(DatumFileConstants.DefaultZstdCompressionLevel));
 
         foreach (KeyValuePair<DataValue, byte[]> entry in _activeBitmaps)
         {

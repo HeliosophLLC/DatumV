@@ -71,6 +71,10 @@ internal sealed class CliOptions
     /// <summary>Gets or sets whether to build bitmap indexes for all auto-indexable columns during index creation.</summary>
     public bool BitmapAllColumns { get; set; }
 
+    /// <summary>Gets or sets the output directory for the ingest command. When <c>null</c>,
+    /// output files are written alongside the source file.</summary>
+    public string? OutputDirectory { get; set; }
+
     /// <summary>Gets or sets whether to compute pairwise column interactions during manifest generation.</summary>
     public bool WithInteractions { get; set; }
 
@@ -107,7 +111,7 @@ internal sealed class CliOptions
         // The 'index' and 'manifest-schema' commands do not require a SQL argument.
         int argStart;
 
-        if (options.Command is "index" or "index-manifest" or "manifest-schema" or "shell" or "star-schema")
+        if (options.Command is "index" or "index-manifest" or "ingest" or "manifest-schema" or "shell" or "star-schema")
         {
             argStart = 1;
         }
@@ -257,6 +261,14 @@ internal sealed class CliOptions
                     options.OutputPath = args[++i];
                     break;
 
+                case "--output-dir":
+                    if (i + 1 >= args.Length)
+                    {
+                        throw new ArgumentException("--output-dir requires a directory path argument");
+                    }
+                    options.OutputDirectory = args[++i];
+                    break;
+
                 case "--sql-file":
                     if (i + 1 >= args.Length)
                     {
@@ -295,7 +307,7 @@ internal sealed class CliOptions
         }
 
         // Require SQL from either the positional argument or --sql-file for SQL commands.
-        bool isSqlCommand = options.Command is not ("index" or "index-manifest" or "manifest-schema" or "shell" or "star-schema");
+        bool isSqlCommand = options.Command is not ("index" or "index-manifest" or "ingest" or "manifest-schema" or "shell" or "star-schema");
         if (isSqlCommand && string.IsNullOrEmpty(options.Sql) && options.SqlFile is null)
         {
             throw new ArgumentException("Usage: datum-ingest <command> <sql> [...options] (or use --sql-file <path>)");

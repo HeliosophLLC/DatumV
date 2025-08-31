@@ -12,6 +12,19 @@ namespace DatumIngest.DatumFile.Compression;
 public static class DatumCompressor
 {
     /// <summary>
+    /// Thread-local reusable Zstd compressor context. Avoids allocating a ~140 KiB native
+    /// ZSTD_CCtx (with a <see cref="System.Runtime.ConstrainedExecution.CriticalFinalizerObject"/>)
+    /// on every <see cref="CompressZstd"/> call.
+    /// </summary>
+    [ThreadStatic]
+    private static Compressor? _threadCompressor;
+
+    /// <summary>
+    /// Thread-local reusable Zstd decompressor context.
+    /// </summary>
+    [ThreadStatic]
+    private static Decompressor? _threadDecompressor;
+    /// <summary>
     /// Compresses <paramref name="source"/> using the specified codec.
     /// Returns the unmodified source bytes when <paramref name="kind"/> is <see cref="DatumCompression.None"/>.
     /// </summary>
@@ -54,14 +67,15 @@ public static class DatumCompressor
 
     private static byte[] CompressZstd(ReadOnlySpan<byte> source, int level)
     {
-        using Compressor compressor = new(level);
+        Compressor compressor = (_threadCompressor ??= new Compressor(level));
+        compressor.Level = level;
         return compressor.Wrap(source).ToArray();
     }
 
     private static byte[] DecompressZstd(ReadOnlySpan<byte> source, int uncompressedLength)
     {
         byte[] output = new byte[uncompressedLength];
-        using Decompressor decompressor = new();
+        Decompressor decompressor = (_threadDecompressor ??= new Decompressor());
         int written = decompressor.Unwrap(source, output);
 
         if (written != uncompressedLength)

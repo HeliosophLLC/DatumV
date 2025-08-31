@@ -22,28 +22,62 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
             return;
         }
 
-        // Scalar uses the raw float bit pattern as an integer string — faster than
-        // float.ToString("R") and still unique per distinct float value.
-        string representation = value.Kind switch
+        // Use numeric overloads to avoid per-value string allocation.
+        // The CardinalityEstimation library hashes numeric primitives directly.
+        switch (value.Kind)
         {
-            DataKind.Float32 => BitConverter.SingleToInt32Bits(value.AsFloat32()).ToString(),
-            DataKind.Float64 => BitConverter.DoubleToInt64Bits(value.AsFloat64()).ToString(),
-            DataKind.UInt8 => value.AsUInt8().ToString(),
-            DataKind.Int8 => value.AsInt8().ToString(),
-            DataKind.Int16 => value.AsInt16().ToString(),
-            DataKind.UInt16 => value.AsUInt16().ToString(),
-            DataKind.Int32 => value.AsInt32().ToString(),
-            DataKind.UInt32 => value.AsUInt32().ToString(),
-            DataKind.Int64 => value.AsInt64().ToString(),
-            DataKind.UInt64 => value.AsUInt64().ToString(),
-            DataKind.String => value.AsString(),
-            DataKind.Date => value.AsDate().ToString("O"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            DataKind.JsonValue => value.AsJsonValue(),
-            _ => value.GetHashCode().ToString()
-        };
-
-        _estimator.Add(representation);
+            case DataKind.Float32:
+                _estimator.Add(value.AsFloat32());
+                break;
+            case DataKind.Float64:
+                _estimator.Add(value.AsFloat64());
+                break;
+            case DataKind.UInt8:
+                _estimator.Add((int)value.AsUInt8());
+                break;
+            case DataKind.Int8:
+                _estimator.Add((int)value.AsInt8());
+                break;
+            case DataKind.Int16:
+                _estimator.Add((int)value.AsInt16());
+                break;
+            case DataKind.UInt16:
+                _estimator.Add((int)value.AsUInt16());
+                break;
+            case DataKind.Int32:
+                _estimator.Add(value.AsInt32());
+                break;
+            case DataKind.UInt32:
+                _estimator.Add((long)value.AsUInt32());
+                break;
+            case DataKind.Int64:
+                _estimator.Add(value.AsInt64());
+                break;
+            case DataKind.UInt64:
+                _estimator.Add((long)value.AsUInt64());
+                break;
+            case DataKind.Boolean:
+                _estimator.Add(value.AsBoolean() ? 1 : 0);
+                break;
+            case DataKind.Date:
+                _estimator.Add(value.AsDate().DayNumber);
+                break;
+            case DataKind.DateTime:
+                _estimator.Add(value.AsDateTime().ToUnixTimeMilliseconds());
+                break;
+            case DataKind.String:
+                _estimator.Add(value.AsString());
+                break;
+            case DataKind.Uuid:
+                _estimator.Add(value.AsUuid().ToString());
+                break;
+            case DataKind.JsonValue:
+                _estimator.Add(value.AsJsonValue());
+                break;
+            default:
+                _estimator.Add(value.GetHashCode());
+                break;
+        }
     }
 
     /// <inheritdoc />

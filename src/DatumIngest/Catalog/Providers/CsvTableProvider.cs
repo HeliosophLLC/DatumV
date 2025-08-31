@@ -343,12 +343,10 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
         Schema schema = await GetSchemaAsync(descriptor, cancellationToken);
         bool hasHeader = HasHeaderRow(descriptor, schema);
 
-        using StreamReader reader = new(
-            CompressionStreamFactory.OpenRead(descriptor),
-            System.Text.Encoding.UTF8,
-            detectEncodingFromByteOrderMarks: true,
-            bufferSize: ReaderBufferSize);
-        string? firstLine = await reader.ReadLineAsync(cancellationToken);
+        using Stream dataStream = CompressionStreamFactory.OpenRead(descriptor);
+        using CsvLineReader lineReader = new(dataStream, ReaderBufferSize);
+
+        string? firstLine = lineReader.ReadLineAsString();
         if (firstLine is null)
         {
             yield break;
@@ -427,8 +425,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            string? logicalLine = await ReadLogicalLineAsync(reader, cancellationToken);
-            if (logicalLine is null)
+            if (!lineReader.TryReadLogicalLine(out ReadOnlySpan<char> lineSpan))
             {
                 break;
             }
@@ -438,9 +435,8 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             // Fast path for unquoted lines: extract fields as spans and parse scalars
             // directly, avoiding per-field substring allocations. This is the common case
             // for numeric CSVs (e.g. Instacart order_products__prior).
-            if (!logicalLine.Contains('"'))
+            if (!lineSpan.Contains('"'))
             {
-                ReadOnlySpan<char> lineSpan = logicalLine.AsSpan();
                 int fieldStart = 0;
                 int currentFieldIndex = 0;
                 int projectionIndex = 0;
@@ -469,7 +465,8 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             }
             else
             {
-                // Quoted line: fall back to full RFC 4180 parsing.
+                // Quoted line: fall back to full RFC 4180 parsing (requires string).
+                string logicalLine = lineSpan.ToString();
                 List<string> fields = ParseCsvLineList(logicalLine, delimiter);
 
                 for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
@@ -778,6 +775,22 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 return double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double floatEncodedValue)
                     ? DataValue.FromInt64((long)floatEncodedValue)
                     : DataValue.Null(DataKind.Int64);
+            case DataKind.Boolean:
+                if (field.Length == 1)
+                {
+                    if (field[0] == '1') return DataValue.FromBoolean(true);
+                    if (field[0] == '0') return DataValue.FromBoolean(false);
+                }
+                else if (field.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    return DataValue.FromBoolean(true);
+                }
+                else if (field.Equals("false", StringComparison.OrdinalIgnoreCase))
+                {
+                    return DataValue.FromBoolean(false);
+                }
+
+                return DataValue.Null(DataKind.Boolean);
             default:
                 return ParseField(field.ToString(), kind);
         }
@@ -1126,78 +1139,6 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
         return fields;
     }
 
-    /// <summary>
-    /// Thread-local reusable <see cref="System.Text.StringBuilder"/> for assembling
-    /// logical CSV lines that span multiple physical lines (embedded newlines in quoted fields).
-    /// </summary>
-    [ThreadStatic]
-    private static System.Text.StringBuilder? _lineBuilder;
-
-    /// <summary>
-    /// Reads a logical CSV line that may span multiple physical lines when
-    /// quoted fields contain embedded newlines (RFC 4180).
-    /// </summary>
-    private static async Task<string?> ReadLogicalLineAsync(
-        StreamReader reader,
-        CancellationToken cancellationToken)
-    {
-        string? firstLine = await reader.ReadLineAsync(cancellationToken);
-        if (firstLine is null)
-        {
-            return null;
-        }
-
-        // Lines without quotes (the vast majority of numeric CSVs) can be returned
-        // immediately. Contains uses SIMD-vectorised search in .NET 8+.
-        if (!firstLine.Contains('"'))
-        {
-            return firstLine;
-        }
-
-        // Count unescaped quotes — if odd, the logical line continues
-        int quoteCount = CountUnescapedQuotes(firstLine);
-        if (quoteCount % 2 == 0)
-        {
-            return firstLine;
-        }
-
-        System.Text.StringBuilder builder = (_lineBuilder ??= new(1024));
-        builder.Clear();
-        builder.Append(firstLine);
-        while (quoteCount % 2 != 0)
-        {
-            string? continuation = await reader.ReadLineAsync(cancellationToken);
-            if (continuation is null)
-            {
-                break;
-            }
-
-            builder.Append('\n');
-            builder.Append(continuation);
-            quoteCount += CountUnescapedQuotes(continuation);
-        }
-
-        return builder.ToString();
-    }
-
-    /// <summary>
-    /// Counts quote characters in a line. Doubled quotes ("") count as two
-    /// individual quotes, which keeps the parity correct for detecting
-    /// whether we are inside a quoted field.
-    /// </summary>
-    private static int CountUnescapedQuotes(string line)
-    {
-        int count = 0;
-        for (int index = 0; index < line.Length; index++)
-        {
-            if (line[index] == '"')
-            {
-                count++;
-            }
-        }
-        return count;
-    }
-
     // -------------------------------------------------------------------------
     // IPartitionedTableProvider — parallel multi-stream scan
     // -------------------------------------------------------------------------
@@ -1445,40 +1386,30 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             yield break;
         }
 
-        // leaveOpen: true so the StreamReader does not close the FileStream —
-        // the using block below is the sole owner of the FileStream lifetime.
+        // The CsvLineReader reads directly from the bounded stream, performing its
+        // own UTF-8 decoding and line buffering without per-line string allocation.
         using FileStream fileStream = new(
             filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: ReaderBufferSize, useAsync: true);
+            bufferSize: ReaderBufferSize, useAsync: false);
 
         fileStream.Seek(partitionStart, SeekOrigin.Begin);
 
         BoundedStream bounded = new(fileStream, partitionLength);
-
-        using StreamReader reader = new(
-            bounded,
-            System.Text.Encoding.UTF8,
-            detectEncodingFromByteOrderMarks: false,
-            bufferSize: ReaderBufferSize,
-            leaveOpen: true);
+        using CsvLineReader lineReader = new(bounded, ReaderBufferSize);
 
         RowBatch? batch = null;
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            string? logicalLine = await ReadLogicalLineAsync(reader, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (logicalLine is null)
+            if (!lineReader.TryReadLogicalLine(out ReadOnlySpan<char> lineSpan))
             {
                 break;
             }
 
             DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
 
-            if (!logicalLine.Contains('"'))
+            if (!lineSpan.Contains('"'))
             {
-                ReadOnlySpan<char> lineSpan = logicalLine.AsSpan();
                 int fieldStart = 0;
                 int currentFieldIndex = 0;
                 int projectionIndex = 0;
@@ -1507,6 +1438,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             }
             else
             {
+                string logicalLine = lineSpan.ToString();
                 List<string> fields = ParseCsvLineList(logicalLine, delimiter);
 
                 for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
