@@ -90,6 +90,22 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         TotalRowGroups = reader.RowGroupCount;
         PrunedRowGroups = 0;
 
+        // Pre-allocate column buffers for the maximum row group size so that
+        // DecodeIntoColumn writes directly into reused arrays, eliminating ~1,980
+        // LOH DataValue[] allocations (one per column per row group).
+        int maxRowGroupSize = 0;
+        for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
+        {
+            int rowCount = (int)reader.GetRowGroupDescriptor(rgIndex).RowCount;
+            if (rowCount > maxRowGroupSize) maxRowGroupSize = rowCount;
+        }
+
+        DataValue[][] columns = new DataValue[projectedIndices.Length][];
+        for (int colIndex = 0; colIndex < projectedIndices.Length; colIndex++)
+        {
+            columns[colIndex] = new DataValue[maxRowGroupSize];
+        }
+
         RowBatch? batch = null;
 
         for (int rgIndex = 0; rgIndex < reader.RowGroupCount; rgIndex++)
@@ -112,7 +128,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             }
 
             int rowCount = (int)rowGroupDescriptor.RowCount;
-            DataValue[][] columns = reader.ReadColumns(rgIndex, projectedIndices);
+            reader.ReadColumnsInto(rgIndex, projectedIndices, columns);
 
             for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using DatumIngest.Model;
 
@@ -204,8 +205,8 @@ internal sealed class BPlusTreeBulkLoader
 
             // We don't know the next leaf page index yet. We'll use pageIndex + 1
             // optimistically; the last leaf will be patched below.
-            ReadOnlySpan<ValueIndexEntry> acceptedEntries = new ReadOnlySpan<ValueIndexEntry>(
-                currentLeafEntries.ToArray(), 0, acceptedCount);
+            ReadOnlySpan<ValueIndexEntry> acceptedEntries =
+                CollectionsMarshal.AsSpan(currentLeafEntries)[..acceptedCount];
 
             byte[] pageBytes = BPlusTreePageCodec.EncodeLeafPage(
                 acceptedEntries,
@@ -269,7 +270,7 @@ internal sealed class BPlusTreeBulkLoader
         }
 
         // Try the full batch first.
-        ReadOnlySpan<ValueIndexEntry> span = entries.ToArray();
+        ReadOnlySpan<ValueIndexEntry> span = CollectionsMarshal.AsSpan(entries);
 
         if (TryEncodeLeaf(span))
         {

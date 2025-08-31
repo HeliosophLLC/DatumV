@@ -49,6 +49,36 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
     }
 
     /// <inheritdoc/>
+    public override void DecodeInto(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target)
+    {
+        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
+        DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
+        int bytesPerElement = FixedNumericColumnEncoder.BytesPerElement(descriptor.Kind);
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            if (nullBitmap.IsNull(rowIndex))
+            {
+                target[rowIndex] = DataValue.Null(descriptor.Kind);
+            }
+            else
+            {
+                int offset = bitmapByteCount + rowIndex * bytesPerElement;
+                target[rowIndex] = ReadValue(descriptor.Kind, raw, offset);
+            }
+        }
+    }
+
+    /// <inheritdoc/>
     public override void DecodeIntoColumn(
         byte[] payload,
         DatumEncoding encoding,

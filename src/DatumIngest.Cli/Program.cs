@@ -28,23 +28,26 @@ try
     // Expand multi-table sources (e.g. JSON files with multiple array properties).
     await catalog.ExpandMultiTableSourcesAsync(CancellationToken.None);
 
-    // Load any pre-built indexes.
+    // Load any pre-built indexes from explicit --index paths.
     LoadIndexes(catalog, options);
 
-    // Commands that do not require SQL.
+    // Commands that build artifacts from raw data — no manifests or schemas needed.
     if (options.Command == "index")
     {
         return await RunIndexAsync(catalog, options);
     }
 
-    if (options.Command == "index-manifest")
-    {
-        return await RunIndexManifestAsync(catalog, options);
-    }
-
     if (options.Command == "ingest")
     {
         return await RunIngestAsync(catalog, options);
+    }
+
+    // Remaining commands may require sidecar data (manifests, schemas, vocabularies).
+    catalog.DiscoverSidecars();
+
+    if (options.Command == "index-manifest")
+    {
+        return await RunIndexManifestAsync(catalog, options);
     }
 
     if (options.Command == "manifest-schema")
@@ -181,9 +184,6 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
             }
         }
     }
-
-    // Auto-discover sidecar files (indexes, manifests, schemas) for registered tables.
-    catalog.DiscoverSidecars();
 }
 
 static SourceIndexBuilder CreateIndexBuilder(CliOptions options)

@@ -40,6 +40,36 @@ public abstract class DatumColumnDecoder
         DataValue[] decoded = Decode(payload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
         decoded.AsSpan(0, rowCount).CopyTo(target);
     }
+
+    /// <summary>
+    /// Decodes a column page into a pre-allocated <see cref="DataValue"/> buffer, producing
+    /// standalone (non-arena-backed) values. Numeric decoders override this to write directly
+    /// into the target without allocating intermediate arrays. String and binary decoders fall
+    /// back to <see cref="Decode(byte[], DatumEncoding, DatumCompression, int, int, DatumColumnDescriptor, DatumDecoderContext)"/> plus a copy, producing materialised values safe for use
+    /// outside any arena lifetime.
+    /// </summary>
+    /// <param name="payload">Compressed page bytes as written to the <c>.datum</c> file.</param>
+    /// <param name="encoding">Encoding applied before compression.</param>
+    /// <param name="compression">Compression algorithm used.</param>
+    /// <param name="uncompressedByteLength">Expected byte count after decompression.</param>
+    /// <param name="rowCount">Number of rows in this page.</param>
+    /// <param name="descriptor">Column schema descriptor.</param>
+    /// <param name="context">Decoder context carrying the datum file path for sidecar blob resolution.</param>
+    /// <param name="target">Pre-allocated column buffer with at least <paramref name="rowCount"/> slots.</param>
+    public virtual void DecodeInto(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target)
+    {
+        DataValue[] decoded = Decode(payload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
+        decoded.AsSpan(0, rowCount).CopyTo(target);
+    }
+
     /// <summary>
     /// Decodes a column page using an empty decoder context.
     /// Suitable for in-memory round-trip tests and callers whose pages contain no externalized blobs.

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using DatumIngest.DatumFile.Decoding;
 using DatumIngest.Model;
@@ -119,6 +120,56 @@ public sealed class DatumFileReader : IDisposable
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Reads and decodes the specified columns into pre-allocated <see cref="DataValue"/> arrays,
+    /// avoiding per-row-group allocation of result arrays. Compressed page buffers are rented from
+    /// <see cref="ArrayPool{T}"/> and returned immediately after decoding.
+    /// </summary>
+    /// <param name="rowGroupIndex">Zero-based row group index.</param>
+    /// <param name="columnIndices">Schema column indices to decode.</param>
+    /// <param name="target">
+    /// Pre-allocated column buffers. <c>target[i]</c> must have at least as many elements as the
+    /// row group's row count. Reused across row groups to avoid LOH churn.
+    /// </param>
+    internal void ReadColumnsInto(
+        int rowGroupIndex,
+        int[] columnIndices,
+        DataValue[][] target)
+    {
+        DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
+        int rowCount = (int)rowGroup.RowCount;
+        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+
+        for (int i = 0; i < columnIndices.Length; i++)
+        {
+            int columnIndex = columnIndices[i];
+            DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
+            DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
+
+            byte[] compressedBuffer = ArrayPool<byte>.Shared.Rent((int)chunk.CompressedByteLength);
+            try
+            {
+                _stream.Seek(chunk.PageOffset, SeekOrigin.Begin);
+                _stream.ReadExactly(compressedBuffer.AsSpan(0, (int)chunk.CompressedByteLength));
+
+                DatumColumnDecoder decoder = DatumDecoderFactory.GetDecoder(descriptor, chunk.Encoding);
+                decoder.DecodeInto(
+                    compressedBuffer[..(int)chunk.CompressedByteLength],
+                    chunk.Encoding,
+                    chunk.Compression,
+                    (int)chunk.UncompressedByteLength,
+                    rowCount,
+                    descriptor,
+                    context,
+                    target[i]);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(compressedBuffer);
+            }
+        }
     }
 
     /// <summary>

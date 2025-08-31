@@ -608,10 +608,22 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 uncompressedLength = checked((int)counting.BytesWritten);
             }
 
-            byte[] compressed = compressedBuffer.ToArray();
             output.Write(uncompressedLength);
-            output.Write(compressed.Length);
-            output.Write(compressed);
+
+            if (compressedBuffer.TryGetBuffer(out ArraySegment<byte> compressedSegment))
+            {
+                output.Write(compressedSegment.Count);
+                output.BaseStream.Write(
+                    compressedSegment.Array!,
+                    compressedSegment.Offset,
+                    compressedSegment.Count);
+            }
+            else
+            {
+                byte[] compressed = compressedBuffer.ToArray();
+                output.Write(compressed.Length);
+                output.Write(compressed);
+            }
         }
     }
 
