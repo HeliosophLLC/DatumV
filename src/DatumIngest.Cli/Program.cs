@@ -839,6 +839,8 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
             batch.Return();
         }
 
+        ReferenceStore.CurrentOrCreate().Reset();
+
         if (!schemaInitialized)
         {
             Console.WriteLine("No rows produced by query.");
@@ -877,6 +879,7 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
         progress.WriteSummary();
     }
 
+    ReferenceStore.CurrentOrCreate().Reset();
     context.LocalBufferPool.DumpStats();
     return 0;
 }
@@ -928,6 +931,7 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
         }
     }
 
+    ReferenceStore.CurrentOrCreate().Reset();
     stopwatch.Stop();
     Console.WriteLine($"\n{count} row(s) in {stopwatch.Elapsed.TotalSeconds:F2} second(s)");
     return 0;
@@ -961,6 +965,7 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
         batch.Return();
     }
 
+    ReferenceStore.CurrentOrCreate().Reset();
     progress.WriteSummary();
     Console.WriteLine();
 
@@ -1007,6 +1012,7 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
         {
         }
 
+        ReferenceStore.CurrentOrCreate().Reset();
         InstrumentedOperator.PopulateMetrics(explainPlan, instrumentedRoot);
     }
 
@@ -1056,6 +1062,7 @@ static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog cata
         batch.Return();
     }
 
+    ReferenceStore.CurrentOrCreate().Reset();
     progress.WriteSummary();
 
     IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
