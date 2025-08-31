@@ -41,10 +41,19 @@ internal sealed class SpillPartition : IDisposable
     /// </summary>
     /// <param name="spillDirectory">The temporary directory for spill files.</param>
     /// <param name="partitionIndex">The zero-based index of this partition (used in file names).</param>
-    internal SpillPartition(string spillDirectory, int partitionIndex)
+    /// <param name="estimatedBuildRows">
+    /// Estimated number of build-side rows for this partition. Used to pre-size the
+    /// internal list and avoid repeated LOH-crossing doublings that drive Gen2 GC pressure.
+    /// Zero or negative values fall back to the default list capacity.
+    /// </param>
+    internal SpillPartition(string spillDirectory, int partitionIndex, int estimatedBuildRows = 0)
     {
         _spillDirectory = spillDirectory;
         _partitionIndex = partitionIndex;
+        if (estimatedBuildRows > 0)
+        {
+            _buildRows = new List<Row>(estimatedBuildRows);
+        }
     }
 
     /// <summary>The number of build-side rows currently held in memory.</summary>

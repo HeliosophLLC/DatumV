@@ -192,7 +192,8 @@ public sealed class JoinOperator : IQueryOperator
             {
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                 IQueryOperator buildSide = _flipped ? _left : _right;
-                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide));
+                long? estimatedBuildRows = GetEstimatedRowCount(buildSide);
+                GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide), estimatedBuildRows: estimatedBuildRows);
 
                 await foreach (RowBatch batch in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {

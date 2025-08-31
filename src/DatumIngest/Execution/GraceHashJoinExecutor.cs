@@ -61,6 +61,9 @@ internal sealed class GraceHashJoinExecutor
     /// <summary>Human-readable label used in trace output to identify this join's build side.</summary>
     private readonly string _label;
 
+    /// <summary>Estimated build-side row count for pre-sizing partition lists.</summary>
+    private readonly long? _estimatedBuildRows;
+
     /// <summary>
     /// Creates a new Grace hash join executor.
     /// </summary>
@@ -78,6 +81,10 @@ internal sealed class GraceHashJoinExecutor
     /// Output column order is preserved as [left | right].
     /// </param>
     /// <param name="label">Human-readable label for the build-side table, used in execution trace output.</param>
+    /// <param name="estimatedBuildRows">
+    /// Optional estimated build-side row count. Used to pre-size partition lists
+    /// and avoid LOH-crossing doublings that drive Gen2 GC pressure.
+    /// </param>
     internal GraceHashJoinExecutor(
         JoinType joinType,
         JoinKeyExtractionResult extraction,
@@ -85,7 +92,8 @@ internal sealed class GraceHashJoinExecutor
         ExpressionEvaluator evaluator,
         bool nullSensitiveAntiSemi = false,
         bool flipped = false,
-        string label = "")
+        string label = "",
+        long? estimatedBuildRows = null)
     {
         _joinType = joinType;
         _extraction = extraction;
@@ -94,6 +102,7 @@ internal sealed class GraceHashJoinExecutor
         _nullSensitiveAntiSemi = nullSensitiveAntiSemi;
         _flipped = flipped;
         _label = label;
+        _estimatedBuildRows = estimatedBuildRows;
         _spillDirectory = Path.Combine(Path.GetTempPath(), $"datum-join-{Guid.NewGuid():N}");
     }
 
@@ -393,11 +402,11 @@ internal sealed class GraceHashJoinExecutor
         internal CombinedRowSchema? JoinSchema;
         internal Row? CachedNullBuild;
 
-        internal PartitionBuildTable(List<Row> buildRows, bool useSingleKey)
+        internal PartitionBuildTable(List<Row> buildRows, bool useSingleKey, int estimatedCapacity = 0)
         {
             BuildRows = buildRows;
-            SingleKeyTable = useSingleKey ? new() : null;
-            CompositeKeyTable = useSingleKey ? null : new();
+            SingleKeyTable = useSingleKey ? new(estimatedCapacity) : null;
+            CompositeKeyTable = useSingleKey ? null : new(estimatedCapacity);
         }
     }
 
@@ -412,7 +421,7 @@ internal sealed class GraceHashJoinExecutor
     {
         bool buildKeyIsRight = !_flipped;
         List<Row> buildList = new(buildRows.Count);
-        PartitionBuildTable table = new(buildList, useSingleKey);
+        PartitionBuildTable table = new(buildList, useSingleKey, buildRows.Count);
 
         foreach (Row buildRow in buildRows)
         {
@@ -604,11 +613,14 @@ internal sealed class GraceHashJoinExecutor
                 : partition.GetInMemoryProbeRows();
 
             // Materialize build side into a hash table for this partition.
-            List<Row> buildRowList = new();
+            int buildRowEstimate = partition.IsBuildSpilled
+                ? partition.TotalBuildRowCount
+                : partition.InMemoryBuildRowCount;
+            List<Row> buildRowList = new(Math.Max(buildRowEstimate, 4));
             Dictionary<DataValue, List<(int Index, Row Row)>>? singleKeyTable =
-                useSingleKey ? new() : null;
+                useSingleKey ? new(buildRowEstimate) : null;
             Dictionary<CompositeKey, List<(int Index, Row Row)>>? compositeKeyTable =
-                useSingleKey ? null : new();
+                useSingleKey ? null : new(buildRowEstimate);
 
             long buildSizeEstimate = 0;
             MemoryEstimator partitionEstimator = new();
@@ -996,10 +1008,14 @@ internal sealed class GraceHashJoinExecutor
 
     private SpillPartition[] CreatePartitions(int count)
     {
+        int perPartitionEstimate = _estimatedBuildRows.HasValue
+            ? (int)Math.Min(_estimatedBuildRows.Value / count, int.MaxValue)
+            : 0;
+
         SpillPartition[] partitions = new SpillPartition[count];
         for (int index = 0; index < count; index++)
         {
-            partitions[index] = new SpillPartition(_spillDirectory, index);
+            partitions[index] = new SpillPartition(_spillDirectory, index, perPartitionEstimate);
         }
 
         return partitions;
