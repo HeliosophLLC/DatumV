@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using DatumIngest.Model;
 
 namespace DatumIngest.Indexing;
@@ -130,67 +132,136 @@ public sealed class BloomFilter
     /// <summary>
     /// Computes two independent hash values for double hashing using
     /// FNV-1a and a variant with different offset basis.
+    /// Fixed-size numeric types are hashed directly from a stack-allocated
+    /// buffer, avoiding per-call heap allocations.
     /// </summary>
     private static (uint Hash1, uint Hash2) ComputeHashes(DataValue value)
     {
-        ReadOnlySpan<byte> bytes = GetValueBytes(value);
+        // Fast path: fixed-size types hash from stackalloc without any heap allocation.
+        switch (value.Kind)
+        {
+            case DataKind.Boolean:
+            {
+                Span<byte> buffer = stackalloc byte[1];
+                buffer[0] = value.AsBoolean() ? (byte)1 : (byte)0;
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Int8:
+            {
+                Span<byte> buffer = stackalloc byte[1];
+                buffer[0] = unchecked((byte)value.AsInt8());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.UInt8:
+            {
+                Span<byte> buffer = stackalloc byte[1];
+                buffer[0] = value.AsUInt8();
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Int16:
+            {
+                Span<byte> buffer = stackalloc byte[2];
+                BinaryPrimitives.WriteInt16LittleEndian(buffer, value.AsInt16());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.UInt16:
+            {
+                Span<byte> buffer = stackalloc byte[2];
+                BinaryPrimitives.WriteUInt16LittleEndian(buffer, value.AsUInt16());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Int32:
+            {
+                Span<byte> buffer = stackalloc byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(buffer, value.AsInt32());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.UInt32:
+            {
+                Span<byte> buffer = stackalloc byte[4];
+                BinaryPrimitives.WriteUInt32LittleEndian(buffer, value.AsUInt32());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Float32:
+            {
+                Span<byte> buffer = stackalloc byte[4];
+                BinaryPrimitives.WriteSingleLittleEndian(buffer, value.AsFloat32());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Date:
+            {
+                Span<byte> buffer = stackalloc byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(buffer, value.AsDate().DayNumber);
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Int64:
+            {
+                Span<byte> buffer = stackalloc byte[8];
+                BinaryPrimitives.WriteInt64LittleEndian(buffer, value.AsInt64());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.UInt64:
+            {
+                Span<byte> buffer = stackalloc byte[8];
+                BinaryPrimitives.WriteUInt64LittleEndian(buffer, value.AsUInt64());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.Float64:
+            {
+                Span<byte> buffer = stackalloc byte[8];
+                BinaryPrimitives.WriteDoubleLittleEndian(buffer, value.AsFloat64());
+                return FinalizeHashes(buffer);
+            }
+            case DataKind.DateTime:
+            {
+                Span<byte> buffer = stackalloc byte[8];
+                BinaryPrimitives.WriteInt64LittleEndian(buffer, value.AsDateTime().ToUnixTimeMilliseconds());
+                return FinalizeHashes(buffer);
+            }
+            default:
+                return FinalizeHashes(GetValueBytesHeap(value));
+        }
+    }
 
+    /// <summary>
+    /// Produces two FNV-1a hashes from a byte span and ensures h2 is odd
+    /// for coprimality with power-of-two moduli.
+    /// </summary>
+    private static (uint Hash1, uint Hash2) FinalizeHashes(ReadOnlySpan<byte> bytes)
+    {
         uint hash1 = Fnv1a(bytes);
         uint hash2 = Fnv1aAlternate(bytes);
-
-        // Ensure hash2 is odd so it's coprime with any power-of-two modulus.
         hash2 |= 1;
-
         return (hash1, hash2);
     }
 
     /// <summary>
-    /// Converts a <see cref="DataValue"/> to a byte representation suitable for hashing.
+    /// Heap-allocating fallback for variable-length and complex types
+    /// that cannot use a fixed-size stack buffer.
     /// </summary>
-    private static ReadOnlySpan<byte> GetValueBytes(DataValue value)
+    private static ReadOnlySpan<byte> GetValueBytesHeap(DataValue value)
     {
         switch (value.Kind)
         {
-            case DataKind.Float32:
-            {
-                float scalar = value.AsFloat32();
-                return BitConverter.GetBytes(scalar);
-            }
-            case DataKind.UInt8:
-            {
-                return new byte[] { value.AsUInt8() };
-            }
             case DataKind.String:
-            {
                 return System.Text.Encoding.UTF8.GetBytes(value.AsString());
-            }
-            case DataKind.Date:
-            {
-                return BitConverter.GetBytes(value.AsDate().DayNumber);
-            }
-            case DataKind.DateTime:
-            {
-                return BitConverter.GetBytes(value.AsDateTime().ToUnixTimeMilliseconds());
-            }
             case DataKind.JsonValue:
-            {
                 return System.Text.Encoding.UTF8.GetBytes(value.AsJsonValue());
-            }
             case DataKind.UInt8Array:
-            {
                 return value.AsUInt8Array();
-            }
             case DataKind.Vector:
             {
                 float[] vector = value.AsVector();
-                byte[] bytes = new byte[vector.Length * 4];
-                Buffer.BlockCopy(vector, 0, bytes, 0, bytes.Length);
-                return bytes;
+                byte[] vectorBytes = new byte[vector.Length * 4];
+                Buffer.BlockCopy(vector, 0, vectorBytes, 0, vectorBytes.Length);
+                return vectorBytes;
             }
             default:
             {
-                // For complex types (Matrix, Tensor, Image), use their hash code.
-                return BitConverter.GetBytes(value.GetHashCode());
+                // Matrix, Tensor, Image, and any future complex types.
+                byte[] fallback = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(fallback, value.GetHashCode());
+                return fallback;
             }
         }
     }
