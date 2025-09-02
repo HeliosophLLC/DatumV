@@ -89,11 +89,18 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// Initializes per-column tracking for the specified index columns.
     /// </summary>
     /// <param name="indexColumns">Column names that should have sorted indexes built.</param>
-    internal void Initialize(IReadOnlySet<string> indexColumns)
+    /// <param name="chunkCapacity">
+    /// Expected number of entries per chunk. When positive, used to pre-size the
+    /// per-column entry lists and avoid geometric-doubling allocations during the
+    /// first chunk.
+    /// </param>
+    internal void Initialize(IReadOnlySet<string> indexColumns, int chunkCapacity = 0)
     {
         foreach (string column in indexColumns)
         {
-            _currentChunkEntries.TryAdd(column, new List<ValueIndexEntry>());
+            _currentChunkEntries.TryAdd(column, chunkCapacity > 0
+                ? new List<ValueIndexEntry>(chunkCapacity)
+                : new List<ValueIndexEntry>());
             _spillRunCounts.TryAdd(column, 0);
             _spillTotalEntries.TryAdd(column, 0);
             _spillRunMetadata.TryAdd(column, new List<SpillRunMetadata>());
@@ -390,7 +397,8 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 EnumerateMergedEntries(columnName, runCount),
                 columnName,
                 keyKind,
-                output);
+                output,
+                _spillTotalEntries[columnName]);
         }
     }
 

@@ -55,6 +55,9 @@ internal sealed class BPlusTreeBulkLoader
     /// <param name="columnName">Name of the indexed column.</param>
     /// <param name="keyKind">The <see cref="DataKind"/> of the key column.</param>
     /// <param name="output">Writable, seekable output stream.</param>
+    /// <param name="estimatedEntryCount">
+    /// Optional hint for total entry count, used to pre-size internal lists.
+    /// </param>
     /// <returns>
     /// The section header describing the resulting tree. Returns <c>null</c> if
     /// <paramref name="sortedEntries"/> is empty.
@@ -63,11 +66,12 @@ internal sealed class BPlusTreeBulkLoader
         IEnumerable<ValueIndexEntry> sortedEntries,
         string columnName,
         DataKind keyKind,
-        BinaryWriter output)
+        BinaryWriter output,
+        long estimatedEntryCount = 0)
     {
         output.Flush();
         using BufferedIndexWriter writer = new(output.BaseStream);
-        BPlusTreeSectionHeader? result = Build(sortedEntries, columnName, keyKind, writer);
+        BPlusTreeSectionHeader? result = Build(sortedEntries, columnName, keyKind, writer, estimatedEntryCount);
         writer.Flush();
         return result;
     }
@@ -76,11 +80,20 @@ internal sealed class BPlusTreeBulkLoader
     /// Builds a B+Tree from sorted entries using a <see cref="BufferedIndexWriter"/>
     /// for high-throughput page serialization.
     /// </summary>
+    /// <param name="sortedEntries">Entries in ascending key order.</param>
+    /// <param name="columnName">Name of the indexed column.</param>
+    /// <param name="keyKind">The <see cref="DataKind"/> of the key column.</param>
+    /// <param name="output">Buffered output stream.</param>
+    /// <param name="estimatedEntryCount">
+    /// Optional hint for total entry count. When positive, used to pre-size internal
+    /// lists (separator keys, child page indexes) and avoid geometric-doubling allocations.
+    /// </param>
     internal static BPlusTreeSectionHeader? Build(
         IEnumerable<ValueIndexEntry> sortedEntries,
         string columnName,
         DataKind keyKind,
-        BufferedIndexWriter output)
+        BufferedIndexWriter output,
+        long estimatedEntryCount = 0)
     {
         // Write placeholder section header (same column name ensures identical byte length).
         long headerPosition = output.Position;
@@ -89,7 +102,7 @@ internal sealed class BPlusTreeBulkLoader
         WriteSectionHeader(output, placeholder);
 
         // Phase 1: Write leaf pages and collect separator keys.
-        LeafBuildResult leafResult = WriteLeafPages(sortedEntries, output);
+        LeafBuildResult leafResult = WriteLeafPages(sortedEntries, output, estimatedEntryCount);
 
         if (leafResult.LeafCount == 0)
         {
@@ -183,11 +196,17 @@ internal sealed class BPlusTreeBulkLoader
     /// </summary>
     private static LeafBuildResult WriteLeafPages(
         IEnumerable<ValueIndexEntry> sortedEntries,
-        BufferedIndexWriter output)
+        BufferedIndexWriter output,
+        long estimatedEntryCount = 0)
     {
-        List<DataValue> separatorKeys = new();
-        List<uint> childPageIndexes = new();
-        List<ValueIndexEntry> currentLeafEntries = new();
+        // Pre-size lists when the caller provides an entry count estimate.
+        // This avoids geometric-doubling allocations that promote to Gen2.
+        int estimatedLeafCount = estimatedEntryCount > 0
+            ? (int)(estimatedEntryCount / InitialTargetEntriesPerLeaf) + 1
+            : 0;
+        List<DataValue> separatorKeys = new(estimatedLeafCount);
+        List<uint> childPageIndexes = new(estimatedLeafCount);
+        List<ValueIndexEntry> currentLeafEntries = new(InitialTargetEntriesPerLeaf);
         int targetEntriesPerLeaf = InitialTargetEntriesPerLeaf;
         uint pageIndex = 0;
         long totalEntryCount = 0;
@@ -259,10 +278,7 @@ internal sealed class BPlusTreeBulkLoader
             // If we had excess entries, put them at the front of the next batch.
             if (acceptedCount < currentLeafEntries.Count)
             {
-                List<ValueIndexEntry> overflow = currentLeafEntries.GetRange(
-                    acceptedCount, currentLeafEntries.Count - acceptedCount);
-                currentLeafEntries.Clear();
-                currentLeafEntries.AddRange(overflow);
+                currentLeafEntries.RemoveRange(0, acceptedCount);
 
                 // Re-add buffered entries to fill the next batch.
                 while (hasMore && currentLeafEntries.Count < targetEntriesPerLeaf)

@@ -1386,7 +1386,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
             if (_spillWriter is not null && effectiveIndexColumns is not null)
             {
-                _spillWriter.Initialize(effectiveIndexColumns);
+                _spillWriter.Initialize(effectiveIndexColumns, _chunkSize);
             }
 
             _bitmapAccumulators = SourceIndexBuilder.CreateBitmapAccumulators(_schema, _indexHints);
