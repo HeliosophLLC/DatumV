@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Text;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Compression;
@@ -49,35 +51,129 @@ internal static class BPlusTreePageCodec
         uint previousLeafPageIndex,
         uint nextLeafPageIndex)
     {
-        byte[] uncompressed = SerializeLeafEntries(entries);
-        byte[] compressed = DatumCompressor.Compress(uncompressed, DatumCompression.Zstd);
+        // Serialize entries into a rented buffer via BufferedIndexWriter.
+        int estimatedSize = entries.Length * 17; // ~17 bytes per Int32 entry (kind + key + chunk + offset).
+        byte[] rentedEntryBuffer = ArrayPool<byte>.Shared.Rent(Math.Max(estimatedSize, 256));
+        int uncompressedLength;
 
-        if (compressed.Length > BPlusTreeConstants.LeafPayloadCapacity)
+        try
         {
-            throw new InvalidOperationException(
-                $"Compressed leaf payload ({compressed.Length} bytes) exceeds page capacity " +
-                $"({BPlusTreeConstants.LeafPayloadCapacity} bytes) for {entries.Length} entries.");
+            using (MemoryStream entryStream = new(rentedEntryBuffer, 0, rentedEntryBuffer.Length, writable: true))
+            {
+                // MemoryStream over a fixed array throws NotSupportedException if
+                // the data exceeds the buffer. Fall back to the growable path if that happens.
+                try
+                {
+                    using BufferedIndexWriter entryWriter = new(entryStream);
+
+                    foreach (ValueIndexEntry entry in entries)
+                    {
+                        IndexWriter.WriteDataValue(entryWriter, entry.Key);
+                        entryWriter.Write(entry.ChunkIndex);
+                        entryWriter.Write(entry.RowOffsetInChunk);
+                    }
+
+                    entryWriter.Flush();
+                    uncompressedLength = (int)entryStream.Position;
+                }
+                catch (NotSupportedException)
+                {
+                    // Buffer was too small — fall back to growable serialization.
+                    ArrayPool<byte>.Shared.Return(rentedEntryBuffer);
+                    return EncodeLeafPageFallback(entries, previousLeafPageIndex, nextLeafPageIndex);
+                }
+            }
+
+            // Compress directly into the page array at the payload offset.
+            byte[] page = new byte[BPlusTreeConstants.PageSize];
+            int payloadOffset = BPlusTreeConstants.PageHeaderSize + LeafHeaderSize;
+
+            int compressedLength = DatumCompressor.CompressZstdInto(
+                rentedEntryBuffer.AsSpan(0, uncompressedLength),
+                page,
+                payloadOffset);
+
+            if (compressedLength > BPlusTreeConstants.LeafPayloadCapacity)
+            {
+                throw new InvalidOperationException(
+                    $"Compressed leaf payload ({compressedLength} bytes) exceeds page capacity " +
+                    $"({BPlusTreeConstants.LeafPayloadCapacity} bytes) for {entries.Length} entries.");
+            }
+
+            // Write headers directly via BinaryPrimitives — no MemoryStream/BinaryWriter needed.
+            // Common header: [PageType: 1B] [KeyCount: 2B] [Reserved: 1B]
+            page[0] = (byte)BPlusTreePageType.Leaf;
+            BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1), (ushort)entries.Length);
+            page[3] = 0; // Reserved.
+
+            // Leaf header: [PrevLeaf: 4B] [NextLeaf: 4B] [UncompressedSize: 4B] [CompressedSize: 4B]
+            BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(4), previousLeafPageIndex);
+            BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(8), nextLeafPageIndex);
+            BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(12), uncompressedLength);
+            BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(16), compressedLength);
+
+            return page;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rentedEntryBuffer);
+        }
+    }
+
+    /// <summary>Leaf header size in bytes: PrevLeaf (4) + NextLeaf (4) + UncompressedSize (4) + CompressedSize (4).</summary>
+    private const int LeafHeaderSize = 16;
+
+    /// <summary>
+    /// Fallback path for pages where the rented entry buffer was too small.
+    /// Uses a growable MemoryStream. Rarely hit in practice — only for pages
+    /// with very large string or variable-length keys.
+    /// </summary>
+    private static byte[] EncodeLeafPageFallback(
+        ReadOnlySpan<ValueIndexEntry> entries,
+        uint previousLeafPageIndex,
+        uint nextLeafPageIndex)
+    {
+        byte[] uncompressed;
+
+        using (MemoryStream buffer = new())
+        {
+            using BufferedIndexWriter writer = new(buffer);
+
+            foreach (ValueIndexEntry entry in entries)
+            {
+                IndexWriter.WriteDataValue(writer, entry.Key);
+                writer.Write(entry.ChunkIndex);
+                writer.Write(entry.RowOffsetInChunk);
+            }
+
+            writer.Flush();
+            uncompressed = buffer.ToArray();
         }
 
         byte[] page = new byte[BPlusTreeConstants.PageSize];
-        using MemoryStream stream = new(page);
-        using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+        int payloadOffset = BPlusTreeConstants.PageHeaderSize + LeafHeaderSize;
 
-        // Common header.
-        writer.Write((byte)BPlusTreePageType.Leaf);
-        writer.Write((ushort)entries.Length);
-        writer.Write((byte)0); // Reserved.
+        int compressedLength = DatumCompressor.CompressZstdInto(
+            uncompressed,
+            page,
+            payloadOffset);
 
-        // Leaf header.
-        writer.Write(previousLeafPageIndex);
-        writer.Write(nextLeafPageIndex);
-        writer.Write(uncompressed.Length);
-        writer.Write(compressed.Length);
+        if (compressedLength > BPlusTreeConstants.LeafPayloadCapacity)
+        {
+            throw new InvalidOperationException(
+                $"Compressed leaf payload ({compressedLength} bytes) exceeds page capacity " +
+                $"({BPlusTreeConstants.LeafPayloadCapacity} bytes) for {entries.Length} entries.");
+        }
 
-        // Compressed payload (remaining bytes are zero-padded by array initialization).
-        writer.Write(compressed);
+        page[0] = (byte)BPlusTreePageType.Leaf;
+        BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(1), (ushort)entries.Length);
+        page[3] = 0;
 
-        writer.Flush();
+        BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(4), previousLeafPageIndex);
+        BinaryPrimitives.WriteUInt32LittleEndian(page.AsSpan(8), nextLeafPageIndex);
+        BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(12), uncompressed.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(page.AsSpan(16), compressedLength);
+
         return page;
     }
 
@@ -139,7 +235,7 @@ internal static class BPlusTreePageCodec
         // fixed-capacity MemoryStream. FindMaxInternalKeys relies on catching
         // InvalidOperationException to probe the maximum key count per page.
         using MemoryStream stream = new();
-        using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+        using BufferedIndexWriter writer = new(stream);
 
         // Common header.
         writer.Write((byte)BPlusTreePageType.Internal);
@@ -224,26 +320,6 @@ internal static class BPlusTreePageCodec
     internal static BPlusTreePageType ReadPageType(byte[] pageData)
     {
         return (BPlusTreePageType)pageData[0];
-    }
-
-    /// <summary>
-    /// Serializes leaf entries to a byte array for Zstd compression.
-    /// Uses the same <see cref="IndexWriter.WriteDataValue(BinaryWriter, DataValue)"/> format for keys.
-    /// </summary>
-    private static byte[] SerializeLeafEntries(ReadOnlySpan<ValueIndexEntry> entries)
-    {
-        using MemoryStream buffer = new();
-        using BinaryWriter writer = new(buffer, Encoding.UTF8, leaveOpen: true);
-
-        foreach (ValueIndexEntry entry in entries)
-        {
-            IndexWriter.WriteDataValue(writer, entry.Key);
-            writer.Write(entry.ChunkIndex);
-            writer.Write(entry.RowOffsetInChunk);
-        }
-
-        writer.Flush();
-        return buffer.ToArray();
     }
 
     /// <summary>

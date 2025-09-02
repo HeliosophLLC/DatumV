@@ -109,6 +109,21 @@ public static class DatumCompressor
         }
     }
 
+    /// <summary>
+    /// Compresses <paramref name="source"/> using Zstd into <paramref name="destination"/>
+    /// at the specified <paramref name="offset"/>. Returns the number of compressed bytes written.
+    /// </summary>
+    internal static int CompressZstdInto(
+        ReadOnlySpan<byte> source,
+        byte[] destination,
+        int offset,
+        int level = DatumFileConstants.DefaultZstdCompressionLevel)
+    {
+        Compressor compressor = (_threadCompressor ??= new Compressor(level));
+        compressor.Level = level;
+        return compressor.Wrap(source, destination.AsSpan(offset));
+    }
+
     private static byte[] DecompressZstd(ReadOnlySpan<byte> source, int uncompressedLength)
     {
         byte[] output = new byte[uncompressedLength];
