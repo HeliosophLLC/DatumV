@@ -228,7 +228,7 @@ internal static class BPlusTreePageCodec
 
     /// <summary>
     /// Serializes leaf entries to a byte array for Zstd compression.
-    /// Uses the same <see cref="IndexWriter.WriteDataValue"/> format for keys.
+    /// Uses the same <see cref="IndexWriter.WriteDataValue(BinaryWriter, DataValue)"/> format for keys.
     /// </summary>
     private static byte[] SerializeLeafEntries(ReadOnlySpan<ValueIndexEntry> entries)
     {

@@ -65,8 +65,25 @@ internal sealed class BPlusTreeBulkLoader
         DataKind keyKind,
         BinaryWriter output)
     {
+        output.Flush();
+        using BufferedIndexWriter writer = new(output.BaseStream);
+        BPlusTreeSectionHeader? result = Build(sortedEntries, columnName, keyKind, writer);
+        writer.Flush();
+        return result;
+    }
+
+    /// <summary>
+    /// Builds a B+Tree from sorted entries using a <see cref="BufferedIndexWriter"/>
+    /// for high-throughput page serialization.
+    /// </summary>
+    internal static BPlusTreeSectionHeader? Build(
+        IEnumerable<ValueIndexEntry> sortedEntries,
+        string columnName,
+        DataKind keyKind,
+        BufferedIndexWriter output)
+    {
         // Write placeholder section header (same column name ensures identical byte length).
-        long headerPosition = output.BaseStream.Position;
+        long headerPosition = output.Position;
         BPlusTreeSectionHeader placeholder = new(
             columnName, keyKind, 0, 0, 0, (ushort)BPlusTreeConstants.PageSize, 0);
         WriteSectionHeader(output, placeholder);
@@ -77,6 +94,7 @@ internal sealed class BPlusTreeBulkLoader
         if (leafResult.LeafCount == 0)
         {
             // Seek back to erase the placeholder header.
+            output.Flush();
             output.BaseStream.Position = headerPosition;
             return null;
         }
@@ -101,9 +119,11 @@ internal sealed class BPlusTreeBulkLoader
             totalPageCount);
 
         // Patch the placeholder header with actual values.
+        output.Flush();
         long savedPosition = output.BaseStream.Position;
         output.BaseStream.Position = headerPosition;
         WriteSectionHeader(output, actualHeader);
+        output.Flush();
         output.BaseStream.Position = savedPosition;
 
         return actualHeader;
@@ -113,6 +133,20 @@ internal sealed class BPlusTreeBulkLoader
     /// Writes the B+Tree section header to the output stream.
     /// </summary>
     internal static void WriteSectionHeader(BinaryWriter writer, BPlusTreeSectionHeader header)
+    {
+        writer.Write(header.ColumnName);
+        writer.Write((byte)header.KeyKind);
+        writer.Write(header.RootPageIndex);
+        writer.Write(header.EntryCount);
+        writer.Write(header.TreeHeight);
+        writer.Write(header.PageSize);
+        writer.Write(header.PageCount);
+    }
+
+    /// <summary>
+    /// Writes the B+Tree section header using a <see cref="BufferedIndexWriter"/>.
+    /// </summary>
+    internal static void WriteSectionHeader(BufferedIndexWriter writer, BPlusTreeSectionHeader header)
     {
         writer.Write(header.ColumnName);
         writer.Write((byte)header.KeyKind);
@@ -149,7 +183,7 @@ internal sealed class BPlusTreeBulkLoader
     /// </summary>
     private static LeafBuildResult WriteLeafPages(
         IEnumerable<ValueIndexEntry> sortedEntries,
-        BinaryWriter output)
+        BufferedIndexWriter output)
     {
         List<DataValue> separatorKeys = new();
         List<uint> childPageIndexes = new();
@@ -213,7 +247,7 @@ internal sealed class BPlusTreeBulkLoader
                 previousLeafPageIndex,
                 pageIndex + 1); // Optimistic next pointer; patched for last leaf.
 
-            long currentStreamPosition = output.BaseStream.Position;
+            long currentStreamPosition = output.Position;
             output.Write(pageBytes);
 
             previousLeafStreamPosition = currentStreamPosition;
@@ -250,6 +284,7 @@ internal sealed class BPlusTreeBulkLoader
         // Patch the last leaf's next pointer to NoLinkedPage.
         if (pageIndex > 0 && previousLeafStreamPosition >= 0 && output.BaseStream.CanSeek)
         {
+            output.Flush();
             long savedPosition = output.BaseStream.Position;
             PatchLastLeafNextPointer(output, previousLeafStreamPosition);
             output.BaseStream.Position = savedPosition;
@@ -331,7 +366,7 @@ internal sealed class BPlusTreeBulkLoader
     /// Patches the next-leaf pointer in the last written leaf page from
     /// <c>pageIndex + 1</c> to <see cref="BPlusTreeConstants.NoLinkedPage"/>.
     /// </summary>
-    private static void PatchLastLeafNextPointer(BinaryWriter writer, long leafStreamPosition)
+    private static void PatchLastLeafNextPointer(BufferedIndexWriter writer, long leafStreamPosition)
     {
         // The next-leaf field is at offset: PageHeaderSize (4) + sizeof(uint) prev (4) = 8.
         long nextLeafFieldOffset = leafStreamPosition
@@ -340,6 +375,7 @@ internal sealed class BPlusTreeBulkLoader
 
         writer.BaseStream.Position = nextLeafFieldOffset;
         writer.Write(BPlusTreeConstants.NoLinkedPage);
+        writer.Flush();
     }
 
     // ───────────────────────── Internal level construction ─────────────────────────
@@ -353,7 +389,7 @@ internal sealed class BPlusTreeBulkLoader
         List<DataValue> separatorKeys,
         List<uint> childPageIndexes,
         uint nextPageIndex,
-        BinaryWriter output)
+        BufferedIndexWriter output)
     {
         if (childPageIndexes.Count <= 1)
         {

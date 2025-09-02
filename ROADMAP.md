@@ -115,6 +115,76 @@ Eliminate per-DataValue heap allocation for scalar types via `[StructLayout(Layo
 
 ---
 
+## Index Encoding Strategies (Deferred)
+
+**Status**: Under consideration. The current index format writes raw `DataValue` keys in B+Tree leaf pages and sorted indexes. For many column profiles, specialised encodings would reduce page counts, improve compression ratios, and enable queryable-while-compressed bitmap operations. Vocabulary files collected during ingestion provide the foundation for dictionary-coded indexes.
+
+### Dictionary-coded B+Tree indexes
+
+Replace materialised `DataValue` keys in B+Tree leaf pages with ordinal dictionary codes. Each column section's header carries the dictionary (sorted distinct values with ordinal assignments); leaf entries store `(code: uint16/uint32, chunkIndex, rowOffset)` instead of `(key: DataValue, chunkIndex, rowOffset)`.
+
+**Prerequisites**: The vocabulary file infrastructure already collects distinct values during ingestion. Two requirements remain: (1) ordinal assignment must preserve the sort order of the original values so B+Tree range scans work on codes directly, and (2) the bulk loader needs a two-pass or deferred-code-assignment strategy since the current streaming build consumes entries in sorted order without a pre-built dictionary.
+
+**Acquisition strategy** (mirrors vocabulary collection):
+1. **Manifest/vocab covers full domain** (distinctCount ≤ cardinality threshold): Dictionary known before index build. Assign ordinal codes, emit coded entries in a single pass.
+2. **Manifest/vocab insufficient**: Two-pass index build. Pass 1 collects distinct keys from the sorted merge stream. Pass 2 re-reads spill files and emits coded entries. The merge is already spill-based, so the second pass is I/O-bound, not memory-bound.
+3. **Cardinality exceeds threshold**: Fall back to raw `DataValue` keys (current behaviour). Dictionary encoding is counterproductive when the dictionary itself is large.
+
+**Candidate columns**: String and JsonValue columns with moderate cardinality (1K–100K distinct values). For fixed-width numeric types (Int32, Float64, etc.), raw keys are already 4–8 bytes — a dictionary code saves nothing. The column statistics already available in `ChunkColumnStatistics.EstimatedCardinality` (HLL) gate the decision.
+
+**Expected impact**: For a String column with 50K distinct values averaging 20 bytes each, dictionary-coded entries shrink from ~32 bytes/entry to ~6 bytes/entry (uint16 code + chunkIndex + rowOffset), fitting ~5× more entries per leaf page → fewer pages → shallower tree → fewer I/O operations during seeks.
+
+### Run-length encoding for sorted indexes
+
+For low-to-medium cardinality columns in sorted indexes (not B+Tree), consecutive entries with the same key can be run-length encoded: `(key, runLength, [(chunkIndex, rowOffset)...])` instead of repeating the key per entry. The sorted merge already produces entries in key order, so runs are naturally contiguous.
+
+**Candidate columns**: Columns where `distinctCount / rowCount < 0.01` (fewer than 1% unique values). The "reordered" Boolean column in Instacart (2 distinct values, 32M rows) is the extreme case — 32M key serialisations reduced to 2.
+
+**Trade-off**: RLE sorted indexes lose O(1) random access into the entry stream. Binary search for a key requires scanning run headers. For point lookups, the B+Tree path is already preferred (all Instacart columns exceed `BPlusTreeAutoThreshold`). RLE is most useful for range scans and full-column iteration where the sequential access pattern naturally follows runs.
+
+**Relationship to bitmap indexes**: For very-low-cardinality columns (≤ ~1000 distinct values), bitmap indexes already serve the same purpose more efficiently — they're column-major and support set operations. RLE sorted indexes occupy the middle ground: too many distinct values for bitmap indexes, too much key repetition for raw sorted indexes. The decision matrix in `CategorizeBPlusTreeColumns` would grow a third branch.
+
+### Roaring bitmap indexes
+
+Replace the current Zstd-compressed opaque bitmaps in `BitmapColumnIndex` with Roaring bitmaps — a hybrid format using three container types per 64K-row range: array (sparse), bitset (dense), and RLE (runs). Roaring bitmaps are queryable while compressed: AND/OR/XOR/NOT/ANDNOT operations execute directly on the compressed representation without decompression.
+
+**Current limitation**: Bitmap index probes in `BitmapScanOperator` decompress the full Zstd-compressed bitset per chunk before testing membership. Multi-predicate queries (e.g., `WHERE color = 'red' AND size = 'large'`) decompress both columns' bitmaps independently, then intersect the decompressed arrays. This is O(n) in chunk size regardless of selectivity.
+
+**With Roaring**: Multi-predicate intersection operates on compressed containers directly — sparse × sparse = small array intersection; dense × dense = word-level AND. Selectivity-proportional cost: a highly selective predicate produces a small Roaring bitmap that intersects cheaply against any other predicate's bitmap. No decompression step.
+
+**Additional benefits**:
+- O(1) `rank` and `select` operations for offset-based access (useful for late materialisation)
+- Serialisation format is standardised ([Roaring specification](https://roaringbitmap.org/)) and interoperable with other systems
+- Memory-mapped access: Roaring's frozen serialisation format supports zero-copy reads from mmap regions, aligning with the planned mmap-based index access for multi-tenancy
+
+**Implementation path**: Replace `BitmapChunkAccumulator`'s `BitArray` + Zstd compression with Roaring bitmap construction. The accumulator already processes entries in row-offset order (sequential adds), which is Roaring's optimal insertion pattern. The `BitmapColumnIndex` reader switches from Zstd-decompress-then-scan to direct Roaring container operations. Existing `BitmapIndexSet` serialisation format changes (breaking change to `.datum-index` bitmap section).
+
+**Library option**: [RoaringBitmap](https://www.nuget.org/packages/RoaringBitmap) on NuGet, or a minimal hand-rolled implementation covering only the three container types + AND/OR to avoid the dependency.
+
+### Adaptive encoding selection
+
+Unify the per-column encoding decision into a single matrix driven by statistics already collected during chunk accumulation (`ChunkAccumulatorProxy`: HLL cardinality, min/max, null count, row count):
+
+| Cardinality / Row Count | Encoding | Index strategy |
+|---|---|---|
+| ≤ 2 (Boolean-like) | Bitmap | Bitmap index; skip B+Tree and sorted index |
+| 3–1,000 | Bitmap + optional dictionary | Bitmap index (Roaring when available) |
+| 1K–100K, String/JSON | Dictionary-coded B+Tree | Ordinal dictionary from vocab file, uint16/uint32 codes |
+| 100K+, or fixed-width numeric | Raw B+Tree | Current approach (`DataValue` keys) |
+| Any column, sorted index path | RLE if distinctCount/rowCount < 0.01 | Run-length encoded sorted index |
+
+The decision point is `IndexWriter.CategorizeBPlusTreeColumns` (currently a binary B+Tree-vs-sorted split). This becomes a multi-way classifier returning an `IndexEncodingStrategy` enum per column. The vocabulary file collected during ingestion supplies the dictionary for dictionary-coded columns; if no vocabulary is available, the index builder falls back to raw encoding.
+
+### Frame-of-reference (FOR) and bit-packing for integer keys
+
+For integer columns where the key range is narrow relative to the full type range (e.g., `product_id` values between 1 and 50K stored as Int32), frame-of-reference encoding subtracts the minimum value in each leaf page and bit-packs the residuals at the minimum necessary bit width. A page with keys [10000..10255] stores 8-bit residuals instead of 32-bit values — 4× compression before Zstd.
+
+**Synergy with existing compression**: FOR + bit-packing reduces the uncompressed payload fed to Zstd, improving both the compression ratio and the compressed size. More entries fit per leaf page → fewer pages → shallower tree.
+
+**Candidate columns**: Integer types (Int8–Int64, UInt8–UInt64) where `max - min` within a leaf page fits in fewer bits than the native type width. The bulk loader already knows the key range per page (it holds the entries before encoding) — computing `maxKey - minKey` and choosing the bit width is a local decision with no global state.
+
+---
+
 ## Type System Extensions (Deferred)
 
 **Status**: Under consideration. These types have clear use cases in OLAP analytics and ML pipelines but are not blocking V1 workflows. The current type system (Float32, UInt8, Vector, Matrix, Tensor, UInt8Array, Image, String, Date, DateTime, Time, Duration, JsonValue, UUID, Boolean) covers the primary ML and analytics needs.

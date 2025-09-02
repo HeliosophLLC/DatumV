@@ -49,7 +49,7 @@ public sealed class IndexWriter
         SortedIndexSpillWriter? sortedIndexSpillWriter,
         bool compressIndexes = false)
     {
-        using BinaryWriter writer = new(output, System.Text.Encoding.UTF8, leaveOpen: true);
+        using BufferedIndexWriter writer = new(output);
 
         WriteHeader(writer, compressIndexes);
 
@@ -150,16 +150,17 @@ public sealed class IndexWriter
             }
         }
 
-        long tableOfContentsOffset = output.Position;
+        long tableOfContentsOffset = writer.Position;
         WriteTableOfContents(writer, sections);
 
         // Patch the TOC offset in the header.
+        writer.Flush();
         output.Position = 8; // After magic (4) + version (2) + flags (2).
         writer.Write(tableOfContentsOffset);
         writer.Flush();
     }
 
-    private static void WriteHeader(BinaryWriter writer, bool compressIndexes)
+    private static void WriteHeader(BufferedIndexWriter writer, bool compressIndexes)
     {
         writer.Write(IndexConstants.Magic);
 
@@ -175,17 +176,17 @@ public sealed class IndexWriter
         List<(IndexSectionType, byte, long, long)> sections,
         IndexSectionType type,
         byte tableIndex,
-        BinaryWriter writer,
+        BufferedIndexWriter writer,
         Action writeBody)
     {
-        long start = writer.BaseStream.Position;
+        long start = writer.Position;
         writeBody();
-        long length = writer.BaseStream.Position - start;
+        long length = writer.Position - start;
         sections.Add((type, tableIndex, start, length));
     }
 
     private static void WriteTableOfContents(
-        BinaryWriter writer,
+        BufferedIndexWriter writer,
         List<(IndexSectionType Type, byte TableIndex, long Offset, long Length)> sections)
     {
         writer.Write(sections.Count);
@@ -200,7 +201,7 @@ public sealed class IndexWriter
     }
 
     private static void WriteTableDirectory(
-        BinaryWriter writer,
+        BufferedIndexWriter writer,
         List<KeyValuePair<string, SourceIndex>> tableList)
     {
         writer.Write((byte)tableList.Count);
@@ -213,14 +214,14 @@ public sealed class IndexWriter
 
     // ───────────────────────── Section writers ─────────────────────────
 
-    private static void WriteFingerprint(BinaryWriter writer, SourceFingerprint fingerprint)
+    private static void WriteFingerprint(BufferedIndexWriter writer, SourceFingerprint fingerprint)
     {
         writer.Write(fingerprint.FileSize);
         writer.Write(fingerprint.StripedHash.Length);
         writer.Write(fingerprint.StripedHash);
     }
 
-    private static void WriteSchema(BinaryWriter writer, IndexSchema schema)
+    private static void WriteSchema(BufferedIndexWriter writer, IndexSchema schema)
     {
         writer.Write(schema.TotalRowCount);
         IReadOnlyList<ColumnInfo> columns = schema.Schema.Columns;
@@ -234,7 +235,7 @@ public sealed class IndexWriter
         }
     }
 
-    private static void WriteChunkDirectory(BinaryWriter writer, IReadOnlyList<IndexChunk> chunks)
+    private static void WriteChunkDirectory(BufferedIndexWriter writer, IReadOnlyList<IndexChunk> chunks)
     {
         writer.Write(chunks.Count);
 
@@ -255,7 +256,7 @@ public sealed class IndexWriter
         }
     }
 
-    private static void WriteChunkColumnStatistics(BinaryWriter writer, ChunkColumnStatistics statistics)
+    private static void WriteChunkColumnStatistics(BufferedIndexWriter writer, ChunkColumnStatistics statistics)
     {
         writer.Write(statistics.NullCount);
         writer.Write(statistics.RowCount);
@@ -266,7 +267,7 @@ public sealed class IndexWriter
 
     // ───────────────────────── DataValue serialization ─────────────────────────
 
-    private static void WriteBloomFilters(BinaryWriter writer, BloomFilterSet bloomFilterSet)
+    private static void WriteBloomFilters(BufferedIndexWriter writer, BloomFilterSet bloomFilterSet)
     {
         IReadOnlyDictionary<string, BloomFilter[]> filters = bloomFilterSet.Filters;
         writer.Write(filters.Count);       // Number of columns.
@@ -286,7 +287,7 @@ public sealed class IndexWriter
         }
     }
 
-    private static void WriteSortedIndexes(BinaryWriter writer, SortedValueIndexSet sortedIndexes)
+    private static void WriteSortedIndexes(BufferedIndexWriter writer, SortedValueIndexSet sortedIndexes)
     {
         IReadOnlyDictionary<string, SortedValueIndex> indexes = sortedIndexes.Indexes;
         writer.Write(indexes.Count);
@@ -312,7 +313,7 @@ public sealed class IndexWriter
     /// as an envelope: column name, entry count, uncompressed length, compressed length,
     /// compressed payload.
     /// </summary>
-    private static void WriteCompressedSortedIndexes(BinaryWriter writer, SortedValueIndexSet sortedIndexes)
+    private static void WriteCompressedSortedIndexes(BufferedIndexWriter writer, SortedValueIndexSet sortedIndexes)
     {
         IReadOnlyDictionary<string, SortedValueIndex> indexes = sortedIndexes.Indexes;
         writer.Write(indexes.Count);
@@ -351,7 +352,7 @@ public sealed class IndexWriter
         return buffer.ToArray();
     }
 
-    private static void WriteZipDirectory(BinaryWriter writer, ZipDirectoryCache zipDirectory)
+    private static void WriteZipDirectory(BufferedIndexWriter writer, ZipDirectoryCache zipDirectory)
     {
         writer.Write(zipDirectory.Count);
 
@@ -369,7 +370,7 @@ public sealed class IndexWriter
     /// Writes a B+Tree indexes section containing all columns' trees.
     /// Each column's tree is written as a section header followed by its raw pages.
     /// </summary>
-    private static void WriteBPlusTreeIndexes(BinaryWriter writer, BPlusTreeIndexSet bPlusTreeIndexes)
+    private static void WriteBPlusTreeIndexes(BufferedIndexWriter writer, BPlusTreeIndexSet bPlusTreeIndexes)
     {
         IReadOnlyCollection<string> columnNames = bPlusTreeIndexes.ColumnNames;
         writer.Write(columnNames.Count);
@@ -396,7 +397,7 @@ public sealed class IndexWriter
     /// Format: column count, then per column: name, value count, chunk count, chunk row counts,
     /// then per value: DataValue key, then per chunk: compressed size + compressed bytes.
     /// </summary>
-    private static void WriteBitmapIndexes(BinaryWriter writer, BitmapIndexSet bitmapIndexes)
+    private static void WriteBitmapIndexes(BufferedIndexWriter writer, BitmapIndexSet bitmapIndexes)
     {
         IReadOnlyCollection<string> columnNames = bitmapIndexes.ColumnNames;
         writer.Write(columnNames.Count);
@@ -527,6 +528,157 @@ public sealed class IndexWriter
                 byte[] imageBytes = value.AsImage();
                 writer.Write(imageBytes.Length);
                 writer.Write(imageBytes);
+                break;
+
+            case DataKind.Boolean:
+                writer.Write(value.AsBoolean());
+                break;
+
+            case DataKind.Time:
+                writer.Write(value.AsTime().Ticks);
+                break;
+
+            case DataKind.Duration:
+                writer.Write(value.AsDuration().Ticks);
+                break;
+
+            case DataKind.Uuid:
+                writer.Write(value.AsUuid().ToByteArray());
+                break;
+
+            case DataKind.Float64:
+                writer.Write(value.AsFloat64());
+                break;
+
+            case DataKind.Int8:
+                writer.Write(value.AsInt8());
+                break;
+
+            case DataKind.Int16:
+                writer.Write(value.AsInt16());
+                break;
+
+            case DataKind.UInt16:
+                writer.Write(value.AsUInt16());
+                break;
+
+            case DataKind.Int32:
+                writer.Write(value.AsInt32());
+                break;
+
+            case DataKind.UInt32:
+                writer.Write(value.AsUInt32());
+                break;
+
+            case DataKind.Int64:
+                writer.Write(value.AsInt64());
+                break;
+
+            case DataKind.UInt64:
+                writer.Write(value.AsUInt64());
+                break;
+
+            default:
+                throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
+        }
+    }
+
+    /// <summary>
+    /// Writes a nullable <see cref="DataValue"/> using a <see cref="BufferedIndexWriter"/>.
+    /// </summary>
+    internal static void WriteNullableDataValue(BufferedIndexWriter writer, DataValue? value)
+    {
+        if (!value.HasValue || value.Value.IsNull)
+        {
+            writer.Write(false); // hasValue = false
+            return;
+        }
+
+        writer.Write(true); // hasValue = true
+        WriteDataValue(writer, value.Value);
+    }
+
+    /// <summary>
+    /// Writes a <see cref="DataValue"/> using a <see cref="BufferedIndexWriter"/>
+    /// for high-throughput serialization on hot index-writing paths.
+    /// </summary>
+    internal static void WriteDataValue(BufferedIndexWriter writer, DataValue value)
+    {
+        writer.Write((byte)value.Kind);
+
+        switch (value.Kind)
+        {
+            case DataKind.Float32:
+                writer.Write(value.AsFloat32());
+                break;
+
+            case DataKind.UInt8:
+                writer.Write(value.AsUInt8());
+                break;
+
+            case DataKind.String:
+                writer.Write(value.AsString());
+                break;
+
+            case DataKind.Date:
+                DateOnly dateValue = value.AsDate();
+                writer.Write(dateValue.DayNumber);
+                break;
+
+            case DataKind.DateTime:
+                DateTimeOffset dateTimeValue = value.AsDateTime();
+                writer.Write(dateTimeValue.Ticks);
+                writer.Write((short)dateTimeValue.Offset.TotalMinutes);
+                break;
+
+            case DataKind.JsonValue:
+                writer.Write(value.AsJsonValue());
+                break;
+
+            case DataKind.UInt8Array:
+                byte[] byteArray = value.AsUInt8Array();
+                writer.Write(byteArray.Length);
+                writer.Write(byteArray);
+                break;
+
+            case DataKind.Vector:
+                float[] vectorArray = value.AsVector();
+                writer.Write(vectorArray.Length);
+                foreach (float element in vectorArray)
+                {
+                    writer.Write(element);
+                }
+                break;
+
+            case DataKind.Matrix:
+                float[] matrixArray = value.AsMatrix(out int matrixRows, out int matrixColumns);
+                writer.Write(matrixRows);
+                writer.Write(matrixColumns);
+                writer.Write(matrixArray.Length);
+                foreach (float element in matrixArray)
+                {
+                    writer.Write(element);
+                }
+                break;
+
+            case DataKind.Tensor:
+                float[] tensorArray = value.AsTensor(out int[] tensorShape);
+                writer.Write(tensorShape.Length);
+                foreach (int dimension in tensorShape)
+                {
+                    writer.Write(dimension);
+                }
+                writer.Write(tensorArray.Length);
+                foreach (float element in tensorArray)
+                {
+                    writer.Write(element);
+                }
+                break;
+
+            case DataKind.Image:
+                byte[] imageData = value.AsImage();
+                writer.Write(imageData.Length);
+                writer.Write(imageData);
                 break;
 
             case DataKind.Boolean:
