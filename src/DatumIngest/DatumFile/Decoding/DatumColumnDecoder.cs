@@ -82,11 +82,23 @@ public abstract class DatumColumnDecoder
         int payloadLength = -1,
         byte[]? decompressedBuffer = null)
     {
+        // When the payload buffer is oversized (shared rental), decompress here using
+        // the span-aware overload to avoid the GetSubArray allocation that
+        // payload[..payloadLength] would produce. Pass the decompressed bytes to
+        // Decode with compression=None so the decoder skips redundant decompression.
+        if (payloadLength >= 0 && payloadLength < payload.Length && compression != DatumCompression.None)
+        {
+            byte[] decompressed = DecompressPayload(payload, payloadLength, uncompressedByteLength, compression);
+            DataValue[] decoded = Decode(decompressed, encoding, DatumCompression.None, uncompressedByteLength, rowCount, descriptor, context);
+            decoded.AsSpan(0, rowCount).CopyTo(target);
+            return;
+        }
+
         byte[] effectivePayload = payloadLength >= 0 && payloadLength < payload.Length
             ? payload[..payloadLength]
             : payload;
-        DataValue[] decoded = Decode(effectivePayload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
-        decoded.AsSpan(0, rowCount).CopyTo(target);
+        DataValue[] decoded2 = Decode(effectivePayload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
+        decoded2.AsSpan(0, rowCount).CopyTo(target);
     }
 
     /// <summary>
@@ -130,7 +142,7 @@ public abstract class DatumColumnDecoder
 
     /// <summary>Decompresses the page payload using the given codec.</summary>
     protected static byte[] DecompressPayload(byte[] payload, int uncompressedByteLength, DatumCompression compression)
-        => DatumCompressor.Decompress(payload, uncompressedByteLength, compression);
+        => compression == DatumCompression.None ? payload : DatumCompressor.Decompress(payload, uncompressedByteLength, compression);
 
     /// <summary>
     /// Decompresses a region of the page payload using the given codec.

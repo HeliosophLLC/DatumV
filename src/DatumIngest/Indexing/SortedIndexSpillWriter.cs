@@ -599,9 +599,11 @@ internal sealed class SortedIndexSpillWriter : IDisposable
             // compressed output (typically 5-20% of original) is held in memory.
             // The previous approach materialized the entire uncompressed buffer
             // (~500 MB+ for large columns), causing a ~1.5 GB peak allocation.
-            // Pre-size to ~20% of estimated uncompressed size (13 bytes/entry for
+            // Pre-size to ~40% of estimated uncompressed size (13 bytes/entry for
             // typical Int32 keys) to avoid geometric MemoryStream doublings.
-            int estimatedCompressedCapacity = Math.Max(256, (int)(totalEntries * 13 / 5));
+            // 40% accommodates columns with higher entropy (strings, dates) that
+            // compress less aggressively than integer keys.
+            int estimatedCompressedCapacity = Math.Max(256, (int)(totalEntries * 13 * 2 / 5));
             using MemoryStream compressedBuffer = new(estimatedCompressedCapacity);
             int uncompressedLength;
 
