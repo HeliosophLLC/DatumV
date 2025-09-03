@@ -82,10 +82,10 @@ public abstract class DatumColumnDecoder
         int payloadLength = -1,
         byte[]? decompressedBuffer = null)
     {
-        byte[] exactPayload = payloadLength >= 0 && payloadLength < payload.Length
+        byte[] effectivePayload = payloadLength >= 0 && payloadLength < payload.Length
             ? payload[..payloadLength]
             : payload;
-        DataValue[] decoded = Decode(exactPayload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
+        DataValue[] decoded = Decode(effectivePayload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
         decoded.AsSpan(0, rowCount).CopyTo(target);
     }
 
@@ -153,6 +153,6 @@ public abstract class DatumColumnDecoder
     protected static DatumNullBitmap ReadNullBitmap(byte[] raw, int rowCount)
     {
         int byteCount = DatumNullBitmap.ByteCount(rowCount);
-        return DatumNullBitmap.FromBytes(raw[0..byteCount], rowCount);
+        return DatumNullBitmap.FromBytes(raw.AsSpan(0, byteCount), rowCount);
     }
 }

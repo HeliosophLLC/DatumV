@@ -68,6 +68,28 @@ public sealed class DatumNullBitmap
     /// </summary>
     public static DatumNullBitmap FromBytes(byte[] bits, int rowCount)
     {
+        int nullCount = CountNulls(bits.AsSpan(), rowCount);
+        return new DatumNullBitmap(bits, rowCount, nullCount);
+    }
+
+    /// <summary>
+    /// Reconstructs a null bitmap from a region of a raw byte buffer.
+    /// Copies the relevant bytes into an internal array so the caller's buffer can be reused.
+    /// </summary>
+    public static DatumNullBitmap FromBytes(ReadOnlySpan<byte> source, int rowCount)
+    {
+        int byteCount = ByteCount(rowCount);
+        byte[] bits = new byte[byteCount];
+        source[..byteCount].CopyTo(bits);
+        int nullCount = CountNulls(bits.AsSpan(), rowCount);
+        return new DatumNullBitmap(bits, rowCount, nullCount);
+    }
+
+    /// <summary>
+    /// Counts the number of null bits set in the bitmap bytes.
+    /// </summary>
+    private static int CountNulls(ReadOnlySpan<byte> bits, int rowCount)
+    {
         int nullCount = 0;
 
         foreach (byte b in bits)
@@ -96,6 +118,6 @@ public sealed class DatumNullBitmap
             }
         }
 
-        return new DatumNullBitmap(bits, rowCount, nullCount);
+        return nullCount;
     }
 }

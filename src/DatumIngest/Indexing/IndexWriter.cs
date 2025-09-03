@@ -338,7 +338,9 @@ public sealed class IndexWriter
     /// </summary>
     internal static byte[] SerializeEntriesToBuffer(ReadOnlySpan<ValueIndexEntry> entries)
     {
-        using MemoryStream buffer = new();
+        // Pre-size buffer: ~13 bytes per entry for typical Int32 keys
+        // (1 kind + 4 value + 4 chunkIndex + 4 rowOffset).
+        using MemoryStream buffer = new(entries.Length * 13);
         using BinaryWriter bufferWriter = new(buffer, System.Text.Encoding.UTF8, leaveOpen: true);
 
         foreach (ValueIndexEntry entry in entries)
