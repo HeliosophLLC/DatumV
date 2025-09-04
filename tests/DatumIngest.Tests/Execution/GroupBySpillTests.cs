@@ -37,6 +37,29 @@ public sealed class GroupBySpillTests
         return new Row(names, values);
     }
 
+    /// <summary>
+    /// Builds 100 groups × 5 rows = 500 rows with independent <see cref="DataValue"/>
+    /// arrays. Each call returns a fresh set so that two operators do not share
+    /// backing arrays through <see cref="GlobalBufferPool"/>.
+    /// </summary>
+    private static Row[] BuildManyGroupRows()
+    {
+        Row[] rows = new Row[500];
+        int index = 0;
+
+        for (int groupIndex = 0; groupIndex < 100; groupIndex++)
+        {
+            for (int rowIndex = 1; rowIndex <= 5; rowIndex++)
+            {
+                rows[index++] = MakeRow(
+                    ("key", DataValue.FromString($"G{groupIndex}")),
+                    ("val", DataValue.FromFloat32((float)rowIndex)));
+            }
+        }
+
+        return rows;
+    }
+
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
     {
         List<Row> rows = [];
@@ -109,19 +132,13 @@ public sealed class GroupBySpillTests
     public async Task SingleKey_ManyGroups_SpillMatchesUnbounded()
     {
         // Build 100 groups with 5 rows each = 500 rows.
-        List<Row> sourceRows = new();
-        for (int groupIndex = 0; groupIndex < 100; groupIndex++)
-        {
-            for (int rowIndex = 1; rowIndex <= 5; rowIndex++)
-            {
-                sourceRows.Add(MakeRow(
-                    ("key", DataValue.FromString($"G{groupIndex}")),
-                    ("val", DataValue.FromFloat32((float)rowIndex))));
-            }
-        }
+        // Each operator gets its own copy so data returned to GlobalBufferPool
+        // by the first operator cannot corrupt the second operator's input.
+        Row[] spillRows = BuildManyGroupRows();
+        Row[] unboundedRows = BuildManyGroupRows();
 
         GroupByOperator spillGroupBy = new(
-            new MockOperator(sourceRows.ToArray()),
+            new MockOperator(spillRows),
             groupByExpressions: [new ColumnReference("key")],
             aggregateColumns:
             [
@@ -133,7 +150,7 @@ public sealed class GroupBySpillTests
             ]);
 
         GroupByOperator unboundedGroupBy = new(
-            new MockOperator(sourceRows.ToArray()),
+            new MockOperator(unboundedRows),
             groupByExpressions: [new ColumnReference("key")],
             aggregateColumns:
             [

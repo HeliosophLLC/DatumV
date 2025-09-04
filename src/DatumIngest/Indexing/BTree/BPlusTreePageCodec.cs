@@ -79,7 +79,9 @@ internal static class BPlusTreePageCodec
                 catch (NotSupportedException)
                 {
                     // Buffer was too small — fall back to growable serialization.
-                    ArrayPool<byte>.Shared.Return(rentedEntryBuffer);
+                    // Do not return rentedEntryBuffer here; the outer finally block
+                    // always returns it. Returning here would double-return the buffer
+                    // and poison the ArrayPool (two callers sharing the same array).
                     return EncodeLeafPageFallback(entries, previousLeafPageIndex, nextLeafPageIndex);
                 }
             }

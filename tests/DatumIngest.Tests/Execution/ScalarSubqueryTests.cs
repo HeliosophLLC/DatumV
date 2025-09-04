@@ -837,7 +837,11 @@ public sealed class ScalarSubqueryTests
 
             foreach (Row row in _rows)
             {
-                batch.Add(row);
+                // Copy the backing DataValue[] so operators that return consumed
+                // rows to GlobalBufferPool do not corrupt the source data for
+                // subsequent re-scans (e.g. per-row correlated subqueries).
+                DataValue[] copy = (DataValue[])row.RawValues.Clone();
+                batch.Add(new Row(row.ColumnNames.ToArray(), copy));
 
                 if (batch.IsFull)
                 {
