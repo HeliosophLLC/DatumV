@@ -113,6 +113,47 @@ Eliminate per-DataValue heap allocation for scalar types via `[StructLayout(Layo
 
 - **D9. Column-major vectorized execution** — replace the current row-major `Row[]` batch model with a columnar `DataValue[][]` representation where the first index is the column and the second is the row offset within the batch. *Use case*: aggregation-heavy and expression-heavy queries where tight loops over a single column (e.g. `SUM`, `AVG`, predicate evaluation) benefit from sequential memory access and SIMD auto-vectorisation. Requires rewriting the expression evaluator to operate on column vectors, converting all operators to produce and consume columnar batches, and adding a row-to-columnar adapter at provider boundaries. The current row-major RowBatch already amortises async state-machine overhead; this optimisation targets the *inner-loop* compute cost.
 
+### P5. Memory-Mapped Sorted Indexes
+
+Replace the v3 sorted index format (variable-length `WriteDataValue` entries, Zstd-compressed per column, full materialization into `ValueIndexEntry[]` on read) with a fixed-width binary layout that can be memory-mapped for zero-copy binary search.
+
+**On-disk format (v4)**:
+
+- **Column directory**: Per column: column name, `DataKind`, entry count, key width (bytes), absolute file offsets for keys/locators/string table.
+- **Keys array**: `entryCount × keyWidth` bytes. Stored in sort-preserving binary encoding (big-endian + sign-flip for signed integers; IEEE-to-sortable transform for floats) so `SequenceCompareTo` on raw bytes gives correct ordering.
+- **Locators array**: `entryCount × 12` bytes. Fixed-width `[int32 ChunkIndex | int64 RowOffsetInChunk]`.
+- **String table** (string columns only): Packed UTF-8 bytes. Keys store fixed-width `(int32 offset, int32 length)` pairs referencing into this region.
+
+**Storage strategy**: The canonical local `.datum-index` file stores the v4 fixed-width layout directly — no compression layer. The fixed-width format *is* the local storage format, always mmap-ready. On-disk size is larger (~8× for typical columns vs. Zstd-compressed v3), but acceptable for a local ML ETL tool where datasets already occupy hundreds of megabytes. Compression is a **blob storage / transport concern**: when uploading to cloud blob storage (Azure Blob, S3), the file is Zstd-compressed before upload; after download, the compressed blob is decompressed back to the fixed-width layout and then mmap'd. This keeps the format simple (one canonical layout, no dual-state files) while still getting ~8× compression savings on the wire and in blob storage costs.
+
+**Key encoding per kind**: UInt8 = 1 byte raw. Int8 = 1 byte XOR sign bit. Int16/UInt16 = 2 bytes big-endian (± sign flip). Int32/UInt32 = 4 bytes. Int64/UInt64 = 8 bytes. Float32 = 4 bytes IEEE→sortable. Float64 = 8 bytes IEEE→sortable. Date = 4 bytes (DayNumber as Int32). DateTime = 8 bytes (UTC ticks as Int64). String = 8 bytes (offset + length into string table).
+
+**New types**: `SortedIndexKeyEncoder` (encode/decode per kind), `MappedSortedIndex` (implements `IColumnIndex` over `MemoryMappedViewAccessor`), `MappedSortedIndexSet` (replaces `SortedValueIndexSet` for mmap path). All consumers operate through `IColumnIndex` — no changes to `ScanOperator`, `IndexScanOperator`, `JoinOperator`, or `QueryPlanner`.
+
+**Multi-tenancy benefit**: OS-level page sharing — multiple server connections or gRPC compute clients reading the same mmap'd index share physical memory pages. Deterministic memory: the process doesn't "own" the pages; the OS pages in/out on demand. Ten concurrent sessions don't multiply index memory 10×.
+
+**Deletions**: v2 uncompressed read/write, v3 compressed read/write, `SerializeEntriesToBuffer`, `MemoryStream`-based sorted index serialization. No backward compatibility — existing `.datum-index` files must be regenerated.
+
+**Implement when**: This is the prerequisite for multi-tenant index sharing and temp-table isolation.
+
+### P6. ReferenceStore Session Isolation
+
+`ReferenceStore` is currently a process-global static `object?[]` that backs all `DataValue` instances holding managed references (strings, byte arrays, vectors, etc.). Every `DataValue.FromString()` call allocates a slot in this shared array. In a multi-tenant server with concurrent sessions, this creates two problems:
+
+1. **Cross-session leakage**: String values materialized by one session's query remain in `ReferenceStore` indefinitely because there is no mechanism to release slots when a session ends. Over time, the store grows monotonically, leaking memory proportional to the total volume of distinct string/array values ever touched across all sessions.
+
+2. **Unbounded growth under concurrent load**: With N concurrent sessions each processing datasets with string columns, the global `ReferenceStore` accumulates N×M entries (M = distinct strings per session). There is no eviction, no LRU, no per-session scoping.
+
+**Required changes**:
+- **Per-session `ReferenceStore`** instances instead of the process-global static. Each session's `ExecutionContext` (or a new `SessionContext`) owns a `ReferenceStore` that is disposed when the session ends, releasing all referenced objects.
+- **`DataValue` must encode which store it belongs to**, or all `DataValue` instances within a session must be consumed before the store is disposed. The current 4-byte `_referenceIndex` field could be split into a 2-byte session/store ID + 2-byte index (64K entries per store per segment), or a two-level indirection `StoreTable[storeId][index]`. The exact encoding depends on the expected concurrency × cardinality.
+- **Arena-backed strings bypass this entirely**: `DataValue.FromStringSlice` (arena-backed) stores offset+length instead of a reference index. Expanding arena usage to more code paths (e.g., index reader, provider deserialization) reduces `ReferenceStore` pressure and makes session isolation cheaper.
+- **Audit all `DataValue.FromString` / `FromVector` / `FromImage` call sites**: Ensure each runs in a session context and allocates into the correct per-session store. The provider pipeline, function evaluator, and index reader are the key code paths.
+
+**Risk if deferred**: In a single-user CLI, the process exits after each command — no leak. In the gRPC `ComputeService` or `Server` REPL running long-lived sessions, this is a memory leak proportional to usage. It becomes a blocker the moment multi-session compute is deployed.
+
+**Prerequisite for**: Temp tables (per-session materialized results), multi-tenant compute service, long-lived REPL sessions.
+
 ---
 
 ## Index Encoding Strategies (Deferred)
