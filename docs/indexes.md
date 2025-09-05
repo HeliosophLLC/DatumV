@@ -13,6 +13,7 @@ A `.datum-index` file uses a TOC-at-end layout (like ZIP), enabling sequential w
 │  Header (16 bytes)              │
 │    Magic: DTIX (4 bytes ASCII)  │
 │    Version: uint16 (currently 3)│
+│    ▸ See also: v4 mapped format │
 │    Flags: uint16 (reserved)     │
 │    TOC offset: int64            │
 ├─────────────────────────────────┤
@@ -55,6 +56,7 @@ Fingerprint, Schema, and ChunkDirectory are always present. BloomFilters, Sorted
 | 1 | Initial format |
 | 2 | Added RowOffsets section, multi-table TableDirectory |
 | 3 | Added per-column Zstd compression for SortedIndexes section, BTreeIndexes section type |
+| 4 (mapped) | Memory-mapped fixed-width sorted indexes in a separate `.datum-mapped-index` file (magic `DXIX`). See [Memory-mapped sorted indexes](#memory-mapped-sorted-indexes). |
 
 ## Staleness detection
 
@@ -149,6 +151,87 @@ The compressed envelope format per column is:
 | CompressedPayload | byte[] | Zstd-compressed entry data |
 
 Compression is enabled by default in the `DatumIndexerOptions` (`CompressIndexes = true`). The CLI `--with-index` flag writes uncompressed indexes (version 2) for maximum compatibility. The reader accepts both compressed (v3) and uncompressed (v2) indexes transparently.
+
+## Memory-mapped sorted indexes
+
+The v4 format replaces variable-length `WriteDataValue` entries with a fixed-width binary layout that can be memory-mapped for zero-copy binary search. Unlike the v3 sorted index section (embedded inside the `.datum-index` TOC), the v4 format lives in a separate file with magic `DXIX` and is designed for direct `MemoryMappedFile` access — no decompression, no deserialization, no materialization into `ValueIndexEntry[]`.
+
+### Motivation
+
+The v3 sorted index path allocates a `ValueIndexEntry[]` per column on read: for a 10-million-row column, that is 10M × 40 bytes ≈ 400 MB per column in managed heap. In a multi-tenant server with ten concurrent sessions each querying a different table, memory usage scales linearly with concurrency.
+
+Memory-mapped indexes solve this by letting the OS page in only the regions touched by each binary search (typically 3–5 pages per point lookup). Multiple sessions reading the same file share physical memory pages at the OS level — ten concurrent sessions do not multiply memory 10×.
+
+### On-disk format
+
+```
+┌──────────────────────────────────────┐  Offset 0
+│  Magic: DXIX (4 bytes ASCII)         │
+│  Format version: int32 (4)           │
+│  Column count: int32                 │
+├──────────────────────────────────────┤
+│  Column directory                    │
+│    Per column:                       │
+│      Column name (length-prefixed)   │
+│      DataKind: byte                  │
+│      Entry count: int64              │
+│      Keys offset: int64              │
+│      Locators offset: int64          │
+│      String table offset: int64      │
+│      String table length: int64      │
+├──────────────────────────────────────┤
+│  Column 0: Keys array                │
+│  Column 0: Locators array            │
+│  Column 0: String table (if string)  │
+│  Column 1: Keys array                │
+│  Column 1: Locators array            │
+│  ...                                 │
+└──────────────────────────────────────┘
+```
+
+**Keys array**: `entryCount × keyWidth` bytes in sort-preserving binary encoding. For numeric and temporal kinds, `SequenceCompareTo` on raw bytes gives the correct ordering — no decoding needed for comparison. Key encodings:
+
+| Kind | Width | Encoding |
+|------|-------|----------|
+| Boolean | 1 | `0x00` = false, `0x01` = true |
+| UInt8 | 1 | Raw byte |
+| Int8 | 1 | XOR sign bit (`0x80`) |
+| UInt16 | 2 | Big-endian |
+| Int16 | 2 | Big-endian + sign flip |
+| UInt32 | 4 | Big-endian |
+| Int32 | 4 | Big-endian + sign flip |
+| Float32 | 4 | IEEE-to-sortable (sign flip + conditional complement) |
+| Date | 4 | DayNumber as Int32, big-endian + sign flip |
+| UInt64 | 8 | Big-endian |
+| Int64 | 8 | Big-endian + sign flip |
+| Float64 | 8 | IEEE-to-sortable |
+| DateTime | 8 | UTC ticks as Int64, big-endian + sign flip |
+| Time | 8 | Ticks as Int64, big-endian + sign flip |
+| Duration | 8 | Ticks as Int64, big-endian + sign flip |
+| String | 8 | `(int32 offset, int32 length)` into string table |
+| Uuid | 16 | Raw 16 bytes (RFC 4122 byte order) |
+
+**Locators array**: `entryCount × 12` bytes. Fixed-width `[int32 ChunkIndex | int64 RowOffsetInChunk]`, parallel to the keys array.
+
+**String table** (string columns only): Packed UTF-8 bytes with deduplication. String keys store `(offset, length)` references into this region. Binary search for string keys dereferences the string table for comparison rather than relying on byte ordering.
+
+### Storage strategy
+
+The v4 file is stored uncompressed on the local filesystem — the fixed-width layout *is* the storage format, always mmap-ready. On-disk size is larger than Zstd-compressed v3 (~8× for typical columns), but acceptable for local ML ETL workloads where source datasets already occupy hundreds of megabytes. Compression is a transport concern: blob storage uploads compress the file with Zstd; after download, the decompressed file is mmap'd directly.
+
+### Runtime behavior
+
+`MappedSortedIndex` implements the same `IColumnIndex` interface as `SortedValueIndex` and `BPlusTreeReader`. Query operators (`ScanOperator`, `IndexScanOperator`, `JoinOperator`, `QueryPlanner`) are polymorphic — no code changes required. Binary search operates directly on the mapped memory via `MemoryMappedViewAccessor`, touching only the pages needed for each lookup.
+
+### Key types
+
+| Type | Purpose |
+|------|---------|
+| `SortedIndexKeyEncoder` | Encodes/decodes `DataValue` keys in sort-preserving fixed-width binary |
+| `MappedSortedIndexWriter` | Writes the v4 file with column directory and backpatched offsets |
+| `MappedSortedIndexReader` | Opens a v4 file via `MemoryMappedFile`, creates per-column `MappedSortedIndex` instances |
+| `MappedSortedIndex` | `IColumnIndex` implementation with binary search over mapped memory |
+| `MappedSortedIndexSet` | Owns `MemoryMappedFile` + shared `MemoryMappedViewAccessor` lifetime, case-insensitive column lookup |
 
 ## B+Tree indexes
 

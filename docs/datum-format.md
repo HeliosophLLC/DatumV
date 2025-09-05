@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Providers](providers.md)
 
-The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It stores data in compressed column pages grouped by row group, with a self-describing footer that carries schema, encoding metadata, and per-column zone maps. A companion [`.datum-index`](indexes.md) sidecar file provides bloom filters, sorted value indexes, and chunk-level statistics for query acceleration.
+The `.datum` format is a binary columnar store designed for high-throughput ML/ETL workloads. It stores data in compressed column pages grouped by row group, with a self-describing footer that carries schema, encoding metadata, and per-column zone maps. A companion [`.datum-index`](indexes.md) sidecar file provides bloom filters, sorted value indexes, and chunk-level statistics for query acceleration. An optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) sidecar adds memory-mapped fixed-width sorted indexes for zero-copy multi-tenant access.
 
 ## Design goals
 
@@ -220,7 +220,7 @@ Nullable wrapper: `bool hasValue`, then (if true) the `DataValue` payload.
 
 ## Sidecar index (`.datum-index`)
 
-The `.datum` format is intentionally simple — all acceleration structures live in a separate [`.datum-index`](indexes.md) sidecar file. This separation means the data file format never changes for index features, indexes can be rebuilt independently, and the same index format works across all source file types (CSV, Parquet, HDF5, ZIP archives, etc.).
+The `.datum` format is intentionally simple — all acceleration structures live in separate sidecar files. The [`.datum-index`](indexes.md) sidecar carries bloom filters, sorted value indexes, B+Tree indexes, bitmap indexes, and chunk-level statistics. The optional [`.datum-mapped-index`](indexes.md#memory-mapped-sorted-indexes) sidecar provides memory-mapped fixed-width sorted indexes designed for zero-copy multi-tenant deployments. This separation means the data file format never changes for index features, indexes can be rebuilt independently, and the same index format works across all source file types (CSV, Parquet, HDF5, ZIP archives, etc.).
 
 The sidecar provides:
 
@@ -234,7 +234,9 @@ The sidecar provides:
 | **ZIP directory** | Cached central directory for ZIP archive sources |
 | **Row offsets** | Byte offsets into the source file for seekable chunk access |
 
-See [indexes.md](indexes.md) for the full binary specification.
+The `.datum-mapped-index` sidecar (format version 4) stores memory-mapped fixed-width sorted indexes in a separate file with magic `DXIX`. See [Memory-mapped sorted indexes](indexes.md#memory-mapped-sorted-indexes) for the binary specification.
+
+See [indexes.md](indexes.md) for the full binary specification of both sidecar formats.
 
 ## Reading flow
 
