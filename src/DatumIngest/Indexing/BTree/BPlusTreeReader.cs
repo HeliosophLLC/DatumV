@@ -1,3 +1,4 @@
+using System.IO.MemoryMappedFiles;
 using DatumIngest.Execution;
 using DatumIngest.Model;
 
@@ -16,7 +17,9 @@ namespace DatumIngest.Indexing.BTree;
 /// </remarks>
 internal sealed class BPlusTreeReader
 {
-    private readonly byte[][] _rawPages;
+    private readonly byte[][]? _rawPages;
+    private readonly MemoryMappedViewAccessor? _accessor;
+    private readonly long _pagesBaseOffset;
     private readonly BPlusTreeSectionHeader _header;
     private readonly BPlusTreePageCache _cache;
 
@@ -32,8 +35,29 @@ internal sealed class BPlusTreeReader
     /// <summary>The section header describing this tree's shape.</summary>
     internal BPlusTreeSectionHeader Header => _header;
 
-    /// <summary>The raw 8 KiB page byte arrays (for serialization).</summary>
-    internal byte[][] RawPages => _rawPages;
+    /// <summary>
+    /// The raw 8 KiB page byte arrays (for serialization). For memory-mapped trees,
+    /// reads all pages from the accessor into newly allocated arrays.
+    /// </summary>
+    internal byte[][] RawPages
+    {
+        get
+        {
+            if (_rawPages is not null)
+            {
+                return _rawPages;
+            }
+
+            byte[][] pages = new byte[_header.PageCount][];
+
+            for (uint pageIndex = 0; pageIndex < _header.PageCount; pageIndex++)
+            {
+                pages[pageIndex] = GetRawPageBytes(pageIndex);
+            }
+
+            return pages;
+        }
+    }
 
     /// <summary>
     /// Creates a reader over pre-loaded raw page data.
@@ -47,6 +71,27 @@ internal sealed class BPlusTreeReader
     {
         _header = header;
         _rawPages = rawPages;
+        _cache = new BPlusTreePageCache(cacheCapacity);
+    }
+
+    /// <summary>
+    /// Creates a memory-mapped reader that reads raw page bytes from a
+    /// <see cref="MemoryMappedViewAccessor"/> on demand instead of holding
+    /// all pages in managed heap memory.
+    /// </summary>
+    /// <param name="header">The B+Tree section header describing the tree shape.</param>
+    /// <param name="accessor">The shared view accessor spanning the index file.</param>
+    /// <param name="pagesBaseOffset">Absolute byte offset of the first page in the file.</param>
+    /// <param name="cacheCapacity">Maximum number of decoded pages to cache.</param>
+    internal BPlusTreeReader(
+        BPlusTreeSectionHeader header,
+        MemoryMappedViewAccessor accessor,
+        long pagesBaseOffset,
+        int cacheCapacity = DefaultCacheCapacity)
+    {
+        _header = header;
+        _accessor = accessor;
+        _pagesBaseOffset = pagesBaseOffset;
         _cache = new BPlusTreePageCache(cacheCapacity);
     }
 
@@ -219,7 +264,7 @@ internal sealed class BPlusTreeReader
             return cached;
         }
 
-        BPlusTreeLeafPage page = BPlusTreePageCodec.DecodeLeafPage(_rawPages[pageIndex], pageIndex);
+        BPlusTreeLeafPage page = BPlusTreePageCodec.DecodeLeafPage(GetRawPageBytes(pageIndex), pageIndex);
         _cache.AddLeafPage(pageIndex, page);
         return page;
     }
@@ -234,9 +279,27 @@ internal sealed class BPlusTreeReader
             return cached;
         }
 
-        BPlusTreeInternalPage page = BPlusTreePageCodec.DecodeInternalPage(_rawPages[pageIndex], pageIndex);
+        BPlusTreeInternalPage page = BPlusTreePageCodec.DecodeInternalPage(GetRawPageBytes(pageIndex), pageIndex);
         _cache.AddInternalPage(pageIndex, page);
         return page;
+    }
+
+    /// <summary>
+    /// Returns the raw 8 KiB bytes for the given page index, either from
+    /// the in-memory array or by reading from the memory-mapped accessor.
+    /// </summary>
+    private byte[] GetRawPageBytes(uint pageIndex)
+    {
+        if (_rawPages is not null)
+        {
+            return _rawPages[pageIndex];
+        }
+
+        byte[] buffer = new byte[BPlusTreeConstants.PageSize];
+        _accessor!.ReadArray(
+            _pagesBaseOffset + pageIndex * BPlusTreeConstants.PageSize,
+            buffer.AsSpan());
+        return buffer;
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.MemoryMappedFiles;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using DatumIngest.Model;
@@ -19,7 +20,9 @@ namespace DatumIngest.Indexing;
 /// </remarks>
 public sealed class BloomFilter
 {
-    private readonly byte[] _bits;
+    private readonly byte[]? _bits;
+    private readonly MemoryMappedViewAccessor? _accessor;
+    private readonly long _bitsOffset;
     private readonly int _bitCount;
     private readonly int _hashCount;
 
@@ -30,10 +33,26 @@ public sealed class BloomFilter
     public int HashCount => _hashCount;
 
     /// <summary>Size of the filter in bytes.</summary>
-    public int SizeInBytes => _bits.Length;
+    public int SizeInBytes => _bits?.Length ?? ((_bitCount + 7) / 8);
 
-    /// <summary>Raw bit array backing the filter.</summary>
-    internal byte[] Bits => _bits;
+    /// <summary>
+    /// Raw bit array backing the filter. For memory-mapped filters, reads the
+    /// bytes from the accessor into a new array (serialization path only).
+    /// </summary>
+    internal byte[] Bits
+    {
+        get
+        {
+            if (_bits is not null)
+            {
+                return _bits;
+            }
+
+            byte[] buffer = new byte[(_bitCount + 7) / 8];
+            _accessor!.ReadArray(_bitsOffset, buffer.AsSpan());
+            return buffer;
+        }
+    }
 
     /// <summary>
     /// Creates a bloom filter sized for the given parameters.
@@ -79,6 +98,22 @@ public sealed class BloomFilter
     }
 
     /// <summary>
+    /// Creates a memory-mapped bloom filter that reads bits directly from
+    /// a <see cref="MemoryMappedViewAccessor"/> without materializing a byte array.
+    /// </summary>
+    /// <param name="accessor">The shared view accessor spanning the index file.</param>
+    /// <param name="bitsOffset">Absolute byte offset of this filter's bit array in the file.</param>
+    /// <param name="bitCount">Number of valid bits in the filter.</param>
+    /// <param name="hashCount">Number of hash functions.</param>
+    internal BloomFilter(MemoryMappedViewAccessor accessor, long bitsOffset, int bitCount, int hashCount)
+    {
+        _accessor = accessor;
+        _bitsOffset = bitsOffset;
+        _bitCount = bitCount;
+        _hashCount = hashCount;
+    }
+
+    /// <summary>
     /// Adds a value to the bloom filter.
     /// </summary>
     /// <param name="value">The value to add. Null values are ignored.</param>
@@ -87,6 +122,11 @@ public sealed class BloomFilter
         if (value.IsNull)
         {
             return;
+        }
+
+        if (_bits is null)
+        {
+            throw new InvalidOperationException("Cannot add values to a memory-mapped bloom filter.");
         }
 
         (uint hash1, uint hash2) = ComputeHashes(value);
@@ -120,7 +160,18 @@ public sealed class BloomFilter
             int position = (int)(((long)hash1 + (long)i * hash2) % _bitCount);
             if (position < 0) position += _bitCount;
 
-            if ((_bits[position >> 3] & (1 << (position & 7))) == 0)
+            byte bitByte;
+
+            if (_bits is not null)
+            {
+                bitByte = _bits[position >> 3];
+            }
+            else
+            {
+                bitByte = _accessor!.ReadByte(_bitsOffset + (position >> 3));
+            }
+
+            if ((bitByte & (1 << (position & 7))) == 0)
             {
                 return false;
             }

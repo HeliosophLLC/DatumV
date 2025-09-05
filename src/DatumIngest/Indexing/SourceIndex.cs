@@ -52,6 +52,13 @@ public sealed class SourceIndex
     internal BitmapIndexSet? BitmapIndexes { get; }
 
     /// <summary>
+    /// Per-column memory-mapped sorted indexes for zero-copy key lookup,
+    /// or <c>null</c> if no mapped sorted indexes are available.
+    /// Preferred over <see cref="SortedIndexes"/> when both are present.
+    /// </summary>
+    internal Dictionary<string, MappedSortedIndex>? MappedSortedIndexes { get; }
+
+    /// <summary>
     /// Creates a new source index.
     /// </summary>
     /// <param name="fingerprint">Source file fingerprint.</param>
@@ -82,7 +89,8 @@ public sealed class SourceIndex
         SortedValueIndexSet? sortedIndexes,
         ZipDirectoryCache? zipDirectory,
         BPlusTreeIndexSet? bPlusTreeIndexes,
-        BitmapIndexSet? bitmapIndexes = null)
+        BitmapIndexSet? bitmapIndexes = null,
+        Dictionary<string, MappedSortedIndex>? mappedSortedIndexes = null)
     {
         Fingerprint = fingerprint;
         Schema = schema;
@@ -92,6 +100,7 @@ public sealed class SourceIndex
         ZipDirectory = zipDirectory;
         BPlusTreeIndexes = bPlusTreeIndexes;
         BitmapIndexes = bitmapIndexes;
+        MappedSortedIndexes = mappedSortedIndexes;
     }
 
     /// <summary>
@@ -105,6 +114,12 @@ public sealed class SourceIndex
     /// <returns><c>true</c> if an index exists for the specified column.</returns>
     public bool TryGetColumnIndex(string columnName, [NotNullWhen(true)] out IColumnIndex? index)
     {
+        if (MappedSortedIndexes is not null && MappedSortedIndexes.TryGetValue(columnName, out MappedSortedIndex? mappedIndex))
+        {
+            index = mappedIndex;
+            return true;
+        }
+
         if (SortedIndexes is not null && SortedIndexes.TryGetIndex(columnName, out SortedValueIndex? sortedIndex))
         {
             index = sortedIndex;
@@ -135,6 +150,12 @@ public sealed class SourceIndex
     /// <returns><c>true</c> if a sorted array index exists for the specified column.</returns>
     public bool TryGetSortedColumnIndex(string columnName, [NotNullWhen(true)] out IColumnIndex? index)
     {
+        if (MappedSortedIndexes is not null && MappedSortedIndexes.TryGetValue(columnName, out MappedSortedIndex? mappedIndex))
+        {
+            index = mappedIndex;
+            return true;
+        }
+
         if (SortedIndexes is not null && SortedIndexes.TryGetIndex(columnName, out SortedValueIndex? sortedIndex))
         {
             index = sortedIndex;
