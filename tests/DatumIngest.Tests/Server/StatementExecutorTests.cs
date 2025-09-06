@@ -401,6 +401,116 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(CommandResultKind.AffectedRows, dropResult.Kind);
     }
 
+    // ──────────────────── DELETE ────────────────────
+
+    /// <summary>
+    /// DELETE FROM without WHERE deletes all rows.
+    /// </summary>
+    [Fact]
+    public async Task DeleteAll_RemovesAllRows()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')");
+
+        CommandResult deleteResult = await ExecuteAsync("DELETE FROM data");
+
+        Assert.Equal(CommandResultKind.AffectedRows, deleteResult.Kind);
+        Assert.Equal(3, deleteResult.AffectedRowCount);
+
+        CommandResult selectResult = await ExecuteAsync("SELECT * FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Empty(rows);
+    }
+
+    /// <summary>
+    /// DELETE FROM with WHERE deletes only matching rows.
+    /// </summary>
+    [Fact]
+    public async Task DeleteWithWhere_RemovesMatchingRows()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')");
+
+        CommandResult deleteResult = await ExecuteAsync("DELETE FROM data WHERE id = 2");
+
+        Assert.Equal(CommandResultKind.AffectedRows, deleteResult.Kind);
+        Assert.Equal(1, deleteResult.AffectedRowCount);
+
+        CommandResult selectResult = await ExecuteAsync("SELECT id, name FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0]["id"].AsInt32());
+        Assert.Equal(3, rows[1]["id"].AsInt32());
+    }
+
+    /// <summary>
+    /// DELETE FROM with WHERE that matches no rows reports zero affected.
+    /// </summary>
+    [Fact]
+    public async Task DeleteWithWhere_NoMatch_ZeroAffected()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1), (2), (3)");
+
+        CommandResult deleteResult = await ExecuteAsync("DELETE FROM data WHERE id = 99");
+
+        Assert.Equal(CommandResultKind.AffectedRows, deleteResult.Kind);
+        Assert.Equal(0, deleteResult.AffectedRowCount);
+
+        CommandResult selectResult = await ExecuteAsync("SELECT * FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(3, rows.Count);
+    }
+
+    /// <summary>
+    /// DELETE FROM a nonexistent table returns an error.
+    /// </summary>
+    [Fact]
+    public async Task Delete_MissingTable_ReturnsError()
+    {
+        CommandResult result = await ExecuteAsync("DELETE FROM nonexistent");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("does not exist", result.Message);
+    }
+
+    /// <summary>
+    /// INSERT after DELETE appends new rows alongside tombstoned ones.
+    /// </summary>
+    [Fact]
+    public async Task InsertAfterDelete_AppendsCorrectly()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
+        await ExecuteAsync("DELETE FROM data WHERE id = 1");
+        await ExecuteAsync("INSERT INTO data VALUES (3, 'Carol')");
+
+        CommandResult selectResult = await ExecuteAsync("SELECT id, name FROM data ORDER BY id");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(2, rows[0]["id"].AsInt32());
+        Assert.Equal(3, rows[1]["id"].AsInt32());
+    }
+
+    /// <summary>
+    /// Multiple deletes work correctly — second delete on already-sparse data.
+    /// </summary>
+    [Fact]
+    public async Task MultipleDeletes_WorkCorrectly()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1), (2), (3), (4), (5)");
+
+        await ExecuteAsync("DELETE FROM data WHERE id <= 2");
+        await ExecuteAsync("DELETE FROM data WHERE id = 4");
+
+        CommandResult selectResult = await ExecuteAsync("SELECT id FROM data ORDER BY id");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(3, rows[0]["id"].AsInt32());
+        Assert.Equal(5, rows[1]["id"].AsInt32());
+    }
+
     // ──────────────────── Regular SELECT still works ────────────────────
 
     /// <summary>

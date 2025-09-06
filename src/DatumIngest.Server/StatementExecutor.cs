@@ -11,8 +11,8 @@ namespace DatumIngest.Server;
 
 /// <summary>
 /// Executes DDL and DML <see cref="Statement"/> nodes against a session's catalog
-/// and temp table storage. Handles CREATE TEMP TABLE, INSERT, UPDATE, ALTER ADD,
-/// and DROP TABLE operations.
+/// and temp table storage. Handles CREATE TEMP TABLE, INSERT, UPDATE, DELETE,
+/// ALTER ADD, and DROP TABLE operations.
 /// </summary>
 internal sealed class StatementExecutor
 {
@@ -58,6 +58,9 @@ internal sealed class StatementExecutor
                     .ConfigureAwait(false),
             UpdateStatement updateStatement =>
                 await ExecuteUpdateAsync(updateStatement, cancellationToken, queryMeter, parameters)
+                    .ConfigureAwait(false),
+            DeleteStatement deleteStatement =>
+                await ExecuteDeleteAsync(deleteStatement, cancellationToken, queryMeter, parameters)
                     .ConfigureAwait(false),
             AlterTableAddColumnStatement alterStatement =>
                 ExecuteAlterTableAddColumn(alterStatement),
@@ -347,7 +350,7 @@ internal sealed class StatementExecutor
 
             // Read row groups using the footer.
             using FileStream footerStream = File.OpenRead(descriptor.FilePath);
-            (_, rowGroups, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+            (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
         }
 
         // Build the list of column replacements.
@@ -384,6 +387,170 @@ internal sealed class StatementExecutor
         return CommandResult.AffectedRows(totalRowCount, $"Updated {totalRowCount} rows in '{tableName}'.");
     }
 
+    // ──────────────────── DELETE ────────────────────
+
+    private async Task<CommandResult> ExecuteDeleteAsync(
+        DeleteStatement statement,
+        CancellationToken cancellationToken,
+        QueryMeter? queryMeter,
+        IReadOnlyDictionary<string, DataValue>? parameters)
+    {
+        _ = queryMeter;
+        _ = parameters;
+
+        string tableName = statement.TableName;
+
+        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        {
+            return CommandResult.Error($"Table '{tableName}' does not exist.");
+        }
+
+        DatumFileSchema schema;
+        DatumRowGroupDescriptor[] rowGroups;
+
+        using (DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath))
+        {
+            schema = reader.FileSchema;
+            using FileStream footerStream = File.OpenRead(descriptor.FilePath);
+            (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+        }
+
+        if (statement.Where is null)
+        {
+            // DELETE all rows: mark every row in every row group as deleted.
+            List<(int RowGroupIndex, byte[] TombstoneBitmap)> tombstoneUpdates = new(rowGroups.Length);
+            long totalDeleted = 0;
+
+            for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
+            {
+                DatumRowGroupDescriptor rowGroup = rowGroups[rowGroupIndex];
+                if (rowGroup.ActiveRowCount == 0) continue;
+
+                int bitmapLength = ((int)rowGroup.RowCount + 7) / 8;
+                byte[] bitmap = rowGroup.TombstoneBitmap is not null
+                    ? (byte[])rowGroup.TombstoneBitmap.Clone()
+                    : new byte[bitmapLength];
+
+                // Set all valid row bits.
+                Array.Fill(bitmap, (byte)0xFF);
+
+                tombstoneUpdates.Add((rowGroupIndex, bitmap));
+                totalDeleted += rowGroup.ActiveRowCount;
+            }
+
+            if (tombstoneUpdates.Count > 0)
+            {
+                using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
+                DatumFileEditor.MarkDeleted(stream, tombstoneUpdates);
+            }
+
+            return CommandResult.AffectedRows(totalDeleted, $"Deleted {totalDeleted} rows from '{tableName}'.");
+        }
+
+        // Conditional DELETE: evaluate the WHERE predicate per row per row group.
+        long deletedRows = await ExecuteConditionalDeleteAsync(
+            descriptor.FilePath, schema, rowGroups, statement.Where, cancellationToken).ConfigureAwait(false);
+
+        return CommandResult.AffectedRows(deletedRows, $"Deleted {deletedRows} rows from '{tableName}'.");
+    }
+
+    private Task<long> ExecuteConditionalDeleteAsync(
+        string filePath,
+        DatumFileSchema schema,
+        DatumRowGroupDescriptor[] rowGroups,
+        Expression whereExpression,
+        CancellationToken cancellationToken)
+    {
+        // Read the file and evaluate the WHERE predicate against each row.
+        // Build tombstone bitmaps for row groups that have matching rows.
+        List<(int RowGroupIndex, byte[] TombstoneBitmap)> tombstoneUpdates = new();
+        long deletedRows = 0;
+
+        // Scope the reader so the file is closed before MarkDeleted reopens it.
+        using (DatumFileReader reader = DatumFileReader.Open(filePath))
+        {
+            Schema querySchema = reader.Schema;
+
+            // Build all column indices for predicate evaluation.
+            int[] allIndices = new int[querySchema.Columns.Count];
+            for (int columnIndex = 0; columnIndex < allIndices.Length; columnIndex++)
+            {
+                allIndices[columnIndex] = columnIndex;
+            }
+
+            string[] columnNames = Array.ConvertAll(allIndices, i => querySchema.Columns[i].Name);
+            Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int columnIndex = 0; columnIndex < columnNames.Length; columnIndex++)
+            {
+                nameIndex[columnNames[columnIndex]] = columnIndex;
+            }
+
+            LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+
+            try
+            {
+                ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
+
+                for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    DatumRowGroupDescriptor rowGroup = rowGroups[rowGroupIndex];
+                    if (rowGroup.ActiveRowCount == 0) continue;
+
+                    int rowCount = (int)rowGroup.RowCount;
+                    DataValue[][] columns = reader.ReadColumns(rowGroupIndex, allIndices);
+
+                    int bitmapLength = (rowCount + 7) / 8;
+                    byte[] bitmap = rowGroup.TombstoneBitmap is not null
+                        ? (byte[])rowGroup.TombstoneBitmap.Clone()
+                        : new byte[bitmapLength];
+
+                    bool anyNewDeletions = false;
+
+                    for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                    {
+                        if (rowGroup.IsRowDeleted(rowIndex)) continue;
+
+                        DataValue[] values = new DataValue[allIndices.Length];
+                        for (int colPos = 0; colPos < allIndices.Length; colPos++)
+                        {
+                            values[colPos] = columns[colPos][rowIndex];
+                        }
+
+                        Row row = new(columnNames, values, nameIndex);
+
+                        if (evaluator.EvaluateAsBoolean(whereExpression, row))
+                        {
+                            int byteIndex = rowIndex >> 3;
+                            int bitIndex = rowIndex & 7;
+                            bitmap[byteIndex] |= (byte)(1 << bitIndex);
+                            deletedRows++;
+                            anyNewDeletions = true;
+                        }
+                    }
+
+                    if (anyNewDeletions)
+                    {
+                        tombstoneUpdates.Add((rowGroupIndex, bitmap));
+                    }
+                }
+            }
+            finally
+            {
+                localBufferPool.Dispose();
+            }
+        }
+
+        if (tombstoneUpdates.Count > 0)
+        {
+            using FileStream stream = new(filePath, FileMode.Open, FileAccess.ReadWrite);
+            DatumFileEditor.MarkDeleted(stream, tombstoneUpdates);
+        }
+
+        return Task.FromResult(deletedRows);
+    }
+
     // ──────────────────── ALTER TABLE ADD COLUMN ────────────────────
 
     private CommandResult ExecuteAlterTableAddColumn(AlterTableAddColumnStatement statement)
@@ -402,7 +569,7 @@ internal sealed class StatementExecutor
         DatumRowGroupDescriptor[] rowGroups;
         using (FileStream footerStream = File.OpenRead(descriptor.FilePath))
         {
-            (_, rowGroups, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+            (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
         }
 
         // Build one null/default page per row group.

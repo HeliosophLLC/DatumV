@@ -55,8 +55,23 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         CancellationToken cancellationToken)
     {
         using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+
+        // When tombstones are present, report the active (non-deleted) row count
+        // so the query planner sees the true logical size.
+        long rowCount = reader.TotalRowCount;
+        if (reader.Flags.HasFlag(DatumFileFlags.HasTombstones))
+        {
+            long activeCount = 0;
+            for (int rowGroupIndex = 0; rowGroupIndex < reader.RowGroupCount; rowGroupIndex++)
+            {
+                activeCount += reader.GetRowGroupDescriptor(rowGroupIndex).ActiveRowCount;
+            }
+
+            rowCount = activeCount;
+        }
+
         return Task.FromResult(new ProviderCapabilities(
-            reader.TotalRowCount,
+            rowCount,
             EstimatedRowSizeBytes: null,
             SupportsSeek: true,
             ColumnCosts: new Dictionary<string, ColumnCost>()));
@@ -149,9 +164,21 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             int rowCount = (int)rowGroupDescriptor.RowCount;
             reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
 
+            // Skip fully-deleted row groups without emitting any rows.
+            if (rowGroupDescriptor.ActiveRowCount == 0)
+            {
+                continue;
+            }
+
             for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Skip tombstoned rows.
+                if (rowGroupDescriptor.IsRowDeleted(rowIndex))
+                {
+                    continue;
+                }
 
                 DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
@@ -227,8 +254,44 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                 }
             }
 
-            yield return reader.ReadColumnsAsColumnBatch(
+            // Skip row groups where all rows have been tombstoned.
+            if (rowGroupDescriptor.ActiveRowCount == 0)
+            {
+                continue;
+            }
+
+            ColumnBatch fullBatch = reader.ReadColumnsAsColumnBatch(
                 rowGroupIndex, projectedIndices, projectedNames, nameIndex);
+
+            // When some rows are tombstoned, copy only the active rows into a new batch.
+            if (rowGroupDescriptor.TombstoneBitmap is not null
+                && rowGroupDescriptor.ActiveRowCount < rowGroupDescriptor.RowCount)
+            {
+                int activeCount = (int)rowGroupDescriptor.ActiveRowCount;
+                ColumnBatch filtered = ColumnBatch.Create(projectedNames, nameIndex, activeCount);
+                int destinationIndex = 0;
+
+                for (int rowIndex = 0; rowIndex < (int)rowGroupDescriptor.RowCount; rowIndex++)
+                {
+                    if (rowGroupDescriptor.IsRowDeleted(rowIndex)) continue;
+
+                    for (int columnIndex = 0; columnIndex < projectedIndices.Length; columnIndex++)
+                    {
+                        filtered.GetColumnBuffer(columnIndex)[destinationIndex] =
+                            fullBatch.GetColumnBuffer(columnIndex)[rowIndex];
+                    }
+
+                    destinationIndex++;
+                }
+
+                filtered.SetRowCount(activeCount);
+                fullBatch.Dispose();
+                yield return filtered;
+            }
+            else
+            {
+                yield return fullBatch;
+            }
         }
 
         await Task.CompletedTask;
@@ -292,6 +355,12 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             for (int rowIndex = sliceStart; rowIndex < sliceEnd && emitted < count; rowIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Skip tombstoned rows.
+                if (rowGroupDescriptor.IsRowDeleted(rowIndex))
+                {
+                    continue;
+                }
 
                 DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)

@@ -250,6 +250,9 @@ public enum SqlToken
     /// <summary>The SET keyword (UPDATE assignment list).</summary>
     Set,
 
+    /// <summary>The DELETE keyword (DML row deletion).</summary>
+    Delete,
+
     /// <summary>The ALTER keyword (DDL table modification).</summary>
     Alter,
 

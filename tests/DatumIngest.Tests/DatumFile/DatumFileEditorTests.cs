@@ -378,7 +378,7 @@ public sealed class DatumFileEditorTests : IDisposable
         DatumEncodedPage[] pages;
         using (FileStream readStream = File.OpenRead(path))
         {
-            (DatumFileSchema _, DatumRowGroupDescriptor[] rowGroups, long _) =
+            (DatumFileSchema _, DatumRowGroupDescriptor[] rowGroups, long _, DatumFileFlags _) =
                 DatumFileReader.ReadFooterAndHeader(readStream);
 
             pages = new DatumEncodedPage[rowGroups.Length];
@@ -436,6 +436,168 @@ public sealed class DatumFileEditorTests : IDisposable
         // Provide 0 pages when 1 is expected.
         using FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite);
         Assert.Throws<ArgumentException>(() => DatumFileEditor.AddColumn(stream, newColumn, []));
+    }
+
+    // ──────────────────── MarkDeleted ────────────────────
+
+    [Fact]
+    public void MarkDeleted_SetsRowGroupTombstones()
+    {
+        string path = Path.Combine(_tempDirectory, "delete_partial.datum");
+        DatumFileSchema schema = CreateSchema(("id", DataKind.Int32, false));
+
+        WriteInitialFile(path, schema, rowGroupSize: 8, rows:
+        [
+            MakeRow(schema, DataValue.FromInt32(1)),
+            MakeRow(schema, DataValue.FromInt32(2)),
+            MakeRow(schema, DataValue.FromInt32(3)),
+        ]);
+
+        // Delete row 1 (second row, 0-indexed) — bitmap: 0b00000010 = 0x02.
+        byte[] bitmap = [0x02];
+
+        using (FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite))
+        {
+            long deleted = DatumFileEditor.MarkDeleted(stream, [(0, bitmap)]);
+            Assert.Equal(1, deleted);
+        }
+
+        using DatumFileReader reader = DatumFileReader.Open(path);
+        Assert.Equal(3, reader.TotalRowCount);
+
+        DatumRowGroupDescriptor descriptor = reader.GetRowGroupDescriptor(0);
+        Assert.Equal(2u, descriptor.ActiveRowCount);
+        Assert.False(descriptor.IsRowDeleted(0));
+        Assert.True(descriptor.IsRowDeleted(1));
+        Assert.False(descriptor.IsRowDeleted(2));
+    }
+
+    [Fact]
+    public void MarkDeleted_AllRows_SetsActiveCountToZero()
+    {
+        string path = Path.Combine(_tempDirectory, "delete_all.datum");
+        DatumFileSchema schema = CreateSchema(("id", DataKind.Int32, false));
+
+        WriteInitialFile(path, schema, rowGroupSize: 8, rows:
+        [
+            MakeRow(schema, DataValue.FromInt32(1)),
+            MakeRow(schema, DataValue.FromInt32(2)),
+        ]);
+
+        // Delete both rows — bitmap: 0b00000011 = 0x03.
+        byte[] bitmap = [0x03];
+
+        using (FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite))
+        {
+            long deleted = DatumFileEditor.MarkDeleted(stream, [(0, bitmap)]);
+            Assert.Equal(2, deleted);
+        }
+
+        using DatumFileReader reader = DatumFileReader.Open(path);
+        DatumRowGroupDescriptor descriptor = reader.GetRowGroupDescriptor(0);
+        Assert.Equal(0u, descriptor.ActiveRowCount);
+        Assert.True(descriptor.IsRowDeleted(0));
+        Assert.True(descriptor.IsRowDeleted(1));
+    }
+
+    [Fact]
+    public void MarkDeleted_SetsHasTombstonesFlag()
+    {
+        string path = Path.Combine(_tempDirectory, "delete_flag.datum");
+        DatumFileSchema schema = CreateSchema(("id", DataKind.Int32, false));
+
+        WriteInitialFile(path, schema, rowGroupSize: 8, rows:
+        [
+            MakeRow(schema, DataValue.FromInt32(1)),
+        ]);
+
+        // Verify flag is not set before deletion.
+        using (DatumFileReader beforeReader = DatumFileReader.Open(path))
+        {
+            Assert.False(beforeReader.Flags.HasFlag(DatumFileFlags.HasTombstones));
+        }
+
+        byte[] bitmap = [0x01];
+
+        using (FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite))
+        {
+            DatumFileEditor.MarkDeleted(stream, [(0, bitmap)]);
+        }
+
+        // Verify flag is now set.
+        using DatumFileReader afterReader = DatumFileReader.Open(path);
+        Assert.True(afterReader.Flags.HasFlag(DatumFileFlags.HasTombstones));
+    }
+
+    [Fact]
+    public void MarkDeleted_EmptyList_IsNoOp()
+    {
+        string path = Path.Combine(_tempDirectory, "delete_noop.datum");
+        DatumFileSchema schema = CreateSchema(("id", DataKind.Int32, false));
+
+        WriteInitialFile(path, schema, rowGroupSize: 8, rows:
+        [
+            MakeRow(schema, DataValue.FromInt32(1)),
+        ]);
+
+        long originalLength = new FileInfo(path).Length;
+
+        using (FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite))
+        {
+            long deleted = DatumFileEditor.MarkDeleted(stream, []);
+            Assert.Equal(0, deleted);
+        }
+
+        Assert.Equal(originalLength, new FileInfo(path).Length);
+    }
+
+    [Fact]
+    public void MarkDeleted_InvalidRowGroupIndex_Throws()
+    {
+        string path = Path.Combine(_tempDirectory, "delete_bad_rg.datum");
+        DatumFileSchema schema = CreateSchema(("id", DataKind.Int32, false));
+
+        WriteInitialFile(path, schema, rowGroupSize: 8, rows:
+        [
+            MakeRow(schema, DataValue.FromInt32(1)),
+        ]);
+
+        byte[] bitmap = [0x01];
+
+        using FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite);
+        Assert.Throws<ArgumentOutOfRangeException>(() => DatumFileEditor.MarkDeleted(stream, [(5, bitmap)]));
+    }
+
+    [Fact]
+    public void MarkDeleted_DataStillReadable()
+    {
+        string path = Path.Combine(_tempDirectory, "delete_data.datum");
+        DatumFileSchema schema = CreateSchema(("id", DataKind.Int32, false), ("name", DataKind.String, true));
+
+        WriteInitialFile(path, schema, rowGroupSize: 8, rows:
+        [
+            MakeRow(schema, DataValue.FromInt32(1), DataValue.FromString("Alice")),
+            MakeRow(schema, DataValue.FromInt32(2), DataValue.FromString("Bob")),
+            MakeRow(schema, DataValue.FromInt32(3), DataValue.FromString("Carol")),
+        ]);
+
+        // Delete middle row.
+        byte[] bitmap = [0x02];
+
+        using (FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite))
+        {
+            DatumFileEditor.MarkDeleted(stream, [(0, bitmap)]);
+        }
+
+        // Column data is still physically present (tombstones are metadata-only).
+        using DatumFileReader reader = DatumFileReader.Open(path);
+        DataValue[][] columns = reader.ReadColumns(0, [0, 1]);
+
+        // All 3 physical rows still exist in the column data.
+        Assert.Equal(3, columns[0].Length);
+        Assert.Equal(1, columns[0][0].AsInt32());
+        Assert.Equal(2, columns[0][1].AsInt32());
+        Assert.Equal(3, columns[0][2].AsInt32());
     }
 
     // ──────────────────── Combined operations ────────────────────

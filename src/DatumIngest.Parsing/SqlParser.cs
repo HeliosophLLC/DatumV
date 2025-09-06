@@ -1330,6 +1330,16 @@ public static class SqlParser
         select (Statement)new UpdateStatement(tableName, assignments, whereClause);
 
     /// <summary>
+    /// Parses <c>DELETE FROM name [WHERE ...]</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DeleteParser =
+        from deleteKw in Token.EqualTo(SqlToken.Delete)
+        from fromKw in Token.EqualTo(SqlToken.From)
+        from tableName in IdentifierOrKeywordAsName
+        from whereClause in WhereClauseParser.OptionalOrDefault()
+        select (Statement)new DeleteStatement(tableName, whereClause);
+
+    /// <summary>
     /// Parses <c>ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr]</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
@@ -1361,6 +1371,7 @@ public static class SqlParser
             .Or(DropTableParser.Try())
             .Or(InsertParser.Try())
             .Or(UpdateParser.Try())
+            .Or(DeleteParser.Try())
             .Or(AlterTableParser.Try())
             .Or(QueryExpressionParser.Select(q => (Statement)new QueryStatement(q)));
 
@@ -1418,6 +1429,7 @@ public static class SqlParser
         SqlToken.Drop,
         SqlToken.Insert,
         SqlToken.Update,
+        SqlToken.Delete,
         SqlToken.Alter,
     ];
 

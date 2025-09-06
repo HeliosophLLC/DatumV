@@ -201,6 +201,44 @@ public class DdlParsingTests
         Assert.Null(update.Where);
     }
 
+    // ───────────────────── DELETE ─────────────────────
+
+    /// <summary>DELETE FROM without WHERE parses with null predicate.</summary>
+    [Fact]
+    public void DeleteFromWithoutWhere()
+    {
+        Statement statement = SqlParser.ParseStatement("DELETE FROM staging");
+
+        DeleteStatement delete = Assert.IsType<DeleteStatement>(statement);
+        Assert.Equal("staging", delete.TableName);
+        Assert.Null(delete.Where);
+    }
+
+    /// <summary>DELETE FROM with WHERE parses the predicate.</summary>
+    [Fact]
+    public void DeleteFromWithWhere()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "DELETE FROM staging WHERE id = 1");
+
+        DeleteStatement delete = Assert.IsType<DeleteStatement>(statement);
+        Assert.Equal("staging", delete.TableName);
+        Assert.NotNull(delete.Where);
+        Assert.IsType<BinaryExpression>(delete.Where);
+    }
+
+    /// <summary>DELETE FROM with compound WHERE predicate.</summary>
+    [Fact]
+    public void DeleteFromWithCompoundWhere()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "DELETE FROM staging WHERE id > 5 AND name = 'test'");
+
+        DeleteStatement delete = Assert.IsType<DeleteStatement>(statement);
+        Assert.Equal("staging", delete.TableName);
+        Assert.NotNull(delete.Where);
+    }
+
     // ───────────────────── ALTER TABLE ─────────────────────
 
     [Fact]
@@ -314,18 +352,20 @@ public class DdlParsingTests
             CREATE TEMP TABLE staging (id INT, value STRING);
             INSERT INTO staging VALUES (1, 'hello'), (2, 'world');
             UPDATE staging SET value = 'updated' WHERE id = 1;
+            DELETE FROM staging WHERE id = 2;
             ALTER TABLE staging ADD COLUMN flag INT DEFAULT 0;
             SELECT * FROM staging;
             DROP TABLE staging
             """);
 
-        Assert.Equal(6, statements.Count);
+        Assert.Equal(7, statements.Count);
         Assert.IsType<CreateTempTableStatement>(statements[0]);
         Assert.IsType<InsertStatement>(statements[1]);
         Assert.IsType<UpdateStatement>(statements[2]);
-        Assert.IsType<AlterTableAddColumnStatement>(statements[3]);
-        Assert.IsType<QueryStatement>(statements[4]);
-        Assert.IsType<DropTableStatement>(statements[5]);
+        Assert.IsType<DeleteStatement>(statements[3]);
+        Assert.IsType<AlterTableAddColumnStatement>(statements[4]);
+        Assert.IsType<QueryStatement>(statements[5]);
+        Assert.IsType<DropTableStatement>(statements[6]);
     }
 
     [Fact]

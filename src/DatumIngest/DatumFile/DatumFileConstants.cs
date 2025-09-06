@@ -176,6 +176,15 @@ public enum DatumFileFlags : ushort
 
     /// <summary>Zone maps are embedded in the row group directory. Always set by this writer.</summary>
     HasZoneMaps = 0x02,
+
+    /// <summary>
+    /// One or more row groups contain tombstone deletion bitmaps.
+    /// When set, each row group descriptor includes an <c>ActiveRowCount</c> field
+    /// and an optional per-row deletion bitmap after the standard fields.
+    /// Readers must filter out tombstoned rows; the header's <c>totalRowCount</c>
+    /// remains the physical (pre-deletion) count.
+    /// </summary>
+    HasTombstones = 0x04,
 }
 
 /// <summary>

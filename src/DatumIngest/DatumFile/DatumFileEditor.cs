@@ -58,7 +58,7 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(newRowGroups);
         if (newRowGroups.Count == 0) return;
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount) =
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
             DatumFileReader.ReadFooterAndHeader(stream);
 
         long footerOffset = ReadFooterOffset(stream);
@@ -76,10 +76,10 @@ public static class DatumFileEditor
         }
 
         long newFooterOffset = stream.Position;
-        WriteFooterAndTail(stream, schema, allRowGroups);
+        WriteFooterAndTail(stream, schema, allRowGroups, flags);
         long endPosition = stream.Position;
 
-        PatchHeader(stream, allRowGroups.Count, totalRowCount + additionalRows, newFooterOffset);
+        PatchHeader(stream, allRowGroups.Count, totalRowCount + additionalRows, newFooterOffset, flags);
         stream.SetLength(endPosition);
     }
 
@@ -104,7 +104,7 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(replacements);
         if (replacements.Count == 0) return;
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount) =
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
             DatumFileReader.ReadFooterAndHeader(stream);
 
         // Deep-copy row group descriptors so chunk arrays can be mutated.
@@ -149,10 +149,10 @@ public static class DatumFileEditor
         }
 
         long newFooterOffset = stream.Position;
-        WriteFooterAndTail(stream, schema, allRowGroups);
+        WriteFooterAndTail(stream, schema, allRowGroups, flags);
         long endPosition = stream.Position;
 
-        PatchHeader(stream, allRowGroups.Count, totalRowCount, newFooterOffset);
+        PatchHeader(stream, allRowGroups.Count, totalRowCount, newFooterOffset, flags);
         stream.SetLength(endPosition);
     }
 
@@ -178,7 +178,7 @@ public static class DatumFileEditor
         ArgumentNullException.ThrowIfNull(newColumn);
         ArgumentNullException.ThrowIfNull(pagesPerRowGroup);
 
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount) =
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
             DatumFileReader.ReadFooterAndHeader(stream);
 
         if (pagesPerRowGroup.Count != existingRowGroups.Length)
@@ -218,11 +218,122 @@ public static class DatumFileEditor
         }
 
         long newFooterOffset = stream.Position;
-        WriteFooterAndTail(stream, widerSchema, allRowGroups);
+        WriteFooterAndTail(stream, widerSchema, allRowGroups, flags);
         long endPosition = stream.Position;
 
-        PatchHeader(stream, allRowGroups.Count, totalRowCount, newFooterOffset);
+        PatchHeader(stream, allRowGroups.Count, totalRowCount, newFooterOffset, flags);
         stream.SetLength(endPosition);
+    }
+
+    /// <summary>
+    /// Marks rows as deleted in one or more row groups by writing tombstone bitmaps
+    /// into the footer. No column page I/O is performed — only the footer and header
+    /// are rewritten. The file's <see cref="DatumFileFlags.HasTombstones"/> flag is
+    /// set automatically if not already present.
+    /// </summary>
+    /// <param name="stream">A readable, writable, seekable stream positioned at any offset.</param>
+    /// <param name="tombstoneUpdates">
+    /// Per row group: the zero-based row group index and the new tombstone bitmap.
+    /// Each bitmap must be <c>ceil(rowCount / 8)</c> bytes with set bits for deleted rows.
+    /// When merging with existing tombstones, the caller is responsible for OR-ing the
+    /// old and new bitmaps before passing them.
+    /// </param>
+    /// <returns>The total number of rows newly marked as deleted across all affected row groups.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when a row group index is outside the valid range.
+    /// </exception>
+    public static long MarkDeleted(
+        Stream stream,
+        IReadOnlyList<(int RowGroupIndex, byte[] TombstoneBitmap)> tombstoneUpdates)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(tombstoneUpdates);
+        if (tombstoneUpdates.Count == 0) return 0;
+
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] existingRowGroups, long totalRowCount, DatumFileFlags flags) =
+            DatumFileReader.ReadFooterAndHeader(stream);
+
+        // Enable the tombstone flag if this is the first deletion.
+        flags |= DatumFileFlags.HasTombstones;
+
+        List<DatumRowGroupDescriptor> allRowGroups = new(existingRowGroups.Length);
+        allRowGroups.AddRange(existingRowGroups);
+
+        long newlyDeleted = 0;
+
+        foreach ((int rowGroupIndex, byte[] bitmap) in tombstoneUpdates)
+        {
+            if (rowGroupIndex < 0 || rowGroupIndex >= allRowGroups.Count)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(tombstoneUpdates),
+                    $"Row group index {rowGroupIndex} is outside the range [0, {allRowGroups.Count}).");
+            }
+
+            DatumRowGroupDescriptor existing = allRowGroups[rowGroupIndex];
+            uint activeCount = CountActiveBits(existing.RowCount, bitmap);
+            long previousActive = existing.ActiveRowCount;
+            newlyDeleted += previousActive - activeCount;
+
+            allRowGroups[rowGroupIndex] = new DatumRowGroupDescriptor(
+                existing.RowCount,
+                activeCount,
+                bitmap,
+                existing.ColumnChunks);
+        }
+
+        // Footer-only rewrite: seek to the old footer position, write the new footer there.
+        long footerOffset = ReadFooterOffset(stream);
+        stream.Seek(footerOffset, SeekOrigin.Begin);
+
+        long newFooterOffset = stream.Position;
+        WriteFooterAndTail(stream, schema, allRowGroups, flags);
+        long endPosition = stream.Position;
+
+        PatchHeader(stream, allRowGroups.Count, totalRowCount, newFooterOffset, flags);
+        stream.SetLength(endPosition);
+
+        return newlyDeleted;
+    }
+
+    /// <summary>
+    /// Counts the number of non-deleted (active) rows by counting clear bits in the bitmap.
+    /// </summary>
+    private static uint CountActiveBits(uint totalRows, byte[] bitmap)
+    {
+        uint deletedCount = 0;
+        for (int byteIndex = 0; byteIndex < bitmap.Length; byteIndex++)
+        {
+            deletedCount += (uint)BitCount(bitmap[byteIndex]);
+        }
+
+        // The last byte may have padding bits beyond totalRows; subtract them.
+        int paddingBits = bitmap.Length * 8 - (int)totalRows;
+        if (paddingBits > 0)
+        {
+            byte lastByte = bitmap[^1];
+            // Count only the padding bits that are set.
+            for (int bit = (int)totalRows & 7; bit < 8; bit++)
+            {
+                if ((lastByte & (1 << bit)) != 0) deletedCount--;
+            }
+        }
+
+        return totalRows - deletedCount;
+    }
+
+    /// <summary>Returns the number of set bits (popcount) in a single byte.</summary>
+    private static int BitCount(byte value)
+    {
+        // Kernighan's bit counting.
+        int count = 0;
+        while (value != 0)
+        {
+            value &= (byte)(value - 1);
+            count++;
+        }
+
+        return count;
     }
 
     // ──────────────────── Private helpers ────────────────────
@@ -277,9 +388,11 @@ public static class DatumFileEditor
     private static void WriteFooterAndTail(
         Stream stream,
         DatumFileSchema schema,
-        IReadOnlyList<DatumRowGroupDescriptor> rowGroups)
+        IReadOnlyList<DatumRowGroupDescriptor> rowGroups,
+        DatumFileFlags flags = DatumFileFlags.None)
     {
         long footerStart = stream.Position;
+        bool hasTombstones = flags.HasFlag(DatumFileFlags.HasTombstones);
 
         using BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, leaveOpen: true);
         schema.Serialize(writer);
@@ -287,7 +400,7 @@ public static class DatumFileEditor
 
         foreach (DatumRowGroupDescriptor rowGroup in rowGroups)
         {
-            rowGroup.Serialize(writer);
+            rowGroup.Serialize(writer, hasTombstones);
         }
 
         writer.Flush();
@@ -299,19 +412,22 @@ public static class DatumFileEditor
     }
 
     /// <summary>
-    /// Overwrites the mutable header fields at byte offset 8: rowGroupCount, totalRowCount, footerOffset.
+    /// Overwrites the mutable header fields: flags at byte offset 6, then
+    /// rowGroupCount, totalRowCount, and footerOffset at byte offset 8.
     /// </summary>
     private static void PatchHeader(
         Stream stream,
         int rowGroupCount,
         long totalRowCount,
-        long footerOffset)
+        long footerOffset,
+        DatumFileFlags flags = DatumFileFlags.None)
     {
-        stream.Seek(8, SeekOrigin.Begin);
-        Span<byte> patch = stackalloc byte[20];
-        BinaryPrimitives.WriteUInt32LittleEndian(patch, (uint)rowGroupCount);
-        BinaryPrimitives.WriteInt64LittleEndian(patch[4..], totalRowCount);
-        BinaryPrimitives.WriteInt64LittleEndian(patch[12..], footerOffset);
+        stream.Seek(6, SeekOrigin.Begin);
+        Span<byte> patch = stackalloc byte[22];
+        BinaryPrimitives.WriteUInt16LittleEndian(patch, (ushort)flags);
+        BinaryPrimitives.WriteUInt32LittleEndian(patch[2..], (uint)rowGroupCount);
+        BinaryPrimitives.WriteInt64LittleEndian(patch[6..], totalRowCount);
+        BinaryPrimitives.WriteInt64LittleEndian(patch[14..], footerOffset);
         stream.Write(patch);
     }
 }

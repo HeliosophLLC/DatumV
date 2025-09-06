@@ -423,3 +423,50 @@ Separate file recording *how* the output was produced — source query, encoding
 - **Join classification** — Automatic 1:1, 1:N, N:1, N:M classification from NDV/RowCount ratios
 - **Star schema detection** — Identifies hub tables with ≥2 spoke relationships from OneToMany/ManyToOne candidates
 - **Tests** — Column matching, evidence scoring, and star schema detector tests
+
+---
+
+## Datum File Compaction
+
+**Status**: Design phase. The `.datum` format now supports tombstone-based deletion (`HasTombstones` flag, per-row-group tombstone bitmaps). Tombstones mark rows as logically deleted without rewriting column data, creating dead space. Compaction reclaims that space.
+
+### Problem
+
+After DELETE operations, `.datum` files contain:
+- **Tombstoned rows**: Column pages still hold data for deleted rows; tombstone bitmaps in the footer mark them as invisible. Readers skip these rows at query time, but the bytes remain on disk.
+- **Replaced column pages**: `ReplaceColumns` (used by UPDATE via ALTER TABLE) appends new column pages and rewrites the footer to point at them. The old pages become orphaned — no footer entry references them, but the file is never truncated to remove them.
+
+Over time, repeated DELETE + INSERT cycles and UPDATE operations cause `.datum` files to accumulate dead space proportional to churn.
+
+### Compaction strategy
+
+**Full compaction** rewrites a `.datum` file by:
+1. Reading the footer to discover active row groups and their tombstone bitmaps.
+2. For each row group with `ActiveRowCount > 0`: reading all column pages, filtering out tombstoned rows, re-encoding the surviving rows into new column pages.
+3. Skipping row groups where `ActiveRowCount == 0` entirely (no I/O for fully-deleted groups).
+4. Writing a new `.datum` file with fresh row groups (no tombstones, no orphaned pages), then atomically replacing the old file.
+
+**Merge compaction** (future enhancement) combines multiple small row groups into fewer large ones, improving read performance by reducing row-group overhead and enabling better compression.
+
+### Triggering heuristics
+
+- **Dead-space ratio**: `1 - (sum(ActiveRowCount) / sum(RowCount))` — compact when this exceeds a threshold (e.g., 50%).
+- **Orphan page ratio**: `(fileSize - liveDataSize) / fileSize` — captures space wasted by replaced column pages.
+- **Manual**: CLI `COMPACT TABLE name` command and gRPC `Compact` RPC for explicit compaction.
+- **Automatic**: Background compaction in server mode when dead-space exceeds threshold and no active readers hold the file.
+
+### Implementation phases
+
+**Phase 1 — Full compaction command**
+- `DatumFileEditor.Compact(Stream source, Stream destination)` — reads source, writes compacted destination
+- SQL: `COMPACT TABLE name` parsed and executed in `StatementExecutor`
+- CLI: available as a SQL statement in interactive and batch modes
+
+**Phase 2 — Merge compaction**
+- Combine undersized row groups (below a configurable minimum, e.g., 1024 rows) into consolidated groups
+- Rebalance row group sizes toward the target row group size for optimal read performance
+
+**Phase 3 — Automatic compaction**
+- Server-mode background task that monitors `.datum` files for compaction eligibility
+- Concurrent reader safety: copy-on-write (write to temp file, atomic rename) ensures active readers see a consistent snapshot
+- Compaction statistics surfaced via `GetUsage` RPC

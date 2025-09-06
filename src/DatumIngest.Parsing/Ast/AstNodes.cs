@@ -786,6 +786,15 @@ public sealed record UpdateStatement(
     Expression? Where = null) : Statement;
 
 /// <summary>
+/// <c>DELETE FROM name [WHERE ...]</c> — deletes rows from a table using tombstone bitmaps.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="Where">Optional filter predicate restricting which rows are deleted. When omitted, all rows are deleted.</param>
+public sealed record DeleteStatement(
+    string TableName,
+    Expression? Where = null) : Statement;
+
+/// <summary>
 /// A single <c>column = expression</c> assignment in an UPDATE SET clause.
 /// </summary>
 /// <param name="ColumnName">The column being assigned.</param>

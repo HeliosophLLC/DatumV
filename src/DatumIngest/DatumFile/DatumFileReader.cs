@@ -21,19 +21,22 @@ public sealed class DatumFileReader : IDisposable
     private readonly DatumFileSchema _schema;
     private readonly DatumRowGroupDescriptor[] _rowGroups;
     private readonly long _totalRowCount;
+    private readonly DatumFileFlags _flags;
 
     private DatumFileReader(
         FileStream stream,
         string filePath,
         DatumFileSchema schema,
         DatumRowGroupDescriptor[] rowGroups,
-        long totalRowCount)
+        long totalRowCount,
+        DatumFileFlags flags)
     {
         _stream = stream;
         _filePath = filePath;
         _schema = schema;
         _rowGroups = rowGroups;
         _totalRowCount = totalRowCount;
+        _flags = flags;
     }
 
     /// <summary>Opens a <c>.datum</c> file and reads its footer and schema.</summary>
@@ -50,10 +53,10 @@ public sealed class DatumFileReader : IDisposable
 
         try
         {
-            (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount) =
+            (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount, DatumFileFlags flags) =
                 ReadFooterAndHeader(stream);
 
-            return new DatumFileReader(stream, filePath, schema, rowGroups, totalRowCount);
+            return new DatumFileReader(stream, filePath, schema, rowGroups, totalRowCount, flags);
         }
         catch
         {
@@ -70,6 +73,9 @@ public sealed class DatumFileReader : IDisposable
 
     /// <summary>Total number of rows across all row groups.</summary>
     public long TotalRowCount => _totalRowCount;
+
+    /// <summary>File-level flags read from the header.</summary>
+    internal DatumFileFlags Flags => _flags;
 
     /// <summary>The raw schema descriptor, used internally for provider wiring.</summary>
     internal DatumFileSchema FileSchema => _schema;
@@ -238,7 +244,7 @@ public sealed class DatumFileReader : IDisposable
 
     // ──────────────────── Footer reading ────────────────────
 
-    internal static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount)
+    internal static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount, DatumFileFlags Flags)
         ReadFooterAndHeader(Stream stream)
     {
         // Validate header magic and read totalRowCount from position 12.
@@ -258,6 +264,7 @@ public sealed class DatumFileReader : IDisposable
                 $"Unsupported .datum format version {version}. Expected {DatumFileConstants.FormatVersion}.");
         }
 
+        DatumFileFlags flags = (DatumFileFlags)BinaryPrimitives.ReadUInt16LittleEndian(headerBytes.AsSpan(6));
         long totalRowCount = BinaryPrimitives.ReadInt64LittleEndian(headerBytes.AsSpan(12));
 
         // Read tail to locate the footer.
@@ -282,13 +289,14 @@ public sealed class DatumFileReader : IDisposable
 
         DatumFileSchema schema = DatumFileSchema.Deserialize(reader);
         uint rowGroupCount = reader.ReadUInt32();
+        bool hasTombstones = flags.HasFlag(DatumFileFlags.HasTombstones);
         DatumRowGroupDescriptor[] rowGroups = new DatumRowGroupDescriptor[rowGroupCount];
 
         for (int groupIndex = 0; groupIndex < (int)rowGroupCount; groupIndex++)
         {
-            rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount);
+            rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount, hasTombstones);
         }
 
-        return (schema, rowGroups, totalRowCount);
+        return (schema, rowGroups, totalRowCount, flags);
     }
 }

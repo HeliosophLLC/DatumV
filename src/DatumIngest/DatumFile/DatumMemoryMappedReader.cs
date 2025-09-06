@@ -55,7 +55,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
     {
         // Use a temporary FileStream solely to read the compact footer — then
         // create the long-lived MemoryMappedFile for all subsequent data reads.
-        (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount) =
+        (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount, DatumFileFlags _) =
             ReadFooterFromPath(filePath);
 
         MemoryMappedFile mappedFile = MemoryMappedFile.CreateFromFile(
@@ -251,7 +251,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
 
     // ──────────────────── Private helpers ────────────────────
 
-    private static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount)
+    private static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount, DatumFileFlags Flags)
         ReadFooterFromPath(string filePath)
     {
         using FileStream stream = File.OpenRead(filePath);
