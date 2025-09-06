@@ -76,6 +76,22 @@ internal static class UnifiedIndexReader
         int sectionCount = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[12..]);
         // long fileLength = BinaryPrimitives.ReadInt64LittleEndian(headerBytes[16..]);
 
+        if (sectionCount < 0)
+        {
+            throw new InvalidDataException(
+                $"Invalid section count {sectionCount} in unified index header.");
+        }
+
+        // Verify the file is large enough to hold the section directory.
+        long directoryEnd = UnifiedIndexWriter.HeaderSize
+            + (long)sectionCount * UnifiedIndexWriter.DirectoryEntrySize;
+
+        if (directoryEnd > sharedAccessor.Capacity)
+        {
+            throw new InvalidDataException(
+                $"Section directory requires {directoryEnd} bytes but file is only {sharedAccessor.Capacity} bytes.");
+        }
+
         // Read section directory.
         SectionDirectoryEntry[] directory = new SectionDirectoryEntry[sectionCount];
         long directoryOffset = UnifiedIndexWriter.HeaderSize;
@@ -91,6 +107,21 @@ internal static class UnifiedIndexReader
                 entryBuffer[1],
                 BinaryPrimitives.ReadInt64LittleEndian(entryBuffer[2..]),
                 BinaryPrimitives.ReadInt64LittleEndian(entryBuffer[10..]));
+        }
+
+        // Validate that all section entries point within the file.
+        long fileCapacity = sharedAccessor.Capacity;
+
+        for (int index = 0; index < directory.Length; index++)
+        {
+            SectionDirectoryEntry entry = directory[index];
+
+            if (entry.Offset < 0 || entry.Length < 0 || entry.Offset + entry.Length > fileCapacity)
+            {
+                throw new InvalidDataException(
+                    $"Section {entry.Type} (table {entry.TableIndex}) has invalid bounds: "
+                    + $"offset={entry.Offset}, length={entry.Length}.");
+            }
         }
 
         // Read shared fingerprint.
@@ -139,7 +170,13 @@ internal static class UnifiedIndexReader
                 sectionMap[entry.Type] = entry;
             }
 
-            IndexSchema schema = ReadSchema(memoryMappedFile, sectionMap[UnifiedIndexSectionType.Schema]);
+            if (!sectionMap.TryGetValue(UnifiedIndexSectionType.Schema, out SectionDirectoryEntry schemaEntry))
+            {
+                throw new InvalidDataException(
+                    $"Missing required Schema section for table '{tableNames[tableIndex]}'.");
+            }
+
+            IndexSchema schema = ReadSchema(memoryMappedFile, schemaEntry);
 
             IReadOnlyList<IndexChunk> chunks = sectionMap.ContainsKey(UnifiedIndexSectionType.ChunkDirectory)
                 ? MappedChunkDirectory.Create(
