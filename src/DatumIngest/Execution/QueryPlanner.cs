@@ -344,6 +344,12 @@ public sealed class QueryPlanner
             scan.ColumnStatistics = columnStatistics;
         }
 
+        // Attach source index for chunk-based pruning annotation if one is registered.
+        if (_catalog.TryGetIndex(descriptor.Name, out Indexing.SourceIndex? sourceIndex))
+        {
+            scan.SourceIndex = sourceIndex;
+        }
+
         IColumnBatchOperator columnBatchOperator = scan;
 
         // Alias: prefix column names when an explicit alias is given.

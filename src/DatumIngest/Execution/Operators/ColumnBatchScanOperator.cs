@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -50,6 +51,13 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
     public IReadOnlyDictionary<string, FeatureManifest>? ColumnStatistics { get; set; }
 
     /// <summary>
+    /// The sidecar index for this table, or <c>null</c> if no index is available.
+    /// Set at plan time by the query planner when a <c>.datum-index</c> sidecar
+    /// is registered in the catalog.
+    /// </summary>
+    public SourceIndex? SourceIndex { get; set; }
+
+    /// <summary>
     /// Adds an advisory filter predicate for statistics-based partition pruning.
     /// Multiple calls combine predicates with AND.
     /// </summary>
@@ -79,10 +87,56 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
             properties["statistics filter"] = QueryExplainer.FormatExpression(_filterHint);
         }
 
+        List<PruningCapability> pruningCapabilities = [];
+
+        if (_filterHint is not null && SourceIndex is not null)
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.StatisticsPruning, [], pendingRuntime: false));
+        }
+
+        if (SourceIndex?.BloomFilters is not null)
+        {
+            List<string> bloomColumns = [.. SourceIndex.BloomFilters.ColumnNames];
+            if (bloomColumns.Count > 0)
+            {
+                pruningCapabilities.Add(new PruningCapability(
+                    PruningTechnique.BloomFilterPruning, bloomColumns, pendingRuntime: true));
+            }
+        }
+
+        List<string>? sortedColumns = ScanOperator.CollectSortedIndexColumnNames(SourceIndex);
+        if (sortedColumns is { Count: > 0 })
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.SortedIndexPruning, sortedColumns, pendingRuntime: false));
+        }
+
+        if (SourceIndex?.BitmapIndexes is { Count: > 0 } bitmapIndexes)
+        {
+            pruningCapabilities.Add(new PruningCapability(
+                PruningTechnique.BitmapPruning, [.. bitmapIndexes.ColumnNames], pendingRuntime: false));
+        }
+
+        if (SourceIndex?.BPlusTreeIndexes is { } bPlusTreeIndexes)
+        {
+            List<string> btreeColumns = [.. bPlusTreeIndexes.ColumnNames];
+            if (btreeColumns.Count > 0)
+            {
+                pruningCapabilities.Add(new PruningCapability(
+                    PruningTechnique.BPlusTreeIndexPruning, btreeColumns, pendingRuntime: false));
+            }
+        }
+
+        AccessStrategyDescription accessStrategy = new(
+            AccessMethod.TableScan,
+            pruningCapabilities.Count > 0 ? pruningCapabilities : null);
+
         return new OperatorPlanDescription("Scan")
         {
             Properties = properties,
             EstimatedRows = EstimatedRowCount,
+            AccessStrategy = accessStrategy,
         };
     }
 

@@ -176,10 +176,11 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
-        if (_sourceIndex?.SortedIndexes is { Count: > 0 } sortedIndexes)
+        List<string>? sortedColumns = CollectSortedIndexColumnNames(_sourceIndex);
+        if (sortedColumns is { Count: > 0 })
         {
             pruningCapabilities.Add(new PruningCapability(
-                PruningTechnique.SortedIndexPruning, [.. sortedIndexes.ColumnNames], pendingRuntime: false));
+                PruningTechnique.SortedIndexPruning, sortedColumns, pendingRuntime: false));
         }
 
         if (_sourceIndex?.BitmapIndexes is { Count: > 0 } bitmapIndexes)
@@ -210,6 +211,39 @@ public sealed class ScanOperator : IQueryOperator
         };
     }
 
+    /// <summary>
+    /// Collects sorted index column names from both the v3 in-memory
+    /// <see cref="Indexing.SortedValueIndexSet"/> and the v5 memory-mapped
+    /// <see cref="Indexing.MappedSortedIndex"/> stores, returning a unified list.
+    /// </summary>
+    /// <param name="sourceIndex">The source index, or <c>null</c>.</param>
+    /// <returns>A list of column names, or <c>null</c> if no sorted indexes exist.</returns>
+    internal static List<string>? CollectSortedIndexColumnNames(Indexing.SourceIndex? sourceIndex)
+    {
+        if (sourceIndex is null)
+        {
+            return null;
+        }
+
+        HashSet<string>? columns = null;
+
+        if (sourceIndex.SortedIndexes is { Count: > 0 } sortedIndexes)
+        {
+            columns = new(sortedIndexes.ColumnNames, StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (sourceIndex.MappedSortedIndexes is { Count: > 0 } mappedSortedIndexes)
+        {
+            columns ??= new(StringComparer.OrdinalIgnoreCase);
+            foreach (string columnName in mappedSortedIndexes.Keys)
+            {
+                columns.Add(columnName);
+            }
+        }
+
+        return columns is { Count: > 0 } ? [.. columns] : null;
+    }
+
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
@@ -223,6 +257,7 @@ public sealed class ScanOperator : IQueryOperator
             && (_filterHint is not null || _bloomPruningKeys is not null
                 || _sortedIndexPruningKeys is not null
                 || _sourceIndex.SortedIndexes is not null
+                || _sourceIndex.MappedSortedIndexes is not null
                 || _sourceIndex.BPlusTreeIndexes is not null
                 || _sourceIndex.BitmapIndexes is not null);
 

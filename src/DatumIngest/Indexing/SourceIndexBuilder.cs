@@ -1518,7 +1518,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
     /// Finalizes the index after all rows have been observed.
     /// The spill writer is prepared for reading but not materialized or disposed —
     /// callers that need to serialize sorted indexes should pass <see cref="SpillWriter"/>
-    /// to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?, bool)"/>.
+    /// to <see cref="UnifiedIndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter)"/>.
     /// The spill writer is cleaned up when this builder is disposed.
     /// </summary>
     /// <returns>The completed source index (with <see cref="SourceIndex.SortedIndexes"/>

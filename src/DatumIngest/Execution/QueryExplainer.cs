@@ -46,6 +46,7 @@ public static class QueryExplainer
             CommonTableExpressionOperator cte => BuildCommonTableExpressionNode(cte, stats),
             RecursiveCommonTableExpressionOperator recursiveCte => BuildRecursiveCommonTableExpressionNode(recursiveCte, stats),
             SetOperationOperator setOp => BuildSetOperationNode(setOp, stats),
+            ColumnBatchToRowBatchAdapter adapter => BuildColumnBatchNode(adapter.Source, stats),
             _ => BuildGenericNode(op, stats),
         };
     }
@@ -509,6 +510,159 @@ public static class QueryExplainer
         };
     }
 
+    // ──────────────── Columnar pipeline explain ────────────────
+
+    /// <summary>
+    /// Recursively builds an <see cref="ExplainPlanNode"/> tree from a columnar
+    /// <see cref="IColumnBatchOperator"/> sub-pipeline.  The columnar pipeline uses
+    /// separate operator types that are not <see cref="IQueryOperator"/>, so this
+    /// method mirrors <see cref="BuildNode"/> for the columnar tree.
+    /// </summary>
+    private static ExplainPlanNode BuildColumnBatchNode(
+        IColumnBatchOperator op, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        return op switch
+        {
+            ColumnBatchScanOperator scan => BuildColumnBatchScanNode(scan),
+            ColumnBatchFilterOperator filter => BuildColumnBatchFilterNode(filter, stats),
+            ColumnBatchProjectOperator project => BuildColumnBatchProjectNode(project, stats),
+            ColumnBatchLimitOperator limit => BuildColumnBatchLimitNode(limit, stats),
+            ColumnBatchAliasOperator alias => BuildColumnBatchAliasNode(alias, stats),
+            _ => BuildGenericColumnBatchNode(op),
+        };
+    }
+
+    private static ExplainPlanNode BuildColumnBatchScanNode(ColumnBatchScanOperator scan)
+    {
+        string tableName = scan.Descriptor.Name;
+        string provider = scan.Descriptor.Provider;
+        string columns = scan.RequiredColumns is not null
+            ? string.Join(", ", scan.RequiredColumns)
+            : "*";
+
+        string details = $"table: {tableName}, provider: {provider}, columns: [{columns}], mode: columnar";
+
+        if (scan.FilterHint is not null)
+        {
+            details += $", statistics filter: {FormatExpression(scan.FilterHint)}";
+        }
+
+        OperatorPlanDescription description = scan.DescribeForExplain();
+
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Scan",
+            Details = details,
+            EstimatedRows = scan.EstimatedRowCount,
+            AccessStrategyMethod = description.AccessStrategy?.Method,
+            Properties = description.Properties,
+        };
+
+        AppendAccessStrategyAnnotations(node, description.AccessStrategy);
+
+        return node;
+    }
+
+    private static ExplainPlanNode BuildColumnBatchFilterNode(
+        ColumnBatchFilterOperator filter, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        ExplainPlanNode child = BuildColumnBatchNode(filter.Source, stats);
+
+        ExplainPlanNode node = new()
+        {
+            OperatorName = "Filter",
+            Details = $"predicate: {FormatExpression(filter.Predicate)}, mode: columnar",
+            Children = { child },
+            EstimatedRows = EstimateFilterRows(child.EstimatedRows, filter.Predicate, stats),
+        };
+
+        if (ContainsPatternMatch(filter.Predicate))
+        {
+            node.Warnings.Add("Pattern matching predicate requires full scan of input rows.");
+        }
+
+        return node;
+    }
+
+    private static ExplainPlanNode BuildColumnBatchProjectNode(
+        ColumnBatchProjectOperator project, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        List<string> columnNames = [];
+        foreach (SelectColumn column in project.Columns)
+        {
+            string formatted = FormatExpression(column.Expression);
+            columnNames.Add(column.Alias is not null ? $"{formatted} AS {column.Alias}" : formatted);
+        }
+
+        ExplainPlanNode child = BuildColumnBatchNode(project.Source, stats);
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "Project",
+            Details = $"{string.Join(", ", columnNames)}, mode: columnar",
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
+        };
+    }
+
+    private static ExplainPlanNode BuildColumnBatchLimitNode(
+        ColumnBatchLimitOperator limit, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        string details = limit.Offset > 0
+            ? $"limit: {limit.Limit}, offset: {limit.Offset}, mode: columnar"
+            : $"limit: {limit.Limit}, mode: columnar";
+
+        ExplainPlanNode child = BuildColumnBatchNode(limit.Source, stats);
+        long effectiveLimit = limit.Limit + limit.Offset;
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "Limit",
+            Details = details,
+            Children = { child },
+            EstimatedRows = child.EstimatedRows.HasValue
+                ? Math.Min(effectiveLimit, child.EstimatedRows.Value)
+                : effectiveLimit,
+        };
+    }
+
+    private static ExplainPlanNode BuildColumnBatchAliasNode(
+        ColumnBatchAliasOperator alias, IReadOnlyDictionary<string, FeatureManifest>? stats)
+    {
+        ExplainPlanNode child = BuildColumnBatchNode(alias.Source, stats);
+
+        return new ExplainPlanNode
+        {
+            OperatorName = "Alias",
+            Details = $"as: {alias.Alias}, mode: columnar",
+            Children = { child },
+            EstimatedRows = child.EstimatedRows,
+        };
+    }
+
+    /// <summary>
+    /// Fallback for unrecognised columnar operators — uses the operator's
+    /// <see cref="IColumnBatchOperator.DescribeForExplain"/> description.
+    /// </summary>
+    private static ExplainPlanNode BuildGenericColumnBatchNode(IColumnBatchOperator op)
+    {
+        OperatorPlanDescription description = op.DescribeForExplain();
+
+        StringBuilder details = new();
+        if (description.Properties is not null)
+        {
+            details.AppendJoin(", ", description.Properties.Select(
+                keyValuePair => $"{keyValuePair.Key}: {keyValuePair.Value}"));
+        }
+
+        return new ExplainPlanNode
+        {
+            OperatorName = description.OperatorName,
+            Details = details.ToString(),
+            EstimatedRows = description.EstimatedRows,
+        };
+    }
+
     // ──────────────── Cardinality estimation ────────────────
 
     /// <summary>
@@ -714,6 +868,51 @@ public static class QueryExplainer
 
             case RecursiveCommonTableExpressionOperator recursiveCommonTableExpression:
                 CollectColumnStatisticsCore(recursiveCommonTableExpression.AnchorOperator, alias, ref result);
+                break;
+
+            case ColumnBatchToRowBatchAdapter adapter:
+                CollectColumnBatchStatisticsCore(adapter.Source, alias, ref result);
+                break;
+        }
+    }
+
+    private static void CollectColumnBatchStatisticsCore(
+        IColumnBatchOperator op, string? alias, ref Dictionary<string, FeatureManifest>? result)
+    {
+        switch (op)
+        {
+            case ColumnBatchScanOperator scan:
+                if (scan.ColumnStatistics is null)
+                {
+                    break;
+                }
+
+                result ??= new(StringComparer.OrdinalIgnoreCase);
+                foreach (KeyValuePair<string, FeatureManifest> entry in scan.ColumnStatistics)
+                {
+                    result.TryAdd(entry.Key, entry.Value);
+                    if (alias is not null)
+                    {
+                        result.TryAdd($"{alias}.{entry.Key}", entry.Value);
+                    }
+                }
+
+                break;
+
+            case ColumnBatchAliasOperator aliasOperator:
+                CollectColumnBatchStatisticsCore(aliasOperator.Source, aliasOperator.Alias, ref result);
+                break;
+
+            case ColumnBatchFilterOperator filter:
+                CollectColumnBatchStatisticsCore(filter.Source, alias, ref result);
+                break;
+
+            case ColumnBatchProjectOperator project:
+                CollectColumnBatchStatisticsCore(project.Source, alias, ref result);
+                break;
+
+            case ColumnBatchLimitOperator limit:
+                CollectColumnBatchStatisticsCore(limit.Source, alias, ref result);
                 break;
         }
     }

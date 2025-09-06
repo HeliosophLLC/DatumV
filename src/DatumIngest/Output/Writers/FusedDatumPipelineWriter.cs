@@ -95,7 +95,7 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
 
     /// <summary>
     /// The spill writer holding sorted index data on disk, available after <see cref="FinalizeAsync"/>.
-    /// Pass to <see cref="IndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter?, bool)"/> for
+    /// Pass to <see cref="UnifiedIndexWriter.Write(SourceIndexSet, Stream, SortedIndexSpillWriter)"/> for
     /// streaming serialization without materializing the full sorted index arrays.
     /// </summary>
     internal SortedIndexSpillWriter? SortedIndexSpillWriter => _indexBuilder?.SpillWriter;

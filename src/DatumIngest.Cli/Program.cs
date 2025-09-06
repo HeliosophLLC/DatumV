@@ -488,8 +488,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
         string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
         using (FileStream outputStream = File.Create(indexPath))
         {
-            IndexWriter writer = new();
-            writer.Write(indexSet, outputStream);
+            UnifiedIndexWriter.Write(indexSet, outputStream);
         }
 
         Console.WriteLine($"Index created: {indexPath}");

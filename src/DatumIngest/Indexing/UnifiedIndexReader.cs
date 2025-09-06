@@ -379,6 +379,14 @@ internal static class UnifiedIndexReader
             mappedIndexes[columnName] = new MappedSortedIndex(
                 sharedAccessor, kind, entryCount,
                 keysOffset, locatorsOffset, stringTableOffset, stringTableLength);
+
+            // Skip past this column's key, locator, and string table data so
+            // the stream is positioned at the next column's header.
+            int keyWidth = SortedIndexKeyEncoder.GetKeyWidth(kind);
+            long dataBytes = entryCount * keyWidth
+                + entryCount * MappedSortedIndex.LocatorWidth
+                + stringTableLength;
+            stream.Seek(dataBytes, SeekOrigin.Current);
         }
 
         return mappedIndexes;
