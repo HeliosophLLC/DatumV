@@ -138,12 +138,28 @@ public sealed class DatumIngesterTests
 
             DatumIndexTableResult indexTable = indexResult.Tables.Values.First();
 
-            // Verify the index stream is deserializable
-            DatumIngest.Indexing.IndexReader reader = new();
-            DatumIngest.Indexing.SourceIndexSet restored = reader.Read(indexTable.IndexStream);
+            // Write the index stream to a temp file so UnifiedIndexReader can mmap it.
+            string tempIndexPath = Path.Combine(Path.GetTempPath(), $"test_ridx_{Guid.NewGuid():N}.datum-index");
+            try
+            {
+                await using (FileStream indexOutput = File.Create(tempIndexPath))
+                {
+                    await indexTable.IndexStream.CopyToAsync(indexOutput, CancellationToken.None);
+                }
 
-            Assert.Single(restored.Tables);
-            Assert.Equal(3, restored.Tables.Values.First().Schema.TotalRowCount);
+                using DatumIngest.Indexing.MappedSourceIndexSet restored =
+                    DatumIngest.Indexing.UnifiedIndexReader.Open(tempIndexPath);
+
+                Assert.Single(restored.IndexSet.Tables);
+                Assert.Equal(3, restored.IndexSet.Tables.Values.First().Schema.TotalRowCount);
+            }
+            finally
+            {
+                if (File.Exists(tempIndexPath))
+                {
+                    File.Delete(tempIndexPath);
+                }
+            }
         }
         finally
         {

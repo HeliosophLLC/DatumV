@@ -51,12 +51,36 @@ internal static class UnifiedIndexWriter
     /// <param name="output">Writable, seekable output stream.</param>
     public static void Write(SourceIndexSet indexSet, Stream output)
     {
+        Write(indexSet, output, sortedIndexSpillWriter: null);
+    }
+
+    /// <summary>
+    /// Writes a unified index file for the given index set, optionally streaming sorted
+    /// indexes directly from a <see cref="SortedIndexSpillWriter"/> instead of materializing
+    /// all <see cref="ValueIndexEntry"/> arrays in memory. When the spill writer is provided
+    /// and contains data, columns are categorized into flat sorted indexes (below the B+Tree
+    /// threshold) and B+Tree indexes (above the threshold). Sorted columns are materialized
+    /// one at a time to allow the two-pass v5 encoding (keys, then locators). B+Tree columns
+    /// are streamed directly into <see cref="BPlusTreeBulkLoader"/> without materialization.
+    /// </summary>
+    /// <param name="indexSet">The source index set to serialize.</param>
+    /// <param name="output">Writable, seekable output stream.</param>
+    /// <param name="sortedIndexSpillWriter">
+    /// Optional spill writer holding sorted index runs on disk. When non-null and containing
+    /// data, its entries are used instead of <see cref="SourceIndex.SortedIndexes"/> and
+    /// <see cref="SourceIndex.BPlusTreeIndexes"/>.
+    /// </param>
+    internal static void Write(
+        SourceIndexSet indexSet,
+        Stream output,
+        SortedIndexSpillWriter? sortedIndexSpillWriter)
+    {
         // Build ordered table list for deterministic index assignment.
         List<KeyValuePair<string, SourceIndex>> tableList = new(indexSet.Tables);
         tableList.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
 
         // Plan sections to determine directory size before writing data.
-        List<PlannedSection> plannedSections = PlanSections(indexSet, tableList);
+        List<PlannedSection> plannedSections = PlanSections(indexSet, tableList, sortedIndexSpillWriter);
 
         int directorySize = plannedSections.Count * DirectoryEntrySize;
         long dataStartOffset = HeaderSize + directorySize;
@@ -121,7 +145,8 @@ internal static class UnifiedIndexWriter
 
     private static List<PlannedSection> PlanSections(
         SourceIndexSet indexSet,
-        List<KeyValuePair<string, SourceIndex>> tableList)
+        List<KeyValuePair<string, SourceIndex>> tableList,
+        SortedIndexSpillWriter? sortedIndexSpillWriter)
     {
         List<PlannedSection> sections = new();
 
@@ -156,21 +181,50 @@ internal static class UnifiedIndexWriter
                     w => WriteBloomFilters(w, bloomFilters)));
             }
 
-            if (index.SortedIndexes is not null)
+            if (sortedIndexSpillWriter is not null && sortedIndexSpillWriter.HasSortedIndexes)
             {
-                SortedValueIndexSet sortedIndexes = index.SortedIndexes;
-                Schema schema = index.Schema.Schema;
-                sections.Add(new PlannedSection(
-                    UnifiedIndexSectionType.SortedIndexes, tableIndexByte,
-                    w => WriteSortedIndexes(w, sortedIndexes, schema)));
-            }
+                // Categorize columns into sorted (flat) vs B+Tree based on entry count.
+                HashSet<string>? bTreeColumns = CategorizeBPlusTreeColumns(sortedIndexSpillWriter);
 
-            if (index.BPlusTreeIndexes is not null)
+                bool hasSortedColumns = bTreeColumns is null
+                    || bTreeColumns.Count < CountColumnsWithEntries(sortedIndexSpillWriter);
+
+                if (hasSortedColumns)
+                {
+                    SortedIndexSpillWriter spillCapture = sortedIndexSpillWriter;
+                    Schema schema = index.Schema.Schema;
+                    sections.Add(new PlannedSection(
+                        UnifiedIndexSectionType.SortedIndexes, tableIndexByte,
+                        w => WriteStreamedSortedIndexes(w, spillCapture, schema, bTreeColumns)));
+                }
+
+                if (bTreeColumns is not null && bTreeColumns.Count > 0)
+                {
+                    SortedIndexSpillWriter spillCapture = sortedIndexSpillWriter;
+                    Schema schema = index.Schema.Schema;
+                    sections.Add(new PlannedSection(
+                        UnifiedIndexSectionType.BTreePages, tableIndexByte,
+                        w => WriteStreamedBTreePages(w, spillCapture, schema, bTreeColumns)));
+                }
+            }
+            else
             {
-                BPlusTreeIndexSet bPlusTreeIndexes = index.BPlusTreeIndexes;
-                sections.Add(new PlannedSection(
-                    UnifiedIndexSectionType.BTreePages, tableIndexByte,
-                    w => WriteBTreePages(w, bPlusTreeIndexes)));
+                if (index.SortedIndexes is not null)
+                {
+                    SortedValueIndexSet sortedIndexes = index.SortedIndexes;
+                    Schema schema = index.Schema.Schema;
+                    sections.Add(new PlannedSection(
+                        UnifiedIndexSectionType.SortedIndexes, tableIndexByte,
+                        w => WriteSortedIndexes(w, sortedIndexes, schema)));
+                }
+
+                if (index.BPlusTreeIndexes is not null)
+                {
+                    BPlusTreeIndexSet bPlusTreeIndexes = index.BPlusTreeIndexes;
+                    sections.Add(new PlannedSection(
+                        UnifiedIndexSectionType.BTreePages, tableIndexByte,
+                        w => WriteBTreePages(w, bPlusTreeIndexes)));
+                }
             }
 
             if (index.BitmapIndexes is not null)
@@ -600,6 +654,225 @@ internal static class UnifiedIndexWriter
                 writer.BaseStream.Position = savedPosition;
             }
         }
+    }
+
+    // ───────────────── Streamed sorted indexes (spill writer) ──────────────────
+
+    /// <summary>
+    /// Writes sorted indexes in v5 format by streaming entries from a
+    /// <see cref="SortedIndexSpillWriter"/>. Each column is materialized one at a time via
+    /// <see cref="SortedIndexSpillWriter.GetMergedEntries"/> to allow the two-pass encoding
+    /// (keys first, then locators). Columns promoted to B+Tree are excluded.
+    /// </summary>
+    private static void WriteStreamedSortedIndexes(
+        BinaryWriter writer,
+        SortedIndexSpillWriter spillWriter,
+        Schema schema,
+        IReadOnlySet<string>? excludeColumns)
+    {
+        // Count eligible columns.
+        int columnCount = 0;
+
+        foreach (string columnName in spillWriter.IndexedColumnNames)
+        {
+            if (excludeColumns is null || !excludeColumns.Contains(columnName))
+            {
+                columnCount++;
+            }
+        }
+
+        writer.Write(columnCount);
+
+        Span<byte> sortedKeyBuffer = stackalloc byte[16];
+
+        foreach (string columnName in spillWriter.IndexedColumnNames)
+        {
+            if (excludeColumns is not null && excludeColumns.Contains(columnName))
+            {
+                continue;
+            }
+
+            // Materialize this column's entries so we can do the two-pass v5 encoding.
+            ValueIndexEntry[] entries = spillWriter.GetMergedEntries(columnName);
+
+            DataKind kind = SortedIndexSpillWriter.ResolveDataKind(columnName, schema);
+            int keyWidth = SortedIndexKeyEncoder.GetKeyWidth(kind);
+
+            writer.Write(columnName);
+            writer.Write((byte)kind);
+            writer.Write((long)entries.Length);
+
+            long directoryPosition = writer.BaseStream.Position;
+            writer.Write(0L); // keysOffset placeholder
+            writer.Write(0L); // locatorsOffset placeholder
+            writer.Write(0L); // stringTableOffset placeholder
+            writer.Write(0L); // stringTableLength placeholder
+
+            long keysOffset = writer.BaseStream.Position;
+
+            if (kind is DataKind.String or DataKind.JsonValue)
+            {
+                List<byte[]> stringTable = new();
+                Dictionary<string, (int Offset, int Length)> stringDedup = new(StringComparer.Ordinal);
+                int currentStringOffset = 0;
+                Span<byte> referenceSlice = sortedKeyBuffer[..keyWidth];
+
+                foreach (ValueIndexEntry entry in entries)
+                {
+                    string stringValue = kind == DataKind.String
+                        ? entry.Key.AsString()
+                        : entry.Key.AsJsonValue();
+
+                    if (!stringDedup.TryGetValue(stringValue, out (int Offset, int Length) reference))
+                    {
+                        byte[] utf8Bytes = Encoding.UTF8.GetBytes(stringValue);
+                        reference = (currentStringOffset, utf8Bytes.Length);
+                        stringDedup[stringValue] = reference;
+                        stringTable.Add(utf8Bytes);
+                        currentStringOffset += utf8Bytes.Length;
+                    }
+
+                    SortedIndexKeyEncoder.EncodeStringReference(reference.Offset, reference.Length, referenceSlice);
+                    writer.Write(referenceSlice);
+                }
+
+                long locatorsOffset = writer.BaseStream.Position;
+
+                foreach (ValueIndexEntry entry in entries)
+                {
+                    writer.Write(entry.ChunkIndex);
+                    writer.Write(entry.RowOffsetInChunk);
+                }
+
+                long stringTableOffset = writer.BaseStream.Position;
+
+                foreach (byte[] utf8Bytes in stringTable)
+                {
+                    writer.Write(utf8Bytes);
+                }
+
+                long stringTableLength = writer.BaseStream.Position - stringTableOffset;
+
+                long savedPosition = writer.BaseStream.Position;
+                writer.BaseStream.Position = directoryPosition;
+                writer.Write(keysOffset);
+                writer.Write(locatorsOffset);
+                writer.Write(stringTableOffset);
+                writer.Write(stringTableLength);
+                writer.BaseStream.Position = savedPosition;
+            }
+            else
+            {
+                Span<byte> keySlice = sortedKeyBuffer[..keyWidth];
+
+                foreach (ValueIndexEntry entry in entries)
+                {
+                    SortedIndexKeyEncoder.Encode(entry.Key, keySlice);
+                    writer.Write(keySlice);
+                }
+
+                long locatorsOffset = writer.BaseStream.Position;
+
+                foreach (ValueIndexEntry entry in entries)
+                {
+                    writer.Write(entry.ChunkIndex);
+                    writer.Write(entry.RowOffsetInChunk);
+                }
+
+                long savedPosition = writer.BaseStream.Position;
+                writer.BaseStream.Position = directoryPosition;
+                writer.Write(keysOffset);
+                writer.Write(locatorsOffset);
+                writer.Write(0L);
+                writer.Write(0L);
+                writer.BaseStream.Position = savedPosition;
+            }
+        }
+    }
+
+    // ─────────────── Streamed B+Tree pages (spill writer) ────────────────
+
+    /// <summary>
+    /// Writes B+Tree indexes by streaming merged entries from a
+    /// <see cref="SortedIndexSpillWriter"/> into <see cref="BPlusTreeBulkLoader"/>.
+    /// Each column's entries are consumed in a single streaming pass without materializing
+    /// the full sorted array.
+    /// </summary>
+    private static void WriteStreamedBTreePages(
+        BinaryWriter writer,
+        SortedIndexSpillWriter spillWriter,
+        Schema schema,
+        IReadOnlySet<string> columnFilter)
+    {
+        int columnCount = 0;
+
+        foreach (string columnName in spillWriter.IndexedColumnNames)
+        {
+            if (columnFilter.Contains(columnName))
+            {
+                columnCount++;
+            }
+        }
+
+        writer.Write(columnCount);
+
+        foreach (string columnName in spillWriter.IndexedColumnNames)
+        {
+            if (!columnFilter.Contains(columnName))
+            {
+                continue;
+            }
+
+            DataKind keyKind = SortedIndexSpillWriter.ResolveDataKind(columnName, schema);
+            long totalEntries = spillWriter.GetTotalEntryCount(columnName);
+
+            BPlusTreeBulkLoader.Build(
+                spillWriter.EnumerateMergedEntries(columnName),
+                columnName,
+                keyKind,
+                writer,
+                totalEntries);
+        }
+    }
+
+    // ────────────────── B+Tree column categorization ──────────────────
+
+    /// <summary>
+    /// Determines which columns from the spill writer should be written as B+Tree indexes.
+    /// Columns whose total entry count exceeds <see cref="IndexConstants.BPlusTreeAutoThreshold"/>
+    /// are promoted to B+Tree; all others remain as flat sorted indexes.
+    /// </summary>
+    /// <returns>
+    /// A set of column names that should use B+Tree, or <c>null</c> if no columns qualify.
+    /// </returns>
+    private static HashSet<string>? CategorizeBPlusTreeColumns(SortedIndexSpillWriter spillWriter)
+    {
+        HashSet<string> bTreeColumns = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string columnName in spillWriter.IndexedColumnNames)
+        {
+            if (spillWriter.GetTotalEntryCount(columnName) > IndexConstants.BPlusTreeAutoThreshold)
+            {
+                bTreeColumns.Add(columnName);
+            }
+        }
+
+        return bTreeColumns.Count > 0 ? bTreeColumns : null;
+    }
+
+    /// <summary>
+    /// Counts the number of columns in the spill writer that have at least one entry.
+    /// </summary>
+    private static int CountColumnsWithEntries(SortedIndexSpillWriter spillWriter)
+    {
+        int count = 0;
+
+        foreach (string _ in spillWriter.IndexedColumnNames)
+        {
+            count++;
+        }
+
+        return count;
     }
 
     // ───────────────────────── B+Tree pages ─────────────────────────

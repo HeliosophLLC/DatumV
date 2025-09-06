@@ -345,6 +345,67 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     }
 
     /// <summary>
+    /// K-way merges pre-sorted runs for a column into a single materialized array.
+    /// Callers that require multiple passes over the data (e.g. the v5 format writes keys
+    /// before locators) should use this instead of <see cref="EnumerateMergedEntries(string)"/>.
+    /// </summary>
+    /// <param name="columnName">The column to merge.</param>
+    /// <returns>A sorted array of all entries for the column, or an empty array if the column
+    /// has no spilled data.</returns>
+    internal ValueIndexEntry[] GetMergedEntries(string columnName)
+    {
+        PrepareForReading();
+
+        if (!_spillRunCounts.TryGetValue(columnName, out int runCount) || runCount == 0)
+        {
+            return [];
+        }
+
+        long totalEntries = _spillTotalEntries[columnName];
+        return MergeSortedRuns(columnName, runCount, totalEntries);
+    }
+
+    /// <summary>
+    /// K-way merges pre-sorted runs for a column and yields entries in sorted order
+    /// without materializing the full array. Suitable for single-pass consumers such as
+    /// <see cref="BPlusTreeBulkLoader"/>.
+    /// </summary>
+    /// <param name="columnName">The column to merge.</param>
+    /// <returns>Entries in ascending key order, or an empty sequence if the column has no
+    /// spilled data.</returns>
+    internal IEnumerable<ValueIndexEntry> EnumerateMergedEntries(string columnName)
+    {
+        PrepareForReading();
+
+        if (!_spillRunCounts.TryGetValue(columnName, out int runCount) || runCount == 0)
+        {
+            yield break;
+        }
+
+        foreach (ValueIndexEntry entry in EnumerateMergedEntries(columnName, runCount))
+        {
+            yield return entry;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the <see cref="DataKind"/> for the specified column from the schema.
+    /// Falls back to <see cref="DataKind.String"/> if the column is not found.
+    /// </summary>
+    internal static DataKind ResolveDataKind(string columnName, Schema schema)
+    {
+        foreach (ColumnInfo column in schema.Columns)
+        {
+            if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return column.Kind;
+            }
+        }
+
+        return DataKind.String;
+    }
+
+    /// <summary>
     /// Streams B+Tree index sections to the output writer by performing a k-way merge
     /// of spilled sorted runs per column and feeding them to <see cref="BPlusTreeBulkLoader"/>.
     /// Each column produces one B+Tree with section header + compressed pages.
@@ -400,23 +461,6 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 output,
                 _spillTotalEntries[columnName]);
         }
-    }
-
-    /// <summary>
-    /// Resolves the <see cref="DataKind"/> for the specified column from the schema.
-    /// Falls back to <see cref="DataKind.String"/> if the column is not found.
-    /// </summary>
-    private static DataKind ResolveDataKind(string columnName, Schema schema)
-    {
-        foreach (ColumnInfo column in schema.Columns)
-        {
-            if (string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase))
-            {
-                return column.Kind;
-            }
-        }
-
-        return DataKind.String;
     }
 
     /// <summary>

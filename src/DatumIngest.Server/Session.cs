@@ -221,5 +221,6 @@ public sealed class Session : IDisposable
 
         _activeQueries.Clear();
         _sessionCancellationTokenSource.Dispose();
+        Catalog.Dispose();
     }
 }

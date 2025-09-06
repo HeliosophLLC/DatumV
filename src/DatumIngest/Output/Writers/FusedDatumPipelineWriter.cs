@@ -184,8 +184,7 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
 
         string indexPath = FileFormatDetector.GetSidecarBasePath(_filePath) + ".datum-index";
         using FileStream output = File.Create(indexPath);
-        IndexWriter indexWriter = new();
-        indexWriter.Write(indexSet, output, _indexBuilder?.SpillWriter);
+        UnifiedIndexWriter.Write(indexSet, output, _indexBuilder?.SpillWriter);
 
         filesCreated.Add(indexPath);
     }

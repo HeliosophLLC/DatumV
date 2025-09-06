@@ -332,9 +332,7 @@ static async Task BuildGroupedIndexAsync(
             string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
 
             using FileStream outputStream = File.Create(indexPath);
-            IndexWriter writer = new();
-            writer.Write(indexSet, outputStream, indexBuilder.SpillWriter,
-                compressIndexes: true);
+            UnifiedIndexWriter.Write(indexSet, outputStream, indexBuilder.SpillWriter);
 
             indexBuilder.Dispose();
 

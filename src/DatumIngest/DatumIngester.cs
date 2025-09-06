@@ -492,14 +492,12 @@ public static class DatumIngester
         FileStream indexStream = new(
             indexTempPath, FileMode.Create, FileAccess.ReadWrite,
             FileShare.None, bufferSize: 65536, FileOptions.DeleteOnClose);
-        IndexWriter indexWriter = new();
         string sidecarTableName = GetSidecarTableName(descriptor);
 
-        indexWriter.Write(
+        UnifiedIndexWriter.Write(
             SourceIndexSet.Create(sidecarTableName, index),
             indexStream,
-            indexBuilder.SpillWriter,
-            compressIndexes: options.CompressIndexes);
+            indexBuilder.SpillWriter);
 
         diagnostics?.Invoke(new IndexingDiagnosticEvent
         {
