@@ -3,8 +3,8 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
-/// Returns the zero-based index of the first occurrence of a substring within a string.
-/// <c>position(string, substring)</c> returns the index as a Scalar, or -1 if the substring is not found.
+/// Returns the 1-based index of the first occurrence of a substring within a string.
+/// <c>position(string, substring)</c> returns the index as a Scalar, or 0 if the substring is not found.
 /// </summary>
 public sealed class PositionFunction : IScalarFunction
 {
@@ -44,6 +44,6 @@ public sealed class PositionFunction : IScalarFunction
         }
 
         int index = input.AsString().IndexOf(substring.AsString(), StringComparison.Ordinal);
-        return DataValue.FromFloat32(index);
+        return DataValue.FromFloat32(index + 1);
     }
 }

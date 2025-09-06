@@ -44,8 +44,8 @@ Every function belongs to a single **category** that describes its operational d
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
 | `len` | `len(val)` | Length of string, collection, or array. | 1 |
-| `mid` | `mid(str, start, length)` | Extract substring by position and length (0-based). | 1 |
-| `substring` | `substring(str, start, [length])` | Extract substring from start position (0-based). | 1 |
+| `mid` | `mid(str, start, length)` | Extract substring by position and length (1-based). | 1 |
+| `substring` | `substring(str, start, [length])` | Extract substring from start position (1-based). | 1 |
 | `upper` | `upper(str)` | Convert to uppercase (invariant). | 1 |
 | `lower` | `lower(str)` | Convert to lowercase (invariant). | 1 |
 | `trim` | `trim(str)` | Remove whitespace from both sides. | 1 |
@@ -54,7 +54,7 @@ Every function belongs to a single **category** that describes its operational d
 | `contains` | `contains(str, sub)` | Returns Boolean — whether str contains sub (ordinal). | 1 |
 | `starts_with` | `starts_with(str, prefix)` | Returns Boolean — whether str starts with prefix (ordinal). | 1 |
 | `ends_with` | `ends_with(str, suffix)` | Returns Boolean — whether str ends with suffix (ordinal). | 1 |
-| `position` | `position(str, sub)` | 0-based index of first occurrence, or -1. | 1 |
+| `position` | `position(str, sub)` | 1-based index of first occurrence, or 0 if not found. | 1 |
 | `replace` | `replace(str, old, new)` | Replace all occurrences of old with new (ordinal). | 1 |
 | `concat` | `concat(a, b, ...)` | Concatenate two or more strings. Null args treated as empty. | 1 |
 | `repeat` | `repeat(str, count)` | Repeat string count times. | 1 |
@@ -67,6 +67,15 @@ Every function belongs to a single **category** that describes its operational d
 | `get_file_extension` | `get_file_extension(path)` | Return extension (with dot) from path. | 1 |
 | `get_path` | `get_path(path)` | Return directory portion of path. | 1 |
 | `regexp_extract` | `regexp_extract(str, pattern, [group])` | Extract first regex match. Optional 1-based group index returns a capture group. NULL if no match. | 1 |
+| `regexp_replace` | `regexp_replace(str, pattern, replacement, [flags])` | Replace regex matches. Global by default; flags: `'g'` global, `'i'` case-insensitive. Without `'g'`, replaces first match only. | 1 |
+| `concat_ws` | `concat_ws(sep, s1, s2, ...)` | Concatenate with separator, skipping nulls. | 1 |
+| `split_part` | `split_part(str, delim, n)` | Split on delimiter, return the n-th field (1-based). Empty string if out of range. Negative n counts from end. | 1 |
+| `initcap` | `initcap(str)` | Capitalize first letter of each word, lowercase the rest. | 1 |
+| `translate` | `translate(str, from, to)` | Character-by-character substitution. Chars in `from` without a `to` counterpart are deleted. | 1 |
+| `ascii` | `ascii(str)` | ASCII code of first character. Returns 0 for empty string. | 1 |
+| `chr` | `chr(code)` | Character from ASCII/Unicode code point. | 1 |
+| `btrim` | `btrim(str, [chars])` | Trim specified characters from both sides. Default: whitespace. | 1 |
+| `word_count` | `word_count(str)` | Count whitespace-separated words. | 1 |
 
 ## JSON Column Functions
 
@@ -634,12 +643,14 @@ SELECT noise(grayscale(file_bytes), 'gaussian', 5) AS augmented FROM training_im
 | `dot` | `dot(a, b)` | Dot product of two vectors. | 2 |
 | `hamming_distance` | `hamming_distance(a, b)` | Hamming distance between two strings. | 2 |
 
-## Math — Utility & Conditional (10)
+## Math — Utility & Conditional (11)
 
 | Function | Signature | Description | QU |
-|----------|-----------|-------------|----|| `coalesce` | `coalesce(a, b, ...)` | Returns first non-null argument. | 1 |
-| `greatest` | `greatest(a, b, ...)` | Returns maximum of scalar arguments. | 1 |
-| `least` | `least(a, b, ...)` | Returns minimum of scalar arguments. | 1 |
+|----------|-----------|-------------|----|
+| `coalesce` | `coalesce(a, b, ...)` | Returns first non-null argument. | 1 |
+| `greatest` | `greatest(a, b, ...)` | Returns maximum of scalar or string arguments. | 1 |
+| `least` | `least(a, b, ...)` | Returns minimum of scalar or string arguments. | 1 |
+| `choose` | `choose(index, v1, v2, ...)` | Returns the value at 1-based index. NULL if out of range. | 1 |
 | `is_nan` | `is_nan(x)` | Returns 1 if NaN, 0 otherwise. | 1 |
 | `is_finite` | `is_finite(x)` | Returns 1 if finite, 0 if NaN or infinite. | 1 |
 | `is_even` | `is_even(x)` | Returns 1 if x is an even integer, 0 otherwise. | 1 |

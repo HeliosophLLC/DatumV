@@ -5,7 +5,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <summary>
 /// Extracts a substring using start position and length.
 /// <c>mid(str, start, length)</c>
-/// Uses 0-based indexing.
+/// Uses 1-based indexing (PostgreSQL semantics).
 /// </summary>
 public sealed class MidFunction : IScalarFunction
 {
@@ -38,7 +38,7 @@ public sealed class MidFunction : IScalarFunction
         }
 
         string text = input.AsString();
-        int start = (int)arguments[1].AsFloat32();
+        int start = (int)arguments[1].AsFloat32() - 1;
         int length = (int)arguments[2].AsFloat32();
 
         if (start < 0)

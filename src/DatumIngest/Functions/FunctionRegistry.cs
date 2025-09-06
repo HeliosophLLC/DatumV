@@ -178,7 +178,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.LpadFunction());
         registry.RegisterScalar(new Scalar.RpadFunction());
         registry.RegisterScalar(new Scalar.RegexpExtractFunction());
+        registry.RegisterScalar(new Scalar.RegexpReplaceFunction());
         registry.RegisterScalar(new Scalar.WordCountFunction());
+        registry.RegisterScalar(new Scalar.ConcatWsFunction());
+        registry.RegisterScalar(new Scalar.SplitPartFunction());
+        registry.RegisterScalar(new Scalar.InitcapFunction());
+        registry.RegisterScalar(new Scalar.TranslateFunction());
+        registry.RegisterScalar(new Scalar.AsciiFunction());
+        registry.RegisterScalar(new Scalar.ChrFunction());
+        registry.RegisterScalar(new Scalar.BtrimFunction());
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());
@@ -389,6 +397,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.IsOddFunction());
         registry.RegisterScalar(new Math.IfNullFunction());
         registry.RegisterScalar(new Math.IifFunction());
+        registry.RegisterScalar(new Math.ChooseFunction());
         registry.RegisterScalar(new Math.RandomFunction());
 
         // Random — Core

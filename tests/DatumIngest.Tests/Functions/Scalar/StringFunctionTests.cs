@@ -204,18 +204,18 @@ public class StringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("ll")
         ]);
-        Assert.Equal(2f, result.AsFloat32());
+        Assert.Equal(3f, result.AsFloat32());
     }
 
     [Fact]
-    public void PositionFunction_NotFound_ReturnsNegativeOne()
+    public void PositionFunction_NotFound_ReturnsZero()
     {
         PositionFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello"),
             DataValue.FromString("xyz")
         ]);
-        Assert.Equal(-1f, result.AsFloat32());
+        Assert.Equal(0f, result.AsFloat32());
     }
 
     [Fact]

@@ -5,7 +5,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <summary>
 /// Extracts a substring from a start position to the end, or with an optional length.
 /// <c>substring(str, start)</c> or <c>substring(str, start, length)</c>
-/// Uses 0-based indexing.
+/// Uses 1-based indexing (PostgreSQL semantics).
 /// </summary>
 public sealed class SubstringFunction : IScalarFunction
 {
@@ -38,7 +38,7 @@ public sealed class SubstringFunction : IScalarFunction
         }
 
         string text = input.AsString();
-        int start = (int)arguments[1].AsFloat32();
+        int start = (int)arguments[1].AsFloat32() - 1;
 
         if (start < 0)
         {

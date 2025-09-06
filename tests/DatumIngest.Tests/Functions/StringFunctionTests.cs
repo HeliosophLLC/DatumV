@@ -87,7 +87,7 @@ public class StringFunctionTests
         MidFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello world"),
-            DataValue.FromFloat32(6),
+            DataValue.FromFloat32(7),
             DataValue.FromFloat32(5)
         ]);
         Assert.Equal("world", result.AsString());
@@ -111,7 +111,7 @@ public class StringFunctionTests
         MidFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello"),
-            DataValue.FromFloat32(3),
+            DataValue.FromFloat32(4),
             DataValue.FromFloat32(100)
         ]);
         Assert.Equal("lo", result.AsString());
@@ -157,7 +157,7 @@ public class StringFunctionTests
         SubstringFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello world"),
-            DataValue.FromFloat32(6)
+            DataValue.FromFloat32(7)
         ]);
         Assert.Equal("world", result.AsString());
     }
@@ -168,7 +168,7 @@ public class StringFunctionTests
         SubstringFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromString("hello world"),
-            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(1),
             DataValue.FromFloat32(5)
         ]);
         Assert.Equal("hello", result.AsString());
@@ -191,7 +191,7 @@ public class StringFunctionTests
         SubstringFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.String),
-            DataValue.FromFloat32(0)
+            DataValue.FromFloat32(1)
         ]);
         Assert.True(result.IsNull);
     }

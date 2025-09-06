@@ -31,7 +31,7 @@ public sealed class CoalesceFunction : IScalarFunction
 }
 
 /// <summary>
-/// Returns the greatest (maximum) of a set of scalar values: greatest(a, b, ...).
+/// Returns the greatest (maximum) of a set of scalar or string values: greatest(a, b, ...).
 /// </summary>
 public sealed class GreatestFunction : IScalarFunction
 {
@@ -43,6 +43,18 @@ public sealed class GreatestFunction : IScalarFunction
     {
         if (argumentKinds.Length < 2)
             throw new ArgumentException("greatest() requires at least 2 arguments.");
+
+        DataKind firstKind = argumentKinds[0];
+        if (firstKind == DataKind.String)
+        {
+            for (int i = 1; i < argumentKinds.Length; i++)
+            {
+                if (argumentKinds[i] != DataKind.String)
+                    throw new ArgumentException($"greatest() argument {i + 1} must be String to match other arguments.");
+            }
+            return DataKind.String;
+        }
+
         for (int i = 0; i < argumentKinds.Length; i++)
         {
             if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
@@ -54,6 +66,11 @@ public sealed class GreatestFunction : IScalarFunction
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
+        if (arguments[0].Kind is DataKind.String || (arguments[0].IsNull && arguments.Length > 1 && !arguments[1].IsNull && arguments[1].Kind is DataKind.String))
+        {
+            return ExecuteString(arguments);
+        }
+
         float max = float.NegativeInfinity;
         bool allNull = true;
         for (int i = 0; i < arguments.Length; i++)
@@ -65,10 +82,27 @@ public sealed class GreatestFunction : IScalarFunction
         }
         return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(max);
     }
+
+    private static DataValue ExecuteString(ReadOnlySpan<DataValue> arguments)
+    {
+        string? max = null;
+        bool allNull = true;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) continue;
+            allNull = false;
+            string value = arguments[i].AsString();
+            if (max is null || string.Compare(value, max, StringComparison.Ordinal) > 0)
+            {
+                max = value;
+            }
+        }
+        return allNull ? DataValue.Null(DataKind.String) : DataValue.FromString(max!);
+    }
 }
 
 /// <summary>
-/// Returns the least (minimum) of a set of scalar values: least(a, b, ...).
+/// Returns the least (minimum) of a set of scalar or string values: least(a, b, ...).
 /// </summary>
 public sealed class LeastFunction : IScalarFunction
 {
@@ -80,6 +114,18 @@ public sealed class LeastFunction : IScalarFunction
     {
         if (argumentKinds.Length < 2)
             throw new ArgumentException("least() requires at least 2 arguments.");
+
+        DataKind firstKind = argumentKinds[0];
+        if (firstKind == DataKind.String)
+        {
+            for (int i = 1; i < argumentKinds.Length; i++)
+            {
+                if (argumentKinds[i] != DataKind.String)
+                    throw new ArgumentException($"least() argument {i + 1} must be String to match other arguments.");
+            }
+            return DataKind.String;
+        }
+
         for (int i = 0; i < argumentKinds.Length; i++)
         {
             if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
@@ -91,6 +137,11 @@ public sealed class LeastFunction : IScalarFunction
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
+        if (arguments[0].Kind is DataKind.String || (arguments[0].IsNull && arguments.Length > 1 && !arguments[1].IsNull && arguments[1].Kind is DataKind.String))
+        {
+            return ExecuteString(arguments);
+        }
+
         float min = float.PositiveInfinity;
         bool allNull = true;
         for (int i = 0; i < arguments.Length; i++)
@@ -101,6 +152,23 @@ public sealed class LeastFunction : IScalarFunction
             if (value < min) min = value;
         }
         return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(min);
+    }
+
+    private static DataValue ExecuteString(ReadOnlySpan<DataValue> arguments)
+    {
+        string? min = null;
+        bool allNull = true;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) continue;
+            allNull = false;
+            string value = arguments[i].AsString();
+            if (min is null || string.Compare(value, min, StringComparison.Ordinal) < 0)
+            {
+                min = value;
+            }
+        }
+        return allNull ? DataValue.Null(DataKind.String) : DataValue.FromString(min!);
     }
 }
 

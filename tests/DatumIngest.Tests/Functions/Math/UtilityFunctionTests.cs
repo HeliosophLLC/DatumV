@@ -66,6 +66,45 @@ public class UtilityFunctionTests
     }
 
     [Fact]
+    public void Greatest_Strings_ReturnsMax()
+    {
+        GreatestFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("banana"),
+            DataValue.FromString("apple"),
+            DataValue.FromString("cherry")
+        ]);
+        Assert.Equal("cherry", result.AsString());
+    }
+
+    [Fact]
+    public void Greatest_Strings_WithNull_SkipsNull()
+    {
+        GreatestFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("beta"),
+            DataValue.FromString("alpha")
+        ]);
+        Assert.Equal("beta", result.AsString());
+    }
+
+    [Fact]
+    public void Greatest_Strings_AllNull_ReturnsNull()
+    {
+        GreatestFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String), DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Greatest_Strings_Validate_ReturnsString()
+    {
+        DataKind result = new GreatestFunction().ValidateArguments([DataKind.String, DataKind.String]);
+        Assert.Equal(DataKind.String, result);
+    }
+
+    [Fact]
     public void Least_MultipleScalars()
     {
         LeastFunction function = new();
@@ -274,6 +313,45 @@ public class UtilityFunctionTests
         Assert.Equal(3f, result.AsFloat32());
     }
 
+    [Fact]
+    public void Least_Strings_ReturnsMin()
+    {
+        LeastFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("banana"),
+            DataValue.FromString("apple"),
+            DataValue.FromString("cherry")
+        ]);
+        Assert.Equal("apple", result.AsString());
+    }
+
+    [Fact]
+    public void Least_Strings_WithNull_SkipsNull()
+    {
+        LeastFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("beta"),
+            DataValue.FromString("alpha")
+        ]);
+        Assert.Equal("alpha", result.AsString());
+    }
+
+    [Fact]
+    public void Least_Strings_AllNull_ReturnsNull()
+    {
+        LeastFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String), DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Least_Strings_Validate_ReturnsString()
+    {
+        DataKind result = new LeastFunction().ValidateArguments([DataKind.String, DataKind.String]);
+        Assert.Equal(DataKind.String, result);
+    }
+
     // ── iif ────────────────────────────────────────────────
 
     [Fact]
@@ -374,5 +452,122 @@ public class UtilityFunctionTests
     {
         DataKind result = new IifFunction().ValidateArguments([DataKind.Float32, DataKind.Vector, DataKind.Vector]);
         Assert.Equal(DataKind.Vector, result);
+    }
+
+    // ── choose ─────────────────────────────────────────────
+
+    [Fact]
+    public void Choose_Index1_ReturnsFirstValue()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromFloat32(1),
+            DataValue.FromString("alpha"),
+            DataValue.FromString("beta"),
+            DataValue.FromString("gamma")
+        ]);
+        Assert.Equal("alpha", result.AsString());
+    }
+
+    [Fact]
+    public void Choose_Index3_ReturnsThirdValue()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromFloat32(3),
+            DataValue.FromString("alpha"),
+            DataValue.FromString("beta"),
+            DataValue.FromString("gamma")
+        ]);
+        Assert.Equal("gamma", result.AsString());
+    }
+
+    [Fact]
+    public void Choose_IndexZero_ReturnsNull()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromFloat32(0),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(20)
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Choose_IndexBeyondRange_ReturnsNull()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromFloat32(5),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(20)
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Choose_NullIndex_ReturnsNull()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.Float32),
+            DataValue.FromFloat32(10),
+            DataValue.FromFloat32(20)
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Choose_SelectedValueIsNull_ReturnsNull()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromFloat32(2),
+            DataValue.FromString("alpha"),
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("gamma")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Choose_UInt8Index_Works()
+    {
+        ChooseFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromUInt8(1),
+            DataValue.FromFloat32(100),
+            DataValue.FromFloat32(200)
+        ]);
+        Assert.Equal(100f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Choose_Validate_TooFewArgs_Throws()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new ChooseFunction().ValidateArguments([DataKind.Float32]));
+    }
+
+    [Fact]
+    public void Choose_Validate_NonNumericIndex_Throws()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new ChooseFunction().ValidateArguments([DataKind.String, DataKind.String, DataKind.String]));
+    }
+
+    [Fact]
+    public void Choose_Validate_MismatchedValueKinds_Throws()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new ChooseFunction().ValidateArguments([DataKind.Float32, DataKind.String, DataKind.Float32]));
+    }
+
+    [Fact]
+    public void Choose_Validate_ReturnsValueKind()
+    {
+        DataKind result = new ChooseFunction().ValidateArguments([DataKind.Float32, DataKind.String, DataKind.String]);
+        Assert.Equal(DataKind.String, result);
     }
 }
