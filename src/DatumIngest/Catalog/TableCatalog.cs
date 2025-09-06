@@ -44,6 +44,13 @@ public sealed class TableCatalog : IDisposable
     /// </summary>
     private readonly Dictionary<string, string> _pendingIndexSidecarPaths = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Tracks v5 memory-mapped index sets that must be disposed when the catalog is disposed.
+    /// Each entry owns a <see cref="System.IO.MemoryMappedFiles.MemoryMappedFile"/> and its
+    /// shared <see cref="System.IO.MemoryMappedFiles.MemoryMappedViewAccessor"/>.
+    /// </summary>
+    private readonly List<MappedSourceIndexSet> _mappedIndexSets = new();
+
     private readonly List<string> _tempFiles = new();
 
     /// <summary>
@@ -301,6 +308,17 @@ public sealed class TableCatalog : IDisposable
     }
 
     /// <summary>
+    /// Registers a v5 memory-mapped index set loaded externally (e.g. via an explicit
+    /// <c>--index-path</c> CLI option). The catalog takes ownership of the handle and
+    /// will dispose it when the catalog itself is disposed.
+    /// </summary>
+    /// <param name="mappedIndexSet">The mapped index set to track for disposal.</param>
+    internal void TrackMappedIndexSet(MappedSourceIndexSet mappedIndexSet)
+    {
+        _mappedIndexSets.Add(mappedIndexSet);
+    }
+
+    /// <summary>
     /// Attempts to retrieve a source index for the given table name.
     /// If the index was discovered via a sidecar file but not yet loaded, it is deserialized
     /// on demand here so that the heap cost is only paid when a query actually needs the index.
@@ -460,9 +478,20 @@ public sealed class TableCatalog : IDisposable
             return;
         }
 
-        IndexReader reader = new();
-        using FileStream stream = File.OpenRead(sidecarPath);
-        SourceIndexSet indexSet = reader.Read(stream);
+        SourceIndexSet indexSet;
+
+        if (IsUnifiedIndexFormat(sidecarPath))
+        {
+            MappedSourceIndexSet mapped = UnifiedIndexReader.Open(sidecarPath);
+            _mappedIndexSets.Add(mapped);
+            indexSet = mapped.IndexSet;
+        }
+        else
+        {
+            IndexReader reader = new();
+            using FileStream stream = File.OpenRead(sidecarPath);
+            indexSet = reader.Read(stream);
+        }
 
         foreach (string name in pendingNames)
         {
@@ -477,6 +506,24 @@ public sealed class TableCatalog : IDisposable
                 _indexes[name] = entry;
             }
         }
+    }
+
+    /// <summary>
+    /// Detects whether a <c>.datum-index</c> file uses the v5 unified memory-mapped format
+    /// by checking its four-byte magic header (<c>DXIX</c>) rather than the v2/v3 <c>DTIX</c> magic.
+    /// </summary>
+    private static bool IsUnifiedIndexFormat(string filePath)
+    {
+        Span<byte> magic = stackalloc byte[4];
+
+        using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        if (stream.Read(magic) < 4)
+        {
+            return false;
+        }
+
+        return magic.SequenceEqual(UnifiedIndexWriter.MagicBytes);
     }
 
     private void DiscoverSidecarManifest(
@@ -744,6 +791,13 @@ public sealed class TableCatalog : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        foreach (MappedSourceIndexSet mapped in _mappedIndexSets)
+        {
+            mapped.Dispose();
+        }
+
+        _mappedIndexSets.Clear();
+
         foreach (string tempFile in _tempFiles)
         {
             try

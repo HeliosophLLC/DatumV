@@ -180,6 +180,44 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         Assert.Equal(7, indexB!.Schema.TotalRowCount);
     }
 
+    [Fact]
+    public void DiscoversSidecarIndex_v5UnifiedFormat()
+    {
+        string csvPath = CreateCsvFile("unified.csv", "id\n1\n2\n3\n");
+        SourceIndex index = CreateTestIndex(rowCount: 3);
+        WriteV5Sidecar(csvPath, "unified", index);
+
+        using TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "unified", csvPath, new Dictionary<string, string>()));
+
+        DiscoverSidecarIndexes(catalog);
+
+        Assert.True(catalog.TryGetIndex("unified", out SourceIndex? discovered));
+        Assert.Equal(3, discovered!.Schema.TotalRowCount);
+    }
+
+    [Fact]
+    public void DiscoversSidecarIndex_v5UnifiedFormat_DeferredLoad()
+    {
+        string csvPath = CreateCsvFile("v5lazy.csv", "id\n1\n");
+        SourceIndex index = CreateTestIndex(rowCount: 55);
+        WriteV5Sidecar(csvPath, "v5lazy", index);
+
+        using TableCatalog catalog = new();
+        catalog.RegisterProvider("csv", () => new CsvTableProvider());
+        catalog.Register(new TableDescriptor("csv", "v5lazy", csvPath, new Dictionary<string, string>()));
+
+        catalog.DiscoverSidecars();
+
+        Assert.True(catalog.TryGetIndex("v5lazy", out SourceIndex? loaded));
+        Assert.Equal(55, loaded!.Schema.TotalRowCount);
+
+        // Second access returns the cached entry.
+        Assert.True(catalog.TryGetIndex("v5lazy", out SourceIndex? cached));
+        Assert.Same(loaded, cached);
+    }
+
     /// <summary>
     /// Delegates to the unified <see cref="TableCatalog.DiscoverSidecars"/> method.
     /// </summary>
@@ -210,5 +248,13 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         IndexWriter writer = new();
         SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
         writer.Write(indexSet, stream);
+    }
+
+    private static void WriteV5Sidecar(string sourceFilePath, string tableName, SourceIndex index)
+    {
+        string sidecarPath = sourceFilePath + ".datum-index";
+        using FileStream stream = File.Create(sidecarPath);
+        SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
+        UnifiedIndexWriter.Write(indexSet, stream);
     }
 }

@@ -140,8 +140,6 @@ static TableCatalog BuildCatalog(CliOptions options)
 
 static void LoadIndexes(TableCatalog catalog, CliOptions options)
 {
-    IndexReader reader = new();
-
     foreach (string indexPath in options.IndexPaths)
     {
         if (!File.Exists(indexPath))
@@ -149,8 +147,20 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
             throw new FileNotFoundException($"Index file not found: {indexPath}");
         }
 
-        using FileStream stream = File.OpenRead(indexPath);
-        SourceIndexSet indexSet = reader.Read(stream);
+        SourceIndexSet indexSet;
+
+        if (IsUnifiedIndexFormat(indexPath))
+        {
+            MappedSourceIndexSet mapped = UnifiedIndexReader.Open(indexPath);
+            catalog.TrackMappedIndexSet(mapped);
+            indexSet = mapped.IndexSet;
+        }
+        else
+        {
+            IndexReader reader = new();
+            using FileStream stream = File.OpenRead(indexPath);
+            indexSet = reader.Read(stream);
+        }
 
         // Derive table name from the index file path by stripping the .datum-index suffix.
         string fileName = Path.GetFileName(indexPath);
@@ -184,6 +194,21 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
             }
         }
     }
+}
+
+// Detects whether a .datum-index file uses the v5 unified format (DXIX magic).
+static bool IsUnifiedIndexFormat(string filePath)
+{
+    Span<byte> magic = stackalloc byte[4];
+
+    using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+    if (stream.Read(magic) < 4)
+    {
+        return false;
+    }
+
+    return magic.SequenceEqual(UnifiedIndexWriter.MagicBytes);
 }
 
 static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
