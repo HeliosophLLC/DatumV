@@ -1193,6 +1193,195 @@ public static class SqlParser
         from intoClause in IntoClauseParser.OptionalOrDefault()
         select ApplyTrailingClauses(query, orderBy, limit, offset, intoClause);
 
+    // ───────────────────── DDL / DML statements ─────────────────────
+
+    /// <summary>
+    /// Parses an identifier that may also be a keyword token in other contexts.
+    /// DDL table/column names like "set", "table", "values" etc. are valid identifiers
+    /// when they appear in name position. This parser accepts an <see cref="SqlToken.Identifier"/>
+    /// or any keyword token that can legally serve as an unquoted name.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string> IdentifierOrKeywordAsName =
+        Token.EqualTo(SqlToken.Identifier).Select(GetTokenText)
+            .Or(Token.EqualTo(SqlToken.Table).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Set).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Values).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Column).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Default).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Add).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.If).Select(t => t.ToStringValue()));
+
+    /// <summary>
+    /// Parses a column type name. Accepts a plain identifier and also compound types
+    /// like <c>NOT NULL</c> as a suffix modifier.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string> TypeNameParser =
+        Token.EqualTo(SqlToken.Identifier).Select(GetTokenText);
+
+    /// <summary>
+    /// Parses a single column definition: <c>name type [NOT NULL]</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, ColumnDefinition> ColumnDefinitionParser =
+        from name in IdentifierOrKeywordAsName
+        from typeName in TypeNameParser
+        from notNull in (
+            from notKw in Token.EqualTo(SqlToken.Not)
+            from nullKw in Token.EqualTo(SqlToken.Null)
+            select true
+        ).OptionalOrDefault()
+        select new ColumnDefinition(name, typeName, Nullable: !notNull);
+
+    /// <summary>
+    /// Parses <c>IF NOT EXISTS</c> as an optional guard clause for CREATE statements.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> IfNotExistsParser =
+        (from ifKw in Token.EqualTo(SqlToken.If)
+         from notKw in Token.EqualTo(SqlToken.Not)
+         from existsKw in Token.EqualTo(SqlToken.Exists)
+         select true
+        ).OptionalOrDefault();
+
+    /// <summary>
+    /// Parses <c>IF EXISTS</c> as an optional guard clause for DROP statements.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, bool> IfExistsParser =
+        (from ifKw in Token.EqualTo(SqlToken.If)
+         from existsKw in Token.EqualTo(SqlToken.Exists)
+         select true
+        ).OptionalOrDefault();
+
+    /// <summary>
+    /// Parses <c>CREATE TEMP TABLE [IF NOT EXISTS] name (col type, ...) </c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> CreateTempTableParser =
+        from createKw in Token.EqualTo(SqlToken.Create)
+        from tempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary))
+        from tableKw in Token.EqualTo(SqlToken.Table)
+        from ifNotExists in IfNotExistsParser
+        from tableName in IdentifierOrKeywordAsName
+        from asOrParen in Token.EqualTo(SqlToken.As).Try()
+            .Or(Token.EqualTo(SqlToken.LeftParen))
+        from statement in asOrParen.Kind == SqlToken.As
+            ? SP.Ref(() => QueryExpressionParser!)
+                .Select(query => (Statement)new CreateTempTableAsSelectStatement(tableName, query, ifNotExists))
+            : ColumnDefinitionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+                .Then(columns => Token.EqualTo(SqlToken.RightParen)
+                    .Select(_ => (Statement)new CreateTempTableStatement(tableName, columns, ifNotExists)))
+        select statement;
+
+    /// <summary>
+    /// Parses <c>DROP TABLE [IF EXISTS] name</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> DropTableParser =
+        from dropKw in Token.EqualTo(SqlToken.Drop)
+        from tableKw in Token.EqualTo(SqlToken.Table)
+        from ifExists in IfExistsParser
+        from tableName in IdentifierOrKeywordAsName
+        select (Statement)new DropTableStatement(tableName, ifExists);
+
+    /// <summary>
+    /// Parses <c>INSERT INTO name [(col, ...)] SELECT ...</c> or
+    /// <c>INSERT INTO name [(col, ...)] VALUES (...), (...)</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> InsertParser =
+        from insertKw in Token.EqualTo(SqlToken.Insert)
+        from intoKw in Token.EqualTo(SqlToken.Into)
+        from tableName in IdentifierOrKeywordAsName
+        from columnNames in (
+            from open in Token.EqualTo(SqlToken.LeftParen)
+            from names in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            from close in Token.EqualTo(SqlToken.RightParen)
+            select names
+        ).AsNullable().OptionalOrDefault()
+        from source in ValuesSourceParser.Select(v => (InsertSource)v).Try()
+            .Or(SP.Ref(() => QueryExpressionParser!).Select(q => (InsertSource)new InsertQuerySource(q)))
+        select (Statement)new InsertStatement(
+            tableName,
+            columnNames is { Length: > 0 } ? columnNames : null,
+            source);
+
+    /// <summary>
+    /// Parses <c>VALUES (expr, ...), (expr, ...) ...</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, InsertValuesSource> ValuesSourceParser =
+        from valuesKw in Token.EqualTo(SqlToken.Values)
+        from rows in (
+            from open in Token.EqualTo(SqlToken.LeftParen)
+            from values in SP.Ref(() => ExpressionParser!).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            from close in Token.EqualTo(SqlToken.RightParen)
+            select (IReadOnlyList<Expression>)values
+        ).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        select new InsertValuesSource(rows);
+
+    /// <summary>
+    /// Parses <c>UPDATE name SET col = expr [, ...] [WHERE ...]</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> UpdateParser =
+        from updateKw in Token.EqualTo(SqlToken.Update)
+        from tableName in IdentifierOrKeywordAsName
+        from setKw in Token.EqualTo(SqlToken.Set)
+        from assignments in (
+            from colName in IdentifierOrKeywordAsName
+            from eq in Token.EqualTo(SqlToken.Equals)
+            from value in SP.Ref(() => ExpressionParser!)
+            select new ColumnAssignment(colName, value)
+        ).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from whereClause in WhereClauseParser.OptionalOrDefault()
+        select (Statement)new UpdateStatement(tableName, assignments, whereClause);
+
+    /// <summary>
+    /// Parses <c>ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr]</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
+        from alterKw in Token.EqualTo(SqlToken.Alter)
+        from tableKw in Token.EqualTo(SqlToken.Table)
+        from tableName in IdentifierOrKeywordAsName
+        from addKw in Token.EqualTo(SqlToken.Add)
+        from columnKw in Token.EqualTo(SqlToken.Column).OptionalOrDefault()
+        from colName in IdentifierOrKeywordAsName
+        from typeName in TypeNameParser
+        from notNull in (
+            from notKw in Token.EqualTo(SqlToken.Not)
+            from nullKw in Token.EqualTo(SqlToken.Null)
+            select true
+        ).OptionalOrDefault()
+        from defaultValue in (
+            from defaultKw in Token.EqualTo(SqlToken.Default)
+            from expr in SP.Ref(() => ExpressionParser!)
+            select expr
+        ).AsNullable().OptionalOrDefault()
+        select (Statement)new AlterTableAddColumnStatement(
+            tableName, colName, typeName, defaultValue, Nullable: !notNull);
+
+    /// <summary>
+    /// Parses a single statement: a DDL/DML command or a query expression.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
+        CreateTempTableParser.Try()
+            .Or(DropTableParser.Try())
+            .Or(InsertParser.Try())
+            .Or(UpdateParser.Try())
+            .Or(AlterTableParser.Try())
+            .Or(QueryExpressionParser.Select(q => (Statement)new QueryStatement(q)));
+
+    /// <summary>
+    /// Parses a batch of semicolon-separated statements. Trailing semicolons
+    /// and empty statements between semicolons are silently ignored.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyList<Statement>> BatchParser =
+        from first in SingleStatementParser
+        from rest in (
+            from semi in Token.EqualTo(SqlToken.Semicolon).AtLeastOnce()
+            from stmt in SingleStatementParser
+            select stmt
+        ).Try().Many()
+        from trailing in Token.EqualTo(SqlToken.Semicolon).Many()
+        select (IReadOnlyList<Statement>)(new[] { first }.Concat(rest).ToArray());
+
+    /// <summary>The full batch parser that expects to consume all input.</summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyList<Statement>> FullBatchParser =
+        BatchParser.AtEnd();
+
     /// <summary>The full query expression parser that expects to consume all input.</summary>
     private static readonly TokenListParser<SqlToken, QueryExpression> FullParser =
         QueryExpressionParser.AtEnd();
@@ -1225,6 +1414,11 @@ public static class SqlParser
         SqlToken.Union,
         SqlToken.Intersect,
         SqlToken.Except,
+        SqlToken.Create,
+        SqlToken.Drop,
+        SqlToken.Insert,
+        SqlToken.Update,
+        SqlToken.Alter,
     ];
 
     // ───────────────────── Public API ─────────────────────
@@ -1239,6 +1433,51 @@ public static class SqlParser
     {
         TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
         TokenListParserResult<SqlToken, QueryExpression> result = FullParser.TryParse(tokens);
+
+        if (!result.HasValue)
+        {
+            throw new ParseException(
+                result.ToString(),
+                result.ErrorPosition);
+        }
+
+        return result.Value;
+    }
+
+    /// <summary>
+    /// Parses a SQL string into a single <see cref="Statement"/> AST node.
+    /// Accepts both query expressions and DDL/DML statements.
+    /// </summary>
+    /// <param name="sql">The SQL statement text.</param>
+    /// <returns>The parsed statement.</returns>
+    /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
+    public static Statement ParseStatement(string sql)
+    {
+        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenListParserResult<SqlToken, Statement> result = SingleStatementParser.AtEnd().TryParse(tokens);
+
+        if (!result.HasValue)
+        {
+            throw new ParseException(
+                result.ToString(),
+                result.ErrorPosition);
+        }
+
+        return result.Value;
+    }
+
+    /// <summary>
+    /// Parses a SQL string containing one or more semicolon-separated statements
+    /// into a list of <see cref="Statement"/> AST nodes. Trailing semicolons
+    /// and empty statements between semicolons are silently ignored.
+    /// </summary>
+    /// <param name="sql">The SQL text containing one or more statements.</param>
+    /// <returns>The list of parsed statements in order.</returns>
+    /// <exception cref="ParseException">Thrown when the input cannot be parsed.</exception>
+    public static IReadOnlyList<Statement> ParseBatch(string sql)
+    {
+        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenListParserResult<SqlToken, IReadOnlyList<Statement>> result = FullBatchParser.TryParse(tokens);
 
         if (!result.HasValue)
         {

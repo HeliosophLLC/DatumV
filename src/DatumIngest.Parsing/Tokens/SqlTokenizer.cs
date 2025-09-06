@@ -209,6 +209,25 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("TABLESAMPLE"), SqlToken.Tablesample, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("REPEATABLE"), SqlToken.Repeatable, requireDelimiters: true)
 
+            // DDL / DML keywords
+            .Match(Span.EqualToIgnoreCase("CREATE"), SqlToken.Create, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TABLE"), SqlToken.Table, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TEMPORARY"), SqlToken.Temporary, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TEMP"), SqlToken.Temp, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("DROP"), SqlToken.Drop, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("INSERT"), SqlToken.Insert, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("VALUES"), SqlToken.Values, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("UPDATE"), SqlToken.Update, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("SET"), SqlToken.Set, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("ALTER"), SqlToken.Alter, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("ADD"), SqlToken.Add, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("COLUMN"), SqlToken.Column, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("DEFAULT"), SqlToken.Default, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("IF"), SqlToken.If, requireDelimiters: true)
+
+            // Semicolon statement terminator
+            .Match(Character.EqualTo(';'), SqlToken.Semicolon)
+
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)

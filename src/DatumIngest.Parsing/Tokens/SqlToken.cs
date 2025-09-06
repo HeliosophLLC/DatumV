@@ -221,6 +221,50 @@ public enum SqlToken
     /// <summary>The REPEATABLE keyword (deterministic sampling seed).</summary>
     Repeatable,
 
+    // ───────────────────── DDL / DML Keywords ─────────────────────
+
+    /// <summary>The CREATE keyword (DDL table creation).</summary>
+    Create,
+
+    /// <summary>The TABLE keyword (DDL table reference).</summary>
+    Table,
+
+    /// <summary>The TEMP keyword (temporary table modifier).</summary>
+    Temp,
+
+    /// <summary>The TEMPORARY keyword (temporary table modifier, synonym for TEMP).</summary>
+    Temporary,
+
+    /// <summary>The DROP keyword (DDL table removal).</summary>
+    Drop,
+
+    /// <summary>The INSERT keyword (DML row insertion).</summary>
+    Insert,
+
+    /// <summary>The VALUES keyword (DML literal row values).</summary>
+    Values,
+
+    /// <summary>The UPDATE keyword (DML row mutation).</summary>
+    Update,
+
+    /// <summary>The SET keyword (UPDATE assignment list).</summary>
+    Set,
+
+    /// <summary>The ALTER keyword (DDL table modification).</summary>
+    Alter,
+
+    /// <summary>The ADD keyword (ALTER TABLE column addition).</summary>
+    Add,
+
+    /// <summary>The COLUMN keyword (ALTER TABLE column specifier).</summary>
+    Column,
+
+    /// <summary>The DEFAULT keyword (column default value).</summary>
+    Default,
+
+    /// <summary>The IF keyword (conditional DDL guard).</summary>
+    If,
+
     // ───────────────────── Identifiers & Literals ─────────────────────
 
     /// <summary>An unquoted or double-quoted identifier (table or column name).</summary>
@@ -287,4 +331,7 @@ public enum SqlToken
 
     /// <summary>A named parameter placeholder such as <c>$threshold</c>.</summary>
     Parameter,
+
+    /// <summary>The ; (semicolon) statement terminator.</summary>
+    Semicolon,
 }

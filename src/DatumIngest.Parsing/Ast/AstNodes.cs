@@ -690,3 +690,119 @@ public sealed record CompoundQueryExpression(
     int? Limit = null,
     int? Offset = null,
     IntoClause? Into = null) : QueryExpression;
+
+// ───────────────────── Statement hierarchy ─────────────────────
+
+/// <summary>
+/// Base type for all executable statements. A statement is either a query
+/// (<see cref="QueryStatement"/>) or a DDL/DML command.
+/// </summary>
+public abstract record Statement;
+
+/// <summary>
+/// A statement that executes a query expression and returns rows.
+/// </summary>
+/// <param name="Query">The query expression to execute.</param>
+public sealed record QueryStatement(QueryExpression Query) : Statement;
+
+/// <summary>
+/// <c>CREATE TEMP TABLE name (col type, ...)</c> — creates a temporary table
+/// with an explicit column definition list.
+/// </summary>
+/// <param name="TableName">The name of the temporary table to create.</param>
+/// <param name="Columns">The column definitions (name and type pairs).</param>
+/// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the table already exists.</param>
+public sealed record CreateTempTableStatement(
+    string TableName,
+    IReadOnlyList<ColumnDefinition> Columns,
+    bool IfNotExists = false) : Statement;
+
+/// <summary>
+/// A single column definition within a <c>CREATE TABLE</c> statement.
+/// </summary>
+/// <param name="Name">The column name.</param>
+/// <param name="TypeName">The SQL type name (resolved to a <c>DataKind</c> at execution time).</param>
+/// <param name="Nullable">Whether the column accepts NULL values. Defaults to <see langword="true"/>.</param>
+public sealed record ColumnDefinition(string Name, string TypeName, bool Nullable = true);
+
+/// <summary>
+/// <c>CREATE TEMP TABLE name AS SELECT ...</c> — creates a temporary table
+/// populated from a query.
+/// </summary>
+/// <param name="TableName">The name of the temporary table to create.</param>
+/// <param name="Query">The query whose results populate the table.</param>
+/// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the table already exists.</param>
+public sealed record CreateTempTableAsSelectStatement(
+    string TableName,
+    QueryExpression Query,
+    bool IfNotExists = false) : Statement;
+
+/// <summary>
+/// <c>DROP TABLE [IF EXISTS] name</c> — removes a temporary table.
+/// </summary>
+/// <param name="TableName">The name of the table to drop.</param>
+/// <param name="IfExists">When <see langword="true"/>, suppresses errors if the table does not exist.</param>
+public sealed record DropTableStatement(
+    string TableName,
+    bool IfExists = false) : Statement;
+
+/// <summary>
+/// <c>INSERT INTO name SELECT ...</c> — inserts rows from a query into an existing table.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="ColumnNames">Optional explicit column list. When <see langword="null"/>, all columns in declaration order.</param>
+/// <param name="Source">The source of rows: either a <see cref="QueryExpression"/> or an <see cref="InsertValuesSource"/>.</param>
+public sealed record InsertStatement(
+    string TableName,
+    IReadOnlyList<string>? ColumnNames,
+    InsertSource Source) : Statement;
+
+/// <summary>
+/// Base type for the source of rows in an INSERT statement.
+/// </summary>
+public abstract record InsertSource;
+
+/// <summary>
+/// Rows sourced from a query expression (<c>INSERT INTO t SELECT ...</c>).
+/// </summary>
+/// <param name="Query">The query providing the rows.</param>
+public sealed record InsertQuerySource(QueryExpression Query) : InsertSource;
+
+/// <summary>
+/// Rows sourced from literal VALUES clauses (<c>INSERT INTO t VALUES (1, 'a'), (2, 'b')</c>).
+/// </summary>
+/// <param name="Rows">The literal row values.</param>
+public sealed record InsertValuesSource(IReadOnlyList<IReadOnlyList<Expression>> Rows) : InsertSource;
+
+/// <summary>
+/// <c>UPDATE name SET col = expr [, ...] [WHERE ...]</c> — updates rows in a table.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="Assignments">The column assignment list.</param>
+/// <param name="Where">Optional filter predicate restricting which rows are updated.</param>
+public sealed record UpdateStatement(
+    string TableName,
+    IReadOnlyList<ColumnAssignment> Assignments,
+    Expression? Where = null) : Statement;
+
+/// <summary>
+/// A single <c>column = expression</c> assignment in an UPDATE SET clause.
+/// </summary>
+/// <param name="ColumnName">The column being assigned.</param>
+/// <param name="Value">The expression to evaluate for the new value.</param>
+public sealed record ColumnAssignment(string ColumnName, Expression Value);
+
+/// <summary>
+/// <c>ALTER TABLE name ADD [COLUMN] col type [DEFAULT expr]</c> — adds a column to a table.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+/// <param name="ColumnName">The name of the column to add.</param>
+/// <param name="TypeName">The SQL type name of the new column.</param>
+/// <param name="DefaultValue">Optional default value expression for existing rows.</param>
+/// <param name="Nullable">Whether the new column accepts NULL values.</param>
+public sealed record AlterTableAddColumnStatement(
+    string TableName,
+    string ColumnName,
+    string TypeName,
+    Expression? DefaultValue = null,
+    bool Nullable = true) : Statement;
