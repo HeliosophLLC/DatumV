@@ -1,0 +1,8 @@
+{
+    "files.watcherExclude": {
+        "**/BenchmarkDotNet.Artifacts/**": true,
+        "**/bin/**": true,
+        "**/obj/**": true,
+        "**/traces/**": true
+    }
+}
