@@ -14,8 +14,13 @@ service DatumCompute {
   // Destroys a session and frees associated resources.
   rpc DestroySession (DestroySessionRequest) returns (DestroySessionResponse);
 
-  // Executes a SQL query and streams result rows back.
-  rpc Query (QueryRequest) returns (stream QueryRow);
+  // Executes one or more semicolon-separated SQL statements and streams
+  // results back. DDL/DML statements produce a single StatementEffect each;
+  // query statements produce a stream of QueryResultRow messages (the first
+  // carries the schema). All results are tagged with the originating
+  // statement's zero-based index. On failure the stream ends with a gRPC
+  // error status and no further statements execute.
+  rpc Query (QueryRequest) returns (stream QueryResult);
 
   // Returns the schema of a registered table.
   rpc GetSchema (GetSchemaRequest) returns (SchemaResponse);
@@ -111,22 +116,47 @@ message QueryRequest {
   map<string, DataValueMessage> parameters = 3;
 }
 
-// Each streamed message contains one result row. The first message
-// also carries the schema so clients can interpret the values.
-message QueryRow {
-  // Schema is set only on the first row of the stream.
+// Streamed result message. Each message is either a row from a query
+// statement or an effect summary from a DDL/DML statement, tagged with
+// the originating statement's index in the batch.
+message QueryResult {
+  // Zero-based index of the statement in the parsed batch that produced
+  // this result. For single-statement SQL this is always 0.
+  int32 statement_index = 1;
+
+  // Running total of Query Units consumed across all statements so far.
+  // The value on the last message is the definitive cost for the batch.
+  int64 query_units = 2;
+
+  // Server-assigned identifier for the entire batch execution.
+  string query_id = 3;
+
+  oneof result {
+    // A row from a query (SELECT) statement.
+    QueryResultRow row = 4;
+
+    // Effect summary from a DDL/DML statement.
+    StatementEffect effect = 5;
+  }
+}
+
+// A single result row from a query statement.
+message QueryResultRow {
+  // Schema for this statement's result set. Set only on the first row
+  // of each query statement in the batch.
   SchemaMessage schema = 1;
 
   // One value per column, in schema order.
   repeated DataValueMessage values = 2;
+}
 
-  // Running total of Query Units consumed so far. The value on the
-  // last row of the stream is the definitive cost for the query.
-  int64 query_units = 3;
+// Effect summary produced by a DDL/DML statement.
+message StatementEffect {
+  // Number of rows affected by the statement (0 for DDL).
+  int64 affected_rows = 1;
 
-  // Server-assigned query identifier. Present on every row so that
-  // clients can correlate responses when running concurrent queries.
-  string query_id = 4;
+  // Human-readable summary of the operation.
+  string message = 2;
 }
 
 // ───────────────────── Schema & Catalog ─────────────────────

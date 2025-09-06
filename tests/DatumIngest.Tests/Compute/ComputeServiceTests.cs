@@ -528,7 +528,7 @@ public sealed class ComputeServiceTests : IDisposable
 
         // Writer that cancels the session after the first row is written,
         // simulating a concurrent CancelQuery call.
-        CancellingStreamWriter<QueryRow> writer = new(session, cancelAfterRow: 1);
+        CancellingStreamWriter<QueryResult> writer = new(session, cancelAfterRow: 1);
 
         RpcException exception = await Assert.ThrowsAsync<RpcException>(
             () => _service.Query(queryRequest, writer, TestCallContext.Create()));
@@ -562,7 +562,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
 
         // The gRPC call token is already cancelled, so the dispatcher
         // catches the OperationCanceledException and returns an error
@@ -595,7 +595,7 @@ public sealed class ComputeServiceTests : IDisposable
 
         // Writer that cancels the session after the first row is written,
         // simulating a mid-stream KillQuery from another session.
-        CancellingStreamWriter<QueryRow> writer = new(session, cancelAfterRow: 1);
+        CancellingStreamWriter<QueryResult> writer = new(session, cancelAfterRow: 1);
 
         RpcException exception = await Assert.ThrowsAsync<RpcException>(
             () => _service.Query(request, writer, TestCallContext.Create()));
@@ -610,7 +610,7 @@ public sealed class ComputeServiceTests : IDisposable
     // ─────────────────── Query ID ───────────────────
 
     /// <summary>
-    /// Every streamed QueryRow includes a server-assigned query identifier.
+    /// Every streamed QueryResult includes a server-assigned query identifier.
     /// </summary>
     [Fact]
     public async Task Query_StreamedRows_ContainQueryId()
@@ -627,7 +627,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
         await _service.Query(request, writer, TestCallContext.Create());
 
         Assert.True(writer.Messages.Count > 0);
@@ -850,7 +850,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
 
         RpcException exception = await Assert.ThrowsAsync<RpcException>(
             () => _service.Query(request, writer, TestCallContext.Create()));
@@ -882,7 +882,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
         await _service.Query(request, writer, TestCallContext.Create());
 
         Assert.True(writer.Messages.Count > 0);
@@ -908,7 +908,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
         await _service.Query(request, writer, TestCallContext.Create());
 
         Assert.True(writer.Messages.Count > 0);
@@ -964,7 +964,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
         await _service.Query(request, writer, TestCallContext.Create());
 
         Assert.True(writer.Messages.Count > 0);
@@ -994,7 +994,7 @@ public sealed class ComputeServiceTests : IDisposable
             Sql = "SELECT * FROM data",
         };
 
-        CapturingStreamWriter<QueryRow> writer = new();
+        CapturingStreamWriter<QueryResult> writer = new();
 
         RpcException exception = await Assert.ThrowsAsync<RpcException>(
             () => _service.Query(request, writer, TestCallContext.Create()));

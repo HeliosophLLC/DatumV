@@ -198,24 +198,40 @@ Destroys a session and frees associated resources.
 
 #### Query (server-streaming)
 
-Executes a SQL query and streams result rows back. The first `QueryRow` message includes the schema; subsequent messages carry only values.
+Executes one or more semicolon-separated SQL statements and streams results back. Each statement in the batch produces either `QueryResultRow` messages (for `SELECT` queries) or a single `StatementEffect` message (for DDL/DML statements like `CREATE TEMP TABLE`, `INSERT`, `UPDATE`, `ALTER`, `DROP`). All results are tagged with the originating statement's zero-based index. On failure the stream ends with a gRPC error status and no further statements execute (fail-fast).
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID. |
-| `sql` | `string` | SQL query to execute. |
-| `parameters` | `map<string, DataValueMessage>` | Named parameter bindings for `$name` placeholders in the query. Keys are parameter names without the `$` prefix. Values are typed `DataValueMessage` instances. Empty map if the query has no parameters. |
+| `sql` | `string` | One or more semicolon-separated SQL statements. |
+| `parameters` | `map<string, DataValueMessage>` | Named parameter bindings for `$name` placeholders. Keys are parameter names without the `$` prefix. Values are typed `DataValueMessage` instances. Empty map if no parameters. Parameters are shared across all statements in the batch. |
 
-**Stream response (`QueryRow`):**
+**Stream response (`QueryResult`):**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schema` | `SchemaMessage` | Set on the first row only. Column names, kinds, and nullability. |
-| `values` | `repeated DataValueMessage` | One value per column, in schema order. |
-| `query_units` | `int64` | Running total of Query Units consumed by function invocations. The value on the last row is the definitive cost for the query. |
-| `query_id` | `string` | Server-assigned query identifier (GUID). Present on every row so clients can correlate responses when running concurrent queries on the same session. |
+| `statement_index` | `int32` | Zero-based index of the statement in the parsed batch that produced this result. Always `0` for single-statement SQL. |
+| `query_units` | `int64` | Running total of Query Units consumed across all statements so far. The value on the last message is the definitive cost for the batch. |
+| `query_id` | `string` | Server-assigned identifier (GUID) for the entire batch execution. Present on every message so clients can correlate responses when running concurrent queries on the same session. |
+| `result` | `oneof` | Either a `QueryResultRow` or a `StatementEffect` (see below). |
 
-**Errors:** `InvalidArgument` on syntax errors or query failures; `NotFound` if the session does not exist.
+**`QueryResultRow`** (for `SELECT` statements):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schema` | `SchemaMessage` | Set on the first row of each query statement in the batch. Column names, kinds, and nullability. |
+| `values` | `repeated DataValueMessage` | One value per column, in schema order. |
+
+**`StatementEffect`** (for DDL/DML statements):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `affected_rows` | `int64` | Number of rows affected by the statement (`0` for DDL). |
+| `message` | `string` | Human-readable summary of the operation. |
+
+**Errors:** `InvalidArgument` on syntax errors or statement failures; `NotFound` if the session does not exist.
+
+**Batch semantics:** All statements in a batch share a single Query Unit meter, a single row budget, and a single memory budget. Parameters are bound into every statement. If any statement fails, the stream ends immediately — subsequent statements are not executed.
 
 **Cancellation:** The stream can be stopped in three ways:
 
@@ -225,7 +241,9 @@ Executes a SQL query and streams result rows back. The first `QueryRow` message 
 
 The server links the gRPC call token, the session-level token, and the per-query token, so any of the three cancellation sources stops the row stream immediately.
 
-**Governance enforcement:** The query streaming loop enforces the session's resource governance limits (see [Resource Governance](#resource-governance) below). A deadline triggers `DeadlineExceeded`, a row budget triggers `ResourceExhausted`, and a throttle delay injects periodic pauses.
+**Governance enforcement:** The query streaming loop enforces the session's resource governance limits (see [Resource Governance](#resource-governance) below). A deadline triggers `DeadlineExceeded`, a row budget triggers `ResourceExhausted`, and a throttle delay injects periodic pauses. All limits are shared across the statements in a batch.
+
+#### Explain
 
 Returns the execution plan for a SQL query without running it.
 
@@ -484,7 +502,7 @@ await connection.Client.AddSourceAsync(
     });
 
 // Stream query results.
-using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
+using AsyncServerStreamingCall<QueryResult> stream = connection.Client.Query(
     new QueryRequest
     {
         SessionId = sessionId,
@@ -497,17 +515,24 @@ using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
 
 SchemaMessage? schema = null;
 
-await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
+await foreach (QueryResult result in stream.ResponseStream.ReadAllAsync())
 {
-    if (row.Schema is not null)
+    if (result.Row is not null)
     {
-        schema = row.Schema;
-        Console.WriteLine(string.Join("\t",
-            schema.Columns.Select(column => column.Name)));
-    }
+        if (result.Row.Schema is not null)
+        {
+            schema = result.Row.Schema;
+            Console.WriteLine(string.Join("\t",
+                schema.Columns.Select(column => column.Name)));
+        }
 
-    Console.WriteLine(string.Join("\t",
-        row.Values.Select(value => value.IsNull ? "NULL" : FormatValue(value))));
+        Console.WriteLine(string.Join("\t",
+            result.Row.Values.Select(value => value.IsNull ? "NULL" : FormatValue(value))));
+    }
+    else if (result.Effect is not null)
+    {
+        Console.WriteLine($"[Statement {result.StatementIndex}] {result.Effect.Message}");
+    }
 }
 
 // Clean up.
@@ -520,12 +545,12 @@ await connection.Client.DestroySessionAsync(
 Dispose the streaming call to stop the server from sending more rows:
 
 ```csharp
-using AsyncServerStreamingCall<QueryRow> stream = connection.Client.Query(
+using AsyncServerStreamingCall<QueryResult> stream = connection.Client.Query(
     new QueryRequest { SessionId = sessionId, Sql = "SELECT * FROM huge_table" });
 
-await foreach (QueryRow row in stream.ResponseStream.ReadAllAsync())
+await foreach (QueryResult result in stream.ResponseStream.ReadAllAsync())
 {
-    if (ShouldStop(row))
+    if (result.Row is not null && ShouldStop(result.Row))
     {
         break; // Exiting the loop disposes the stream, cancelling the server call.
     }
@@ -539,7 +564,7 @@ To cancel the active query on your own session from a separate call
 // Cancel all active queries on the session.
 string message = await connection.CancelActiveQueryAsync(sessionId);
 
-// Or cancel a specific query by its server-assigned ID (from QueryRow.QueryId).
+// Or cancel a specific query by its server-assigned ID (from QueryResult.QueryId).
 string message = await connection.CancelActiveQueryAsync(sessionId, queryId: queryId);
 ```
 
@@ -629,7 +654,7 @@ stub.AddSource(
 )
 
 # Stream query results.
-for row in stub.Query(
+for result in stub.Query(
     datum_compute_pb2.QueryRequest(
         session_id=session_id,
         sql="SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 5",
@@ -637,9 +662,12 @@ for row in stub.Query(
     ),
     metadata=metadata,
 ):
-    if row.schema.columns:
-        print([col.name for col in row.schema.columns])
-    print([v.float32_value if v.HasField("float32_value") else str(v) for v in row.values])
+    if result.HasField("row"):
+        if result.row.schema.columns:
+            print([col.name for col in result.row.schema.columns])
+        print([v.float32_value if v.HasField("float32_value") else str(v) for v in result.row.values])
+    elif result.HasField("effect"):
+        print(f"[Statement {result.statement_index}] {result.effect.message}")
 
 # Clean up.
 stub.DestroySession(
@@ -680,7 +708,7 @@ Each governance field in `CreateSessionRequest` follows three-state semantics:
 
 **Throttle delay (`throttle_delay_ms`):** An artificial pause (in milliseconds) injected every 100 rows during streaming, yielding CPU time to other sessions. Designed for batch export workloads where deadline and row budget are not appropriate. The throttle does not produce an error — it simply slows the stream.
 
-**Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from function invocations (scalar, aggregate, and window). Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-row cost via the `query_units` field on `QueryRow`, and query cumulative session cost via `GetUsage`.
+**Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from function invocations (scalar, aggregate, and window). Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-message cost via the `query_units` field on `QueryResult`, and query cumulative session cost via `GetUsage`.
 
 **Memory budget (`memory_budget_bytes`):** The maximum memory (in bytes) that memory-intensive operators may use before spilling to temporary files on disk. Covered operators:
 

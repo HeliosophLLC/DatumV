@@ -2,6 +2,8 @@ using DatumIngest.Compute.Grpc;
 using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
+using DatumIngest.Parsing;
+using DatumIngest.Parsing.Ast;
 using DatumIngest.Server;
 using Grpc.Core;
 
@@ -93,7 +95,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     /// <inheritdoc />
     public override async Task Query(
         QueryRequest request,
-        IServerStreamWriter<QueryRow> responseStream,
+        IServerStreamWriter<QueryResult> responseStream,
         ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
@@ -127,7 +129,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 linkedTokenSource.CancelAfter(TimeSpan.FromSeconds(governor.QueryTimeoutSeconds.Value));
             }
 
-            // Create a per-query meter for QU cost tracking.
+            // Single meter and memory budget across the entire batch.
             QueryMeter meter = new(governor.MaxQueryUnits);
 
             // Convert gRPC parameter bindings to domain DataValue dictionary.
@@ -141,74 +143,101 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 }
             }
 
-            CommandResult result = await _dispatcher.DispatchAsync(
-                session, request.Sql, cancellationToken, meter, parameters).ConfigureAwait(false);
+            // Parse the SQL as a batch (supports single and multi-statement).
+            IReadOnlyList<Statement> statements = SqlParser.ParseBatch(request.Sql);
+            session.RecordQuery(request.Sql);
 
-            if (!result.IsSuccess)
-            {
-                throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Query failed."));
-            }
-
-            if (result.Kind != CommandResultKind.StreamingRows || result.Rows is null || result.Schema is null)
-            {
-                throw new RpcException(new Status(StatusCode.Internal, "Expected streaming rows result."));
-            }
-
-            bool schemaWritten = false;
-            long rowCount = 0;
+            long totalRowCount = 0;
             long? maxRows = governor.MaxOutputRows;
             int? throttleMilliseconds = governor.ThrottleDelayMilliseconds;
 
             try
             {
-                await foreach (RowBatch batch in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
+                for (int statementIndex = 0; statementIndex < statements.Count; statementIndex++)
                 {
-                    for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    CommandResult result = await _dispatcher.DispatchStatementAsync(
+                        session, statements[statementIndex], cancellationToken, meter, parameters).ConfigureAwait(false);
+
+                    if (!result.IsSuccess)
                     {
-                        Row row = batch[rowIndex];
-                        rowCount++;
+                        throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Statement failed."));
+                    }
 
-                        if (maxRows.HasValue && rowCount > maxRows.Value)
+                    if (result.Kind == CommandResultKind.AffectedRows)
+                    {
+                        // DDL/DML — emit a single effect message.
+                        QueryResult effectMessage = new()
                         {
-                            throw new RpcException(new Status(
-                                StatusCode.ResourceExhausted,
-                                $"Row budget exceeded (limit: {maxRows.Value})."));
-                        }
-
-                        if (meter.IsBudgetExceeded)
-                        {
-                            throw new RpcException(new Status(
-                                StatusCode.ResourceExhausted,
-                                $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
-                        }
-
-                        QueryRow queryRow = new()
-                        {
+                            StatementIndex = statementIndex,
+                            QueryUnits = meter.QueryUnits,
                             QueryId = queryIdString,
+                            Effect = new StatementEffect
+                            {
+                                AffectedRows = result.AffectedRowCount ?? 0,
+                                Message = result.Message ?? "",
+                            },
                         };
+                        await responseStream.WriteAsync(effectMessage, cancellationToken).ConfigureAwait(false);
+                    }
+                    else if (result.Kind == CommandResultKind.StreamingRows && result.Rows is not null && result.Schema is not null)
+                    {
+                        // Query — stream rows with schema on the first row.
+                        bool schemaWritten = false;
 
-                        // Attach schema to the first row only.
-                        if (!schemaWritten)
+                        await foreach (RowBatch batch in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
                         {
-                            queryRow.Schema = ProtoConverter.ToProto(result.Schema);
-                            schemaWritten = true;
-                        }
+                            for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
+                            {
+                                Row row = batch[rowIndex];
+                                totalRowCount++;
 
-                        for (int i = 0; i < row.FieldCount; i++)
-                        {
-                            queryRow.Values.Add(ProtoConverter.ToProto(row[i]));
-                        }
+                                if (maxRows.HasValue && totalRowCount > maxRows.Value)
+                                {
+                                    throw new RpcException(new Status(
+                                        StatusCode.ResourceExhausted,
+                                        $"Row budget exceeded (limit: {maxRows.Value})."));
+                                }
 
-                        queryRow.QueryUnits = meter.QueryUnits;
+                                if (meter.IsBudgetExceeded)
+                                {
+                                    throw new RpcException(new Status(
+                                        StatusCode.ResourceExhausted,
+                                        $"Query Unit budget exceeded (limit: {governor.MaxQueryUnits!.Value}, used: {meter.QueryUnits})."));
+                                }
 
-                        await responseStream.WriteAsync(queryRow, cancellationToken).ConfigureAwait(false);
+                                QueryResultRow queryRow = new();
 
-                        if (throttleMilliseconds.HasValue && rowCount % QueryGovernor.ThrottleBatchSize == 0)
-                        {
-                            await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
+                                if (!schemaWritten)
+                                {
+                                    queryRow.Schema = ProtoConverter.ToProto(result.Schema);
+                                    schemaWritten = true;
+                                }
+
+                                for (int columnIndex = 0; columnIndex < row.FieldCount; columnIndex++)
+                                {
+                                    queryRow.Values.Add(ProtoConverter.ToProto(row[columnIndex]));
+                                }
+
+                                QueryResult rowMessage = new()
+                                {
+                                    StatementIndex = statementIndex,
+                                    QueryUnits = meter.QueryUnits,
+                                    QueryId = queryIdString,
+                                    Row = queryRow,
+                                };
+
+                                await responseStream.WriteAsync(rowMessage, cancellationToken).ConfigureAwait(false);
+
+                                if (throttleMilliseconds.HasValue && totalRowCount % QueryGovernor.ThrottleBatchSize == 0)
+                                {
+                                    await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
+                                }
+                            }
+                            batch.Return();
                         }
                     }
-                    batch.Return();
                 }
             }
             catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
@@ -224,6 +253,11 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
                 throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled."));
             }
+            catch (OperationCanceledException)
+            {
+                // The gRPC call itself was cancelled (client disconnect).
+                throw new RpcException(new Status(StatusCode.Cancelled, "Query cancelled by client."));
+            }
             catch (QueryBudgetExceededException budgetException)
             {
                 throw new RpcException(new Status(
@@ -236,11 +270,9 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             }
             catch (Exception exception)
             {
-                // Surface the real exception so it doesn't get swallowed as
-                // the generic "Exception was thrown by handler" gRPC message.
                 throw new RpcException(new Status(
                     StatusCode.Internal,
-                    $"Query failed at row {rowCount}: {exception.GetType().Name}: {exception.Message}"));
+                    $"Query failed at row {totalRowCount}: {exception.GetType().Name}: {exception.Message}"));
             }
             finally
             {

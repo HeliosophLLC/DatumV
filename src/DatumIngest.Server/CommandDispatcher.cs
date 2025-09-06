@@ -127,6 +127,23 @@ public sealed class CommandDispatcher
 
         Statement statement = SqlParser.ParseStatement(input);
 
+        return await DispatchStatementAsync(session, statement, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Dispatches a pre-parsed statement. Used by <see cref="DispatchSqlAsync"/> for
+    /// single statements and by batch execution for iterating parsed statement lists.
+    /// </summary>
+    /// <param name="session">The session issuing the command.</param>
+    /// <param name="statement">The parsed statement to execute.</param>
+    /// <param name="cancellationToken">Cancellation token for this operation.</param>
+    /// <param name="queryMeter">Optional meter for accumulating Query Unit costs.</param>
+    /// <param name="parameters">Optional named parameter bindings.</param>
+    /// <returns>The result of the statement execution.</returns>
+    internal async Task<CommandResult> DispatchStatementAsync(
+        Session session, Statement statement, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
+        IReadOnlyDictionary<string, DataValue>? parameters = null)
+    {
         // DDL/DML statements are routed to the statement executor.
         if (statement is not QueryStatement queryStatement)
         {
