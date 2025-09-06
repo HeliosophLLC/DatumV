@@ -39,6 +39,9 @@ public sealed class CommandResult
     /// <summary>Gets session information for <see cref="CommandResultKind.SessionList"/> results.</summary>
     public IReadOnlyList<SessionInfo>? Sessions { get; private init; }
 
+    /// <summary>Gets the number of rows affected by a DDL/DML statement, or <c>null</c> for non-DML results.</summary>
+    public long? AffectedRowCount { get; private init; }
+
     /// <summary>Gets the structured explain plan tree for <see cref="CommandResultKind.Success"/> explain results.</summary>
     public ExplainPlanNode? ExplainPlan { get; private init; }
 
@@ -81,6 +84,13 @@ public sealed class CommandResult
     public static CommandResult SessionList(IReadOnlyList<SessionInfo> sessions) =>
         new(CommandResultKind.SessionList) { Sessions = sessions };
 
+    /// <summary>Creates a DDL/DML affected-rows result.</summary>
+    /// <param name="affectedRows">Number of rows affected by the statement.</param>
+    /// <param name="message">Human-readable summary of the operation.</param>
+    /// <returns>An affected-rows result.</returns>
+    public static CommandResult AffectedRows(long affectedRows, string message) =>
+        new(CommandResultKind.AffectedRows) { AffectedRowCount = affectedRows, Message = message };
+
     /// <summary>Creates a success result that also carries a structured explain plan.</summary>
     /// <param name="planText">Human-readable rendered plan text.</param>
     /// <param name="explainPlan">The structured explain plan tree.</param>
@@ -114,6 +124,9 @@ public enum CommandResultKind
 
     /// <summary>A list of active sessions; check <see cref="CommandResult.Sessions"/>.</summary>
     SessionList,
+
+    /// <summary>DDL/DML statement completed; check <see cref="CommandResult.AffectedRowCount"/> and <see cref="CommandResult.Message"/>.</summary>
+    AffectedRows,
 }
 
 /// <summary>

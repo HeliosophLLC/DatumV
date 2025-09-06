@@ -125,7 +125,16 @@ public sealed class CommandDispatcher
 
         session.RecordQuery(input);
 
-        QueryExpression query = SqlParser.Parse(input);
+        Statement statement = SqlParser.ParseStatement(input);
+
+        // DDL/DML statements are routed to the statement executor.
+        if (statement is not QueryStatement queryStatement)
+        {
+            StatementExecutor executor = new(session, _parallelismBudget);
+            return await executor.ExecuteAsync(statement, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
+        }
+
+        QueryExpression query = queryStatement.Query;
 
         // Bind named parameters ($name) to concrete literal values before planning.
         if (parameters is not null && parameters.Count > 0)

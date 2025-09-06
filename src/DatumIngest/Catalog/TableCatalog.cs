@@ -89,6 +89,27 @@ public sealed class TableCatalog : IDisposable
     }
 
     /// <summary>
+    /// Removes a previously registered table from the catalog, cleaning up any
+    /// associated schemas, indexes, manifests, and pending sidecar references.
+    /// </summary>
+    /// <param name="tableName">The logical table name to remove.</param>
+    /// <returns><see langword="true"/> if the table was found and removed; otherwise <see langword="false"/>.</returns>
+    public bool Unregister(string tableName)
+    {
+        bool removed = _descriptors.Remove(tableName);
+
+        if (removed)
+        {
+            _schemas.Remove(tableName);
+            _indexes.Remove(tableName);
+            _manifests.Remove(tableName);
+            _pendingIndexSidecarPaths.Remove(tableName);
+        }
+
+        return removed;
+    }
+
+    /// <summary>
     /// Registers a table from a file path, using the full filename (including
     /// extension) as the table name and auto-detecting the provider.
     /// </summary>
