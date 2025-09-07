@@ -37,6 +37,24 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     public override async Task<CreateSessionResponse> CreateSession(
         CreateSessionRequest request, ServerCallContext context)
     {
+        // Reconnect path: broker passes the previous session ID on client reconnect.
+        // If the session is still within its grace period, cancel the expiry and return it.
+        if (!string.IsNullOrEmpty(request.ReconnectSessionId)
+            && Guid.TryParse(request.ReconnectSessionId, out Guid reconnectId))
+        {
+            Session? existing = _sessionManager.GetSession(reconnectId);
+            if (existing is not null)
+            {
+                _sessionManager.CancelSessionExpiry(reconnectId);
+                return new CreateSessionResponse
+                {
+                    SessionId = existing.SessionId.ToString(),
+                    Reconnected = true,
+                };
+            }
+            // Grace period elapsed — session was already swept. Fall through to create a new one.
+        }
+
         SessionRole role = ParseRole(request.Role);
         QueryGovernor governor = QueryGovernor.Merge(
             _serverDefaults,
@@ -75,8 +93,15 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         return new CreateSessionResponse
         {
             SessionId = session.SessionId.ToString(),
+            Reconnected = false,
         };
     }
+
+    /// <summary>
+    /// Grace period for deferred session destruction. Sessions remain accessible
+    /// to reconnecting clients until this window elapses after <see cref="DestroySession"/>.
+    /// </summary>
+    private static readonly TimeSpan DefaultExpiryGrace = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
     public override Task<DestroySessionResponse> DestroySession(
@@ -84,7 +109,11 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     {
         Guid sessionId = ParseSessionId(request.SessionId);
 
-        if (!_sessionManager.RemoveSession(sessionId))
+        try
+        {
+            _sessionManager.BeginSessionExpiry(sessionId, DefaultExpiryGrace);
+        }
+        catch (InvalidOperationException)
         {
             throw new RpcException(new Status(StatusCode.NotFound, $"Session '{request.SessionId}' not found."));
         }

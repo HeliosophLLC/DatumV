@@ -24,6 +24,69 @@ app.MapDatumCompute();
 app.Run();
 ```
 
+### With Session Expiry (SignalR / Broker Deployments)
+
+When a SignalR hub (or another out-of-process broker) sits in front of the compute backend, clients lose their gRPC-side session on every redeploy or transient network blip. Without intervention those sessions — and their temp tables — are immediately destroyed.
+
+The session expiry grace period defers destruction by a configurable window (default **30 seconds**). When a client disconnects, the broker calls `DestroySession` as it always has — the compute backend now starts the grace period rather than immediately freeing the session. On reconnect, the broker calls `CreateSession` with `reconnect_session_id` set to the previous session ID; if the session is still within its grace window the backend reclaims it and returns `reconnected: true`. Any session not reclaimed within the grace window is swept by a background timer.
+
+```csharp
+using DatumIngest.Compute;
+
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDatumCompute(options =>
+{
+    options.ApiKey = "my-secret-key";
+});
+
+// Register the background sweep timer (checks every 10 seconds by default).
+builder.Services.AddSessionExpiryTimer();
+
+WebApplication app = builder.Build();
+
+app.MapDatumCompute();
+app.Run();
+```
+
+The check interval is configurable:
+
+```csharp
+// Check every 5 seconds for faster cleanup in high-churn deployments.
+builder.Services.AddSessionExpiryTimer(checkInterval: TimeSpan.FromSeconds(5));
+```
+
+The broker signals a disconnect by calling `DestroySession` — the session enters a 30-second grace period:
+
+```csharp
+// On SignalR OnDisconnectedAsync — signal disconnect; backend starts the grace period.
+await connection.Client.DestroySessionAsync(
+    new DestroySessionRequest { SessionId = sessionId });
+```
+
+On reconnect, pass the previous session ID to `CreateSession`. The backend reclaims the session if it is still within the grace window:
+
+```csharp
+// On SignalR OnConnectedAsync — try to reclaim the previous session.
+CreateSessionResponse response = await connection.Client.CreateSessionAsync(
+    new CreateSessionRequest
+    {
+        Role = "user",
+        ReconnectSessionId = previousSessionId, // empty string on first connect
+    });
+
+if (response.Reconnected)
+{
+    // Existing session reclaimed — temp tables and state are intact.
+    sessionId = response.SessionId;
+}
+else
+{
+    // Grace period elapsed — a new session was created.
+    sessionId = response.SessionId;
+}
+```
+
 ### With a Custom Dataset Store
 
 The compute backend optionally depends on `IDatasetStore` (defined in `DatumIngest.Server`) for pulling remote datasets into sessions. Register your implementation **before** calling `AddDatumCompute`:
@@ -175,8 +238,14 @@ Creates a new session on the compute backend.
 | `max_query_units` | `int64` | Per-session QU budget override. `0` = server default, positive = override, negative = disable. |
 | `memory_budget_bytes` | `int64` | Per-session memory budget for spill-to-disk operators (joins, ORDER BY, GROUP BY, DISTINCT, PIVOT, INTERSECT/EXCEPT, materialised CTEs). `0` = server default, positive = override (bytes), negative = disable (all in-memory). |
 | `max_concurrent_queries` | `int32` | Maximum concurrent queries on this session. `0` = server default (3), positive = override, negative = disable (unlimited). |
+| `reconnect_session_id` | `string` | Optional. Session GUID to reclaim after a transient disconnect. When set and the session is still within its grace period, the server returns the existing session rather than creating a new one. See [With Session Expiry](#with-session-expiry-signalr--broker-deployments). |
 
-**Returns:** `session_id` — a GUID identifying the session for all subsequent calls.
+**Returns:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | GUID identifying the session for all subsequent calls. |
+| `reconnected` | `bool` | `true` when `reconnect_session_id` was provided and the existing session was successfully reclaimed; `false` when a new session was created. |
 
 When `dataset_id` is provided, the backend pulls the dataset to local storage and auto-discovers all supported files (CSV, JSON, JSONL, Parquet, HDF5, ZIP, IDX) in the resulting directory. Each file becomes a table named after its filename without extension. Sidecar `.datum-index`, `.datum-manifest`, and `.datum-schema` files are also discovered automatically via `catalog.DiscoverSidecars()`, enabling chunk pruning, manifest-driven cardinality estimation, and cached schema resolution for all sessions created from the dataset. If no `IDatasetStore` is registered, passing a non-empty `dataset_id` returns `FailedPrecondition`.
 
@@ -186,13 +255,15 @@ When `dataset_id` is provided, the backend pulls the dataset to local storage an
 
 #### DestroySession
 
-Destroys a session and frees associated resources.
+Begins a 30-second grace period for the session rather than immediately freeing it. The session remains fully accessible during the grace window — a reconnecting client can reclaim it by calling `CreateSession` with `reconnect_session_id`. Any session not reclaimed within the grace period is swept by the background timer registered via `AddSessionExpiryTimer`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session_id` | `string` | Session GUID to destroy. |
+| `session_id` | `string` | Session GUID to begin expiry for. |
 
 **Errors:** `NotFound` if the session does not exist; `InvalidArgument` if the GUID is malformed.
+
+> **Note:** The deferred sweep only occurs if `AddSessionExpiryTimer` was called during host setup. Without the background timer, sessions in their grace period remain live indefinitely.
 
 ### Query Execution
 

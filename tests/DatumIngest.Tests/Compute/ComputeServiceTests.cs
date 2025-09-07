@@ -135,17 +135,44 @@ public sealed class ComputeServiceTests : IDisposable
     // ─────────────────── DestroySession ───────────────────
 
     /// <summary>
-    /// DestroySession removes an existing session.
+    /// DestroySession starts the grace period rather than immediately freeing the session.
+    /// The session must still be accessible for the duration of the grace window.
     /// </summary>
     [Fact]
-    public async Task DestroySession_ExistingSession_RemovesIt()
+    public async Task DestroySession_ExistingSession_StartsGracePeriod()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
         DestroySessionRequest request = new() { SessionId = session.SessionId.ToString() };
 
         await _service.DestroySession(request, TestCallContext.Create());
 
-        Assert.Null(_sessionManager.GetSession(session.SessionId));
+        // Session is still accessible — it is within its grace period, not yet destroyed.
+        Assert.NotNull(_sessionManager.GetSession(session.SessionId));
+    }
+
+    /// <summary>
+    /// CreateSession with a valid reconnect_session_id for a session in its grace period
+    /// returns the existing session without allocating a new one.
+    /// </summary>
+    [Fact]
+    public async Task CreateSession_WithValidReconnectId_WithinGrace_ReturnsExistingSession()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        Guid id = session.SessionId;
+
+        // Simulate DestroySession starting the grace period.
+        _sessionManager.BeginSessionExpiry(id, TimeSpan.FromSeconds(30));
+
+        CreateSessionRequest request = new()
+        {
+            Role = "user",
+            ReconnectSessionId = id.ToString(),
+        };
+
+        CreateSessionResponse response = await _service.CreateSession(request, TestCallContext.Create());
+
+        Assert.True(response.Reconnected);
+        Assert.Equal(id.ToString(), response.SessionId);
     }
 
     /// <summary>

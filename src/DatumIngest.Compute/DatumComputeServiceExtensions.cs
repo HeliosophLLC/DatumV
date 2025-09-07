@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace DatumIngest.Compute;
 
@@ -119,5 +120,32 @@ public static class DatumComputeServiceExtensions
         this IEndpointRouteBuilder endpoints)
     {
         return endpoints.MapGrpcService<ComputeService>();
+    }
+
+    /// <summary>
+    /// Registers <see cref="SessionExpiryTimer"/> as an <see cref="IHostedService"/> so
+    /// that it starts and stops with the application lifetime. Only call this when
+    /// SignalR (or another broker) manages client sessions and needs the grace-period
+    /// sweep to reclaim sessions after transient disconnects.
+    /// </summary>
+    /// <param name="services">The service collection to add to.</param>
+    /// <param name="checkInterval">
+    /// How often the sweep timer checks for expired sessions.
+    /// Defaults to 10 seconds when <see langword="null"/>.
+    /// </param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddSessionExpiryTimer(
+        this IServiceCollection services,
+        TimeSpan? checkInterval = null)
+    {
+        TimeSpan interval = checkInterval ?? TimeSpan.FromSeconds(10);
+
+        services.AddSingleton<IHostedService>(provider =>
+        {
+            SessionManager sessionManager = provider.GetRequiredService<SessionManager>();
+            return new SessionExpiryTimerHostedService(sessionManager, interval);
+        });
+
+        return services;
     }
 }

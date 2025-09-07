@@ -13,8 +13,16 @@ public sealed class SessionManager
 {
     private readonly ConcurrentDictionary<Guid, Session> _sessions = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _datasetLastAccess = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Tracks sessions that are pending expiry, mapping session ID to the
+    /// absolute deadline after which the session may be destroyed.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _pendingExpiry = new();
+
     private readonly FunctionRegistry _functionRegistry;
     private readonly IDatasetStore? _datasetStore;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new session manager.
@@ -24,10 +32,18 @@ public sealed class SessionManager
     /// Optional dataset store for pulling remote datasets. Pass <see langword="null"/>
     /// for local/shell mode where catalogs are built directly.
     /// </param>
-    public SessionManager(FunctionRegistry functionRegistry, IDatasetStore? datasetStore = null)
+    /// <param name="timeProvider">
+    /// Clock abstraction used to evaluate expiry deadlines. Defaults to
+    /// <see cref="TimeProvider.System"/> when <see langword="null"/>.
+    /// </param>
+    public SessionManager(
+        FunctionRegistry functionRegistry,
+        IDatasetStore? datasetStore = null,
+        TimeProvider? timeProvider = null)
     {
         _functionRegistry = functionRegistry;
         _datasetStore = datasetStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -62,7 +78,7 @@ public sealed class SessionManager
 
         Session session = new(role, datasetId, catalog, _functionRegistry, governor);
         _sessions[session.SessionId] = session;
-        _datasetLastAccess[datasetId] = DateTimeOffset.UtcNow;
+        _datasetLastAccess[datasetId] = _timeProvider.GetUtcNow();
 
         return session;
     }
@@ -125,7 +141,7 @@ public sealed class SessionManager
     /// <param name="datasetId">The dataset identifier.</param>
     internal void TouchDataset(string datasetId)
     {
-        _datasetLastAccess[datasetId] = DateTimeOffset.UtcNow;
+        _datasetLastAccess[datasetId] = _timeProvider.GetUtcNow();
     }
 
     /// <summary>
@@ -136,7 +152,7 @@ public sealed class SessionManager
     /// <returns>Dataset identifiers eligible for eviction.</returns>
     internal IReadOnlyList<string> GetEvictableDatasets(TimeSpan cooldown)
     {
-        DateTimeOffset cutoff = DateTimeOffset.UtcNow - cooldown;
+        DateTimeOffset cutoff = _timeProvider.GetUtcNow() - cooldown;
 
         // Build the set of datasets that still have active sessions.
         HashSet<string> activeDatasets = new(StringComparer.OrdinalIgnoreCase);
@@ -167,5 +183,59 @@ public sealed class SessionManager
     internal void ClearDatasetTracking(string datasetId)
     {
         _datasetLastAccess.TryRemove(datasetId, out _);
+    }
+
+    /// <summary>
+    /// Marks a session as pending expiry. If the session is not reclaimed before
+    /// <paramref name="grace"/> has elapsed, <see cref="GetExpiredSessions"/> will
+    /// return it and the background sweep can destroy it.
+    /// Calling this again before the deadline resets the deadline.
+    /// </summary>
+    /// <param name="sessionId">The session to schedule for expiry.</param>
+    /// <param name="grace">How long to wait before the session is eligible for destruction.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the session does not exist.</exception>
+    public void BeginSessionExpiry(Guid sessionId, TimeSpan grace)
+    {
+        if (!_sessions.ContainsKey(sessionId))
+        {
+            throw new InvalidOperationException($"Session '{sessionId}' not found.");
+        }
+
+        _pendingExpiry[sessionId] = _timeProvider.GetUtcNow() + grace;
+    }
+
+    /// <summary>
+    /// Cancels a pending expiry so the session is not destroyed by the sweep.
+    /// </summary>
+    /// <param name="sessionId">The session whose expiry should be cancelled.</param>
+    /// <returns>
+    /// <see langword="true"/> if the expiry was pending and has been cancelled;
+    /// <see langword="false"/> if no expiry was scheduled.
+    /// </returns>
+    public bool CancelSessionExpiry(Guid sessionId)
+    {
+        return _pendingExpiry.TryRemove(sessionId, out _);
+    }
+
+    /// <summary>
+    /// Returns all sessions whose expiry deadline has passed. The sessions remain
+    /// in the active dictionary — the caller is responsible for removing them via
+    /// <see cref="RemoveSession"/>.
+    /// </summary>
+    /// <returns>Sessions eligible for destruction.</returns>
+    internal IReadOnlyList<Session> GetExpiredSessions()
+    {
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+        List<Session> expired = new();
+
+        foreach (KeyValuePair<Guid, DateTimeOffset> entry in _pendingExpiry)
+        {
+            if (entry.Value <= now && _sessions.TryGetValue(entry.Key, out Session? session))
+            {
+                expired.Add(session);
+            }
+        }
+
+        return expired;
     }
 }

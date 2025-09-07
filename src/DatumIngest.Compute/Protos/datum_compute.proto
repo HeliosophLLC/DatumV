@@ -11,7 +11,10 @@ service DatumCompute {
   // Creates a new session on the compute backend.
   rpc CreateSession (CreateSessionRequest) returns (CreateSessionResponse);
 
-  // Destroys a session and frees associated resources.
+  // Destroys a session and starts a grace period before resources are freed.
+  // The session remains accessible to reconnecting clients until the grace
+  // period elapses. Pass the previous session_id as reconnect_session_id in
+  // a subsequent CreateSession call to reclaim it.
   rpc DestroySession (DestroySessionRequest) returns (DestroySessionResponse);
 
   // Executes one or more semicolon-separated SQL statements and streams
@@ -92,11 +95,20 @@ message CreateSessionRequest {
   // Maximum number of queries that may execute concurrently on this session.
   // 0 = use server default, positive = override, negative = disable.
   int32 max_concurrent_queries = 8;
+
+  // Optional: session ID to reclaim after a transient disconnect. When set
+  // and the session is still within its grace period, the server returns the
+  // existing session instead of creating a new one.
+  string reconnect_session_id = 9;
 }
 
 message CreateSessionResponse {
   // Unique session identifier for subsequent calls.
   string session_id = 1;
+
+  // True when reconnect_session_id was provided and the existing session was
+  // successfully reclaimed. False when a new session was created.
+  bool reconnected = 2;
 }
 
 message DestroySessionRequest {
