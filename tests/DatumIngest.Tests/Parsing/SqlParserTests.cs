@@ -1333,4 +1333,87 @@ public class SqlParserTests
         Assert.Equal("SUM", func.FunctionName);
         Assert.True(func.Distinct);
     }
+
+    // ──────────────────── WITHIN GROUP ────────────────────
+
+    /// <summary>
+    /// <c>MODE() WITHIN GROUP (ORDER BY col)</c> parses as a FunctionCallExpression
+    /// with the ORDER BY column promoted into the argument list and OrderBy set.
+    /// </summary>
+    [Fact]
+    public void ModeWithinGroup_AscendingOrder_ParsesArgumentAndOrderBy()
+    {
+        SelectStatement result = Parse(
+            "SELECT MODE() WITHIN GROUP (ORDER BY order_hour) FROM orders");
+
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+
+        Assert.Equal("MODE", func.FunctionName);
+        Assert.Single(func.Arguments);
+        ColumnReference arg = Assert.IsType<ColumnReference>(func.Arguments[0]);
+        Assert.Equal("order_hour", arg.ColumnName);
+
+        Assert.NotNull(func.OrderBy);
+        Assert.Single(func.OrderBy);
+        ColumnReference orderCol = Assert.IsType<ColumnReference>(func.OrderBy[0].Expression);
+        Assert.Equal("order_hour", orderCol.ColumnName);
+        Assert.Equal(SortDirection.Ascending, func.OrderBy[0].Direction);
+    }
+
+    /// <summary>
+    /// Descending direction in WITHIN GROUP is preserved.
+    /// </summary>
+    [Fact]
+    public void ModeWithinGroup_DescendingOrder_PreservesDirection()
+    {
+        SelectStatement result = Parse(
+            "SELECT MODE() WITHIN GROUP (ORDER BY score DESC) FROM events");
+
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+
+        Assert.NotNull(func.OrderBy);
+        Assert.Equal(SortDirection.Descending, func.OrderBy[0].Direction);
+    }
+
+    /// <summary>
+    /// WITHIN GROUP works alongside a GROUP BY clause (the typical feature-engineering pattern).
+    /// </summary>
+    [Fact]
+    public void ModeWithinGroup_WithGroupBy_ParsesCorrectly()
+    {
+        SelectStatement result = Parse(
+            "SELECT user_id, MODE() WITHIN GROUP (ORDER BY order_hour) AS preferred_hour FROM orders GROUP BY user_id");
+
+        Assert.Equal(2, result.Columns.Count);
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[1].Expression);
+        Assert.Equal("MODE", func.FunctionName);
+        Assert.Equal("preferred_hour", result.Columns[1].Alias);
+        Assert.NotNull(result.GroupBy);
+        Assert.Single(result.GroupBy.Expressions);
+    }
+
+    /// <summary>
+    /// PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY col) places the ORDER BY expression
+    /// first and the fraction second in the argument list, matching the two-arg API contract.
+    /// </summary>
+    [Fact]
+    public void PercentileDiscWithinGroup_ArgumentOrderIsExpressionThenFraction()
+    {
+        SelectStatement result = Parse(
+            "SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY salary) FROM employees");
+
+        FunctionCallExpression func =
+            Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("PERCENTILE_DISC", func.FunctionName);
+
+        // arg[0] must be the ORDER BY expression (salary), arg[1] the fraction (0.5).
+        Assert.Equal(2, func.Arguments.Count);
+        ColumnReference expr = Assert.IsType<ColumnReference>(func.Arguments[0]);
+        Assert.Equal("salary", expr.ColumnName);
+        LiteralExpression fraction = Assert.IsType<LiteralExpression>(func.Arguments[1]);
+        Assert.Equal(0.5, (double)fraction.Value!);
+    }
 }

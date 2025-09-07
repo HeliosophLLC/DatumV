@@ -3,16 +3,18 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Aggregates;
 
 /// <summary>
-/// Implements <c>PERCENTILE_CONT(expression, fraction)</c>. Computes an arbitrary
-/// percentile of all non-null numeric values using SQL-standard linear interpolation.
+/// Implements <c>PERCENTILE_CONT(expression, fraction)</c> and the ordered-set form
+/// <c>PERCENTILE_CONT(fraction) WITHIN GROUP (ORDER BY expression)</c>.
+/// Computes an arbitrary percentile using SQL-standard linear interpolation.
 /// <para>
-/// Arguments: first is the column expression (Scalar/UInt8), second is the percentile
-/// fraction (Scalar in [0, 1]). The fraction must be constant across all rows in a
-/// group — the value from the first accumulated row is used.
+/// Arguments: first is the column expression (any numeric kind), second is the
+/// percentile fraction (Float32 or Float64, in [0, 1]). The fraction must be
+/// constant across all rows in a group — the value from the first accumulated
+/// row is used.
 /// </para>
 /// <para>
 /// Memory: O(N) per group — all non-null values are collected before the percentile
-/// is computed.
+/// is computed. Returns <see cref="DataKind.Float64"/>.
 /// </para>
 /// </summary>
 public sealed class PercentileContinuousFunction : IAggregateFunction
@@ -32,19 +34,19 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             throw new ArgumentException("PERCENTILE_CONT() requires exactly two arguments: expression and fraction.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        if (!PercentileDiscreteFunction.IsNumericKind(argumentKinds[0]))
         {
             throw new ArgumentException(
                 $"PERCENTILE_CONT() first argument must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not DataKind.Float32)
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.Float64))
         {
             throw new ArgumentException(
-                $"PERCENTILE_CONT() second argument (fraction) must be Scalar, got {argumentKinds[1]}.");
+                $"PERCENTILE_CONT() fraction must be Float32 or Float64, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Float64;
     }
 
     /// <inheritdoc/>
@@ -56,8 +58,8 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
     /// </summary>
     private sealed class PercentileContinuousAccumulator : IAggregateAccumulator
     {
-        private readonly List<float> _values = [];
-        private float _fraction;
+        private readonly List<double> _values = [];
+        private double _fraction;
         private bool _fractionCaptured;
 
         public void Accumulate(ReadOnlySpan<DataValue> arguments)
@@ -65,9 +67,11 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             // Capture the fraction from the first non-null invocation.
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
-                _fraction = arguments[1].AsFloat32();
+                _fraction = arguments[1].Kind == DataKind.Float64
+                    ? arguments[1].AsFloat64()
+                    : arguments[1].AsFloat32();
 
-                if (_fraction < 0f || _fraction > 1f)
+                if (_fraction < 0.0 || _fraction > 1.0)
                 {
                     throw new ArgumentException(
                         $"PERCENTILE_CONT() fraction must be between 0 and 1, got {_fraction}.");
@@ -78,7 +82,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
 
             if (arguments[0].IsNull) return;
 
-            _values.Add(arguments[0].AsFloat32());
+            _values.Add(PercentileDiscreteFunction.ToDouble(arguments[0]));
         }
 
         /// <inheritdoc/>
@@ -100,7 +104,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
             {
                 if (_values.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Float32);
+                    return DataValue.Null(DataKind.Float64);
                 }
 
                 _values.Sort();
@@ -112,11 +116,11 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
 
                 if (lower == upper)
                 {
-                    return DataValue.FromFloat32(_values[lower]);
+                    return DataValue.FromFloat64(_values[lower]);
                 }
 
                 double interpolated = _values[lower] + (_values[upper] - _values[lower]) * (row - lower);
-                return DataValue.FromFloat32((float)interpolated);
+                return DataValue.FromFloat64(interpolated);
             }
         }
 
@@ -124,7 +128,7 @@ public sealed class PercentileContinuousFunction : IAggregateFunction
         public void Reset()
         {
             _values.Clear();
-            _fraction = 0;
+            _fraction = 0.0;
             _fractionCaptured = false;
         }
     }

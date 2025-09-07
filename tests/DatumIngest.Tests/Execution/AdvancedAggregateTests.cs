@@ -73,7 +73,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["PERCENTILE_DISC(x, 0.5)"].AsFloat32());
+        Assert.Equal(3.0, results[0]["PERCENTILE_DISC(x, 0.5)"].AsFloat64());
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(10f, results[0]["result"].AsFloat32());
+        Assert.Equal(10.0, results[0]["result"].AsFloat64());
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(30f, results[0]["result"].AsFloat32());
+        Assert.Equal(30.0, results[0]["result"].AsFloat64());
     }
 
     [Fact]
@@ -176,8 +176,8 @@ public class AdvancedAggregateTests
 
         Assert.Single(results);
         // Must be one of {10, 20, 30, 40}
-        float value = results[0]["result"].AsFloat32();
-        Assert.Contains(value, new[] { 10f, 20f, 30f, 40f });
+        double value = results[0]["result"].AsFloat64();
+        Assert.Contains(value, new[] { 10.0, 20.0, 30.0, 40.0 });
     }
 
     // ─────────────── MODE ───────────────

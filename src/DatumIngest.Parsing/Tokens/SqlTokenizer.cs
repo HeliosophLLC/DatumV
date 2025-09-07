@@ -175,6 +175,7 @@ public static class SqlTokenizer
             // Window function keywords
             .Match(Span.EqualToIgnoreCase("OVER"), SqlToken.Over, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("PARTITION"), SqlToken.Partition, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("WITHIN"), SqlToken.Within, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ROWS"), SqlToken.Rows, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("UNBOUNDED"), SqlToken.Unbounded, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("PRECEDING"), SqlToken.Preceding, requireDelimiters: true)

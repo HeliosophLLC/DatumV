@@ -254,6 +254,7 @@ public static class SqlParser
 
     /// <summary>
     /// Function call: identifier ( [DISTINCT] arg1, arg2, ... [ORDER BY ...] )
+    /// [WITHIN GROUP ( ORDER BY ... )]
     /// [FROM FIRST | FROM LAST] [IGNORE NULLS | RESPECT NULLS] [OVER window_spec]
     /// Must be tried before bare column reference because both start with Identifier.
     /// Supports <c>COUNT(*)</c> by treating a bare <c>*</c> inside the argument list
@@ -263,6 +264,10 @@ public static class SqlParser
     /// functions such as <c>COUNT(DISTINCT col)</c>.
     /// The optional <c>ORDER BY</c> before the closing paren is used by
     /// <c>STRING_AGG(expr, separator ORDER BY expr [ASC|DESC])</c>.
+    /// The optional <c>WITHIN GROUP (ORDER BY ...)</c> clause is used by ordered-set
+    /// aggregates such as <c>MODE() WITHIN GROUP (ORDER BY col)</c>. The ORDER BY
+    /// expressions are promoted into the argument list and also set as the OrderBy
+    /// on the resulting <see cref="FunctionCallExpression"/>.
     /// The optional <c>FROM FIRST</c> / <c>FROM LAST</c> clause controls the search
     /// direction for <c>NTH_VALUE</c>. <c>FIRST</c> and <c>LAST</c> are parsed as
     /// contextual identifiers — they are not reserved keywords.
@@ -279,6 +284,14 @@ public static class SqlParser
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from orderBy in WindowOrderByParser.OptionalOrDefault()
         from close in Token.EqualTo(SqlToken.RightParen)
+        from withinGroup in (
+            from _within in Token.EqualTo(SqlToken.Within)
+            from _group  in Token.EqualTo(SqlToken.Group)
+            from _open   in Token.EqualTo(SqlToken.LeftParen)
+            from items   in WindowOrderByParser
+            from _close  in Token.EqualTo(SqlToken.RightParen)
+            select items
+        ).AsNullable().Try().OptionalOrDefault()
         from fromLast in
             (from _from in Token.EqualTo(SqlToken.From)
              from direction in Token.EqualTo(SqlToken.Identifier)
@@ -297,9 +310,16 @@ public static class SqlParser
              select NullHandling.RespectNulls)
             .Try().OptionalOrDefault()
         from windowSpec in WindowSpecificationParser.OptionalOrDefault()
-        select windowSpec is not null
-            ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
-            : (Expression)new FunctionCallExpression(GetTokenText(name), args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
+        select withinGroup is not null
+            ? (Expression)new FunctionCallExpression(
+                GetTokenText(name),
+                [.. withinGroup.Select(item => item.Expression), .. args],
+                OrderBy: withinGroup,
+                Distinct: distinct.HasValue,
+                Span: ToSpan(name))
+            : windowSpec is not null
+                ? (Expression)new WindowFunctionCallExpression(GetTokenText(name), args, windowSpec, Distinct: distinct.HasValue, NullHandling: nullHandling, FromLast: fromLast, Span: ToSpan(name))
+                : (Expression)new FunctionCallExpression(GetTokenText(name), args, OrderBy: orderBy, Distinct: distinct.HasValue, Span: ToSpan(name));
 
     /// <summary>CAST( expression AS type )</summary>
     private static readonly TokenListParser<SqlToken, Expression> CastCall =

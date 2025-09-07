@@ -497,7 +497,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["PERCENTILE_CONT(x, 0.5)"].AsFloat32(), 0.001f);
+        Assert.Equal(3.0, results[0]["PERCENTILE_CONT(x, 0.5)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -523,7 +523,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(10f, results[0]["P0"].AsFloat32());
+        Assert.Equal(10.0, results[0]["P0"].AsFloat64());
     }
 
     [Fact]
@@ -549,7 +549,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(30f, results[0]["P100"].AsFloat32());
+        Assert.Equal(30.0, results[0]["P100"].AsFloat64());
     }
 
     [Fact]
@@ -577,7 +577,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(1.9f, results[0]["P30"].AsFloat32(), 0.001f);
+        Assert.Equal(1.9, results[0]["P30"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -609,8 +609,8 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(2f, results[0]["Q1"].AsFloat32(), 0.001f);
-        Assert.Equal(4f, results[0]["Q3"].AsFloat32(), 0.001f);
+        Assert.Equal(2.0, results[0]["Q1"].AsFloat64(), 0.001);
+        Assert.Equal(4.0, results[0]["Q3"].AsFloat64(), 0.001);
     }
 
     [Fact]

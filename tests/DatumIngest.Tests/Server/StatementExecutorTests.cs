@@ -1224,4 +1224,89 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(CommandResultKind.Error, result.Kind);
         Assert.Contains("does not exist", result.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ──────────────────── MODE() WITHIN GROUP ────────────────────
+
+    /// <summary>
+    /// MODE() WITHIN GROUP (ORDER BY col) returns the most-frequent value per group.
+    /// </summary>
+    [Fact]
+    public async Task ModeWithinGroup_GroupBy_ReturnsMostFrequentValue()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE orders (user_id INT, order_hour INT)");
+        await ExecuteAsync(
+            "INSERT INTO orders VALUES (1, 8), (1, 9), (1, 9), (1, 8), (1, 9), (2, 14), (2, 14), (2, 18)");
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync(
+            "SELECT user_id, MODE() WITHIN GROUP (ORDER BY order_hour) AS preferred_hour " +
+            "FROM orders GROUP BY user_id ORDER BY user_id"));
+
+        Assert.Equal(2, rows.Count);
+        // user 1: hour 9 appears 3 times, hour 8 appears 2 times
+        Assert.Equal(9, rows[0]["preferred_hour"].AsInt32());
+        // user 2: hour 14 appears 2 times, hour 18 appears 1 time
+        Assert.Equal(14, rows[1]["preferred_hour"].AsInt32());
+    }
+
+    /// <summary>
+    /// MODE() WITHIN GROUP with a single distinct value per group returns that value.
+    /// </summary>
+    [Fact]
+    public async Task ModeWithinGroup_SingleValuePerGroup_ReturnsThatValue()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE events (category STRING, score INT)");
+        await ExecuteAsync("INSERT INTO events VALUES ('A', 5), ('A', 5), ('B', 3)");
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync(
+            "SELECT category, MODE() WITHIN GROUP (ORDER BY score) AS modal_score " +
+            "FROM events GROUP BY category ORDER BY category"));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(5, rows[0]["modal_score"].AsInt32());
+        Assert.Equal(3, rows[1]["modal_score"].AsInt32());
+    }
+
+    /// <summary>
+    /// PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY salary) on a Float64 column returns
+    /// the median observed salary value per department.
+    /// </summary>
+    [Fact]
+    public async Task PercentileDiscWithinGroup_Float64Column_ReturnsMedianSalary()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE employees (department STRING, salary DOUBLE)");
+        await ExecuteAsync(
+            "INSERT INTO employees VALUES " +
+            "('eng', 90000.0), ('eng', 120000.0), ('eng', 80000.0), ('eng', 110000.0), ('eng', 100000.0), " +
+            "('sales', 55000.0), ('sales', 65000.0), ('sales', 60000.0)");
+
+        // eng: sorted {80k,90k,100k,110k,120k} → P50 nearest-rank ceil(0.5*5)-1=2 → 100k
+        // sales: sorted {55k,60k,65k} → P50 ceil(0.5*3)-1=1 → 60k
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync(
+            "SELECT department, PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY salary) AS median_salary " +
+            "FROM employees GROUP BY department ORDER BY department"));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(100000.0, rows[0]["median_salary"].AsFloat64());
+        Assert.Equal(60000.0, rows[1]["median_salary"].AsFloat64());
+    }
+
+    /// <summary>
+    /// PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) interpolates the median salary
+    /// for a Float64 column.
+    /// </summary>
+    [Fact]
+    public async Task PercentileContWithinGroup_Float64Column_InterpolatesMedianSalary()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE staff (dept STRING, salary DOUBLE)");
+        await ExecuteAsync(
+            "INSERT INTO staff VALUES ('a', 10000.0), ('a', 20000.0), ('a', 30000.0), ('a', 40000.0)");
+
+        // {10k, 20k, 30k, 40k} → P50 row = 0.5 * 3 = 1.5, lower=1(20k), upper=2(30k)
+        // interpolated = 20k + (30k - 20k) * 0.5 = 25k
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync(
+            "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) AS p50 FROM staff"));
+
+        Assert.Single(rows);
+        Assert.Equal(25000.0, rows[0]["p50"].AsFloat64(), 0.001);
+    }
 }

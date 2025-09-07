@@ -311,9 +311,12 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 | `STDDEV_SAMP(expr)` | Sample standard deviation (N−1). Returns null for fewer than 2 values. |
 | `STDDEV_POP(expr)` | Population standard deviation (N denominator) of non-null values. |
 | `MEDIAN(expr)` | Median (50th percentile). Averages two middle values for even counts. |
-| `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. |
-| `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an observed value. Fraction in [0, 1]. |
+| `PERCENTILE_CONT(expr, fraction)` | Continuous percentile with linear interpolation. Fraction in [0, 1]. Accepts any numeric kind; returns Float64. |
+| `PERCENTILE_CONT(fraction) WITHIN GROUP (ORDER BY expr [ASC\|DESC])` | SQL standard ordered-set form of `PERCENTILE_CONT`. Equivalent to `PERCENTILE_CONT(expr, fraction)`. |
+| `PERCENTILE_DISC(expr, fraction)` | Discrete percentile (nearest rank). Returns an observed value. Fraction in [0, 1]. Accepts any numeric kind; returns Float64. |
+| `PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY expr [ASC\|DESC])` | SQL standard ordered-set form of `PERCENTILE_DISC`. Equivalent to `PERCENTILE_DISC(expr, fraction)`. |
 | `MODE(expr)` | Most frequently occurring value. Ties broken by first occurrence. |
+| `MODE() WITHIN GROUP (ORDER BY expr [ASC\|DESC])` | Ordered-set form: most frequently occurring value of `expr`, with tie-breaking by insertion order. Picks the same result as `MODE(expr)` — the WITHIN GROUP form is provided for SQL standard parity. |
 | `CORR(y, x)` | Pearson correlation coefficient. Returns value in [−1, 1]. |
 | `COVAR_POP(y, x)` | Population covariance (N denominator). |
 | `COVAR_SAMP(y, x)` | Sample covariance (N−1 denominator). Null for fewer than 2 pairs. |
@@ -338,6 +341,14 @@ SELECT department, MEDIAN(salary) AS median_sal,
 FROM employees
 GROUP BY department
 
+-- Ordered-set form (SQL standard) — equivalent to the two-argument form above.
+-- Works on any numeric column kind (Int32, Int64, Float64, etc.)
+SELECT department,
+       PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY salary) AS median_salary,
+       PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY salary) AS p90_salary
+FROM employees
+GROUP BY department
+
 -- Correlation and covariance between two columns
 SELECT CORR(height, weight) AS r,
        COVAR_SAMP(height, weight) AS cov
@@ -350,6 +361,11 @@ GROUP BY species
 
 -- Most frequent value per group
 SELECT region, MODE(payment_method) AS most_common_payment FROM orders GROUP BY region
+
+-- Same result using the ordered-set (WITHIN GROUP) form — SQL standard syntax
+SELECT user_id, MODE() WITHIN GROUP (ORDER BY order_hour_of_day) AS preferred_hour
+FROM orders
+GROUP BY user_id
 
 -- Concatenate labels per group
 SELECT category, STRING_AGG(name, ', ' ORDER BY name ASC) AS items

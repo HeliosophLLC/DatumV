@@ -146,6 +146,9 @@ public enum SqlToken
     /// <summary>The PARTITION keyword (window partitioning).</summary>
     Partition,
 
+    /// <summary>The WITHIN keyword (ordered-set aggregate syntax: WITHIN GROUP).</summary>
+    Within,
+
     /// <summary>The ROWS keyword (window frame type).</summary>
     Rows,
 
