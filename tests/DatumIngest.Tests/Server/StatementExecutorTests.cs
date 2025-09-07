@@ -511,6 +511,200 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(2, result.AffectedRowCount);
     }
 
+    /// <summary>
+    /// UPDATE with an expression assignment evaluates the expression for each row.
+    /// </summary>
+    [Fact]
+    public async Task Update_ExpressionAssignment_EvaluatesPerRow()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE scores (id INT, score DOUBLE)");
+        await ExecuteAsync("INSERT INTO scores VALUES (1, 10.0), (2, 20.0)");
+
+        CommandResult updateResult = await ExecuteAsync("UPDATE scores SET score = score * 2.0");
+
+        Assert.Equal(CommandResultKind.AffectedRows, updateResult.Kind);
+        Assert.Equal(2, updateResult.AffectedRowCount);
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, score FROM scores ORDER BY id"));
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(20.0, rows[0]["score"].AsFloat64());
+        Assert.Equal(40.0, rows[1]["score"].AsFloat64());
+    }
+
+    /// <summary>
+    /// UPDATE with a WHERE clause only modifies rows matching the predicate.
+    /// </summary>
+    [Fact]
+    public async Task Update_WithWhere_OnlyUpdatesMatchingRows()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE items (id INT, status STRING)");
+        await ExecuteAsync("INSERT INTO items VALUES (1, 'new'), (2, 'new'), (3, 'done')");
+
+        CommandResult updateResult = await ExecuteAsync(
+            "UPDATE items SET status = 'processed' WHERE status = 'new'");
+
+        Assert.Equal(CommandResultKind.AffectedRows, updateResult.Kind);
+        Assert.Equal(2, updateResult.AffectedRowCount);
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, status FROM items ORDER BY id"));
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("processed", rows[0]["status"].AsString());
+        Assert.Equal("processed", rows[1]["status"].AsString());
+        Assert.Equal("done", rows[2]["status"].AsString());
+    }
+
+    /// <summary>
+    /// UPDATE SET col1 = col2 copies values across columns.
+    /// </summary>
+    [Fact]
+    public async Task Update_CrossColumnAssignment_CopiesValues()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE audit (id INT, current_name STRING, backup_name STRING)");
+        await ExecuteAsync("INSERT INTO audit VALUES (1, 'Alice', ''), (2, 'Bob', '')");
+
+        await ExecuteAsync("UPDATE audit SET backup_name = current_name");
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, backup_name FROM audit ORDER BY id"));
+        Assert.Equal("Alice", rows[0]["backup_name"].AsString());
+        Assert.Equal("Bob", rows[1]["backup_name"].AsString());
+    }
+
+    /// <summary>
+    /// UPDATE with a WHERE predicate that matches no rows updates nothing.
+    /// </summary>
+    [Fact]
+    public async Task Update_NoMatchingWhere_UpdatesZeroRows()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, value DOUBLE)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 5.0), (2, 10.0)");
+
+        CommandResult result = await ExecuteAsync("UPDATE data SET value = 999.0 WHERE id = 99");
+
+        Assert.Equal(CommandResultKind.AffectedRows, result.Kind);
+        Assert.Equal(0, result.AffectedRowCount);
+
+        // Values must be unchanged.
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, value FROM data ORDER BY id"));
+        Assert.Equal(5.0, rows[0]["value"].AsFloat64());
+        Assert.Equal(10.0, rows[1]["value"].AsFloat64());
+    }
+
+    // ──────────────────── UPDATE...FROM ────────────────────
+
+    /// <summary>
+    /// UPDATE...FROM enriches target rows using matching rows from a source table.
+    /// </summary>
+    [Fact]
+    public async Task UpdateFrom_BasicJoin_EnrichesTargetRows()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE features (id INT, score DOUBLE)");
+        await ExecuteAsync("INSERT INTO features VALUES (1, 0.0), (2, 0.0), (3, 0.0)");
+
+        await ExecuteAsync("CREATE TEMP TABLE raw (id INT, value DOUBLE)");
+        await ExecuteAsync("INSERT INTO raw VALUES (1, 10.5), (2, 20.5)");
+
+        CommandResult updateResult = await ExecuteAsync(
+            "UPDATE features SET score = raw.value FROM raw WHERE features.id = raw.id");
+
+        Assert.Equal(CommandResultKind.AffectedRows, updateResult.Kind);
+        Assert.Equal(2, updateResult.AffectedRowCount);
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, score FROM features ORDER BY id"));
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(10.5, rows[0]["score"].AsFloat64());
+        Assert.Equal(20.5, rows[1]["score"].AsFloat64());
+        // Row id=3 had no match: score stays 0.0.
+        Assert.Equal(0.0, rows[2]["score"].AsFloat64());
+    }
+
+    /// <summary>
+    /// UPDATE...FROM with an explicit alias on the target table resolves target
+    /// columns through the alias.
+    /// </summary>
+    [Fact]
+    public async Task UpdateFrom_WithAlias_ResolvesTargetColumnsViaAlias()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE features (id INT, score DOUBLE)");
+        await ExecuteAsync("INSERT INTO features VALUES (1, 0.0), (2, 0.0)");
+
+        await ExecuteAsync("CREATE TEMP TABLE raw (id INT, value DOUBLE)");
+        await ExecuteAsync("INSERT INTO raw VALUES (1, 42.0), (2, 84.0)");
+
+        CommandResult updateResult = await ExecuteAsync(
+            "UPDATE features AS f SET score = raw.value FROM raw WHERE f.id = raw.id");
+
+        Assert.Equal(CommandResultKind.AffectedRows, updateResult.Kind);
+        Assert.Equal(2, updateResult.AffectedRowCount);
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, score FROM features ORDER BY id"));
+        Assert.Equal(42.0, rows[0]["score"].AsFloat64());
+        Assert.Equal(84.0, rows[1]["score"].AsFloat64());
+    }
+
+    /// <summary>
+    /// UPDATE...FROM with a WHERE that matches no source rows updates nothing.
+    /// </summary>
+    [Fact]
+    public async Task UpdateFrom_NoMatch_UpdatesZeroRows()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE features (id INT, score DOUBLE)");
+        await ExecuteAsync("INSERT INTO features VALUES (1, 5.0)");
+
+        await ExecuteAsync("CREATE TEMP TABLE raw (id INT, value DOUBLE)");
+        await ExecuteAsync("INSERT INTO raw VALUES (99, 100.0)");
+
+        CommandResult result = await ExecuteAsync(
+            "UPDATE features SET score = raw.value FROM raw WHERE features.id = raw.id");
+
+        Assert.Equal(CommandResultKind.AffectedRows, result.Kind);
+        Assert.Equal(0, result.AffectedRowCount);
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT score FROM features"));
+        Assert.Equal(5.0, rows[0]["score"].AsFloat64());
+    }
+
+    /// <summary>
+    /// UPDATE...FROM SET expression can apply arithmetic using the source column value.
+    /// </summary>
+    [Fact]
+    public async Task UpdateFrom_ExpressionInSet_AppliesArithmetic()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE products (id INT, price DOUBLE)");
+        await ExecuteAsync("INSERT INTO products VALUES (1, 100.0), (2, 200.0)");
+
+        await ExecuteAsync("CREATE TEMP TABLE discounts (id INT, factor DOUBLE)");
+        await ExecuteAsync("INSERT INTO discounts VALUES (1, 0.9), (2, 0.75)");
+
+        await ExecuteAsync(
+            "UPDATE products SET price = products.price * discounts.factor FROM discounts WHERE products.id = discounts.id");
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, price FROM products ORDER BY id"));
+        Assert.Equal(90.0, rows[0]["price"].AsFloat64());
+        Assert.Equal(150.0, rows[1]["price"].AsFloat64());
+    }
+
+    /// <summary>
+    /// UPDATE...FROM can set multiple columns in a single statement.
+    /// </summary>
+    [Fact]
+    public async Task UpdateFrom_MultipleSetColumns_UpdatesAllColumns()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE features (id INT, a DOUBLE, b DOUBLE)");
+        await ExecuteAsync("INSERT INTO features VALUES (1, 0.0, 0.0), (2, 0.0, 0.0)");
+
+        await ExecuteAsync("CREATE TEMP TABLE src (id INT, x DOUBLE, y DOUBLE)");
+        await ExecuteAsync("INSERT INTO src VALUES (1, 10.0, 20.0), (2, 30.0, 40.0)");
+
+        await ExecuteAsync(
+            "UPDATE features SET a = src.x, b = src.y FROM src WHERE features.id = src.id");
+
+        List<Row> rows = await CollectRowsAsync(await ExecuteAsync("SELECT id, a, b FROM features ORDER BY id"));
+        Assert.Equal(10.0, rows[0]["a"].AsFloat64());
+        Assert.Equal(20.0, rows[0]["b"].AsFloat64());
+        Assert.Equal(30.0, rows[1]["a"].AsFloat64());
+        Assert.Equal(40.0, rows[1]["b"].AsFloat64());
+    }
+
     // ──────────────────── ALTER TABLE ADD COLUMN ────────────────────
 
     /// <summary>

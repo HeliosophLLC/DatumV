@@ -1373,11 +1373,18 @@ public static class SqlParser
         select new InsertValuesSource(rows);
 
     /// <summary>
-    /// Parses <c>UPDATE name SET col = expr [, ...] [WHERE ...]</c>.
+    /// Parses <c>UPDATE name [AS alias] SET col = expr [, ...] [FROM source [JOIN ...]*] [WHERE ...]</c>.
+    /// Follows PostgreSQL semantics: the target table is not repeated in FROM; the WHERE clause
+    /// contains both join conditions and filters.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> UpdateParser =
         from updateKw in Token.EqualTo(SqlToken.Update)
         from tableName in IdentifierOrKeywordAsName
+        from alias in (
+            from _as in Token.EqualTo(SqlToken.As).OptionalOrDefault()
+            from aliasName in Token.EqualTo(SqlToken.Identifier).Select(GetTokenText)
+            select aliasName
+        ).Try().AsNullable().OptionalOrDefault()
         from setKw in Token.EqualTo(SqlToken.Set)
         from assignments in (
             from colName in IdentifierOrKeywordAsName
@@ -1385,8 +1392,16 @@ public static class SqlParser
             from value in SP.Ref(() => ExpressionParser!)
             select new ColumnAssignment(colName, value)
         ).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
+        from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
-        select (Statement)new UpdateStatement(tableName, assignments, whereClause);
+        select (Statement)new UpdateStatement(
+            tableName,
+            alias,
+            assignments,
+            fromClause,
+            joinClauses.Length > 0 ? joinClauses : null,
+            whereClause);
 
     /// <summary>
     /// Parses <c>DELETE FROM name [WHERE ...]</c>.

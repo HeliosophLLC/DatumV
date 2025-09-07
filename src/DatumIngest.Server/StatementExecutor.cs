@@ -449,16 +449,17 @@ internal sealed class StatementExecutor
 
     // ──────────────────── UPDATE ────────────────────
 
+    /// <summary>
+    /// Entry point for UPDATE statements. Validates the target table, enforces the primary key
+    /// guard, then dispatches to <see cref="ExecuteSimpleUpdateAsync"/> (single-table expression
+    /// SET + optional WHERE) or <see cref="ExecuteFromUpdateAsync"/> (multi-table UPDATE...FROM).
+    /// </summary>
     private async Task<CommandResult> ExecuteUpdateAsync(
         UpdateStatement statement,
         CancellationToken cancellationToken,
         QueryMeter? queryMeter,
         IReadOnlyDictionary<string, DataValue>? parameters)
     {
-        _ = queryMeter;
-        _ = parameters;
-        _ = cancellationToken;
-
         string tableName = statement.TableName;
 
         if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
@@ -487,45 +488,341 @@ internal sealed class StatementExecutor
             }
         }
 
-        // For now, UPDATE only supports constant assignments (SET col = literal).
-        // Full expression evaluation with WHERE requires the expression evaluator,
-        // which will be wired in a later phase.
+        if (statement.From is not null)
+        {
+            return await ExecuteFromUpdateAsync(statement, descriptor, cancellationToken, queryMeter, parameters)
+                .ConfigureAwait(false);
+        }
+
+        return await ExecuteSimpleUpdateAsync(statement, descriptor, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Executes a single-table UPDATE by evaluating each SET assignment expression and the
+    /// optional WHERE predicate against every live row, then writing in-place column page
+    /// replacements for matching rows. Deleted rows are skipped.
+    /// </summary>
+    private async Task<CommandResult> ExecuteSimpleUpdateAsync(
+        UpdateStatement statement,
+        TableDescriptor descriptor,
+        CancellationToken cancellationToken)
+    {
+        string tableName = statement.TableName;
         DatumFileSchema schema;
         DatumRowGroupDescriptor[] rowGroups;
-        long totalRowCount;
 
-        using (DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath))
+        using (DatumFileReader schemaReader = DatumFileReader.Open(descriptor.FilePath))
         {
-            schema = reader.FileSchema;
-            totalRowCount = reader.TotalRowCount;
-
-            // Read row groups using the footer.
+            schema = schemaReader.FileSchema;
             using FileStream footerStream = File.OpenRead(descriptor.FilePath);
             (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
         }
 
-        // Build the list of column replacements.
-        List<ColumnPageReplacement> replacements = new();
-
-        foreach (ColumnAssignment assignment in statement.Assignments)
+        int assignmentCount = statement.Assignments.Count;
+        int[] assignmentColumnIndices = new int[assignmentCount];
+        for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
         {
-            int columnIndex = FindColumnIndex(schema, assignment.ColumnName);
-            DatumColumnDescriptor columnDescriptor = schema.Columns[columnIndex];
-            DataValue constantValue = EvaluateConstantExpression(assignment.Value, columnDescriptor.Kind);
+            assignmentColumnIndices[assignIndex] =
+                FindColumnIndex(schema, statement.Assignments[assignIndex].ColumnName);
+        }
 
+        int columnCount = schema.ColumnCount;
+        int[] allColumnIndices = new int[columnCount];
+        for (int index = 0; index < columnCount; index++) allColumnIndices[index] = index;
+
+        // Column names and name-index are shared across all Row instances in a row group.
+        string[] columnNames = new string[columnCount];
+        for (int index = 0; index < columnCount; index++) columnNames[index] = schema.Columns[index].Name;
+
+        Dictionary<string, int> nameIndex = new(columnCount, StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < columnCount; index++) nameIndex[columnNames[index]] = index;
+
+        List<ColumnPageReplacement> replacements = new();
+        long updatedRows = 0;
+
+        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        try
+        {
+            ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
+
+            using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
             for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
             {
-                int rowCount = (int)rowGroups[rowGroupIndex].RowCount;
-                List<DataValue> values = new(rowCount);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                DatumRowGroupDescriptor rowGroup = rowGroups[rowGroupIndex];
+                if (rowGroup.ActiveRowCount == 0) continue;
+
+                int rowCount = (int)rowGroup.RowCount;
+                DataValue[][] columns = reader.ReadColumns(rowGroupIndex, allColumnIndices);
+
+                // Pre-fill each assignment column buffer with the original values so that
+                // rows not matched by WHERE are written back unchanged.
+                DataValue[][] updatedColumns = new DataValue[assignmentCount][];
+                for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                {
+                    updatedColumns[assignIndex] = new DataValue[rowCount];
+                    Array.Copy(columns[assignmentColumnIndices[assignIndex]], updatedColumns[assignIndex], rowCount);
+                }
+
+                bool anyChange = false;
 
                 for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
                 {
-                    values.Add(constantValue);
+                    if (rowGroup.IsRowDeleted(rowIndex)) continue;
+
+                    DataValue[] rowValues = new DataValue[columnCount];
+                    for (int colIndex = 0; colIndex < columnCount; colIndex++)
+                    {
+                        rowValues[colIndex] = columns[colIndex][rowIndex];
+                    }
+
+                    // The nameIndex is shared across all rows in this row group — safe because
+                    // ExpressionEvaluator only reads from it and never mutates the row.
+                    Row row = new(columnNames, rowValues, nameIndex);
+
+                    if (statement.Where is not null && !evaluator.EvaluateAsBoolean(statement.Where, row))
+                    {
+                        continue;
+                    }
+
+                    for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                    {
+                        DataValue evaluated = evaluator.Evaluate(statement.Assignments[assignIndex].Value, row);
+                        DatumColumnDescriptor col = schema.Columns[assignmentColumnIndices[assignIndex]];
+                        updatedColumns[assignIndex][rowIndex] = CoerceDataValue(evaluated, col.Kind);
+                    }
+
+                    anyChange = true;
+                    updatedRows++;
                 }
 
-                DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(columnDescriptor);
-                DatumEncodedPage page = encoder.Encode(values, columnDescriptor);
-                replacements.Add(new ColumnPageReplacement(columnIndex, rowGroupIndex, page));
+                if (anyChange)
+                {
+                    for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                    {
+                        int columnIndex = assignmentColumnIndices[assignIndex];
+                        DatumColumnDescriptor columnDescriptor = schema.Columns[columnIndex];
+                        DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(columnDescriptor);
+                        DatumEncodedPage page = encoder.Encode(updatedColumns[assignIndex], columnDescriptor);
+                        replacements.Add(new ColumnPageReplacement(columnIndex, rowGroupIndex, page));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            localBufferPool.Dispose();
+        }
+
+        if (replacements.Count > 0)
+        {
+            using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
+            DatumFileEditor.ReplaceColumns(stream, replacements);
+        }
+
+        return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
+    }
+
+    /// <summary>
+    /// Executes an UPDATE...FROM statement by synthesising a join query from the target and
+    /// all FROM/JOIN sources, evaluating SET expressions against each joined row, then writing
+    /// in-place column page replacements for matching target rows.
+    /// </summary>
+    /// <remarks>
+    /// Follows PostgreSQL semantics: the target table is not repeated in the FROM clause; the
+    /// optimizer sees a cross product of target × source filtered by the WHERE predicate. When
+    /// multiple source rows match the same target row, the last match wins (indeterminate order).
+    /// Target row identity is a <see cref="CompositeKey"/> over all target column values.
+    /// Rows with identical values in every column cannot be individually distinguished — in
+    /// practice this is only a concern for tables without a primary key.
+    /// </remarks>
+    private async Task<CommandResult> ExecuteFromUpdateAsync(
+        UpdateStatement statement,
+        TableDescriptor descriptor,
+        CancellationToken cancellationToken,
+        QueryMeter? queryMeter,
+        IReadOnlyDictionary<string, DataValue>? parameters)
+    {
+        _ = parameters;
+
+        string tableName = statement.TableName;
+
+        // The alias is how the query engine qualifies target columns in the join result rows.
+        // If no AS alias was given, fall back to the table name itself.
+        string effectiveAlias = statement.Alias ?? tableName;
+
+        DatumFileSchema targetSchema;
+        DatumRowGroupDescriptor[] rowGroups;
+
+        using (DatumFileReader schemaReader = DatumFileReader.Open(descriptor.FilePath))
+        {
+            targetSchema = schemaReader.FileSchema;
+            using FileStream footerStream = File.OpenRead(descriptor.FilePath);
+            (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+        }
+
+        int assignmentCount = statement.Assignments.Count;
+        int[] assignmentColumnIndices = new int[assignmentCount];
+        for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+        {
+            assignmentColumnIndices[assignIndex] =
+                FindColumnIndex(targetSchema, statement.Assignments[assignIndex].ColumnName);
+        }
+
+        // Synthesise: SELECT * FROM <target> [AS alias] INNER JOIN <from_source> [JOIN ...] WHERE <where>
+        // The FROM source becomes an implicit inner join with no explicit ON clause — the WHERE
+        // provides the equi-join conditions (PostgreSQL UPDATE...FROM semantics).
+        List<JoinClause> syntheticJoins = new() { new JoinClause(JoinType.Inner, statement.From!.Source, null) };
+        if (statement.Joins is not null)
+        {
+            syntheticJoins.AddRange(statement.Joins);
+        }
+
+        SelectStatement joinSelect = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference(tableName, effectiveAlias)),
+            Joins: syntheticJoins,
+            Where: statement.Where);
+
+        QueryExpression joinQuery = new SelectQueryExpression(joinSelect);
+
+        // Execute the join and build: target-row fingerprint → evaluated SET assignment values.
+        ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
+        Dictionary<CompositeKey, DataValue[]> assignmentMap = new();
+
+        QueryPlanner planner = new(_session.Catalog, _session.FunctionRegistry);
+        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+
+        try
+        {
+            ExecutionContext context = new(
+                cancellationToken,
+                _session.FunctionRegistry,
+                _session.Catalog,
+                localBufferPool,
+                queryMeter,
+                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
+            {
+                DegreeOfParallelism = Environment.ProcessorCount,
+                ParallelismBudget = _parallelismBudget,
+            };
+
+            IQueryOperator plan = await planner
+                .PlanWithSubqueriesAsync(joinQuery, context, cancellationToken)
+                .ConfigureAwait(false);
+
+            await foreach (RowBatch batch in plan.ExecuteAsync(context)
+                .WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
+                {
+                    Row joinRow = batch[rowIndex];
+
+                    // Extract the target-side column values to form the identity fingerprint.
+                    // AliasOperator qualifies target columns as "<effectiveAlias>.<column>".
+                    DataValue[] fingerprintValues = new DataValue[targetSchema.ColumnCount];
+                    for (int colIndex = 0; colIndex < targetSchema.ColumnCount; colIndex++)
+                    {
+                        string qualifiedName = $"{effectiveAlias}.{targetSchema.Columns[colIndex].Name}";
+                        fingerprintValues[colIndex] = joinRow.TryGetValue(qualifiedName, out DataValue val)
+                            ? val
+                            : DataValue.Null(targetSchema.Columns[colIndex].Kind);
+                    }
+
+                    CompositeKey fingerprint = new(fingerprintValues);
+
+                    // Evaluate each SET expression against the full joined row so that
+                    // expressions can reference columns from both the target and source.
+                    DataValue[] newValues = new DataValue[assignmentCount];
+                    for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                    {
+                        DataValue evaluated = evaluator.Evaluate(
+                            statement.Assignments[assignIndex].Value, joinRow);
+                        DatumColumnDescriptor col = targetSchema.Columns[assignmentColumnIndices[assignIndex]];
+                        newValues[assignIndex] = CoerceDataValue(evaluated, col.Kind);
+                    }
+
+                    // Last match wins when multiple source rows match the same target row.
+                    assignmentMap[fingerprint] = newValues;
+                }
+            }
+        }
+        finally
+        {
+            localBufferPool.Dispose();
+        }
+
+        if (assignmentMap.Count == 0)
+        {
+            return CommandResult.AffectedRows(0, $"Updated 0 rows in '{tableName}'.");
+        }
+
+        // Re-read the target file and apply updates for rows whose fingerprint is in the map.
+        int targetColumnCount = targetSchema.ColumnCount;
+        int[] allColumnIndices = new int[targetColumnCount];
+        for (int index = 0; index < targetColumnCount; index++) allColumnIndices[index] = index;
+
+        List<ColumnPageReplacement> replacements = new();
+        long updatedRows = 0;
+
+        using (DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath))
+        {
+            for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                DatumRowGroupDescriptor rowGroup = rowGroups[rowGroupIndex];
+                if (rowGroup.ActiveRowCount == 0) continue;
+
+                int rowCount = (int)rowGroup.RowCount;
+                DataValue[][] columns = reader.ReadColumns(rowGroupIndex, allColumnIndices);
+
+                DataValue[][] updatedColumns = new DataValue[assignmentCount][];
+                for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                {
+                    updatedColumns[assignIndex] = new DataValue[rowCount];
+                    Array.Copy(columns[assignmentColumnIndices[assignIndex]], updatedColumns[assignIndex], rowCount);
+                }
+
+                bool anyChange = false;
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    if (rowGroup.IsRowDeleted(rowIndex)) continue;
+
+                    DataValue[] fingerprintValues = new DataValue[targetColumnCount];
+                    for (int colIndex = 0; colIndex < targetColumnCount; colIndex++)
+                    {
+                        fingerprintValues[colIndex] = columns[colIndex][rowIndex];
+                    }
+
+                    CompositeKey key = new(fingerprintValues);
+                    if (!assignmentMap.TryGetValue(key, out DataValue[]? newValues))
+                    {
+                        continue;
+                    }
+
+                    for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                    {
+                        updatedColumns[assignIndex][rowIndex] = newValues[assignIndex];
+                    }
+
+                    anyChange = true;
+                    updatedRows++;
+                }
+
+                if (anyChange)
+                {
+                    for (int assignIndex = 0; assignIndex < assignmentCount; assignIndex++)
+                    {
+                        int columnIndex = assignmentColumnIndices[assignIndex];
+                        DatumColumnDescriptor columnDescriptor = targetSchema.Columns[columnIndex];
+                        DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(columnDescriptor);
+                        DatumEncodedPage page = encoder.Encode(updatedColumns[assignIndex], columnDescriptor);
+                        replacements.Add(new ColumnPageReplacement(columnIndex, rowGroupIndex, page));
+                    }
+                }
             }
         }
 
@@ -535,7 +832,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.ReplaceColumns(stream, replacements);
         }
 
-        return CommandResult.AffectedRows(totalRowCount, $"Updated {totalRowCount} rows in '{tableName}'.");
+        return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
     }
 
     // ──────────────────── DELETE ────────────────────

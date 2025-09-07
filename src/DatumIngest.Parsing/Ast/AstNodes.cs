@@ -783,14 +783,28 @@ public sealed record InsertQuerySource(QueryExpression Query) : InsertSource;
 public sealed record InsertValuesSource(IReadOnlyList<IReadOnlyList<Expression>> Rows) : InsertSource;
 
 /// <summary>
-/// <c>UPDATE name SET col = expr [, ...] [WHERE ...]</c> — updates rows in a table.
+/// <c>UPDATE name [alias] SET col = expr [, ...] [FROM source [JOIN ...]*] [WHERE ...]</c> — updates rows in a table.
+/// Follows PostgreSQL semantics: SET column names are unqualified; the target table is not
+/// repeated in the FROM clause; the WHERE clause contains both join conditions and filters.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
-/// <param name="Assignments">The column assignment list.</param>
-/// <param name="Where">Optional filter predicate restricting which rows are updated.</param>
+/// <param name="Alias">
+/// Optional alias for the target table. When set, the rest of the statement must use the alias
+/// to reference the target's columns (e.g. <c>UPDATE features f SET score = s.v FROM scores s WHERE f.id = s.id</c>).
+/// </param>
+/// <param name="Assignments">The column assignment list. Column names are unqualified.</param>
+/// <param name="From">
+/// Optional FROM clause listing source tables used in SET expressions or join conditions.
+/// The target table must not appear here.
+/// </param>
+/// <param name="Joins">Optional JOIN clauses between source tables listed in the FROM clause.</param>
+/// <param name="Where">Optional filter and join-condition predicate.</param>
 public sealed record UpdateStatement(
     string TableName,
+    string? Alias,
     IReadOnlyList<ColumnAssignment> Assignments,
+    FromClause? From = null,
+    IReadOnlyList<JoinClause>? Joins = null,
     Expression? Where = null) : Statement;
 
 /// <summary>

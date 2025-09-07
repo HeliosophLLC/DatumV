@@ -1488,16 +1488,46 @@ after each INSERT into a session-owned table.
 
 ### UPDATE
 
-Replaces column values in all rows (or filtered rows):
+Replaces column values in a table. Supports constant literals, arbitrary expressions
+(referencing the same row), and WHERE predicates:
 
 ```sql
 UPDATE features SET label = 'retain'
-UPDATE features SET label = 'churn' WHERE score > 0.8
+UPDATE features SET score = score * 1.1 WHERE status = 'active'
+UPDATE features SET label = category, score = score + 0.05
 ```
 
-Currently supports constant-expression assignments. Full expression evaluation (referencing other columns) is planned.
+#### UPDATE...FROM (join-based enrichment)
 
-UPDATE on a PRIMARY KEY column is not permitted. To change a row's key, DELETE the row and re-INSERT with the new key values.
+Follows PostgreSQL semantics. The target table is **not** repeated in the FROM clause;
+the WHERE clause provides both the join condition and any additional row filters:
+
+```sql
+-- Enrich a feature table from a raw-scores source
+UPDATE features SET score = raw.value
+FROM raw
+WHERE features.id = raw.id
+
+-- With an explicit target alias
+UPDATE features AS f SET score = raw.value * 1.1
+FROM raw
+WHERE f.id = raw.id
+
+-- Multi-table join: features ← raw ← model
+UPDATE features SET score = raw.value * m.weight
+FROM raw
+JOIN model AS m ON raw.model_id = m.id
+WHERE features.id = raw.id
+```
+
+SET column names are always unqualified. SET expressions can reference columns from both
+the target table and source tables using qualified form (`alias.column`).
+
+When multiple source rows match the same target row, the last match wins (indeterminate
+order, matching PostgreSQL documented behavior).
+
+UPDATE on a PRIMARY KEY column is not permitted. To change a row's key, DELETE the row
+and re-INSERT with the new key values.
 
 ### DELETE
 
