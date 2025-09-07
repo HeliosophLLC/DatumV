@@ -33,7 +33,7 @@ public sealed class CompletionProvider
         switch (zone.Kind)
         {
             case CompletionZoneKind.StatementStart:
-                AddKeywords(items, ["SELECT", "WITH"]);
+                AddKeywords(items, ["SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE"]);
                 break;
 
             case CompletionZoneKind.AfterSelect:
@@ -41,7 +41,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET"]);
+                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET", "DISTINCT", "WITHIN GROUP"]);
                 break;
 
             case CompletionZoneKind.AfterFrom:
@@ -308,6 +308,6 @@ public sealed class CompletionProvider
     private static readonly string[] ExpressionKeywords =
     [
         "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
-        "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE",
+        "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT",
     ];
 }

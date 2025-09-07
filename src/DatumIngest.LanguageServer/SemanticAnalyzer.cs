@@ -281,6 +281,16 @@ internal sealed class SemanticAnalyzer
                     AnalyzeExpression(argument, aliasToTable, opaqueAliases, diagnostics);
                 }
 
+                // Validate column references in intra-aggregate ORDER BY (STRING_AGG)
+                // and WITHIN GROUP ORDER BY (PERCENTILE_DISC/CONT, MODE).
+                if (functionCall.OrderBy is not null)
+                {
+                    foreach (OrderByItem orderByItem in functionCall.OrderBy)
+                    {
+                        AnalyzeExpression(orderByItem.Expression, aliasToTable, opaqueAliases, diagnostics);
+                    }
+                }
+
                 break;
 
             case BinaryExpression binary:

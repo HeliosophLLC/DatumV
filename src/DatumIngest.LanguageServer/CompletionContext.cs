@@ -272,6 +272,10 @@ public static class CompletionContext
                     // After AS — user is typing an alias, no completions from schema.
                     return CompletionZoneKind.AfterAs;
 
+                case SqlToken.Set:
+                    // After UPDATE ... SET — user is typing assignment expressions.
+                    return CompletionZoneKind.Expression;
+
                 case SqlToken.Let:
                     // After LET — user may be typing a binding name or expression.
                     // Return AfterSelect to offer columns and functions for the expression.
@@ -289,7 +293,7 @@ public static class CompletionContext
 
     private static bool IsKeywordToken(SqlToken kind)
     {
-        return kind <= SqlToken.Let;
+        return kind < SqlToken.Identifier;
     }
 
     private static bool IsSqlSymbol(char character)

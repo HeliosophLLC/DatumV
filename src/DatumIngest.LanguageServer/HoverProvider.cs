@@ -225,14 +225,49 @@ public sealed class HoverProvider
             SqlToken.Asc => "**ASC** — Ascending sort order (default).",
             SqlToken.Desc => "**DESC** — Descending sort order.",
             SqlToken.True => "**TRUE** — Boolean true literal.",
-            SqlToken.False => "**FALSE** — Boolean false literal.",            SqlToken.Over => "**OVER** \u2014 Defines a window specification for a window function: `function() OVER(PARTITION BY ... ORDER BY ... ROWS BETWEEN ...)`.",
-            SqlToken.Partition => "**PARTITION** \u2014 Used with BY to divide rows into partitions for window function evaluation.",
-            SqlToken.Rows => "**ROWS** \u2014 Specifies a row-based window frame: `ROWS BETWEEN start AND end`.",
-            SqlToken.Unbounded => "**UNBOUNDED** \u2014 Indicates the frame extends to the beginning (PRECEDING) or end (FOLLOWING) of the partition.",
-            SqlToken.Preceding => "**PRECEDING** \u2014 Indicates rows before the current row in a window frame.",
-            SqlToken.Following => "**FOLLOWING** \u2014 Indicates rows after the current row in a window frame.",
-            SqlToken.Current => "**CURRENT** \u2014 Used with ROW to indicate the current row in a window frame: `CURRENT ROW`.",
-            SqlToken.Let => "**LET** \u2014 Declares a named, memoized intermediate expression in SELECT. Evaluated once per row. Not included in output unless aliased with AS. Syntax: `LET name = expression [AS alias]`.",            _ => null,
+            SqlToken.False => "**FALSE** — Boolean false literal.",
+            SqlToken.Outer => "**OUTER** — Outer join modifier. `LEFT [OUTER] JOIN`, `RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN` — the keyword is optional in all three forms.",
+            SqlToken.Case => "**CASE** — Conditional expression. Searched form: `CASE WHEN condition THEN result … [ELSE default] END`. Simple form: `CASE value WHEN match THEN result … END`.",
+            SqlToken.When => "**WHEN** — A conditional branch within a CASE expression: `WHEN condition THEN result`.",
+            SqlToken.Then => "**THEN** — The result expression for a matching WHEN branch.",
+            SqlToken.Else => "**ELSE** — The default result when no WHEN branch matches. Without ELSE an unmatched CASE returns NULL.",
+            SqlToken.End => "**END** — Closes a CASE expression.",
+            SqlToken.Over => "**OVER** — Defines a window specification for a window function: `function() OVER(PARTITION BY … ORDER BY … ROWS BETWEEN …)`.",
+            SqlToken.Partition => "**PARTITION** — Used with BY to divide rows into partitions for window function evaluation.",
+            SqlToken.Within => "**WITHIN GROUP** — Ordered-set aggregate syntax. The ORDER BY expression inside WITHIN GROUP supplies the values to aggregate: `PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY salary)`, `MODE() WITHIN GROUP (ORDER BY category)`.",
+            SqlToken.Rows => "**ROWS** — Specifies a row-based window frame: `ROWS BETWEEN start AND end`.",
+            SqlToken.Range => "**RANGE** — Value-based window frame: `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` includes all rows whose ORDER BY value is ≤ the current row's value.",
+            SqlToken.Unbounded => "**UNBOUNDED** — Indicates the frame extends to the beginning (PRECEDING) or end (FOLLOWING) of the partition.",
+            SqlToken.Preceding => "**PRECEDING** — Indicates rows before the current row in a window frame.",
+            SqlToken.Following => "**FOLLOWING** — Indicates rows after the current row in a window frame.",
+            SqlToken.Current => "**CURRENT** — Used with ROW to indicate the current row in a window frame: `CURRENT ROW`.",
+            SqlToken.Exists => "**EXISTS** — Tests whether a subquery returns any rows: `WHERE EXISTS (SELECT 1 FROM …)`. Short-circuits after finding the first matching row.",
+            SqlToken.Distinct => "**DISTINCT** — Eliminates duplicate rows from the result set. Also used inside aggregates: `COUNT(DISTINCT col)`.",
+            SqlToken.Ignore => "**IGNORE NULLS** — Instructs value window functions (FIRST_VALUE, LAST_VALUE, NTH_VALUE) to skip NULL values when searching for the target row.",
+            SqlToken.Respect => "**RESPECT NULLS** — Default NULL handling for value window functions; NULL values are included rather than skipped.",
+            SqlToken.Nulls => "**NULLS** — Used with IGNORE or RESPECT to control null handling in value window functions: `FIRST_VALUE(col) IGNORE NULLS OVER (…)`.",
+            SqlToken.With => "**WITH** — Introduces a Common Table Expression (CTE): `WITH name AS (SELECT …) SELECT …`. CTEs can be composed, recursive (`WITH RECURSIVE`), and optionally materialization-hinted.",
+            SqlToken.Recursive => "**RECURSIVE** — Enables recursive CTEs: `WITH RECURSIVE name AS (anchor UNION ALL recursive_member)`. The recursive member references the CTE by name to build hierarchical or iterative results.",
+            SqlToken.Materialized => "**MATERIALIZED** / **NOT MATERIALIZED** — Hints the planner to buffer the CTE result once (`MATERIALIZED`) or inline it at each reference site (`NOT MATERIALIZED`). By default single-reference CTEs are inlined and multi-reference ones are materialized.",
+            SqlToken.Union => "**UNION** — Combines results from two queries, removing duplicates. Use `UNION ALL` to preserve duplicates.",
+            SqlToken.All => "**ALL** — Modifier for set operations that preserves duplicate rows: `UNION ALL`, `INTERSECT ALL`, `EXCEPT ALL`.",
+            SqlToken.Intersect => "**INTERSECT** — Returns only rows present in both query results. Use `INTERSECT ALL` to keep duplicates.",
+            SqlToken.Except => "**EXCEPT** — Returns rows from the first query that are not in the second. Use `EXCEPT ALL` to preserve duplicates.",
+            SqlToken.Let => "**LET** — Declares a named, memoized intermediate expression in SELECT. Evaluated once per row. Not included in output unless aliased with AS. Syntax: `LET name = expression [AS alias]`.",
+            SqlToken.Pivot => "**PIVOT** — Rotates distinct values of a column into separate output columns, applying an aggregate to each cell: `FROM t PIVOT (SUM(amount) FOR category IN ('A', 'B', 'C'))`.",
+            SqlToken.Unpivot => "**UNPIVOT** — Rotates columns into rows, producing a name/value pair per source column per input row: `FROM t UNPIVOT (value FOR col_name IN (a, b, c))`.",
+            SqlToken.For => "**FOR** — In PIVOT, specifies the pivot axis column: `PIVOT (SUM(x) FOR category IN ('A', 'B'))`. In UNPIVOT, specifies the name-output column: `UNPIVOT (v FOR col IN (a, b))`.",
+            SqlToken.Include => "**INCLUDE NULLS** — UNPIVOT modifier that retains rows where the source column is NULL. By default UNPIVOT excludes NULL-valued source columns.",
+            SqlToken.Tablesample => "**TABLESAMPLE** — Samples a fraction of rows from a table source: `FROM t TABLESAMPLE BERNOULLI(10)` (row-level ~10%) or `FROM t TABLESAMPLE SYSTEM(5)` (chunk-level ~5%). Add `REPEATABLE(seed)` for deterministic results.",
+            SqlToken.Repeatable => "**REPEATABLE** — Seeds the random sampler for deterministic TABLESAMPLE results: `TABLESAMPLE BERNOULLI(10) REPEATABLE(42)`. The same seed on the same data always returns the same sample.",
+            SqlToken.Create => "**CREATE TEMP TABLE** — Creates a session-scoped temporary table. `CREATE TEMP TABLE name (col type, …) [PRIMARY KEY (col, …)]` for an empty table or `CREATE TEMP TABLE name AS SELECT …` to populate from a query. Add `IF NOT EXISTS` to suppress errors.",
+            SqlToken.Drop => "**DROP TABLE** — Removes a temporary table from the session catalog: `DROP TABLE [IF EXISTS] name`.",
+            SqlToken.Insert => "**INSERT INTO** — Inserts rows into a temporary table: `INSERT INTO name VALUES (v1, v2, …)` or `INSERT INTO name SELECT …`.",
+            SqlToken.Update => "**UPDATE** — Updates rows in a temporary table: `UPDATE name SET col = expr [FROM source [AS alias]] [WHERE condition]`. The optional FROM clause joins another table to supply update values.",
+            SqlToken.Delete => "**DELETE FROM** — Removes rows from a temporary table: `DELETE FROM name [WHERE condition]`.",
+            SqlToken.Analyze => "**ANALYZE** — Rebuilds column statistics and chunk indexes for a table. Run after large INSERT/UPDATE/DELETE operations to keep query planner cost estimates accurate.",
+            SqlToken.Alter => "**ALTER TABLE** — Modifies a temporary table's schema: `ALTER TABLE name ADD COLUMN col type [DEFAULT value]`.",
+            _ => null,
         };
     }
 
@@ -306,7 +341,7 @@ public sealed class HoverProvider
 
     private static bool IsKeywordToken(SqlToken kind)
     {
-        return kind <= SqlToken.False;
+        return kind < SqlToken.Identifier;
     }
 }
 
