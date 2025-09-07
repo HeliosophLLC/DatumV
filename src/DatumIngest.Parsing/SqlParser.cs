@@ -1348,7 +1348,7 @@ public static class SqlParser
         select (Statement)new DeleteStatement(tableName, whereClause);
 
     /// <summary>
-    /// Parses <c>ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr]</c>.
+    /// Parses <c>ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr | AS expr]</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> AlterTableParser =
         from alterKw in Token.EqualTo(SqlToken.Alter)
@@ -1368,8 +1368,14 @@ public static class SqlParser
             from expr in SP.Ref(() => ExpressionParser!)
             select expr
         ).AsNullable().OptionalOrDefault()
+        from computedExpression in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from expr in SP.Ref(() => ExpressionParser!)
+            select expr
+        ).AsNullable().OptionalOrDefault()
         select (Statement)new AlterTableAddColumnStatement(
-            tableName, colName, typeName, defaultValue, Nullable: !notNull);
+            tableName, colName, typeName, defaultValue, Nullable: !notNull,
+            ComputedExpression: computedExpression);
 
     /// <summary>
     /// Parses a single statement: a DDL/DML command or a query expression.

@@ -290,6 +290,53 @@ public class DdlParsingTests
         Assert.Equal(0.0, literal.Value);
     }
 
+    /// <summary>
+    /// Computed column: <c>ALTER TABLE t ADD COLUMN ratio FLOAT64 AS revenue / cost</c>.
+    /// </summary>
+    [Fact]
+    public void AlterTableAddColumnComputed()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE t ADD COLUMN ratio FLOAT64 AS revenue / cost");
+
+        AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
+        Assert.Equal("ratio", alter.ColumnName);
+        Assert.Equal("FLOAT64", alter.TypeName);
+        Assert.Null(alter.DefaultValue);
+        Assert.NotNull(alter.ComputedExpression);
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(alter.ComputedExpression);
+        Assert.Equal(BinaryOperator.Divide, binary.Operator);
+    }
+
+    /// <summary>
+    /// Computed column with a function call: <c>AS UPPER(name)</c>.
+    /// </summary>
+    [Fact]
+    public void AlterTableAddColumnComputedWithFunction()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE t ADD COLUMN upper_name STRING AS UPPER(name)");
+
+        AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
+        Assert.NotNull(alter.ComputedExpression);
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(alter.ComputedExpression);
+        Assert.Equal("UPPER", function.FunctionName);
+    }
+
+    /// <summary>
+    /// Computed column with NOT NULL is accepted.
+    /// </summary>
+    [Fact]
+    public void AlterTableAddColumnComputedNotNull()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "ALTER TABLE t ADD COLUMN flag BOOLEAN NOT NULL AS x > 0");
+
+        AlterTableAddColumnStatement alter = Assert.IsType<AlterTableAddColumnStatement>(statement);
+        Assert.False(alter.Nullable);
+        Assert.NotNull(alter.ComputedExpression);
+    }
+
     // ───────────────────── Query as Statement ─────────────────────
 
     [Fact]

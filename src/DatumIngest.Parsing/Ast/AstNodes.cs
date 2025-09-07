@@ -803,19 +803,23 @@ public sealed record DeleteStatement(
 public sealed record ColumnAssignment(string ColumnName, Expression Value);
 
 /// <summary>
-/// <c>ALTER TABLE name ADD [COLUMN] col type [DEFAULT expr]</c> — adds a column to a table.
+/// <c>ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr | AS expr]</c> — adds a column to a table.
+/// When <see cref="ComputedExpression"/> is set, the column value is computed from existing columns
+/// and persisted for every row. <see cref="DefaultValue"/> and <see cref="ComputedExpression"/> are mutually exclusive.
 /// </summary>
 /// <param name="TableName">The target table name.</param>
 /// <param name="ColumnName">The name of the column to add.</param>
 /// <param name="TypeName">The SQL type name of the new column.</param>
 /// <param name="DefaultValue">Optional default value expression for existing rows.</param>
 /// <param name="Nullable">Whether the new column accepts NULL values.</param>
+/// <param name="ComputedExpression">Optional expression evaluated per row from existing columns.</param>
 public sealed record AlterTableAddColumnStatement(
     string TableName,
     string ColumnName,
     string TypeName,
     Expression? DefaultValue = null,
-    bool Nullable = true) : Statement;
+    bool Nullable = true,
+    Expression? ComputedExpression = null) : Statement;
 
 /// <summary>
 /// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.

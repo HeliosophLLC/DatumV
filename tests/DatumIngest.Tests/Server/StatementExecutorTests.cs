@@ -351,6 +351,65 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Contains("does not exist", result.Message);
     }
 
+    /// <summary>
+    /// ALTER TABLE ADD COLUMN with a computed expression evaluates the expression
+    /// against existing rows and persists the results.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_Computed_EvaluatesExpression()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (price FLOAT64, quantity FLOAT64)");
+        await ExecuteAsync("INSERT INTO data VALUES (10.0, 3.0), (25.0, 2.0)");
+
+        CommandResult alterResult = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN total FLOAT64 AS price * quantity");
+
+        Assert.Equal(CommandResultKind.AffectedRows, alterResult.Kind);
+
+        CommandResult selectResult = await ExecuteAsync("SELECT price, quantity, total FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(30.0, rows[0]["total"].AsFloat64(), precision: 5);
+        Assert.Equal(50.0, rows[1]["total"].AsFloat64(), precision: 5);
+    }
+
+    /// <summary>
+    /// Computed column with integer arithmetic coerces the result to the declared type.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_Computed_CoercesToDeclaredType()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (a INT, b INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (10, 3), (20, 4)");
+
+        CommandResult alterResult = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN sum_ab INT AS a + b");
+
+        Assert.Equal(CommandResultKind.AffectedRows, alterResult.Kind);
+
+        CommandResult selectResult = await ExecuteAsync("SELECT a, b, sum_ab FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(13, rows[0]["sum_ab"].AsInt32());
+        Assert.Equal(24, rows[1]["sum_ab"].AsInt32());
+    }
+
+    /// <summary>
+    /// DEFAULT and AS (computed) are mutually exclusive; specifying both returns an error.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_DefaultAndComputed_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (x INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1)");
+
+        CommandResult result = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN y INT DEFAULT 0 AS x + 1");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("mutually exclusive", result.Message);
+    }
+
     // ──────────────────── CREATE TEMP TABLE AS SELECT ────────────────────
 
     /// <summary>

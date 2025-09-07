@@ -1501,6 +1501,21 @@ ALTER TABLE features ADD COLUMN flag INT NOT NULL DEFAULT 0
 
 Existing rows receive the `DEFAULT` value (or NULL when no default is specified).
 
+#### Computed Columns
+
+Use `AS expr` to derive a column from existing columns. The expression is evaluated
+against every existing row and the result is persisted (materialized):
+
+```sql
+ALTER TABLE features ADD COLUMN total FLOAT64 AS price * quantity
+ALTER TABLE features ADD COLUMN upper_name STRING AS UPPER(name)
+ALTER TABLE features ADD COLUMN flag BOOLEAN NOT NULL AS score > 0.5
+```
+
+`DEFAULT` and `AS` are mutually exclusive — a column is either constant-filled or computed, not both.
+The expression can reference any column that exists at the time of the ALTER, and supports
+arithmetic, function calls, CASE, CAST, and all operators available in SELECT expressions.
+
 ### DROP TABLE
 
 Removes a table from the catalog and deletes its backing file:
@@ -1530,6 +1545,7 @@ Multiple statements can be separated by semicolons:
 DROP TABLE IF EXISTS features;
 CREATE TEMP TABLE features AS SELECT * FROM raw_data;
 ALTER TABLE features ADD COLUMN risk FLOAT64 DEFAULT 0.0;
+ALTER TABLE features ADD COLUMN total FLOAT64 AS price * quantity;
 UPDATE features SET risk = 0.9 WHERE churn_score > 0.8;
 ANALYZE features
 ```

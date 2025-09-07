@@ -681,6 +681,11 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
+        if (statement.DefaultValue is not null && statement.ComputedExpression is not null)
+        {
+            return CommandResult.Error("DEFAULT and AS (computed) are mutually exclusive on ALTER TABLE ADD COLUMN.");
+        }
+
         if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
@@ -692,6 +697,11 @@ internal sealed class StatementExecutor
         DataKind kind = ResolveTypeName(statement.TypeName);
         DatumColumnFlags flags = statement.Nullable ? DatumColumnFlags.Nullable : DatumColumnFlags.None;
         DatumColumnDescriptor newColumn = new(statement.ColumnName, kind, flags);
+
+        if (statement.ComputedExpression is not null)
+        {
+            return ExecuteAlterTableAddComputedColumn(statement, descriptor, newColumn, kind);
+        }
 
         DatumRowGroupDescriptor[] rowGroups;
         using (FileStream footerStream = File.OpenRead(descriptor.FilePath))
@@ -725,6 +735,79 @@ internal sealed class StatementExecutor
         }
 
         return CommandResult.AffectedRows(0, $"Added column '{statement.ColumnName}' to '{tableName}'.");
+    }
+
+    /// <summary>
+    /// Evaluates a computed expression against every existing row and appends the
+    /// resulting column to the file. Mirrors the row-reading pattern from
+    /// <see cref="ExecuteConditionalDeleteAsync"/> but writes new column pages
+    /// instead of tombstone bitmaps.
+    /// </summary>
+    private CommandResult ExecuteAlterTableAddComputedColumn(
+        AlterTableAddColumnStatement statement,
+        TableDescriptor descriptor,
+        DatumColumnDescriptor newColumn,
+        DataKind targetKind)
+    {
+        Expression computedExpression = statement.ComputedExpression!;
+        DatumEncodedPage[] pages;
+
+        using (DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath))
+        {
+            Schema querySchema = reader.Schema;
+
+            int[] allIndices = new int[querySchema.Columns.Count];
+            for (int columnIndex = 0; columnIndex < allIndices.Length; columnIndex++)
+            {
+                allIndices[columnIndex] = columnIndex;
+            }
+
+            string[] columnNames = Array.ConvertAll(allIndices, index => querySchema.Columns[index].Name);
+            Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int columnIndex = 0; columnIndex < columnNames.Length; columnIndex++)
+            {
+                nameIndex[columnNames[columnIndex]] = columnIndex;
+            }
+
+            DatumRowGroupDescriptor[] rowGroups;
+            using (FileStream footerStream = File.OpenRead(descriptor.FilePath))
+            {
+                (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+            }
+
+            pages = new DatumEncodedPage[rowGroups.Length];
+            DatumColumnEncoder encoder = DatumEncoderFactory.GetEncoder(newColumn);
+            ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
+
+            for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
+            {
+                int rowCount = (int)rowGroups[rowGroupIndex].RowCount;
+                DataValue[][] columns = reader.ReadColumns(rowGroupIndex, allIndices);
+                List<DataValue> values = new(rowCount);
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    DataValue[] rowValues = new DataValue[allIndices.Length];
+                    for (int columnPosition = 0; columnPosition < allIndices.Length; columnPosition++)
+                    {
+                        rowValues[columnPosition] = columns[columnPosition][rowIndex];
+                    }
+
+                    Row row = new(columnNames, rowValues, nameIndex);
+                    DataValue result = evaluator.Evaluate(computedExpression, row);
+                    values.Add(CoerceDataValue(result, targetKind));
+                }
+
+                pages[rowGroupIndex] = encoder.Encode(values, newColumn);
+            }
+        }
+
+        using (FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite))
+        {
+            DatumFileEditor.AddColumn(stream, newColumn, pages);
+        }
+
+        return CommandResult.AffectedRows(0, $"Added computed column '{statement.ColumnName}' to '{descriptor.Name}'.");
     }
 
     // ──────────────────── ANALYZE ────────────────────
@@ -1027,6 +1110,59 @@ internal sealed class StatementExecutor
             DataKind.Float64 => DataValue.FromFloat64(-Convert.ToDouble(value)),
             _ => throw new InvalidOperationException(
                 $"Cannot negate literal for target type {targetKind}."),
+        };
+    }
+
+    /// <summary>
+    /// Coerces a <see cref="DataValue"/> produced by the expression evaluator to the
+    /// declared column type. Null values are preserved with the target kind.
+    /// Numeric values are widened or narrowed through <see cref="double"/> conversion.
+    /// </summary>
+    private static DataValue CoerceDataValue(DataValue value, DataKind targetKind)
+    {
+        if (value.IsNull)
+        {
+            return DataValue.Null(targetKind);
+        }
+
+        if (value.Kind == targetKind)
+        {
+            return value;
+        }
+
+        // Extract the numeric value as double for safe widening/narrowing.
+        double numeric = value.Kind switch
+        {
+            DataKind.Float32 => value.AsFloat32(),
+            DataKind.Float64 => value.AsFloat64(),
+            DataKind.Int8 => value.AsInt8(),
+            DataKind.Int16 => value.AsInt16(),
+            DataKind.Int32 => value.AsInt32(),
+            DataKind.Int64 => value.AsInt64(),
+            DataKind.UInt8 => value.AsUInt8(),
+            DataKind.UInt16 => value.AsUInt16(),
+            DataKind.UInt32 => value.AsUInt32(),
+            DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Boolean => value.AsBoolean() ? 1.0 : 0.0,
+            _ => throw new InvalidOperationException(
+                $"Cannot coerce {value.Kind} to {targetKind} in computed column expression."),
+        };
+
+        return targetKind switch
+        {
+            DataKind.Float32 => DataValue.FromFloat32((float)numeric),
+            DataKind.Float64 => DataValue.FromFloat64(numeric),
+            DataKind.Int8 => DataValue.FromInt8((sbyte)numeric),
+            DataKind.Int16 => DataValue.FromInt16((short)numeric),
+            DataKind.Int32 => DataValue.FromInt32((int)numeric),
+            DataKind.Int64 => DataValue.FromInt64((long)numeric),
+            DataKind.UInt8 => DataValue.FromUInt8((byte)numeric),
+            DataKind.UInt16 => DataValue.FromUInt16((ushort)numeric),
+            DataKind.UInt32 => DataValue.FromUInt32((uint)numeric),
+            DataKind.UInt64 => DataValue.FromUInt64((ulong)numeric),
+            DataKind.Boolean => DataValue.FromBoolean(numeric != 0.0),
+            _ => throw new InvalidOperationException(
+                $"Cannot coerce {value.Kind} to {targetKind} in computed column expression."),
         };
     }
 }
