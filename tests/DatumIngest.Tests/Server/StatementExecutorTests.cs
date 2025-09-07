@@ -698,4 +698,60 @@ public sealed class StatementExecutorTests : IDisposable
         string manifestPath = Path.ChangeExtension(descriptor!.FilePath, ".datum-manifest");
         Assert.True(File.Exists(manifestPath), "Manifest sidecar file should exist on disk.");
     }
+
+    // ──────────────────── ANALYZE ────────────────────
+
+    /// <summary>
+    /// ANALYZE rebuilds the manifest on a table that was mutated after initial INSERT.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTable_RebuildsSidecarsAfterUpdate()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
+
+        // Mutate data — sidecars become stale.
+        await ExecuteAsync("UPDATE data SET name = 'Charlie'");
+
+        CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
+        Assert.Equal(CommandResultKind.AffectedRows, analyzeResult.Kind);
+
+        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        Assert.True(hasManifest, "Manifest should be registered after ANALYZE.");
+        Assert.NotNull(manifest);
+        Assert.Equal(2, manifest!.RowCount);
+    }
+
+    /// <summary>
+    /// ANALYZE rebuilds the index and manifest after ALTER TABLE ADD COLUMN.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTable_RebuildsSidecarsAfterAlterTable()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1), (2), (3)");
+
+        await ExecuteAsync("ALTER TABLE data ADD COLUMN label STRING DEFAULT 'x'");
+        CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
+        Assert.Equal(CommandResultKind.AffectedRows, analyzeResult.Kind);
+
+        bool hasIndex = _session.Catalog.TryGetIndex("data", out SourceIndex? index);
+        Assert.True(hasIndex, "Index should be rebuilt after ANALYZE.");
+        Assert.Equal(3, index!.Schema.TotalRowCount);
+
+        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        Assert.True(hasManifest, "Manifest should be rebuilt after ANALYZE.");
+        Assert.Equal(2, manifest!.Features.Count);
+    }
+
+    /// <summary>
+    /// ANALYZE on a non-existent table returns an error.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTable_NonExistentTable_ReturnsError()
+    {
+        CommandResult result = await ExecuteAsync("ANALYZE missing");
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("does not exist", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

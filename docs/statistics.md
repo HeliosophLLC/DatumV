@@ -277,6 +277,18 @@ Manifests are not just for external consumption — they feed back into the quer
 
 After tables are registered in the `TableCatalog`, call `catalog.DiscoverSidecars()` to auto-discover `.datum-manifest`, `.datum-index`, and `.datum-schema` sidecar files alongside each source file. Tables that already have a registered artifact are skipped, and each sidecar file is read at most once per unique source path. The CLI, gRPC compute backend, and `.source` interactive command all call this method after source registration. See [Programmatic API — Sidecar Auto-Discovery](api.md#sidecar-auto-discovery) for details.
 
+### Temp Table Auto-Manifest
+
+When a session-owned temp table is populated via `CREATE TEMP TABLE AS SELECT` or `INSERT INTO`, a column statistics manifest is automatically generated using `StatisticsCollector` (all 15 accumulators) and `ManifestBuilder.Build()`. The manifest is written as a `.datum-manifest` sidecar and registered on the catalog, giving the query planner immediate access to accurate cardinality estimates, null ratios, and histograms.
+
+For tables mutated after initial population (`UPDATE`, `DELETE`, `ALTER TABLE ADD COLUMN`), the manifest becomes stale. Use `ANALYZE` to rebuild:
+
+```sql
+ANALYZE features   -- rebuilds manifest and source index
+```
+
+This follows the PostgreSQL convention. See [SQL Reference — ANALYZE](sql.md#analyze) for details.
+
 ### Cost Model
 
 When planning a query, the `QueryPlanner` checks for a registered manifest:

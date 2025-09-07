@@ -67,6 +67,8 @@ internal sealed class StatementExecutor
                     .ConfigureAwait(false),
             AlterTableAddColumnStatement alterStatement =>
                 ExecuteAlterTableAddColumn(alterStatement),
+            AnalyzeTableStatement analyzeStatement =>
+                ExecuteAnalyzeTable(analyzeStatement),
             _ => throw new InvalidOperationException(
                 $"Statement type {statement.GetType().Name} is not executable as DDL/DML."),
         };
@@ -723,6 +725,26 @@ internal sealed class StatementExecutor
         }
 
         return CommandResult.AffectedRows(0, $"Added column '{statement.ColumnName}' to '{tableName}'.");
+    }
+
+    // ──────────────────── ANALYZE ────────────────────
+
+    /// <summary>
+    /// Rebuilds the source index and column statistics manifest for the specified table,
+    /// registering both on the session catalog for use by the query planner.
+    /// </summary>
+    private CommandResult ExecuteAnalyzeTable(AnalyzeTableStatement statement)
+    {
+        string tableName = statement.TableName;
+
+        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        {
+            return CommandResult.Error($"Table '{tableName}' does not exist.");
+        }
+
+        RebuildTempTableSidecars(tableName, descriptor.FilePath);
+
+        return CommandResult.AffectedRows(0, $"Analyzed table '{tableName}'.");
     }
 
     // ──────────────────── Helpers ────────────────────

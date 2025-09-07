@@ -816,3 +816,9 @@ public sealed record AlterTableAddColumnStatement(
     string TypeName,
     Expression? DefaultValue = null,
     bool Nullable = true) : Statement;
+
+/// <summary>
+/// <c>ANALYZE table</c> — rebuilds statistics and indexes for the specified table.
+/// </summary>
+/// <param name="TableName">The target table name.</param>
+public sealed record AnalyzeTableStatement(string TableName) : Statement;

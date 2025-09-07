@@ -46,7 +46,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
-- **SQL interface** — SELECT, SELECT DISTINCT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, DISTINCT aggregates (`COUNT(DISTINCT x)`), window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT with ALL variants), quoted identifiers, parameterized queries (`$name`)
+- **SQL interface** — SELECT, SELECT DISTINCT, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, DISTINCT aggregates (`COUNT(DISTINCT x)`), window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT with ALL variants), quoted identifiers, parameterized queries (`$name`), DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE)
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
@@ -58,6 +58,7 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 - **EXPLAIN / EXPLAIN ANALYZE** — inspect query plans with manifest-driven cardinality estimation (NDV-based selectivity) and optional runtime metrics
 - **Parameterized queries** — named `$parameter` placeholders with early binding (AST-level substitution before planning), preserving all optimizer paths
 - **Resource governance** — per-session query deadlines, row budgets, Query Unit metering, and throttle delays for multi-tenant gRPC deployments
+- **Temp tables** — session-scoped mutable tables with CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE ADD COLUMN, DROP TABLE, and ANALYZE; auto-generated source indexes and column statistics manifests for query planner integration; table mutability model (ReadOnly, SessionOwned, Writable) prevents accidental mutation of source data
 
 ## Why Not DuckDB / Pandas?
 

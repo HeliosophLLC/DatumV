@@ -458,6 +458,47 @@ public class DdlParsingTests
         Assert.False(create.Columns[1].PrimaryKey);
     }
 
+    // ───────────────────── ANALYZE ─────────────────────
+
+    /// <summary>
+    /// ANALYZE table parses to an <see cref="AnalyzeTableStatement"/>.
+    /// </summary>
+    [Fact]
+    public void AnalyzeTable()
+    {
+        Statement statement = SqlParser.ParseStatement("ANALYZE features");
+
+        AnalyzeTableStatement analyze = Assert.IsType<AnalyzeTableStatement>(statement);
+        Assert.Equal("features", analyze.TableName);
+    }
+
+    /// <summary>
+    /// The word ANALYZE is valid as a column name.
+    /// </summary>
+    [Fact]
+    public void AnalyzeAsColumnName()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE t (analyze STRING, value INT)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Equal("analyze", create.Columns[0].Name);
+    }
+
+    /// <summary>
+    /// ANALYZE can appear in a batch with other statements.
+    /// </summary>
+    [Fact]
+    public void AnalyzeInBatch()
+    {
+        IReadOnlyList<Statement> statements = SqlParser.ParseBatch(
+            "INSERT INTO t VALUES (1); ANALYZE t");
+
+        Assert.Equal(2, statements.Count);
+        Assert.IsType<InsertStatement>(statements[0]);
+        Assert.IsType<AnalyzeTableStatement>(statements[1]);
+    }
+
     // ───────────────────── Backward compatibility ─────────────────────
 
     [Fact]

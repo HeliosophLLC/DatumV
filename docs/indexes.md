@@ -700,3 +700,20 @@ catalog.RegisterIndex("data", index);
 // Plan and execute — ScanOperator will prune chunks automatically
 IQueryOperator plan = await planner.PlanAsync(statement, CancellationToken.None);
 ```
+
+## Temp Table Auto-Indexing
+
+When a session-owned temp table is populated via `CREATE TEMP TABLE AS SELECT` or `INSERT INTO`, DatumIngest automatically builds a source index using `IncrementalIndexBuilder` with disk-based spill (via `SortedIndexSpillWriter`). The index is written as a `.datum-index` sidecar alongside the `.datum` file and registered on the catalog — no manual `index` command required.
+
+Auto-indexing uses `autoIndexColumns: true`, which selects columns for sorted indexes based on compact type heuristics (the same logic used by the CLI `--with-index` flag). Bloom filters are not enabled by default for temp tables to minimize I/O overhead.
+
+For tables mutated after initial population (`UPDATE`, `DELETE`, `ALTER TABLE ADD COLUMN`), the index becomes stale. Use `ANALYZE` to rebuild:
+
+```sql
+CREATE TEMP TABLE features AS SELECT * FROM raw_data;
+ALTER TABLE features ADD COLUMN risk FLOAT64 DEFAULT 0.0;
+UPDATE features SET risk = 0.9 WHERE score > 0.8;
+ANALYZE features   -- rebuilds index and manifest
+```
+
+See [SQL Reference — ANALYZE](sql.md#analyze) for details.

@@ -1211,7 +1211,8 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Add).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.If).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Primary).Select(t => t.ToStringValue()))
-            .Or(Token.EqualTo(SqlToken.Key).Select(t => t.ToStringValue()));
+            .Or(Token.EqualTo(SqlToken.Key).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Analyze).Select(t => t.ToStringValue()));
 
     /// <summary>
     /// Parses a column type name. Accepts a plain identifier and also compound types
@@ -1373,6 +1374,17 @@ public static class SqlParser
     /// <summary>
     /// Parses a single statement: a DDL/DML command or a query expression.
     /// </summary>
+    /// <summary>
+    /// Parses <c>ANALYZE table</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Statement> AnalyzeTableParser =
+        from analyzeKw in Token.EqualTo(SqlToken.Analyze)
+        from tableName in IdentifierOrKeywordAsName
+        select (Statement)new AnalyzeTableStatement(tableName);
+
+    /// <summary>
+    /// Parses a single statement: a DDL/DML command or a query expression.
+    /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> SingleStatementParser =
         CreateTempTableParser.Try()
             .Or(DropTableParser.Try())
@@ -1380,6 +1392,7 @@ public static class SqlParser
             .Or(UpdateParser.Try())
             .Or(DeleteParser.Try())
             .Or(AlterTableParser.Try())
+            .Or(AnalyzeTableParser.Try())
             .Or(QueryExpressionParser.Select(q => (Statement)new QueryStatement(q)));
 
     /// <summary>

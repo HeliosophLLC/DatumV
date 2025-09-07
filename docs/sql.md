@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), QUALIFY, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), and set operations (UNION, INTERSECT, EXCEPT).
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), QUALIFY, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
 
 ## Comments
 
@@ -1401,3 +1401,137 @@ Supported table sources:
 - JOINs (INNER, LEFT, RIGHT, FULL OUTER, CROSS — outer joins mark the outer side nullable)
 - Subqueries (`FROM (SELECT ...) AS sub` — recursively infers output column types)
 - Table-valued functions (`RANGE`, `UNNEST` — via `ISchemaAwareTableFunction`)
+
+## DDL / DML
+
+DatumIngest supports session-scoped temp tables with full DDL/DML. Temp tables are stored as `.datum` files in a per-session directory; source indexes and column statistics manifests are auto-generated so the query planner has accurate cardinality estimates and can apply chunk pruning.
+
+### Table Mutability
+
+Every table registered in the catalog has a mutability level:
+
+| Level | Description |
+|-------|-------------|
+| `ReadOnly` | Default for all data sources. DDL/DML statements return an error. |
+| `SessionOwned` | Temp tables created within a session. All DDL/DML permitted. |
+| `Writable` | Reserved for future use (external mutable sources). |
+
+Attempting `INSERT`, `UPDATE`, `DELETE`, `ALTER TABLE`, or `DROP TABLE` on a read-only table returns an error.
+
+### CREATE TEMP TABLE
+
+Creates a session-scoped table with an explicit column definition:
+
+```sql
+CREATE TEMP TABLE features (
+    customer_id   INT PRIMARY KEY,
+    tenure_months INT NOT NULL,
+    monthly_spend FLOAT64,
+    label         STRING
+)
+```
+
+Supported column modifiers:
+
+| Modifier | Behavior |
+|----------|----------|
+| `NOT NULL` | Column rejects NULL values. |
+| `PRIMARY KEY` | Implies `NOT NULL`. Stored as column metadata (not yet enforced as a uniqueness constraint). |
+
+`CREATE TEMP TABLE IF NOT EXISTS` silently succeeds when the table already exists.
+
+### CREATE TEMP TABLE AS SELECT
+
+Creates and populates a temp table from a query in a single statement:
+
+```sql
+CREATE TEMP TABLE features AS
+SELECT customer_id, tenure_months, total_charges / NULLIF(tenure_months, 0) AS avg_spend
+FROM customers
+```
+
+The schema is inferred from the query output. A source index and column statistics manifest are auto-generated after materialization when the table contains rows.
+
+### INSERT INTO
+
+Appends rows to an existing table:
+
+```sql
+-- Literal values
+INSERT INTO features VALUES (1, 'Alice', 0.95), (2, 'Bob', 0.42)
+
+-- Column list (unmapped columns filled with NULL)
+INSERT INTO features (customer_id, label) VALUES (3, 'churn')
+
+-- From a query
+INSERT INTO features SELECT id, name, score FROM raw_data WHERE score IS NOT NULL
+```
+
+A source index and column statistics manifest are auto-rebuilt after each INSERT into a session-owned table.
+
+### UPDATE
+
+Replaces column values in all rows (or filtered rows):
+
+```sql
+UPDATE features SET label = 'retain'
+UPDATE features SET label = 'churn' WHERE score > 0.8
+```
+
+Currently supports constant-expression assignments. Full expression evaluation (referencing other columns) is planned.
+
+### DELETE
+
+Removes rows using tombstone bitmaps:
+
+```sql
+DELETE FROM features WHERE score IS NULL
+```
+
+Tombstoned rows are excluded from subsequent queries. The underlying storage is not compacted.
+
+### ALTER TABLE ADD COLUMN
+
+Adds a column to an existing table:
+
+```sql
+ALTER TABLE features ADD COLUMN risk_tier STRING
+ALTER TABLE features ADD COLUMN flag INT NOT NULL DEFAULT 0
+```
+
+Existing rows receive the `DEFAULT` value (or NULL when no default is specified).
+
+### DROP TABLE
+
+Removes a table from the catalog and deletes its backing file:
+
+```sql
+DROP TABLE features
+DROP TABLE IF EXISTS features
+```
+
+### ANALYZE
+
+Rebuilds the source index and column statistics manifest for a table:
+
+```sql
+ANALYZE features
+```
+
+Use `ANALYZE` after a series of mutations (`UPDATE`, `DELETE`, `ALTER TABLE ADD COLUMN`) to refresh statistics for the query planner. `INSERT` and `CREATE TEMP TABLE AS SELECT` auto-generate sidecars, so `ANALYZE` is only needed after other DDL/DML operations.
+
+Follows the PostgreSQL convention — no `TABLE` keyword required.
+
+### Batch Execution
+
+Multiple statements can be separated by semicolons:
+
+```sql
+DROP TABLE IF EXISTS features;
+CREATE TEMP TABLE features AS SELECT * FROM raw_data;
+ALTER TABLE features ADD COLUMN risk FLOAT64 DEFAULT 0.0;
+UPDATE features SET risk = 0.9 WHERE churn_score > 0.8;
+ANALYZE features
+```
+
+Statements execute sequentially. On failure, execution stops and no further statements run.

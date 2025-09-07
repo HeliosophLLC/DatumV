@@ -198,7 +198,7 @@ Destroys a session and frees associated resources.
 
 #### Query (server-streaming)
 
-Executes one or more semicolon-separated SQL statements and streams results back. Each statement in the batch produces either `QueryResultRow` messages (for `SELECT` queries) or a single `StatementEffect` message (for DDL/DML statements like `CREATE TEMP TABLE`, `INSERT`, `UPDATE`, `ALTER`, `DROP`). All results are tagged with the originating statement's zero-based index. On failure the stream ends with a gRPC error status and no further statements execute (fail-fast).
+Executes one or more semicolon-separated SQL statements and streams results back. Each statement in the batch produces either `QueryResultRow` messages (for `SELECT` queries) or a single `StatementEffect` message (for DDL/DML statements like `CREATE TEMP TABLE`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `ANALYZE`). All results are tagged with the originating statement's zero-based index. On failure the stream ends with a gRPC error status and no further statements execute (fail-fast).
 
 | Field | Type | Description |
 |-------|------|-------------|

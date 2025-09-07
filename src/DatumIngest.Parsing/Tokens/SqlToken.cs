@@ -253,6 +253,9 @@ public enum SqlToken
     /// <summary>The DELETE keyword (DML row deletion).</summary>
     Delete,
 
+    /// <summary>The ANALYZE keyword (statistics and index rebuild).</summary>
+    Analyze,
+
     /// <summary>The ALTER keyword (DDL table modification).</summary>
     Alter,
 

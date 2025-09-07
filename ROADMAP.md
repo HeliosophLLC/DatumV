@@ -152,7 +152,7 @@ Replace the v3 sorted index format (variable-length `WriteDataValue` entries, Zs
 
 **Risk if deferred**: In a single-user CLI, the process exits after each command — no leak. In the gRPC `ComputeService` or `Server` REPL running long-lived sessions, this is a memory leak proportional to usage. It becomes a blocker the moment multi-session compute is deployed.
 
-**Prerequisite for**: Temp tables (per-session materialized results), multi-tenant compute service, long-lived REPL sessions.
+**Prerequisite for**: ~~Temp tables (per-session materialized results)~~ ✅ shipped, multi-tenant compute service, long-lived REPL sessions.
 
 ---
 
