@@ -723,7 +723,8 @@ public sealed record CreateTempTableStatement(
 /// <param name="Name">The column name.</param>
 /// <param name="TypeName">The SQL type name (resolved to a <c>DataKind</c> at execution time).</param>
 /// <param name="Nullable">Whether the column accepts NULL values. Defaults to <see langword="true"/>.</param>
-public sealed record ColumnDefinition(string Name, string TypeName, bool Nullable = true);
+/// <param name="PrimaryKey">Whether this column is part of the primary key. Defaults to <see langword="false"/>.</param>
+public sealed record ColumnDefinition(string Name, string TypeName, bool Nullable = true, bool PrimaryKey = false);
 
 /// <summary>
 /// <c>CREATE TEMP TABLE name AS SELECT ...</c> — creates a temporary table

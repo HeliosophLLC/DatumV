@@ -224,6 +224,8 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("ADD"), SqlToken.Add, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("COLUMN"), SqlToken.Column, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("DEFAULT"), SqlToken.Default, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("PRIMARY"), SqlToken.Primary, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("KEY"), SqlToken.Key, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("IF"), SqlToken.If, requireDelimiters: true)
 
             // Semicolon statement terminator

@@ -1,6 +1,8 @@
 using DatumIngest.Catalog;
 using DatumIngest.DatumFile;
 using DatumIngest.Functions;
+using DatumIngest.Indexing;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Server;
 
@@ -511,21 +513,189 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(5, rows[1]["id"].AsInt32());
     }
 
-    // ──────────────────── Regular SELECT still works ────────────────────
+    // ──────────────────── TABLE MUTABILITY ────────────────────
 
     /// <summary>
-    /// Regular SELECT queries continue to work through the updated dispatcher.
+    /// INSERT into a read-only table returns an error without modifying the file.
     /// </summary>
     [Fact]
-    public async Task RegularSelect_StillWorksAfterDispatcherChange()
+    public async Task InsertIntoReadOnlyTable_ReturnsError()
     {
-        await ExecuteAsync("CREATE TEMP TABLE data (x INT)");
-        await ExecuteAsync("INSERT INTO data VALUES (1), (2), (3)");
+        await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
+        await ExecuteAsync("INSERT INTO source VALUES (1)");
 
-        CommandResult selectResult = await ExecuteAsync("SELECT x FROM data");
-        Assert.Equal(CommandResultKind.StreamingRows, selectResult.Kind);
+        TableDescriptor? descriptor = null;
+        _session.Catalog.TryResolve("source", out descriptor);
 
-        List<Row> rows = await CollectRowsAsync(selectResult);
-        Assert.Equal(3, rows.Count);
+        // Re-register the same file as read-only to simulate a non-temp table.
+        TableDescriptor readOnlyDescriptor = new(
+            "datum", "readonly_data", descriptor!.FilePath,
+            new Dictionary<string, string>(),
+            Mutability: TableMutability.ReadOnly);
+        _session.Catalog.Register(readOnlyDescriptor);
+
+        CommandResult result = await ExecuteAsync("INSERT INTO readonly_data VALUES (99)");
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("read-only", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// DROP TABLE on a read-only table returns an error.
+    /// </summary>
+    [Fact]
+    public async Task DropReadOnlyTable_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
+
+        TableDescriptor? descriptor = null;
+        _session.Catalog.TryResolve("source", out descriptor);
+
+        TableDescriptor readOnlyDescriptor = new(
+            "datum", "readonly_data", descriptor!.FilePath,
+            new Dictionary<string, string>(),
+            Mutability: TableMutability.ReadOnly);
+        _session.Catalog.Register(readOnlyDescriptor);
+
+        CommandResult result = await ExecuteAsync("DROP TABLE readonly_data");
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("read-only", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// UPDATE on a read-only table returns an error.
+    /// </summary>
+    [Fact]
+    public async Task UpdateReadOnlyTable_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
+
+        TableDescriptor? descriptor = null;
+        _session.Catalog.TryResolve("source", out descriptor);
+
+        TableDescriptor readOnlyDescriptor = new(
+            "datum", "readonly_data", descriptor!.FilePath,
+            new Dictionary<string, string>(),
+            Mutability: TableMutability.ReadOnly);
+        _session.Catalog.Register(readOnlyDescriptor);
+
+        CommandResult result = await ExecuteAsync("UPDATE readonly_data SET id = 1");
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("read-only", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// DELETE from a read-only table returns an error.
+    /// </summary>
+    [Fact]
+    public async Task DeleteFromReadOnlyTable_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
+
+        TableDescriptor? descriptor = null;
+        _session.Catalog.TryResolve("source", out descriptor);
+
+        TableDescriptor readOnlyDescriptor = new(
+            "datum", "readonly_data", descriptor!.FilePath,
+            new Dictionary<string, string>(),
+            Mutability: TableMutability.ReadOnly);
+        _session.Catalog.Register(readOnlyDescriptor);
+
+        CommandResult result = await ExecuteAsync("DELETE FROM readonly_data WHERE id = 1");
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("read-only", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Session-owned tables (temp tables) permit all DDL/DML operations.
+    /// </summary>
+    [Fact]
+    public async Task SessionOwnedTable_AllowsInsertUpdateDelete()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        CommandResult insertResult = await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice')");
+        Assert.Equal(CommandResultKind.AffectedRows, insertResult.Kind);
+
+        CommandResult updateResult = await ExecuteAsync("UPDATE data SET name = 'Bob'");
+        Assert.Equal(CommandResultKind.AffectedRows, updateResult.Kind);
+
+        CommandResult deleteResult = await ExecuteAsync("DELETE FROM data WHERE id = 1");
+        Assert.Equal(CommandResultKind.AffectedRows, deleteResult.Kind);
+    }
+
+    // ──────────────────── SIDECAR GENERATION ────────────────────
+
+    /// <summary>
+    /// After INSERT into a temp table, the catalog has a registered source index.
+    /// </summary>
+    [Fact]
+    public async Task InsertIntoTempTable_RegistersSourceIndex()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
+
+        bool hasIndex = _session.Catalog.TryGetIndex("data", out SourceIndex? index);
+        Assert.True(hasIndex, "Source index should be registered on the catalog after INSERT.");
+        Assert.NotNull(index);
+        Assert.Equal(2, index!.Schema.TotalRowCount);
+    }
+
+    /// <summary>
+    /// After INSERT into a temp table, the catalog has a registered manifest with column statistics.
+    /// </summary>
+    [Fact]
+    public async Task InsertIntoTempTable_RegistersManifest()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
+
+        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        Assert.True(hasManifest, "Manifest should be registered on the catalog after INSERT.");
+        Assert.NotNull(manifest);
+        Assert.Equal(2, manifest!.RowCount);
+        Assert.True(manifest.Features.Any(f => f.Name == "id"), "Manifest should contain column 'id'.");
+        Assert.True(manifest.Features.Any(f => f.Name == "name"), "Manifest should contain column 'name'.");
+    }
+
+    /// <summary>
+    /// Manifest includes correct statistics for columns with NULL values.
+    /// </summary>
+    [Fact]
+    public async Task InsertIntoTempTable_ManifestHandlesNullColumns()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING, score FLOAT64)");
+        await ExecuteAsync("INSERT INTO data (id, name) VALUES (1, 'Alice')");
+
+        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        Assert.True(hasManifest, "Manifest should be registered even when columns have NULLs.");
+        Assert.NotNull(manifest);
+        Assert.Equal(1, manifest!.RowCount);
+    }
+
+    /// <summary>
+    /// Sidecar index file is written alongside the .datum file.
+    /// </summary>
+    [Fact]
+    public async Task InsertIntoTempTable_WritesIndexSidecarFile()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice')");
+
+        _session.Catalog.TryResolve("data", out TableDescriptor? descriptor);
+        string indexPath = Path.ChangeExtension(descriptor!.FilePath, ".datum-index");
+        Assert.True(File.Exists(indexPath), "Index sidecar file should exist on disk.");
+    }
+
+    /// <summary>
+    /// Sidecar manifest file is written alongside the .datum file.
+    /// </summary>
+    [Fact]
+    public async Task InsertIntoTempTable_WritesManifestSidecarFile()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice')");
+
+        _session.Catalog.TryResolve("data", out TableDescriptor? descriptor);
+        string manifestPath = Path.ChangeExtension(descriptor!.FilePath, ".datum-manifest");
+        Assert.True(File.Exists(manifestPath), "Manifest sidecar file should exist on disk.");
     }
 }

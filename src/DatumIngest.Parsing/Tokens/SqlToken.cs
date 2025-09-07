@@ -265,6 +265,12 @@ public enum SqlToken
     /// <summary>The DEFAULT keyword (column default value).</summary>
     Default,
 
+    /// <summary>The PRIMARY keyword (primary key constraint).</summary>
+    Primary,
+
+    /// <summary>The KEY keyword (primary key constraint).</summary>
+    Key,
+
     /// <summary>The IF keyword (conditional DDL guard).</summary>
     If,
 

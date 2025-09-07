@@ -1209,7 +1209,9 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.Column).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Default).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Add).Select(t => t.ToStringValue()))
-            .Or(Token.EqualTo(SqlToken.If).Select(t => t.ToStringValue()));
+            .Or(Token.EqualTo(SqlToken.If).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Primary).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.Key).Select(t => t.ToStringValue()));
 
     /// <summary>
     /// Parses a column type name. Accepts a plain identifier and also compound types
@@ -1219,7 +1221,7 @@ public static class SqlParser
         Token.EqualTo(SqlToken.Identifier).Select(GetTokenText);
 
     /// <summary>
-    /// Parses a single column definition: <c>name type [NOT NULL]</c>.
+    /// Parses a single column definition: <c>name type [NOT NULL] [PRIMARY KEY]</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, ColumnDefinition> ColumnDefinitionParser =
         from name in IdentifierOrKeywordAsName
@@ -1229,7 +1231,12 @@ public static class SqlParser
             from nullKw in Token.EqualTo(SqlToken.Null)
             select true
         ).OptionalOrDefault()
-        select new ColumnDefinition(name, typeName, Nullable: !notNull);
+        from primaryKey in (
+            from primaryKw in Token.EqualTo(SqlToken.Primary)
+            from keyKw in Token.EqualTo(SqlToken.Key)
+            select true
+        ).OptionalOrDefault()
+        select new ColumnDefinition(name, typeName, Nullable: !notNull && !primaryKey, PrimaryKey: primaryKey);
 
     /// <summary>
     /// Parses <c>IF NOT EXISTS</c> as an optional guard clause for CREATE statements.

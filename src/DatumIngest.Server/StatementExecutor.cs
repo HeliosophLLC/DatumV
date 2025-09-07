@@ -2,9 +2,12 @@ using DatumIngest.Catalog;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Encoding;
 using DatumIngest.Execution;
+using DatumIngest.Indexing;
+using DatumIngest.Manifest;
 using DatumIngest.Model;
 using DatumIngest.Output.Writers;
 using DatumIngest.Parsing.Ast;
+using DatumIngest.Statistics;
 using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 
 namespace DatumIngest.Server;
@@ -130,6 +133,12 @@ internal sealed class StatementExecutor
             statement.Query, filePath, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
 
         RegisterTempTable(tableName, filePath);
+
+        if (rowCount > 0)
+        {
+            RebuildTempTableSidecars(tableName, filePath);
+        }
+
         return CommandResult.AffectedRows(rowCount, $"Created temp table '{tableName}' with {rowCount} rows.");
     }
 
@@ -148,6 +157,9 @@ internal sealed class StatementExecutor
 
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
+
+        CommandResult? mutabilityError = CheckMutability(descriptor);
+        if (mutabilityError is not null) return mutabilityError;
 
         _session.Catalog.Unregister(tableName);
 
@@ -182,6 +194,9 @@ internal sealed class StatementExecutor
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
 
+        CommandResult? mutabilityError = CheckMutability(descriptor);
+        if (mutabilityError is not null) return mutabilityError;
+
         DatumFileSchema schema;
         using (DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath))
         {
@@ -207,7 +222,108 @@ internal sealed class StatementExecutor
                 return CommandResult.Error($"Unsupported INSERT source: {statement.Source.GetType().Name}.");
         }
 
+        if (insertedRows > 0 && descriptor.Mutability == TableMutability.SessionOwned)
+        {
+            RebuildTempTableSidecars(tableName, descriptor.FilePath);
+        }
+
         return CommandResult.AffectedRows(insertedRows, $"Inserted {insertedRows} rows into '{tableName}'.");
+    }
+
+    /// <summary>
+    /// Rebuilds the source index and column statistics manifest for a session-owned table,
+    /// registering both on the session catalog for use by the query planner.
+    /// </summary>
+    /// <remarks>
+    /// Uses <see cref="IncrementalIndexBuilder"/> to stream rows through the indexing pipeline
+    /// with disk-based spill, avoiding full in-memory materialization. The completed index sidecar
+    /// is written alongside the <c>.datum</c> file and the manifest is registered on the catalog.
+    /// </remarks>
+    private void RebuildTempTableSidecars(string tableName, string filePath)
+    {
+        SourceIndexBuilder sourceIndexBuilder = new(
+            bloomAllColumns: false, indexAllColumns: false, autoIndexColumns: true);
+        SourceFingerprint fingerprint = new(0, Array.Empty<byte>());
+        IncrementalIndexBuilder indexBuilder = sourceIndexBuilder.CreateIncrementalBuilder(fingerprint);
+        StatisticsCollector statisticsCollector = new();
+
+        Schema schema;
+        using (DatumFileReader reader = DatumFileReader.Open(filePath))
+        {
+            schema = reader.Schema;
+            DatumRowGroupDescriptor[] rowGroups;
+            using (FileStream footerStream = File.OpenRead(filePath))
+            {
+                (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+            }
+
+            string[] columnNames = new string[schema.Columns.Count];
+            int[] allIndices = new int[schema.Columns.Count];
+            for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
+            {
+                columnNames[columnIndex] = schema.Columns[columnIndex].Name;
+                allIndices[columnIndex] = columnIndex;
+            }
+
+            Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int columnIndex = 0; columnIndex < columnNames.Length; columnIndex++)
+            {
+                nameIndex[columnNames[columnIndex]] = columnIndex;
+            }
+
+            for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
+            {
+                DatumRowGroupDescriptor rowGroup = rowGroups[rowGroupIndex];
+                if (rowGroup.ActiveRowCount == 0) continue;
+
+                DataValue[][] columns = reader.ReadColumns(rowGroupIndex, allIndices);
+                int rowCount = (int)rowGroup.RowCount;
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    if (rowGroup.IsRowDeleted(rowIndex)) continue;
+
+                    DataValue[] values = new DataValue[allIndices.Length];
+                    for (int columnPosition = 0; columnPosition < allIndices.Length; columnPosition++)
+                    {
+                        values[columnPosition] = columns[columnPosition][rowIndex];
+                    }
+
+                    Row row = new(columnNames, values, nameIndex);
+                    indexBuilder.AddRow(row);
+                    statisticsCollector.AddRow(row);
+                }
+            }
+        }
+
+        // Finalize the index and write the sidecar.
+        SourceIndex sourceIndex = indexBuilder.Finalize();
+        SourceIndexSet indexSet = SourceIndexSet.Create(tableName, sourceIndex);
+
+        string indexPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-index";
+        using (FileStream output = File.Create(indexPath))
+        {
+            UnifiedIndexWriter.Write(indexSet, output, indexBuilder.SpillWriter);
+        }
+
+        indexBuilder.Dispose();
+
+        _session.Catalog.RegisterIndex(tableName, sourceIndex);
+
+        // Build and register the manifest.
+        IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
+        Dictionary<string, DataKind> columnKinds = new(schema.Columns.Count, StringComparer.OrdinalIgnoreCase);
+        for (int columnIndex = 0; columnIndex < schema.Columns.Count; columnIndex++)
+        {
+            columnKinds[schema.Columns[columnIndex].Name] = schema.Columns[columnIndex].Kind;
+        }
+
+        QueryResultsManifest manifest = ManifestBuilder.Build(statistics, columnKinds, sourceIndex.Schema.TotalRowCount);
+
+        string manifestPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-manifest";
+        ManifestSerializer.WriteToFileAsync(tableName, manifest, manifestPath).GetAwaiter().GetResult();
+
+        _session.Catalog.RegisterManifest(tableName, manifest);
     }
 
     private async Task<long> InsertFromQueryAsync(
@@ -336,6 +452,9 @@ internal sealed class StatementExecutor
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
 
+        CommandResult? mutabilityError = CheckMutability(descriptor);
+        if (mutabilityError is not null) return mutabilityError;
+
         // For now, UPDATE only supports constant assignments (SET col = literal).
         // Full expression evaluation with WHERE requires the expression evaluator,
         // which will be wired in a later phase.
@@ -404,6 +523,9 @@ internal sealed class StatementExecutor
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
+
+        CommandResult? mutabilityError = CheckMutability(descriptor);
+        if (mutabilityError is not null) return mutabilityError;
 
         DatumFileSchema schema;
         DatumRowGroupDescriptor[] rowGroups;
@@ -562,6 +684,9 @@ internal sealed class StatementExecutor
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
 
+        CommandResult? mutabilityError = CheckMutability(descriptor);
+        if (mutabilityError is not null) return mutabilityError;
+
         DataKind kind = ResolveTypeName(statement.TypeName);
         DatumColumnFlags flags = statement.Nullable ? DatumColumnFlags.Nullable : DatumColumnFlags.None;
         DatumColumnDescriptor newColumn = new(statement.ColumnName, kind, flags);
@@ -601,6 +726,21 @@ internal sealed class StatementExecutor
     }
 
     // ──────────────────── Helpers ────────────────────
+
+    /// <summary>
+    /// Checks whether the resolved table permits write operations.
+    /// Returns a non-null error result when the table is read-only.
+    /// </summary>
+    private static CommandResult? CheckMutability(TableDescriptor descriptor)
+    {
+        if (descriptor.Mutability == TableMutability.ReadOnly)
+        {
+            return CommandResult.Error(
+                $"Table '{descriptor.Name}' is read-only. DDL/DML operations are only permitted on session-owned or writable tables.");
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Resolves a SQL type name (case-insensitive) to a <see cref="DataKind"/>.
@@ -643,7 +783,8 @@ internal sealed class StatementExecutor
 
     private void RegisterTempTable(string tableName, string filePath)
     {
-        TableDescriptor descriptor = new("datum", tableName, filePath, new Dictionary<string, string>());
+        TableDescriptor descriptor = new("datum", tableName, filePath, new Dictionary<string, string>(),
+            Mutability: TableMutability.SessionOwned);
         _session.Catalog.Register(descriptor);
     }
 

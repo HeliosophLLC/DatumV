@@ -395,6 +395,69 @@ public class DdlParsingTests
             SqlParser.ParseBatch(""));
     }
 
+    // ───────────────────── PRIMARY KEY ─────────────────────
+
+    /// <summary>
+    /// PRIMARY KEY constraint is parsed and sets <see cref="ColumnDefinition.PrimaryKey"/> to true.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_PrimaryKeyColumn()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE orders (id INT PRIMARY KEY, name STRING)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Equal(2, create.Columns.Count);
+        Assert.True(create.Columns[0].PrimaryKey);
+        Assert.False(create.Columns[1].PrimaryKey);
+    }
+
+    /// <summary>
+    /// A PRIMARY KEY column is implicitly NOT NULL even without an explicit NOT NULL keyword.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_PrimaryKeyImpliesNotNull()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE orders (id INT PRIMARY KEY, label STRING)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.False(create.Columns[0].Nullable, "PRIMARY KEY column should be implicitly NOT NULL.");
+        Assert.True(create.Columns[1].Nullable, "Non-PK column should remain nullable by default.");
+    }
+
+    /// <summary>
+    /// Explicit NOT NULL combined with PRIMARY KEY parses without error.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_PrimaryKeyWithExplicitNotNull()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE orders (id INT NOT NULL PRIMARY KEY)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.True(create.Columns[0].PrimaryKey);
+        Assert.False(create.Columns[0].Nullable);
+    }
+
+    /// <summary>
+    /// The words PRIMARY and KEY are valid as column names when used independently.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_PrimaryAndKeyAsColumnNames()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE t (primary STRING, key STRING, value STRING)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Equal(3, create.Columns.Count);
+        Assert.Equal("primary", create.Columns[0].Name);
+        Assert.Equal("key", create.Columns[1].Name);
+        Assert.Equal("value", create.Columns[2].Name);
+        Assert.False(create.Columns[0].PrimaryKey);
+        Assert.False(create.Columns[1].PrimaryKey);
+    }
+
     // ───────────────────── Backward compatibility ─────────────────────
 
     [Fact]
