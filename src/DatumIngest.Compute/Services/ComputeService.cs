@@ -173,7 +173,19 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             }
 
             // Parse the SQL as a batch (supports single and multi-statement).
-            IReadOnlyList<Statement> statements = SqlParser.ParseBatch(request.Sql);
+            // Any tokenizer or parser exception is a user-provided syntax error and
+            // must be surfaced as InvalidArgument, not escape as StatusCode.Unknown.
+            IReadOnlyList<Statement> statements;
+            try
+            {
+                statements = SqlParser.ParseBatch(request.Sql);
+            }
+            catch (Exception parseException) when (parseException is not OperationCanceledException)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    $"Syntax error: {parseException.Message}"));
+            }
+
             session.RecordQuery(request.Sql);
 
             long totalRowCount = 0;

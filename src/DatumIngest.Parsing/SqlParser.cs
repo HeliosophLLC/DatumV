@@ -1312,11 +1312,13 @@ public static class SqlParser
             select (new[] { first }.Concat(rest).ToArray(), primaryKey);
 
     /// <summary>
-    /// Parses <c>CREATE TEMP TABLE [IF NOT EXISTS] name (col type, ..., [PRIMARY KEY (col, ...)])</c>.
+    /// Parses <c>CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] name (col type, ..., [PRIMARY KEY (col, ...)])</c>.
+    /// The <c>TEMP</c>/<c>TEMPORARY</c> keyword is optional — all tables created in a
+    /// session are temporary, so <c>CREATE TABLE</c> is accepted as a synonym.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> CreateTempTableParser =
         from createKw in Token.EqualTo(SqlToken.Create)
-        from tempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary))
+        from optionalTempKw in Token.EqualTo(SqlToken.Temp).Or(Token.EqualTo(SqlToken.Temporary)).OptionalOrDefault()
         from tableKw in Token.EqualTo(SqlToken.Table)
         from ifNotExists in IfNotExistsParser
         from tableName in IdentifierOrKeywordAsName

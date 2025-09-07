@@ -84,6 +84,17 @@ public static class SqlTokenizer
         from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
         select Unit.Value;
 
+    /// <summary>
+    /// Recognizes a SQL Server-style temporary-table identifier prefix: <c>#</c> followed
+    /// by a C-style identifier. The full span (including <c>#</c>) is emitted as a single
+    /// <see cref="SqlToken.Identifier"/> token, preserving the prefix in the table name.
+    /// </summary>
+    private static readonly TextParser<Unit> TempTableIdentifierToken =
+        from hash in Character.EqualTo('#')
+        from first in Character.Letter.Or(Character.EqualTo('_'))
+        from rest in Character.LetterOrDigit.Or(Character.EqualTo('_')).IgnoreMany()
+        select Unit.Value;
+
     /// <summary>The singleton tokenizer instance.</summary>
     public static Tokenizer<SqlToken> Instance { get; } =
         new TokenizerBuilder<SqlToken>()
@@ -236,6 +247,10 @@ public static class SqlTokenizer
             // Named parameter placeholders ($name) — before numeric literals
             // and identifiers so the $ prefix is not treated as unexpected input.
             .Match(ParameterToken, SqlToken.Parameter)
+
+            // Temp-table identifier prefix (#name) — before generic identifiers
+            // so the # is captured as part of the name rather than rejected.
+            .Match(TempTableIdentifierToken, SqlToken.Identifier)
 
             // Numeric literals
             .Match(NumberToken, SqlToken.NumberLiteral, requireDelimiters: true)

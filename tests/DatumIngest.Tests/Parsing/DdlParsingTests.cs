@@ -68,6 +68,34 @@ public class DdlParsingTests
         Assert.Equal(2, create.Columns.Count);
     }
 
+    /// <summary>
+    /// CREATE TABLE (without TEMP/TEMPORARY) is accepted as an alias for
+    /// CREATE TEMP TABLE — all tables created in a session context are temporary.
+    /// </summary>
+    [Fact]
+    public void CreateTableWithoutTempKeyword_ParsesAsCreateTempTable()
+    {
+        Statement statement = SqlParser.ParseStatement("CREATE TABLE t (id INT)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Equal("t", create.TableName);
+        Assert.Single(create.Columns);
+    }
+
+    /// <summary>
+    /// SQL Server-style #name prefixed identifiers are valid temp table names.
+    /// The # prefix is preserved in the table name for consistent catalog lookups.
+    /// </summary>
+    [Fact]
+    public void CreateTable_WithHashPrefixedName_UsesHashPrefixedTableName()
+    {
+        Statement statement = SqlParser.ParseStatement("CREATE TABLE #test (id INT32)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Equal("#test", create.TableName);
+        Assert.Single(create.Columns);
+    }
+
     [Fact]
     public void CreateTempTableAsSelect()
     {
@@ -427,13 +455,6 @@ public class DdlParsingTests
     }
 
     // ───────────────────── Error cases ─────────────────────
-
-    [Fact]
-    public void CreateWithoutTempRejects()
-    {
-        Assert.Throws<ParseException>(() =>
-            SqlParser.ParseStatement("CREATE TABLE t (x INT)"));
-    }
 
     [Fact]
     public void ParseBatchRejectsEmptyInput()

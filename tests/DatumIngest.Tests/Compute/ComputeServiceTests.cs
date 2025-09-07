@@ -568,6 +568,29 @@ public sealed class ComputeServiceTests : IDisposable
     // ─────────────────── Query Cancellation ───────────────────
 
     /// <summary>
+    /// When SQL cannot be parsed, the Query RPC must surface an
+    /// <see cref="StatusCode.InvalidArgument"/> error with a descriptive message
+    /// rather than <see cref="StatusCode.Unknown"/> with "Exception was thrown by handler."
+    /// </summary>
+    [Fact]
+    public async Task Query_WithUnparsableSql_ThrowsInvalidArgumentRpcException()
+    {
+        Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        QueryRequest request = new()
+        {
+            SessionId = session.SessionId.ToString(),
+            Sql = "@@@@ not valid SQL @@@@",
+        };
+
+        CapturingStreamWriter<QueryResult> writer = new();
+        RpcException exception = await Assert.ThrowsAsync<RpcException>(
+            () => _service.Query(request, writer, TestCallContext.Create()));
+
+        Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+        Assert.False(string.IsNullOrEmpty(exception.Status.Detail));
+    }
+
+    /// <summary>
     /// When the gRPC call is cancelled (client disconnects), the linked
     /// token propagates the cancellation through the execution pipeline.
     /// </summary>
