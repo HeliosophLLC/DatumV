@@ -198,4 +198,156 @@ public class CastFunctionTests
         ]);
         Assert.Equal(946684800f, result.AsFloat32());
     }
+
+    // ── Extended numeric type conversions ────────────────────────────────────
+
+    [Fact]
+    public void Cast_BooleanToInt32_True()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromBoolean(true),
+            DataValue.FromString("Int32")
+        ]);
+        Assert.Equal(1, result.AsInt32());
+    }
+
+    [Fact]
+    public void Cast_BooleanToInt32_False()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromBoolean(false),
+            DataValue.FromString("Int32")
+        ]);
+        Assert.Equal(0, result.AsInt32());
+    }
+
+    [Fact]
+    public void Cast_BooleanToInt64_True()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromBoolean(true),
+            DataValue.FromString("Int64")
+        ]);
+        Assert.Equal(1L, result.AsInt64());
+    }
+
+    [Fact]
+    public void Cast_BooleanToFloat64()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromBoolean(true),
+            DataValue.FromString("Float64")
+        ]);
+        Assert.Equal(1.0, result.AsFloat64());
+    }
+
+    [Fact]
+    public void Cast_Int32ToBoolean_Nonzero_IsTrue()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt32(42),
+            DataValue.FromString("Boolean")
+        ]);
+        Assert.True(result.AsBoolean());
+    }
+
+    [Fact]
+    public void Cast_Int32ToBoolean_Zero_IsFalse()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt32(0),
+            DataValue.FromString("Boolean")
+        ]);
+        Assert.False(result.AsBoolean());
+    }
+
+    [Fact]
+    public void Cast_StringToInt32()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromString("42"),
+            DataValue.FromString("Int32")
+        ]);
+        Assert.Equal(42, result.AsInt32());
+    }
+
+    [Fact]
+    public void Cast_Int32ToString()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt32(42),
+            DataValue.FromString("String")
+        ]);
+        Assert.Equal("42", result.AsString());
+    }
+
+    [Fact]
+    public void Cast_Int32ToFloat64()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt32(42),
+            DataValue.FromString("Float64")
+        ]);
+        Assert.Equal(42.0, result.AsFloat64());
+    }
+
+    [Fact]
+    public void Cast_Float64ToInt32_Truncates()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromFloat64(3.7),
+            DataValue.FromString("Int32")
+        ]);
+        Assert.Equal(3, result.AsInt32());
+    }
+
+    [Fact]
+    public void Cast_Int32ToInt64()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt32(int.MaxValue),
+            DataValue.FromString("Int64")
+        ]);
+        Assert.Equal((long)int.MaxValue, result.AsInt64());
+    }
+
+    [Fact]
+    public void Cast_Int64ToFloat32()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt64(12345L),
+            DataValue.FromString("Float32")
+        ]);
+        Assert.Equal(12345f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Cast_StringToInt64()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromString("9876543210"),
+            DataValue.FromString("Int64")
+        ]);
+        Assert.Equal(9876543210L, result.AsInt64());
+    }
+
+    [Fact]
+    public void Cast_Int64ToString()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt64(9876543210L),
+            DataValue.FromString("String")
+        ]);
+        Assert.Equal("9876543210", result.AsString());
+    }
+
+    [Fact]
+    public void Cast_StringToFloat64()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromString("3.141592653589793"),
+            DataValue.FromString("Float64")
+        ]);
+        Assert.Equal(3.141592653589793, result.AsFloat64(), 14);
+    }
 }

@@ -174,4 +174,93 @@ public class ArithmeticFunctionTests
         DataKind resultKind = function.ValidateArguments([DataKind.UInt8]);
         Assert.Equal(DataKind.Float32, resultKind);
     }
+
+    // ── Extended numeric scalar support ─────────────────────────────────────
+
+    [Fact]
+    public void Abs_Int32_ReturnsFloat32()
+    {
+        AbsFunction function = new();
+        DataValue result = function.Execute([DataValue.FromInt32(-42)]);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(42f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Abs_Int64_ReturnsFloat32()
+    {
+        AbsFunction function = new();
+        DataValue result = function.Execute([DataValue.FromInt64(-1000L)]);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(1000f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Abs_Float64_ReturnsFloat32()
+    {
+        AbsFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat64(-3.5)]);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(3.5f, result.AsFloat32(), 0.001f);
+    }
+
+    [Fact]
+    public void ValidateArguments_Int32_ReturnsFloat32()
+    {
+        AbsFunction function = new();
+        DataKind resultKind = function.ValidateArguments([DataKind.Int32]);
+        Assert.Equal(DataKind.Float32, resultKind);
+    }
+
+    [Fact]
+    public void ValidateArguments_Int64_ReturnsFloat32()
+    {
+        AbsFunction function = new();
+        DataKind resultKind = function.ValidateArguments([DataKind.Int64]);
+        Assert.Equal(DataKind.Float32, resultKind);
+    }
+
+    [Fact]
+    public void Add_Int32AndInt32_ReturnsFloat32()
+    {
+        AddFunction function = new();
+        DataValue result = function.Execute([DataValue.FromInt32(3), DataValue.FromInt32(4)]);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(7f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Add_Int64AndFloat32_ReturnsFloat32()
+    {
+        AddFunction function = new();
+        DataValue result = function.Execute([DataValue.FromInt64(100L), DataValue.FromFloat32(0.5f)]);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(100.5f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Mod_Int32_ReturnsFloat32()
+    {
+        ModFunction function = new();
+        DataValue result = function.Execute([DataValue.FromInt32(7), DataValue.FromInt32(3)]);
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(1f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void BinaryValidateArguments_Int32_ReturnsFloat32()
+    {
+        AddFunction function = new();
+        DataKind resultKind = function.ValidateArguments([DataKind.Int32, DataKind.Int32]);
+        Assert.Equal(DataKind.Float32, resultKind);
+    }
+
+    [Fact]
+    public void Abs_NullInt32_ReturnsFloat32Null()
+    {
+        AbsFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.Int32)]);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Float32, result.Kind);
+    }
 }

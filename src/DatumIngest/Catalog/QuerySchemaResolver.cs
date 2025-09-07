@@ -34,16 +34,37 @@ public sealed class QuerySchemaResolver
     /// <param name="statement">The parsed SELECT statement to analyze.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The resolved schema containing columns from all referenced sources.</returns>
-    public async Task<ResolvedQuerySchema> ResolveAsync(
+    /// <inheritdoc cref="ResolveAsync(SelectStatement, CancellationToken)"/>
+    public Task<ResolvedQuerySchema> ResolveAsync(
         SelectStatement statement,
         CancellationToken cancellationToken)
     {
-        // Build a lookup of CTE definitions so table references that match a CTE
-        // name are resolved from the CTE body rather than from the catalog.
+        return ResolveAsyncCore(statement, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Core resolution method. Builds the effective CTE scope by layering
+    /// <paramref name="inheritedCommonTableExpressions"/> (the outer scope, passed
+    /// from a CTE body that references sibling CTEs) under the statement's own
+    /// WITH-clause definitions, then resolves FROM and JOIN sources.
+    /// </summary>
+    private async Task<ResolvedQuerySchema> ResolveAsyncCore(
+        SelectStatement statement,
+        IReadOnlyDictionary<string, CommonTableExpression>? inheritedCommonTableExpressions,
+        CancellationToken cancellationToken)
+    {
+        // Build the effective CTE scope: start from the inherited outer scope
+        // and overlay this statement's own WITH definitions (inner always wins).
         Dictionary<string, CommonTableExpression>? commonTableExpressionsByName = null;
+
+        if (inheritedCommonTableExpressions is not null && inheritedCommonTableExpressions.Count > 0)
+        {
+            commonTableExpressionsByName = new(inheritedCommonTableExpressions, StringComparer.OrdinalIgnoreCase);
+        }
+
         if (statement.CommonTableExpressions is not null && statement.CommonTableExpressions.Count > 0)
         {
-            commonTableExpressionsByName = new(statement.CommonTableExpressions.Count, StringComparer.OrdinalIgnoreCase);
+            commonTableExpressionsByName ??= new(StringComparer.OrdinalIgnoreCase);
             foreach (CommonTableExpression commonTableExpression in statement.CommonTableExpressions)
             {
                 commonTableExpressionsByName[commonTableExpression.Name] = commonTableExpression;
@@ -120,7 +141,7 @@ public sealed class QuerySchemaResolver
             commonTableExpressionsByName.TryGetValue(tableReference.Name, out CommonTableExpression? commonTableExpression))
         {
             return await ResolveCommonTableExpressionAsync(
-                commonTableExpression, tableReference.Alias, cancellationToken).ConfigureAwait(false);
+                commonTableExpression, tableReference.Alias, commonTableExpressionsByName, cancellationToken).ConfigureAwait(false);
         }
 
         Schema schema = await _catalog.GetSchemaAsync(
@@ -134,16 +155,22 @@ public sealed class QuerySchemaResolver
     /// Resolves the output schema of a CTE by extracting the leftmost SELECT
     /// statement from the CTE body's query expression.
     /// </summary>
+    /// <summary>
+    /// Resolves the output schema of a CTE by extracting the leftmost SELECT
+    /// statement from the CTE body's query expression.
+    /// </summary>
     private async Task<IReadOnlyList<ResolvedColumn>> ResolveCommonTableExpressionAsync(
         CommonTableExpression commonTableExpression,
         string? tableAlias,
+        IReadOnlyDictionary<string, CommonTableExpression>? outerCommonTableExpressions,
         CancellationToken cancellationToken)
     {
         // Extract the leftmost SELECT from the CTE body to determine the output schema.
+        // Pass the outer CTE scope so the body can reference sibling CTEs.
         SelectStatement leftmostStatement = ExtractLeftmostStatement(commonTableExpression.Body);
 
-        ResolvedQuerySchema innerSchema = await ResolveAsync(
-            leftmostStatement, cancellationToken).ConfigureAwait(false);
+        ResolvedQuerySchema innerSchema = await ResolveAsyncCore(
+            leftmostStatement, outerCommonTableExpressions, cancellationToken).ConfigureAwait(false);
 
         string sourceIdentifier = tableAlias ?? commonTableExpression.Name;
 

@@ -707,7 +707,8 @@ public static class SqlParser
             from asKw in Token.EqualTo(SqlToken.As)
             from aliasName in Token.EqualTo(SqlToken.Identifier)
             select GetTokenText(aliasName)
-        ).OptionalOrDefault()
+        ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
+        .OptionalOrDefault()
         select (TableSource)new TableReference(GetTokenText(name), alias, ToSpan(name), tablesample);
 
     /// <summary>A subquery source: (SELECT ...) AS alias.</summary>

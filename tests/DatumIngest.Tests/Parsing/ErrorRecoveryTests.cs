@@ -156,7 +156,10 @@ public sealed class ErrorRecoveryTests
     [Fact]
     public void TrailingTokens_ReportsError()
     {
-        ParseResult result = SqlParser.TryParseRecovering("SELECT x FROM t GARBAGE");
+        // GARBAGE after a complete WHERE clause is genuinely leftover —
+        // bare-alias support only applies to tokens immediately after a
+        // table reference, not after clause keywords like WHERE.
+        ParseResult result = SqlParser.TryParseRecovering("SELECT x FROM t WHERE x = 1 GARBAGE");
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors, e => e.Message.Contains("Unexpected"));

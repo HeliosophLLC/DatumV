@@ -42,12 +42,15 @@ public sealed class StandardDeviationFunction : IAggregateFunction
             throw new ArgumentException($"{Name}() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        bool isNumeric = argumentKinds[0] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Float32 or DataKind.Float64;
+        if (!isNumeric)
         {
             throw new ArgumentException($"{Name}() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Float64;
     }
 
     /// <inheritdoc/>
@@ -73,7 +76,7 @@ public sealed class StandardDeviationFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            double value = arguments[0].AsFloat32();
+            double value = AvgFunction.ExtractAsDouble(arguments[0]);
             _count++;
             double delta = value - _mean;
             _mean += delta / _count;
@@ -113,14 +116,14 @@ public sealed class StandardDeviationFunction : IAggregateFunction
                 if (_usePopulation)
                 {
                     return _count > 0
-                        ? DataValue.FromFloat32((float)System.Math.Sqrt(_m2 / _count))
-                        : DataValue.Null(DataKind.Float32);
+                        ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / _count))
+                        : DataValue.Null(DataKind.Float64);
                 }
 
                 // Sample stddev requires at least 2 values (N-1 denominator).
                 return _count > 1
-                    ? DataValue.FromFloat32((float)System.Math.Sqrt(_m2 / (_count - 1)))
-                    : DataValue.Null(DataKind.Float32);
+                    ? DataValue.FromFloat64(System.Math.Sqrt(_m2 / (_count - 1)))
+                    : DataValue.Null(DataKind.Float64);
             }
         }
 

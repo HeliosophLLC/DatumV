@@ -97,7 +97,7 @@ public class GroupByOperatorTests
 
         Assert.Single(results);
         Assert.Equal(60f, results[0]["SUM(price)"].AsFloat32());
-        Assert.Equal(20f, results[0]["AVG(price)"].AsFloat32());
+        Assert.Equal(20.0, results[0]["AVG(price)"].AsFloat64());
     }
 
     // ─────────────── Single-key GROUP BY ───────────────

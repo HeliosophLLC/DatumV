@@ -30,12 +30,15 @@ public sealed class MedianFunction : IAggregateFunction
             throw new ArgumentException("MEDIAN() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        bool isNumeric = argumentKinds[0] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Float32 or DataKind.Float64;
+        if (!isNumeric)
         {
             throw new ArgumentException($"MEDIAN() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Float64;
     }
 
     /// <inheritdoc/>
@@ -43,13 +46,13 @@ public sealed class MedianFunction : IAggregateFunction
 
     private sealed class MedianAccumulator : IAggregateAccumulator
     {
-        private readonly List<float> _values = [];
+        private readonly List<double> _values = [];
 
         public void Accumulate(ReadOnlySpan<DataValue> arguments)
         {
             if (arguments[0].IsNull) return;
 
-            _values.Add(arguments[0].AsFloat32());
+            _values.Add(AvgFunction.ExtractAsDouble(arguments[0]));
         }
 
         /// <inheritdoc/>
@@ -65,7 +68,7 @@ public sealed class MedianFunction : IAggregateFunction
             {
                 if (_values.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Float32);
+                    return DataValue.Null(DataKind.Float64);
                 }
 
                 _values.Sort();
@@ -74,12 +77,12 @@ public sealed class MedianFunction : IAggregateFunction
 
                 if (count % 2 == 1)
                 {
-                    return DataValue.FromFloat32(_values[mid]);
+                    return DataValue.FromFloat64(_values[mid]);
                 }
 
                 // Even count: average of the two middle values.
-                float median = (_values[mid - 1] + _values[mid]) / 2f;
-                return DataValue.FromFloat32(median);
+                double median = (_values[mid - 1] + _values[mid]) / 2.0;
+                return DataValue.FromFloat64(median);
             }
         }
 

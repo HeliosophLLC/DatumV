@@ -5,6 +5,11 @@ namespace DatumIngest.Functions.Aggregates;
 /// <summary>
 /// Implements <c>SUM(expression)</c>. Computes the sum of all non-null numeric
 /// values. Returns null if all values are null.
+/// <para>
+/// Output type follows PostgreSQL semantics: integer inputs produce <c>Int64</c>,
+/// <c>Float32</c> inputs produce <c>Float32</c>, and <c>Float64</c> inputs
+/// produce <c>Float64</c>.
+/// </para>
 /// </summary>
 public sealed class SumFunction : IAggregateFunction
 {
@@ -19,47 +24,113 @@ public sealed class SumFunction : IAggregateFunction
             throw new ArgumentException("SUM() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        return argumentKinds[0] switch
         {
-            throw new ArgumentException($"SUM() requires a numeric argument, got {argumentKinds[0]}.");
-        }
-
-        return DataKind.Float32;
+            DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
+                or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+                => DataKind.Int64,
+            DataKind.Float32 => DataKind.Float32,
+            DataKind.Float64 => DataKind.Float64,
+            DataKind other => throw new ArgumentException(
+                $"SUM() requires a numeric argument, got {other}."),
+        };
     }
 
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new SumAccumulator();
 
+    private static long ExtractAsInt64(DataValue value) => value.Kind switch
+    {
+        DataKind.Int8 => value.AsInt8(),
+        DataKind.Int16 => value.AsInt16(),
+        DataKind.UInt8 => value.AsUInt8(),
+        DataKind.UInt16 => value.AsUInt16(),
+        DataKind.Int32 => value.AsInt32(),
+        DataKind.UInt32 => value.AsUInt32(),
+        DataKind.Int64 => value.AsInt64(),
+        DataKind.UInt64 => (long)value.AsUInt64(),
+        _ => (long)value.AsFloat32(),
+    };
+
     private sealed class SumAccumulator : IAggregateAccumulator
     {
-        private double _sum;
+        private long _longSum;
+        private double _doubleSum;
         private bool _hasValue;
+        private bool _isIntegerKind;
+        private bool _isFloat64Kind;
 
         public void Accumulate(ReadOnlySpan<DataValue> arguments)
         {
-            if (arguments[0].IsNull) return;
+            DataValue arg = arguments[0];
+            if (arg.IsNull) return;
 
-            _sum += arguments[0].AsFloat32();
-            _hasValue = true;
+            if (!_hasValue)
+            {
+                // Capture the accumulation strategy from the first non-null value.
+                // The function object is a shared singleton so output-kind detection
+                // must live on the per-group accumulator, not on the function.
+                _isIntegerKind = arg.Kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8
+                    or DataKind.UInt16 or DataKind.Int32 or DataKind.UInt32
+                    or DataKind.Int64 or DataKind.UInt64;
+                _isFloat64Kind = arg.Kind is DataKind.Float64;
+                _hasValue = true;
+            }
+
+            if (_isIntegerKind)
+            {
+                _longSum += ExtractAsInt64(arg);
+            }
+            else
+            {
+                _doubleSum += _isFloat64Kind ? arg.AsFloat64() : arg.AsFloat32();
+            }
         }
 
         /// <inheritdoc/>
         public void Merge(IAggregateAccumulator other)
         {
             SumAccumulator otherAccumulator = (SumAccumulator)other;
-            _sum += otherAccumulator._sum;
+            _longSum += otherAccumulator._longSum;
+            _doubleSum += otherAccumulator._doubleSum;
+
+            if (!_hasValue && otherAccumulator._hasValue)
+            {
+                _isIntegerKind = otherAccumulator._isIntegerKind;
+                _isFloat64Kind = otherAccumulator._isFloat64Kind;
+            }
+
             _hasValue |= otherAccumulator._hasValue;
         }
 
-        public DataValue Result => _hasValue
-            ? DataValue.FromFloat32((float)_sum)
-            : DataValue.Null(DataKind.Float32);
+        public DataValue Result
+        {
+            get
+            {
+                if (!_hasValue)
+                {
+                    return DataValue.Null(DataKind.Float64);
+                }
+
+                if (_isIntegerKind)
+                {
+                    return DataValue.FromInt64(_longSum);
+                }
+
+                return _isFloat64Kind
+                    ? DataValue.FromFloat64(_doubleSum)
+                    : DataValue.FromFloat32((float)_doubleSum);
+            }
+        }
 
         /// <inheritdoc />
         public void Reset()
         {
-            _sum = 0;
+            _longSum = 0;
+            _doubleSum = 0;
             _hasValue = false;
+            _isIntegerKind = false;
+            _isFloat64Kind = false;
         }
     }
 }

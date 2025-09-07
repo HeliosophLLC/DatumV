@@ -326,6 +326,47 @@ public sealed class QuerySchemaResolverTests
         Assert.Contains("s", tableNames);
     }
 
+    // ───────────────────── Chained CTEs ─────────────────────
+
+    /// <summary>
+    /// A CTE that references another CTE defined in the same WITH clause must
+    /// resolve to the sibling CTE's schema rather than failing with a catalog
+    /// lookup. Regression test for the bug where <see cref="QuerySchemaResolver"/>
+    /// dropped the outer CTE scope when recursing into a CTE body.
+    /// </summary>
+    [Fact]
+    public async Task Resolve_ChainedCtes_SecondCteCanReferencePriorCte()
+    {
+        // WITH base AS (SELECT name, age FROM people),
+        //      derived AS (SELECT name FROM base)
+        // SELECT name FROM derived
+        TableCatalog catalog = CreateCatalog();
+        QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
+
+        CommonTableExpression baseCte = new(
+            Name: "base",
+            Body: new SelectQueryExpression(new SelectStatement(
+                Columns: [new SelectAllColumns()],
+                From: new FromClause(new TableReference("people")))));
+
+        CommonTableExpression derivedCte = new(
+            Name: "derived",
+            Body: new SelectQueryExpression(new SelectStatement(
+                Columns: [new SelectAllColumns()],
+                From: new FromClause(new TableReference("base")))));
+
+        SelectStatement outerStatement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("derived")),
+            CommonTableExpressions: [baseCte, derivedCte]);
+
+        // Must not throw KeyNotFoundException for 'base'.
+        ResolvedQuerySchema schema = await resolver.ResolveAsync(
+            outerStatement, CancellationToken.None);
+
+        Assert.NotEmpty(schema.Columns);
+    }
+
     // ───────────────────── Cross join with function source ─────────────────────
 
     [Fact]

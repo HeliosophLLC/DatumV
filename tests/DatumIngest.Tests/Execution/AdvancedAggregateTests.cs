@@ -374,7 +374,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(1.0f, results[0]["CORR(y, x)"].AsFloat32(), 0.001f);
+        Assert.Equal(1.0, results[0]["CORR(y, x)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -401,7 +401,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(-1.0f, results[0]["CORR(y, x)"].AsFloat32(), 0.001f);
+        Assert.Equal(-1.0, results[0]["CORR(y, x)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -503,7 +503,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(0.7746f, results[0]["CORR(y, x)"].AsFloat32(), 0.01f);
+        Assert.Equal(0.7746, results[0]["CORR(y, x)"].AsFloat64(), 0.01);
     }
 
     // ─────────────── COVAR_POP / COVAR_SAMP ───────────────
@@ -537,7 +537,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(4.0f, results[0]["COVAR_POP(y, x)"].AsFloat32(), 0.001f);
+        Assert.Equal(4.0, results[0]["COVAR_POP(y, x)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -566,7 +566,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(5.0f, results[0]["COVAR_SAMP(y, x)"].AsFloat32(), 0.001f);
+        Assert.Equal(5.0, results[0]["COVAR_SAMP(y, x)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -613,7 +613,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(0f, results[0]["COVAR_POP(y, x)"].AsFloat32());
+        Assert.Equal(0.0, results[0]["COVAR_POP(y, x)"].AsFloat64());
     }
 
     [Fact]
@@ -666,7 +666,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["APPROX_MEDIAN(x)"].AsFloat32());
+        Assert.Equal(3.0, results[0]["APPROX_MEDIAN(x)"].AsFloat64());
     }
 
     [Fact]
@@ -693,7 +693,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(4f, results[0]["APPROX_MEDIAN(x)"].AsFloat32());
+        Assert.Equal(4.0, results[0]["APPROX_MEDIAN(x)"].AsFloat64());
     }
 
     [Fact]
@@ -747,7 +747,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["APPROX_PERCENTILE(x, 0.5)"].AsFloat32(), 0.001f);
+        Assert.Equal(3.0, results[0]["APPROX_PERCENTILE(x, 0.5)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -772,7 +772,7 @@ public class AdvancedAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(10f, results[0]["result"].AsFloat32());
+        Assert.Equal(10.0, results[0]["result"].AsFloat64());
     }
 
     [Fact]

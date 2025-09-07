@@ -473,13 +473,13 @@ public class WindowFunctionTests
             argumentExpressions: arguments, frame: frame);
 
         // Row 0: avg(10,20) = 15
-        Assert.Equal(15f, results[0].AsFloat32());
+        Assert.Equal(15.0, results[0].AsFloat64());
         // Row 1: avg(10,20,30) = 20
-        Assert.Equal(20f, results[1].AsFloat32());
+        Assert.Equal(20.0, results[1].AsFloat64());
         // Row 2: avg(20,30,40) = 30
-        Assert.Equal(30f, results[2].AsFloat32());
+        Assert.Equal(30.0, results[2].AsFloat64());
         // Row 3: avg(30,40) = 35
-        Assert.Equal(35f, results[3].AsFloat32());
+        Assert.Equal(35.0, results[3].AsFloat64());
     }
 
     // ─────────────── FunctionRegistry integration ───────────────

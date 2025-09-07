@@ -437,6 +437,39 @@ public class SqlParserTests
         Assert.Equal("y", joined.Alias);
     }
 
+    /// <summary>
+    /// Table aliases without the AS keyword must be supported in both FROM
+    /// and JOIN clauses — SQL standard bare alias syntax.
+    /// </summary>
+    [Fact]
+    public void BareTableAlias_FromClause()
+    {
+        SelectStatement result = Parse("SELECT o.id FROM orders o WHERE o.id > 1");
+
+        TableReference from = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("orders", from.Name);
+        Assert.Equal("o", from.Alias);
+    }
+
+    /// <summary>
+    /// Bare table alias in a JOIN clause — no AS keyword.
+    /// </summary>
+    [Fact]
+    public void BareTableAlias_JoinClause()
+    {
+        SelectStatement result = Parse(
+            "SELECT o.id FROM orders o JOIN items i ON o.id = i.order_id");
+
+        TableReference from = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("orders", from.Name);
+        Assert.Equal("o", from.Alias);
+
+        Assert.NotNull(result.Joins);
+        TableReference joined = Assert.IsType<TableReference>(result.Joins![0].Source);
+        Assert.Equal("items", joined.Name);
+        Assert.Equal("i", joined.Alias);
+    }
+
     // ───────────────────── INTO clause ─────────────────────
 
     [Fact]

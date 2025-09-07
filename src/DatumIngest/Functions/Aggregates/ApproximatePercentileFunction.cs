@@ -8,10 +8,10 @@ namespace DatumIngest.Functions.Aggregates;
 /// configurable maximum sample size. For groups smaller than the reservoir
 /// cap, the result is exact; for larger groups, the error is typically 1–5%.
 /// <para>
-/// Arguments: first is the column expression (Scalar/UInt8), second is the
-/// percentile fraction (Scalar in [0, 1]). The fraction must be constant
-/// across all rows in a group — the value from the first accumulated row
-/// is used.
+/// Arguments: first is the column expression (any numeric kind), second is the
+/// percentile fraction (Float32 or Float64, in [0, 1]). The fraction must be
+/// constant across all rows in a group — the value from the first accumulated
+/// row is used.
 /// </para>
 /// <para>
 /// This provides O(1) memory per group (bounded by <see cref="MaxSamples"/>)
@@ -40,19 +40,19 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
                 "APPROX_PERCENTILE() requires exactly two arguments: expression and fraction.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        if (!PercentileDiscreteFunction.IsNumericKind(argumentKinds[0]))
         {
             throw new ArgumentException(
                 $"APPROX_PERCENTILE() first argument must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not DataKind.Float32)
+        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.Float64))
         {
             throw new ArgumentException(
-                $"APPROX_PERCENTILE() second argument (fraction) must be Scalar, got {argumentKinds[1]}.");
+                $"APPROX_PERCENTILE() second argument (fraction) must be Float32 or Float64, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Float64;
     }
 
     /// <inheritdoc/>
@@ -65,19 +65,21 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
     /// </summary>
     private sealed class ReservoirPercentileAccumulator : IAggregateAccumulator
     {
-        private readonly List<float> _samples = [];
+        private readonly List<double> _samples = [];
         private readonly Random _random = new(42);
         private long _totalCount;
-        private float _fraction;
+        private double _fraction;
         private bool _fractionCaptured;
 
         public void Accumulate(ReadOnlySpan<DataValue> arguments)
         {
             if (!_fractionCaptured && !arguments[1].IsNull)
             {
-                _fraction = arguments[1].AsFloat32();
+                _fraction = arguments[1].Kind == DataKind.Float64
+                    ? arguments[1].AsFloat64()
+                    : arguments[1].AsFloat32();
 
-                if (_fraction < 0f || _fraction > 1f)
+                if (_fraction < 0.0 || _fraction > 1.0)
                 {
                     throw new ArgumentException(
                         $"APPROX_PERCENTILE() fraction must be between 0 and 1, got {_fraction}.");
@@ -88,7 +90,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
 
             if (arguments[0].IsNull) return;
 
-            float value = arguments[0].AsFloat32();
+            double value = PercentileDiscreteFunction.ToDouble(arguments[0]);
             _totalCount++;
 
             if (_samples.Count < MaxSamples)
@@ -138,7 +140,7 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
             {
                 if (_samples.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Float32);
+                    return DataValue.Null(DataKind.Float64);
                 }
 
                 _samples.Sort();
@@ -149,11 +151,11 @@ public sealed class ApproximatePercentileFunction : IAggregateFunction
 
                 if (lower == upper)
                 {
-                    return DataValue.FromFloat32(_samples[lower]);
+                    return DataValue.FromFloat64(_samples[lower]);
                 }
 
                 double interpolated = _samples[lower] + (_samples[upper] - _samples[lower]) * (row - lower);
-                return DataValue.FromFloat32((float)interpolated);
+                return DataValue.FromFloat64(interpolated);
             }
         }
 

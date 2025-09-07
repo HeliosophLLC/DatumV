@@ -436,8 +436,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(90f, results[0]["avg_score"].AsFloat32(), 0.01f);
-        Assert.Equal(50f, results[1]["avg_score"].AsFloat32(), 0.01f);
+        Assert.Equal(90.0, results[0]["avg_score"].AsFloat64(), 0.01);
+        Assert.Equal(50.0, results[1]["avg_score"].AsFloat64(), 0.01);
     }
 
     /// <summary>

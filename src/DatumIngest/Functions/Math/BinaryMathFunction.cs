@@ -24,21 +24,35 @@ public abstract class BinaryMathFunction : IScalarFunction
         DataKind kindA = argumentKinds[0];
         DataKind kindB = argumentKinds[1];
 
-        if (kindA is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kindA is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Int8 or DataKind.Int16
+            or DataKind.UInt16 or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64
+            or DataKind.UInt64 or DataKind.Float64 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"{Name}() does not support {kindA} as first argument.");
         }
 
-        if (kindB is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kindB is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Int8 or DataKind.Int16
+            or DataKind.UInt16 or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64
+            or DataKind.UInt64 or DataKind.Float64 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"{Name}() does not support {kindB} as second argument.");
         }
 
-        // Result kind: highest rank of the two inputs (UInt8 promotes to Scalar)
-        DataKind effectiveA = kindA is DataKind.UInt8 ? DataKind.Float32 : kindA;
-        DataKind effectiveB = kindB is DataKind.UInt8 ? DataKind.Float32 : kindB;
+        // All numeric scalars promote to Float32 — the computation type of Apply(float, float).
+        // Higher-rank types (Vector, Matrix, Tensor) always win over scalars.
+        bool aIsArray = kindA is DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
+        bool bIsArray = kindB is DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
 
-        return effectiveA >= effectiveB ? effectiveA : effectiveB;
+        if (aIsArray && bIsArray)
+        {
+            // Return the higher-rank of the two (DataKind enum order: Vector < Matrix < Tensor).
+            return kindA >= kindB ? kindA : kindB;
+        }
+
+        if (aIsArray) return kindA;
+        if (bIsArray) return kindB;
+
+        return DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -54,13 +68,13 @@ public abstract class BinaryMathFunction : IScalarFunction
         }
 
         // Extract scalar values for broadcast cases
-        bool aIsScalar = inputA.Kind is DataKind.Float32 or DataKind.UInt8;
-        bool bIsScalar = inputB.Kind is DataKind.Float32 or DataKind.UInt8;
+        bool aIsScalar = IsNumericScalar(inputA.Kind);
+        bool bIsScalar = IsNumericScalar(inputB.Kind);
 
         if (aIsScalar && bIsScalar)
         {
-            float a = inputA.Kind is DataKind.UInt8 ? inputA.AsUInt8() : inputA.AsFloat32();
-            float b = inputB.Kind is DataKind.UInt8 ? inputB.AsUInt8() : inputB.AsFloat32();
+            float a = ExtractFloat(inputA);
+            float b = ExtractFloat(inputB);
             return DataValue.FromFloat32(Apply(a, b));
         }
 
@@ -80,13 +94,13 @@ public abstract class BinaryMathFunction : IScalarFunction
 
     private DataValue ApplyScalarLeft(DataValue scalarVal, DataValue arrayVal)
     {
-        float scalar = scalarVal.Kind is DataKind.UInt8 ? scalarVal.AsUInt8() : scalarVal.AsFloat32();
+        float scalar = ExtractFloat(scalarVal);
         return MapArray(arrayVal, element => Apply(scalar, element));
     }
 
     private DataValue ApplyScalarRight(DataValue arrayVal, DataValue scalarVal)
     {
-        float scalar = scalarVal.Kind is DataKind.UInt8 ? scalarVal.AsUInt8() : scalarVal.AsFloat32();
+        float scalar = ExtractFloat(scalarVal);
         return MapArray(arrayVal, element => Apply(element, scalar));
     }
 
@@ -184,4 +198,31 @@ public abstract class BinaryMathFunction : IScalarFunction
             _ => DataValue.FromVector(data)
         };
     }
+
+    /// <summary>
+    /// Returns true when <paramref name="kind"/> is any numeric scalar kind.
+    /// </summary>
+    private static bool IsNumericScalar(DataKind kind) =>
+        kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Float32 or DataKind.Float64 or DataKind.UInt8;
+
+    /// <summary>
+    /// Extracts the value of any numeric scalar <see cref="DataValue"/> as a <see cref="float"/>.
+    /// Int64 and UInt64 values are cast with possible precision loss beyond 2^24.
+    /// </summary>
+    private static float ExtractFloat(DataValue value) => value.Kind switch
+    {
+        DataKind.Int8 => value.AsInt8(),
+        DataKind.Int16 => value.AsInt16(),
+        DataKind.UInt16 => value.AsUInt16(),
+        DataKind.Int32 => value.AsInt32(),
+        DataKind.UInt32 => value.AsUInt32(),
+        DataKind.Int64 => (float)value.AsInt64(),
+        DataKind.UInt64 => (float)value.AsUInt64(),
+        DataKind.Float32 => value.AsFloat32(),
+        DataKind.Float64 => (float)value.AsFloat64(),
+        DataKind.UInt8 => value.AsUInt8(),
+        _ => throw new InvalidOperationException($"Not a numeric scalar: {value.Kind}."),
+    };
 }

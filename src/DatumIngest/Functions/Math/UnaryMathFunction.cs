@@ -22,12 +22,15 @@ public abstract class UnaryMathFunction : IScalarFunction
 
         DataKind kind = argumentKinds[0];
 
-        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Int8 or DataKind.Int16
+            or DataKind.UInt16 or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64
+            or DataKind.UInt64 or DataKind.Float64 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"{Name}() does not support {kind}.");
         }
 
-        return kind is DataKind.UInt8 ? DataKind.Float32 : kind;
+        // All numeric scalars promote to Float32 — the computation type of Apply(float).
+        return kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor ? kind : DataKind.Float32;
     }
 
     /// <inheritdoc />
@@ -37,16 +40,26 @@ public abstract class UnaryMathFunction : IScalarFunction
 
         if (input.IsNull)
         {
-            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Float32 : input.Kind);
+            // All numeric scalars null-propagate as Float32 — consistent with ValidateArguments.
+            return DataValue.Null(
+                input.Kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor
+                    ? input.Kind
+                    : DataKind.Float32);
         }
 
         switch (input.Kind)
         {
             case DataKind.UInt8:
-                return DataValue.FromFloat32(Apply(input.AsUInt8()));
-
+            case DataKind.Int8:
+            case DataKind.Int16:
+            case DataKind.UInt16:
+            case DataKind.Int32:
+            case DataKind.UInt32:
+            case DataKind.Int64:
+            case DataKind.UInt64:
             case DataKind.Float32:
-                return DataValue.FromFloat32(Apply(input.AsFloat32()));
+            case DataKind.Float64:
+                return DataValue.FromFloat32(Apply(ExtractFloat(input)));
 
             case DataKind.Vector:
             {
@@ -90,4 +103,23 @@ public abstract class UnaryMathFunction : IScalarFunction
     /// Applies the math function to a single float element.
     /// </summary>
     protected abstract float Apply(float value);
+
+    /// <summary>
+    /// Extracts the value of any numeric scalar <see cref="DataValue"/> as a <see cref="float"/>.
+    /// Int64 and UInt64 values are cast with possible precision loss beyond 2^24.
+    /// </summary>
+    private static float ExtractFloat(DataValue value) => value.Kind switch
+    {
+        DataKind.Int8 => value.AsInt8(),
+        DataKind.Int16 => value.AsInt16(),
+        DataKind.UInt16 => value.AsUInt16(),
+        DataKind.Int32 => value.AsInt32(),
+        DataKind.UInt32 => value.AsUInt32(),
+        DataKind.Int64 => (float)value.AsInt64(),
+        DataKind.UInt64 => (float)value.AsUInt64(),
+        DataKind.Float32 => value.AsFloat32(),
+        DataKind.Float64 => (float)value.AsFloat64(),
+        DataKind.UInt8 => value.AsUInt8(),
+        _ => throw new InvalidOperationException($"Not a numeric scalar: {value.Kind}."),
+    };
 }

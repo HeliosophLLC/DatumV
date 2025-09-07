@@ -32,13 +32,13 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
             throw new ArgumentException("APPROX_MEDIAN() requires exactly one argument.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        if (!PercentileDiscreteFunction.IsNumericKind(argumentKinds[0]))
         {
             throw new ArgumentException(
                 $"APPROX_MEDIAN() requires a numeric argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Float64;
     }
 
     /// <inheritdoc/>
@@ -52,7 +52,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
     /// </summary>
     private sealed class ReservoirMedianAccumulator : IAggregateAccumulator
     {
-        private readonly List<float> _samples = [];
+        private readonly List<double> _samples = [];
         private readonly Random _random = new(42);
         private long _totalCount;
 
@@ -60,7 +60,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
         {
             if (arguments[0].IsNull) return;
 
-            float value = arguments[0].AsFloat32();
+            double value = PercentileDiscreteFunction.ToDouble(arguments[0]);
             _totalCount++;
 
             if (_samples.Count < MaxSamples)
@@ -104,7 +104,7 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
             {
                 if (_samples.Count == 0)
                 {
-                    return DataValue.Null(DataKind.Float32);
+                    return DataValue.Null(DataKind.Float64);
                 }
 
                 _samples.Sort();
@@ -114,11 +114,11 @@ public sealed class ApproximateMedianFunction : IAggregateFunction
 
                 if (count % 2 == 1)
                 {
-                    return DataValue.FromFloat32(_samples[mid]);
+                    return DataValue.FromFloat64(_samples[mid]);
                 }
 
-                float median = (_samples[mid - 1] + _samples[mid]) / 2f;
-                return DataValue.FromFloat32(median);
+                double median = (_samples[mid - 1] + _samples[mid]) / 2.0;
+                return DataValue.FromFloat64(median);
             }
         }
 

@@ -114,7 +114,7 @@ public class AccumulatorMergeTests
         left.Merge(right);
 
         // Combined: sum=60, count=3 → avg=20
-        Assert.Equal(20f, left.Result.AsFloat32());
+        Assert.Equal(20.0, left.Result.AsFloat64());
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class AccumulatorMergeTests
         left.Merge(right);
 
         // AVG of 10 and 30 = 20 (null skipped)
-        Assert.Equal(20f, left.Result.AsFloat32());
+        Assert.Equal(20.0, left.Result.AsFloat64());
     }
 
     // ─────────────── MIN ───────────────
@@ -216,7 +216,7 @@ public class AccumulatorMergeTests
 
         left.Merge(right);
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 6);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 6);
     }
 
     [Fact]
@@ -245,7 +245,7 @@ public class AccumulatorMergeTests
 
         left.Merge(right);
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 6);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 6);
     }
 
     // ─────────────── STDDEV ───────────────
@@ -276,7 +276,7 @@ public class AccumulatorMergeTests
 
         left.Merge(right);
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 5);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 5);
     }
 
     // ─────────────── COVARIANCE ───────────────
@@ -309,7 +309,7 @@ public class AccumulatorMergeTests
 
         left.Merge(right);
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 5);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 5);
     }
 
     // ─────────────── CORRELATION ───────────────
@@ -342,7 +342,7 @@ public class AccumulatorMergeTests
 
         left.Merge(right);
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 5);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 5);
     }
 
     // ─────────────── MEDIAN ───────────────
@@ -361,7 +361,7 @@ public class AccumulatorMergeTests
         left.Merge(right);
 
         // Median of [1, 3, 5] = 3
-        Assert.Equal(3f, left.Result.AsFloat32());
+        Assert.Equal(3.0, left.Result.AsFloat64());
     }
 
     // ─────────────── MODE ───────────────
@@ -499,7 +499,7 @@ public class AccumulatorMergeTests
         left.Merge(right);
 
         // Exact median of [1, 3, 5] = 3 (small sample, no approximation error)
-        Assert.Equal(3f, left.Result.AsFloat32());
+        Assert.Equal(3.0, left.Result.AsFloat64());
     }
 
     // ─────────────── Merge with empty accumulator ───────────────
@@ -526,7 +526,7 @@ public class AccumulatorMergeTests
             reference.Accumulate([DataValue.FromFloat32(value)]);
         }
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 6);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 6);
     }
 
     [Fact]
@@ -551,6 +551,6 @@ public class AccumulatorMergeTests
             reference.Accumulate([DataValue.FromFloat32(y), DataValue.FromFloat32(x)]);
         }
 
-        Assert.Equal(reference.Result.AsFloat32(), left.Result.AsFloat32(), precision: 5);
+        Assert.Equal(reference.Result.AsFloat64(), left.Result.AsFloat64(), precision: 5);
     }
 }

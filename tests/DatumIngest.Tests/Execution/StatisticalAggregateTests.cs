@@ -71,7 +71,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(4.0f, results[0]["VARIANCE(x)"].AsFloat32(), 0.001f);
+        Assert.Equal(4.0, results[0]["VARIANCE(x)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(2.667f, results[0]["VAR_POP(x)"].AsFloat32(), 0.01f);
+        Assert.Equal(2.667, results[0]["VAR_POP(x)"].AsFloat64(), 0.01);
     }
 
     [Fact]
@@ -143,7 +143,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(0f, results[0]["VAR_POP(x)"].AsFloat32());
+        Assert.Equal(0.0, results[0]["VAR_POP(x)"].AsFloat64());
     }
 
     [Fact]
@@ -200,8 +200,8 @@ public class StatisticalAggregateTests
         Row groupA = results.First(row => row["cat"].AsString() == "A");
         Row groupB = results.First(row => row["cat"].AsString() == "B");
 
-        Assert.Equal(4.0f, groupA["VARIANCE(x)"].AsFloat32(), 0.001f);
-        Assert.Equal(0.0f, groupB["VARIANCE(x)"].AsFloat32(), 0.001f);
+        Assert.Equal(4.0, groupA["VARIANCE(x)"].AsFloat64(), 0.001);
+        Assert.Equal(0.0, groupB["VARIANCE(x)"].AsFloat64(), 0.001);
     }
 
     // ─────────────── STDDEV / STDDEV_SAMP ───────────────
@@ -229,7 +229,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(2.0f, results[0]["STDDEV(x)"].AsFloat32(), 0.001f);
+        Assert.Equal(2.0, results[0]["STDDEV(x)"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -255,7 +255,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(1.633f, results[0]["STDDEV_POP(x)"].AsFloat32(), 0.01f);
+        Assert.Equal(1.633, results[0]["STDDEV_POP(x)"].AsFloat64(), 0.01);
     }
 
     [Fact]
@@ -330,7 +330,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["MEDIAN(x)"].AsFloat32());
+        Assert.Equal(3.0, results[0]["MEDIAN(x)"].AsFloat64());
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(4f, results[0]["MEDIAN(x)"].AsFloat32());
+        Assert.Equal(4.0, results[0]["MEDIAN(x)"].AsFloat64());
     }
 
     [Fact]
@@ -380,7 +380,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(42f, results[0]["MEDIAN(x)"].AsFloat32());
+        Assert.Equal(42.0, results[0]["MEDIAN(x)"].AsFloat64());
     }
 
     [Fact]
@@ -439,8 +439,8 @@ public class StatisticalAggregateTests
         Row groupA = results.First(row => row["cat"].AsString() == "A");
         Row groupB = results.First(row => row["cat"].AsString() == "B");
 
-        Assert.Equal(20f, groupA["MEDIAN(x)"].AsFloat32());
-        Assert.Equal(2.5f, groupB["MEDIAN(x)"].AsFloat32());
+        Assert.Equal(20.0, groupA["MEDIAN(x)"].AsFloat64());
+        Assert.Equal(2.5, groupB["MEDIAN(x)"].AsFloat64());
     }
 
     [Fact]
@@ -467,7 +467,7 @@ public class StatisticalAggregateTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(5f, results[0]["MEDIAN(x)"].AsFloat32());
+        Assert.Equal(5.0, results[0]["MEDIAN(x)"].AsFloat64());
     }
 
     // ─────────────── PERCENTILE_CONT ───────────────

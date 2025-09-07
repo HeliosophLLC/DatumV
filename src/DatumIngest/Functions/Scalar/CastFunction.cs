@@ -72,30 +72,47 @@ public sealed class CastFunction : IScalarFunction
             return input;
         }
 
+        // ── Numeric ↔ numeric: use double as a common intermediate. ──────────
+        // Covers Int8/Int16/UInt16/Int32/UInt32/Int64/UInt64/Float32/Float64/UInt8
+        // in any combination, including widening and narrowing casts.
+        if (TryExtractAsDouble(input, out double inputAsDouble))
+        {
+            if (TryMakeNumeric(inputAsDouble, targetKind) is { } numericResult)
+            {
+                return numericResult;
+            }
+
+            // Numeric → Boolean (non-zero = true).
+            if (targetKind == DataKind.Boolean)
+            {
+                return DataValue.FromBoolean(inputAsDouble != 0.0);
+            }
+
+            // Numeric → String: format via the native type to preserve integer precision.
+            if (targetKind == DataKind.String)
+            {
+                return DataValue.FromString(FormatNumericAsString(input));
+            }
+
+            // Any remaining numeric-source cases (e.g. Float32 → Time) fall through
+            // to the semantic-conversion switch below.
+        }
+
+        // Boolean → any numeric type (true=1, false=0).
+        if (input.Kind == DataKind.Boolean && IsNumericKind(targetKind))
+        {
+            return TryMakeNumeric(input.AsBoolean() ? 1.0 : 0.0, targetKind)
+                ?? throw new InvalidOperationException($"Internal error: TryMakeNumeric returned null for numeric kind {targetKind}.");
+        }
+
+        // String → any numeric type.
+        if (input.Kind == DataKind.String && IsNumericKind(targetKind))
+        {
+            return ParseStringToNumeric(input.AsString(), targetKind);
+        }
+
         return (input.Kind, targetKind) switch
         {
-            // UInt8 -> Scalar
-            (DataKind.UInt8, DataKind.Float32) => DataValue.FromFloat32(input.AsUInt8()),
-
-            // Scalar -> UInt8 (truncate)
-            (DataKind.Float32, DataKind.UInt8) => DataValue.FromUInt8((byte)System.Math.Clamp(input.AsFloat32(), 0, 255)),
-
-            // String -> Scalar
-            (DataKind.String, DataKind.Float32) => DataValue.FromFloat32(
-                float.Parse(input.AsString(), CultureInfo.InvariantCulture)),
-
-            // Scalar -> String
-            (DataKind.Float32, DataKind.String) => DataValue.FromString(
-                input.AsFloat32().ToString(CultureInfo.InvariantCulture)),
-
-            // UInt8 -> String
-            (DataKind.UInt8, DataKind.String) => DataValue.FromString(
-                input.AsUInt8().ToString(CultureInfo.InvariantCulture)),
-
-            // String -> UInt8
-            (DataKind.String, DataKind.UInt8) => DataValue.FromUInt8(
-                byte.Parse(input.AsString(), CultureInfo.InvariantCulture)),
-
             // Date -> DateTime
             (DataKind.Date, DataKind.DateTime) => DataValue.FromDateTime(
                 new DateTimeOffset(input.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
@@ -155,22 +172,6 @@ public sealed class CastFunction : IScalarFunction
             (DataKind.Boolean, DataKind.String) => DataValue.FromString(
                 input.AsBoolean() ? "true" : "false"),
 
-            // Boolean -> Scalar (true=1, false=0)
-            (DataKind.Boolean, DataKind.Float32) => DataValue.FromFloat32(
-                input.AsBoolean() ? 1f : 0f),
-
-            // Scalar -> Boolean (nonzero=true)
-            (DataKind.Float32, DataKind.Boolean) => DataValue.FromBoolean(
-                input.AsFloat32() != 0f),
-
-            // Boolean -> UInt8 (true=1, false=0)
-            (DataKind.Boolean, DataKind.UInt8) => DataValue.FromUInt8(
-                (byte)(input.AsBoolean() ? 1 : 0)),
-
-            // UInt8 -> Boolean (nonzero=true)
-            (DataKind.UInt8, DataKind.Boolean) => DataValue.FromBoolean(
-                input.AsUInt8() != 0),
-
             // String -> Time
             (DataKind.String, DataKind.Time) => DataValue.FromTime(
                 TimeOnly.Parse(input.AsString(), CultureInfo.InvariantCulture)),
@@ -228,5 +229,105 @@ public sealed class CastFunction : IScalarFunction
 
         throw new InvalidOperationException(
             $"Cannot convert string '{value}' to Boolean. Expected 'true', 'false', '1', or '0'.");
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="kind"/> is one of the ten numeric DataKinds:
+    /// Int8, Int16, UInt16, Int32, UInt32, Int64, UInt64, Float32, Float64, UInt8.
+    /// </summary>
+    private static bool IsNumericKind(DataKind kind)
+    {
+        return kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Float32 or DataKind.Float64 or DataKind.UInt8;
+    }
+
+    /// <summary>
+    /// Extracts the numeric value of <paramref name="value"/> as a <see cref="double"/>.
+    /// Returns false if the value is not a numeric kind.
+    /// </summary>
+    private static bool TryExtractAsDouble(DataValue value, out double result)
+    {
+        switch (value.Kind)
+        {
+            case DataKind.Int8: result = value.AsInt8(); return true;
+            case DataKind.Int16: result = value.AsInt16(); return true;
+            case DataKind.UInt16: result = value.AsUInt16(); return true;
+            case DataKind.Int32: result = value.AsInt32(); return true;
+            case DataKind.UInt32: result = value.AsUInt32(); return true;
+            case DataKind.Int64: result = (double)value.AsInt64(); return true;
+            case DataKind.UInt64: result = (double)value.AsUInt64(); return true;
+            case DataKind.Float32: result = value.AsFloat32(); return true;
+            case DataKind.Float64: result = value.AsFloat64(); return true;
+            case DataKind.UInt8: result = value.AsUInt8(); return true;
+            default: result = 0.0; return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates a <see cref="DataValue"/> of the given numeric <paramref name="targetKind"/>
+    /// from a double intermediate.  Returns null if <paramref name="targetKind"/> is not numeric.
+    /// UInt8 saturates at [0, 255]; all other integer types use truncating cast.
+    /// </summary>
+    private static DataValue? TryMakeNumeric(double value, DataKind targetKind)
+    {
+        return targetKind switch
+        {
+            DataKind.Int8 => DataValue.FromInt8((sbyte)value),
+            DataKind.Int16 => DataValue.FromInt16((short)value),
+            DataKind.UInt16 => DataValue.FromUInt16((ushort)value),
+            DataKind.Int32 => DataValue.FromInt32((int)value),
+            DataKind.UInt32 => DataValue.FromUInt32((uint)value),
+            DataKind.Int64 => DataValue.FromInt64((long)value),
+            DataKind.UInt64 => DataValue.FromUInt64((ulong)value),
+            DataKind.Float32 => DataValue.FromFloat32((float)value),
+            DataKind.Float64 => DataValue.FromFloat64(value),
+            DataKind.UInt8 => DataValue.FromUInt8((byte)System.Math.Clamp(value, 0.0, 255.0)),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Formats a numeric <see cref="DataValue"/> as a string using its native type,
+    /// so integers are not rendered with a decimal point.
+    /// </summary>
+    private static string FormatNumericAsString(DataValue value)
+    {
+        return value.Kind switch
+        {
+            DataKind.Int8 => value.AsInt8().ToString(CultureInfo.InvariantCulture),
+            DataKind.Int16 => value.AsInt16().ToString(CultureInfo.InvariantCulture),
+            DataKind.UInt16 => value.AsUInt16().ToString(CultureInfo.InvariantCulture),
+            DataKind.Int32 => value.AsInt32().ToString(CultureInfo.InvariantCulture),
+            DataKind.UInt32 => value.AsUInt32().ToString(CultureInfo.InvariantCulture),
+            DataKind.Int64 => value.AsInt64().ToString(CultureInfo.InvariantCulture),
+            DataKind.UInt64 => value.AsUInt64().ToString(CultureInfo.InvariantCulture),
+            DataKind.Float32 => value.AsFloat32().ToString(CultureInfo.InvariantCulture),
+            DataKind.Float64 => value.AsFloat64().ToString(CultureInfo.InvariantCulture),
+            DataKind.UInt8 => value.AsUInt8().ToString(CultureInfo.InvariantCulture),
+            _ => throw new InvalidOperationException($"Not a numeric kind: {value.Kind}."),
+        };
+    }
+
+    /// <summary>
+    /// Parses <paramref name="value"/> as the given numeric <paramref name="targetKind"/>
+    /// using culture-invariant, type-specific parsing to preserve full precision.
+    /// </summary>
+    private static DataValue ParseStringToNumeric(string value, DataKind targetKind)
+    {
+        return targetKind switch
+        {
+            DataKind.Int8 => DataValue.FromInt8(sbyte.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.Int16 => DataValue.FromInt16(short.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.UInt16 => DataValue.FromUInt16(ushort.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.Int32 => DataValue.FromInt32(int.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.UInt32 => DataValue.FromUInt32(uint.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.Int64 => DataValue.FromInt64(long.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.UInt64 => DataValue.FromUInt64(ulong.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.Float32 => DataValue.FromFloat32(float.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.Float64 => DataValue.FromFloat64(double.Parse(value, CultureInfo.InvariantCulture)),
+            DataKind.UInt8 => DataValue.FromUInt8(byte.Parse(value, CultureInfo.InvariantCulture)),
+            _ => throw new InvalidOperationException($"Not a numeric kind: {targetKind}."),
+        };
     }
 }

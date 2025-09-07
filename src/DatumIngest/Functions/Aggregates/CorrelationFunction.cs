@@ -27,19 +27,25 @@ public sealed class CorrelationFunction : IAggregateFunction
             throw new ArgumentException("CORR() requires exactly two arguments: y and x.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        bool firstIsNumeric = argumentKinds[0] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Float32 or DataKind.Float64;
+        if (!firstIsNumeric)
         {
             throw new ArgumentException(
                 $"CORR() first argument (y) must be numeric, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
+        bool secondIsNumeric = argumentKinds[1] is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+            or DataKind.Float32 or DataKind.Float64;
+        if (!secondIsNumeric)
         {
             throw new ArgumentException(
                 $"CORR() second argument (x) must be numeric, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Float64;
     }
 
     /// <inheritdoc/>
@@ -63,8 +69,8 @@ public sealed class CorrelationFunction : IAggregateFunction
         {
             if (arguments[0].IsNull || arguments[1].IsNull) return;
 
-            double y = arguments[0].AsFloat32();
-            double x = arguments[1].AsFloat32();
+            double y = AvgFunction.ExtractAsDouble(arguments[0]);
+            double x = AvgFunction.ExtractAsDouble(arguments[1]);
 
             _count++;
 
@@ -120,17 +126,17 @@ public sealed class CorrelationFunction : IAggregateFunction
             {
                 if (_count < 2)
                 {
-                    return DataValue.Null(DataKind.Float32);
+                    return DataValue.Null(DataKind.Float64);
                 }
 
                 double denominator = System.Math.Sqrt(_m2Y * _m2X);
 
                 if (denominator == 0.0)
                 {
-                    return DataValue.Null(DataKind.Float32);
+                    return DataValue.Null(DataKind.Float64);
                 }
 
-                return DataValue.FromFloat32((float)(_coMoment / denominator));
+                return DataValue.FromFloat64(_coMoment / denominator);
             }
         }
 
