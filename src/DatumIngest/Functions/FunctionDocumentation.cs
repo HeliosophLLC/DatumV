@@ -613,6 +613,14 @@ public static class FunctionDocumentation
 
         Register(new FunctionSignature
         {
+            Name = "nullif",
+            Parameters = [Parameter("value", "Any"), Parameter("comparison", "Any")],
+            ReturnType = null,
+            Description = "Returns NULL when value equals comparison; otherwise returns value.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
             Name = "coalesce",
             Parameters = [Parameter("values", "Any")],
             ReturnType = null,

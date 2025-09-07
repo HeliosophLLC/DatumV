@@ -3,6 +3,39 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Math;
 
 /// <summary>
+/// Returns NULL when the two arguments are equal; otherwise returns the first argument.
+/// Equivalent to: CASE WHEN a = b THEN NULL ELSE a END.
+/// </summary>
+public sealed class NullifFunction : IScalarFunction
+{
+    /// <inheritdoc />
+    public string Name => "nullif";
+
+    /// <inheritdoc />
+    public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
+    {
+        if (argumentKinds.Length != 2)
+            throw new ArgumentException("nullif() requires exactly 2 arguments.");
+        if (argumentKinds[0] != argumentKinds[1])
+            throw new ArgumentException($"nullif() arguments must be the same kind, got {argumentKinds[0]} and {argumentKinds[1]}.");
+        return argumentKinds[0];
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments)
+    {
+        DataValue first = arguments[0];
+        DataValue second = arguments[1];
+
+        // If either argument is null, no equality can hold — return first as-is.
+        if (first.IsNull || second.IsNull)
+            return first;
+
+        return first.Equals(second) ? DataValue.Null(first.Kind) : first;
+    }
+}
+
+/// <summary>
 /// Returns the first non-null argument: coalesce(a, b, ...).
 /// Accepts any number of arguments of the same kind.
 /// </summary>

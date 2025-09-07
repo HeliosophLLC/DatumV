@@ -388,6 +388,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Math.HammingDistanceFunction());
 
         // Math — Utility & Conditional
+        registry.RegisterScalar(new Math.NullifFunction());
         registry.RegisterScalar(new Math.CoalesceFunction());
         registry.RegisterScalar(new Math.GreatestFunction());
         registry.RegisterScalar(new Math.LeastFunction());

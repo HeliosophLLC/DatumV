@@ -6,6 +6,72 @@ namespace DatumIngest.Tests.Functions.Math;
 public class UtilityFunctionTests
 {
     [Fact]
+    public void Nullif_EqualValues_ReturnsNull()
+    {
+        NullifFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat32(0f), DataValue.FromFloat32(0f)]);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Float32, result.Kind);
+    }
+
+    [Fact]
+    public void Nullif_UnequalValues_ReturnsFirst()
+    {
+        NullifFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat32(5f), DataValue.FromFloat32(0f)]);
+        Assert.Equal(5f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Nullif_FirstNull_ReturnsNull()
+    {
+        NullifFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32), DataValue.FromFloat32(0f)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Nullif_SecondNull_ReturnsFirst()
+    {
+        NullifFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat32(5f), DataValue.Null(DataKind.Float32)]);
+        Assert.Equal(5f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Nullif_EqualStrings_ReturnsNull()
+    {
+        NullifFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("foo"), DataValue.FromString("foo")]);
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.String, result.Kind);
+    }
+
+    [Fact]
+    public void Nullif_UnequalStrings_ReturnsFirst()
+    {
+        NullifFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("foo"), DataValue.FromString("bar")]);
+        Assert.Equal("foo", result.AsString());
+    }
+
+    [Fact]
+    public void Nullif_MismatchedKinds_Throws()
+    {
+        NullifFunction function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Float32, DataKind.String]));
+    }
+
+    [Fact]
+    public void Nullif_WrongArgumentCount_Throws()
+    {
+        NullifFunction function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Float32]));
+    }
+
+    [Fact]
     public void Coalesce_FirstNonNull()
     {
         CoalesceFunction function = new();
