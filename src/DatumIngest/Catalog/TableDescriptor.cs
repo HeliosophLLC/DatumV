@@ -41,10 +41,15 @@ public enum TableMutability
 /// Controls which operations are permitted on this table.
 /// Defaults to <see cref="TableMutability.ReadOnly"/> for externally sourced tables.
 /// </param>
+/// <param name="PrimaryKeyColumns">
+/// Column names that form the primary key, in declaration order.
+/// When non-null and non-empty, INSERT operations enforce uniqueness.
+/// </param>
 public sealed record TableDescriptor(
     string Provider,
     string Name,
     string FilePath,
     IReadOnlyDictionary<string, string> Options,
     CompressionKind Compression = CompressionKind.None,
-    TableMutability Mutability = TableMutability.ReadOnly);
+    TableMutability Mutability = TableMutability.ReadOnly,
+    IReadOnlyList<string>? PrimaryKeyColumns = null);

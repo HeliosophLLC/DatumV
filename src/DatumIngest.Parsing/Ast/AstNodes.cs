@@ -707,15 +707,22 @@ public sealed record QueryStatement(QueryExpression Query) : Statement;
 
 /// <summary>
 /// <c>CREATE TEMP TABLE name (col type, ...)</c> — creates a temporary table
+/// <c>CREATE TEMP TABLE name (col type, ..., [PRIMARY KEY (col, ...)])</c> — creates a temporary table
 /// with an explicit column definition list.
 /// </summary>
 /// <param name="TableName">The name of the temporary table to create.</param>
 /// <param name="Columns">The column definitions (name and type pairs).</param>
 /// <param name="IfNotExists">When <see langword="true"/>, suppresses errors if the table already exists.</param>
+/// <param name="PrimaryKeyColumns">
+/// Column names that form the primary key. Populated from either inline <c>PRIMARY KEY</c>
+/// annotations on individual columns or a table-level <c>PRIMARY KEY (col, ...)</c> clause.
+/// Empty when no primary key is declared.
+/// </param>
 public sealed record CreateTempTableStatement(
     string TableName,
     IReadOnlyList<ColumnDefinition> Columns,
-    bool IfNotExists = false) : Statement;
+    bool IfNotExists = false,
+    IReadOnlyList<string>? PrimaryKeyColumns = null) : Statement;
 
 /// <summary>
 /// A single column definition within a <c>CREATE TABLE</c> statement.

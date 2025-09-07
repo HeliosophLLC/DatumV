@@ -248,6 +248,192 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Contains("does not exist", result.Message);
     }
 
+    // ──────────────────── PRIMARY KEY ENFORCEMENT ────────────────────
+
+    /// <summary>
+    /// INSERT with a single-column PRIMARY KEY succeeds when keys are unique.
+    /// </summary>
+    [Fact]
+    public async Task Insert_SingleColumnPrimaryKey_Succeeds()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT PRIMARY KEY, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'A'), (2, 'B')");
+
+        CommandResult selectResult = await ExecuteAsync("SELECT id, name FROM data ORDER BY id");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0]["id"].AsInt32());
+        Assert.Equal(2, rows[1]["id"].AsInt32());
+    }
+
+    /// <summary>
+    /// INSERT with a duplicate single-column PK value within the same batch returns an error.
+    /// </summary>
+    [Fact]
+    public async Task Insert_DuplicateInBatch_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT PRIMARY KEY, name STRING)");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO data VALUES (1, 'A'), (1, 'B')");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("PRIMARY KEY violation", result.Message);
+    }
+
+    /// <summary>
+    /// INSERT with a duplicate value against existing rows returns an error.
+    /// </summary>
+    [Fact]
+    public async Task Insert_DuplicateAgainstExisting_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT PRIMARY KEY, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'A')");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO data VALUES (2, 'B'), (1, 'C')");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("PRIMARY KEY violation", result.Message);
+    }
+
+    /// <summary>
+    /// Composite PRIMARY KEY enforces uniqueness on the combination of columns.
+    /// </summary>
+    [Fact]
+    public async Task Insert_CompositePrimaryKey_EnforcesUniqueness()
+    {
+        await ExecuteAsync(
+            "CREATE TEMP TABLE data (user_id INT, product_id INT, quantity INT, PRIMARY KEY (user_id, product_id))");
+
+        await ExecuteAsync("INSERT INTO data VALUES (1, 100, 5), (1, 200, 3)");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO data VALUES (2, 100, 1), (1, 100, 7)");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("PRIMARY KEY violation", result.Message);
+    }
+
+    /// <summary>
+    /// Composite PRIMARY KEY allows rows where individual columns repeat but the combination is unique.
+    /// </summary>
+    [Fact]
+    public async Task Insert_CompositePrimaryKey_AllowsPartialOverlap()
+    {
+        await ExecuteAsync(
+            "CREATE TEMP TABLE data (user_id INT, product_id INT, quantity INT, PRIMARY KEY (user_id, product_id))");
+
+        await ExecuteAsync("INSERT INTO data VALUES (1, 100, 5)");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO data VALUES (1, 200, 3), (2, 100, 1)");
+
+        Assert.Equal(CommandResultKind.AffectedRows, result.Kind);
+
+        CommandResult selectResult = await ExecuteAsync("SELECT user_id, product_id FROM data ORDER BY user_id, product_id");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(3, rows.Count);
+    }
+
+    /// <summary>
+    /// INSERT INTO ... SELECT also enforces the primary key constraint.
+    /// </summary>
+    [Fact]
+    public async Task InsertSelect_DuplicatePrimaryKey_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE source (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO source VALUES (1, 'A'), (2, 'B')");
+
+        await ExecuteAsync("CREATE TEMP TABLE target (id INT PRIMARY KEY, name STRING)");
+        await ExecuteAsync("INSERT INTO target VALUES (1, 'X')");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO target SELECT id, name FROM source");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("PRIMARY KEY violation", result.Message);
+    }
+
+    /// <summary>
+    /// A table with no PRIMARY KEY allows duplicate values freely.
+    /// </summary>
+    [Fact]
+    public async Task Insert_NoPrimaryKey_AllowsDuplicates()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'A'), (1, 'B')");
+
+        CommandResult selectResult = await ExecuteAsync("SELECT id FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Assert.Equal(2, rows.Count);
+    }
+
+    /// <summary>
+    /// INSERT with NULL in a NOT NULL column returns an error.
+    /// </summary>
+    [Fact]
+    public async Task Insert_NullIntoNotNullColumn_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT NOT NULL, name STRING)");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO data VALUES (NULL, 'A')");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("NOT NULL", result.Message);
+        Assert.Contains("id", result.Message);
+    }
+
+    /// <summary>
+    /// INSERT with NULL in a PRIMARY KEY column returns a NOT NULL error
+    /// because PRIMARY KEY implies NOT NULL.
+    /// </summary>
+    [Fact]
+    public async Task Insert_NullIntoPrimaryKeyColumn_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT PRIMARY KEY, name STRING)");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO data VALUES (NULL, 'A')");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("NOT NULL", result.Message);
+    }
+
+    /// <summary>
+    /// INSERT with NULL in a nullable column succeeds normally.
+    /// </summary>
+    [Fact]
+    public async Task Insert_NullIntoNullableColumn_Succeeds()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT NOT NULL, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, NULL)");
+
+        CommandResult selectResult = await ExecuteAsync("SELECT id, name FROM data");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+        Row row = Assert.Single(rows);
+        Assert.True(row["name"].IsNull);
+    }
+
+    /// <summary>
+    /// INSERT INTO ... SELECT with NULL in a NOT NULL column returns an error.
+    /// </summary>
+    [Fact]
+    public async Task InsertSelect_NullIntoNotNullColumn_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE source (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO source VALUES (NULL, 'A')");
+
+        await ExecuteAsync("CREATE TEMP TABLE target (id INT NOT NULL, name STRING)");
+
+        CommandResult result = await ExecuteAsync(
+            "INSERT INTO target SELECT id, name FROM source");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("NOT NULL", result.Message);
+    }
+
     // ──────────────────── INSERT INTO ... SELECT ────────────────────
 
     /// <summary>
@@ -292,6 +478,37 @@ public sealed class StatementExecutorTests : IDisposable
         List<Row> rows = await CollectRowsAsync(selectResult);
         Assert.Equal(2, rows.Count);
         Assert.All(rows, row => Assert.Equal("done", row["status"].AsString()));
+    }
+
+    /// <summary>
+    /// UPDATE targeting a PRIMARY KEY column returns an error.
+    /// </summary>
+    [Fact]
+    public async Task Update_PrimaryKeyColumn_ReturnsError()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT PRIMARY KEY, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'A'), (2, 'B')");
+
+        CommandResult result = await ExecuteAsync("UPDATE data SET id = 99");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("primary key column", result.Message);
+        Assert.Contains("id", result.Message);
+    }
+
+    /// <summary>
+    /// UPDATE targeting a non-PK column on a table with a PRIMARY KEY succeeds.
+    /// </summary>
+    [Fact]
+    public async Task Update_NonPrimaryKeyColumn_Succeeds()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT PRIMARY KEY, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'A'), (2, 'B')");
+
+        CommandResult result = await ExecuteAsync("UPDATE data SET name = 'X'");
+
+        Assert.Equal(CommandResultKind.AffectedRows, result.Kind);
+        Assert.Equal(2, result.AffectedRowCount);
     }
 
     // ──────────────────── ALTER TABLE ADD COLUMN ────────────────────

@@ -108,7 +108,7 @@ internal sealed class StatementExecutor
             writer.Finalize();
         }
 
-        RegisterTempTable(tableName, filePath);
+        RegisterTempTable(tableName, filePath, statement.PrimaryKeyColumns);
         return CommandResult.AffectedRows(0, $"Created temp table '{tableName}'.");
     }
 
@@ -205,28 +205,51 @@ internal sealed class StatementExecutor
             schema = reader.FileSchema;
         }
 
+        List<List<DataValue>> columnBuffers;
         long insertedRows;
 
         switch (statement.Source)
         {
             case InsertQuerySource querySource:
-                insertedRows = await InsertFromQueryAsync(
+                (columnBuffers, insertedRows) = await CollectRowsFromQueryAsync(
                     descriptor.FilePath, schema, querySource.Query,
                     statement.ColumnNames, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
                 break;
 
             case InsertValuesSource valuesSource:
-                insertedRows = InsertFromValues(
-                    descriptor.FilePath, schema, valuesSource.Rows, statement.ColumnNames);
+                (columnBuffers, insertedRows) = CollectRowsFromValues(
+                    schema, valuesSource.Rows, statement.ColumnNames);
                 break;
 
             default:
                 return CommandResult.Error($"Unsupported INSERT source: {statement.Source.GetType().Name}.");
         }
 
-        if (insertedRows > 0 && descriptor.Mutability == TableMutability.SessionOwned)
+        if (insertedRows > 0)
         {
-            RebuildTempTableSidecars(tableName, descriptor.FilePath);
+            string? nullViolation = ValidateNotNullConstraints(schema, columnBuffers);
+            if (nullViolation is not null)
+            {
+                return CommandResult.Error(nullViolation);
+            }
+
+            if (descriptor.PrimaryKeyColumns is { Count: > 0 } primaryKeyColumns)
+            {
+                string? violation = ValidatePrimaryKeyUniqueness(
+                    descriptor.FilePath, schema, columnBuffers, primaryKeyColumns);
+
+                if (violation is not null)
+                {
+                    return CommandResult.Error(violation);
+                }
+            }
+
+            AppendBufferedRows(descriptor.FilePath, schema, columnBuffers, (uint)insertedRows);
+
+            if (descriptor.Mutability == TableMutability.SessionOwned)
+            {
+                RebuildTempTableSidecars(tableName, descriptor.FilePath);
+            }
         }
 
         return CommandResult.AffectedRows(insertedRows, $"Inserted {insertedRows} rows into '{tableName}'.");
@@ -328,7 +351,7 @@ internal sealed class StatementExecutor
         _session.Catalog.RegisterManifest(tableName, manifest);
     }
 
-    private async Task<long> InsertFromQueryAsync(
+    private async Task<(List<List<DataValue>> ColumnBuffers, long RowCount)> CollectRowsFromQueryAsync(
         string filePath,
         DatumFileSchema schema,
         QueryExpression query,
@@ -382,12 +405,7 @@ internal sealed class StatementExecutor
                 }
             }
 
-            if (rowCount > 0)
-            {
-                AppendBufferedRows(filePath, schema, columnBuffers, (uint)rowCount);
-            }
-
-            return rowCount;
+            return (columnBuffers, rowCount);
         }
         finally
         {
@@ -395,8 +413,7 @@ internal sealed class StatementExecutor
         }
     }
 
-    private static long InsertFromValues(
-        string filePath,
+    private static (List<List<DataValue>> ColumnBuffers, long RowCount) CollectRowsFromValues(
         DatumFileSchema schema,
         IReadOnlyList<IReadOnlyList<Expression>> rows,
         IReadOnlyList<string>? targetColumns)
@@ -427,12 +444,7 @@ internal sealed class StatementExecutor
             }
         }
 
-        if (rows.Count > 0)
-        {
-            AppendBufferedRows(filePath, schema, columnBuffers, (uint)rows.Count);
-        }
-
-        return rows.Count;
+        return (columnBuffers, rows.Count);
     }
 
     // ──────────────────── UPDATE ────────────────────
@@ -456,6 +468,24 @@ internal sealed class StatementExecutor
 
         CommandResult? mutabilityError = CheckMutability(descriptor);
         if (mutabilityError is not null) return mutabilityError;
+
+        // Reject UPDATE on primary key columns — uniqueness cannot be re-validated
+        // after in-place column replacement. Users must DELETE + re-INSERT instead.
+        if (descriptor.PrimaryKeyColumns is { Count: > 0 } primaryKeyColumns)
+        {
+            foreach (ColumnAssignment assignment in statement.Assignments)
+            {
+                foreach (string primaryKeyColumn in primaryKeyColumns)
+                {
+                    if (string.Equals(assignment.ColumnName, primaryKeyColumn, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return CommandResult.Error(
+                            $"Cannot UPDATE primary key column '{assignment.ColumnName}' in table '{tableName}'. " +
+                            "DELETE the rows and re-INSERT with the new key values instead.");
+                    }
+                }
+            }
+        }
 
         // For now, UPDATE only supports constant assignments (SET col = literal).
         // Full expression evaluation with WHERE requires the expression evaluator,
@@ -886,10 +916,11 @@ internal sealed class StatementExecutor
         return Path.Combine(tempDirectory, $"{tableName}.datum");
     }
 
-    private void RegisterTempTable(string tableName, string filePath)
+    private void RegisterTempTable(string tableName, string filePath, IReadOnlyList<string>? primaryKeyColumns = null)
     {
         TableDescriptor descriptor = new("datum", tableName, filePath, new Dictionary<string, string>(),
-            Mutability: TableMutability.SessionOwned);
+            Mutability: TableMutability.SessionOwned,
+            PrimaryKeyColumns: primaryKeyColumns);
         _session.Catalog.Register(descriptor);
     }
 
@@ -985,6 +1016,110 @@ internal sealed class StatementExecutor
 
         using FileStream stream = new(filePath, FileMode.Open, FileAccess.ReadWrite);
         DatumFileEditor.AppendRowGroups(stream, [payload]);
+    }
+
+    /// <summary>
+    /// Validates that no non-nullable column contains a NULL value in the new rows.
+    /// Returns <see langword="null"/> if validation passes, or an error message
+    /// identifying the first violating column.
+    /// </summary>
+    private static string? ValidateNotNullConstraints(
+        DatumFileSchema schema,
+        List<List<DataValue>> columnBuffers)
+    {
+        for (int columnIndex = 0; columnIndex < schema.ColumnCount; columnIndex++)
+        {
+            if (schema.Columns[columnIndex].IsNullable)
+            {
+                continue;
+            }
+
+            List<DataValue> buffer = columnBuffers[columnIndex];
+            for (int rowIndex = 0; rowIndex < buffer.Count; rowIndex++)
+            {
+                if (buffer[rowIndex].IsNull)
+                {
+                    return $"NOT NULL constraint violation: column '{schema.Columns[columnIndex].Name}' " +
+                           $"does not allow NULL values (row {rowIndex + 1}).";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Validates that the new rows being inserted do not violate the primary key
+    /// uniqueness constraint. Reads existing PK column values from the file, builds
+    /// a hash set, then checks each new row against it and against other new rows.
+    /// Returns <see langword="null"/> if validation passes, or an error message if a
+    /// duplicate is detected.
+    /// </summary>
+    private static string? ValidatePrimaryKeyUniqueness(
+        string filePath,
+        DatumFileSchema schema,
+        List<List<DataValue>> newColumnBuffers,
+        IReadOnlyList<string> primaryKeyColumns)
+    {
+        // Resolve PK column indices in the schema.
+        int[] primaryKeyIndices = new int[primaryKeyColumns.Count];
+        for (int keyIndex = 0; keyIndex < primaryKeyColumns.Count; keyIndex++)
+        {
+            primaryKeyIndices[keyIndex] = FindColumnIndex(schema, primaryKeyColumns[keyIndex]);
+        }
+
+        // Build a hash set from existing rows in the file.
+        HashSet<CompositeKey> existingKeys = new();
+
+        using (DatumFileReader reader = DatumFileReader.Open(filePath))
+        {
+            DatumRowGroupDescriptor[] rowGroups;
+            using (FileStream footerStream = File.OpenRead(filePath))
+            {
+                (_, rowGroups, _, _) = DatumFileReader.ReadFooterAndHeader(footerStream);
+            }
+
+            for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.Length; rowGroupIndex++)
+            {
+                DatumRowGroupDescriptor rowGroup = rowGroups[rowGroupIndex];
+                if (rowGroup.ActiveRowCount == 0) continue;
+
+                DataValue[][] columns = reader.ReadColumns(rowGroupIndex, primaryKeyIndices);
+                int rowCount = (int)rowGroup.RowCount;
+
+                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+                {
+                    if (rowGroup.IsRowDeleted(rowIndex)) continue;
+
+                    DataValue[] keyValues = new DataValue[primaryKeyIndices.Length];
+                    for (int keyPosition = 0; keyPosition < primaryKeyIndices.Length; keyPosition++)
+                    {
+                        keyValues[keyPosition] = columns[keyPosition][rowIndex];
+                    }
+
+                    existingKeys.Add(new CompositeKey(keyValues));
+                }
+            }
+        }
+
+        // Check each new row against existing keys and other new rows.
+        int newRowCount = newColumnBuffers[0].Count;
+        for (int rowIndex = 0; rowIndex < newRowCount; rowIndex++)
+        {
+            DataValue[] keyValues = new DataValue[primaryKeyIndices.Length];
+            for (int keyPosition = 0; keyPosition < primaryKeyIndices.Length; keyPosition++)
+            {
+                keyValues[keyPosition] = newColumnBuffers[primaryKeyIndices[keyPosition]][rowIndex];
+            }
+
+            CompositeKey key = new(keyValues);
+            if (!existingKeys.Add(key))
+            {
+                return $"PRIMARY KEY violation: duplicate key ({key}) in table.";
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

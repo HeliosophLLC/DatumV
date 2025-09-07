@@ -1431,12 +1431,27 @@ CREATE TEMP TABLE features (
 )
 ```
 
+Composite primary keys are declared with a table-level constraint:
+
+```sql
+CREATE TEMP TABLE order_products (
+    user_id    INT,
+    product_id INT,
+    quantity   INT,
+    PRIMARY KEY (user_id, product_id)
+)
+```
+
 Supported column modifiers:
 
 | Modifier | Behavior |
 |----------|----------|
-| `NOT NULL` | Column rejects NULL values. |
-| `PRIMARY KEY` | Implies `NOT NULL`. Stored as column metadata (not yet enforced as a uniqueness constraint). |
+| `NOT NULL` | Column rejects NULL values on INSERT (both VALUES and SELECT sources). |
+| `PRIMARY KEY` | Implies `NOT NULL`. Enforces uniqueness on INSERT — duplicate key values are rejected. UPDATE on a PRIMARY KEY column is prohibited. |
+
+Both inline `col INT PRIMARY KEY` and table-level `PRIMARY KEY (col1, col2)` syntax are supported.
+When a table has a primary key, each `INSERT` validates that no new rows duplicate an existing or
+in-batch key value. Violations return an error and the entire batch is rejected.
 
 `CREATE TEMP TABLE IF NOT EXISTS` silently succeeds when the table already exists.
 
@@ -1467,7 +1482,9 @@ INSERT INTO features (customer_id, label) VALUES (3, 'churn')
 INSERT INTO features SELECT id, name, score FROM raw_data WHERE score IS NOT NULL
 ```
 
-A source index and column statistics manifest are auto-rebuilt after each INSERT into a session-owned table.
+NOT NULL columns are validated before rows are appended — a NULL value in any non-nullable column
+rejects the entire batch with an error. A source index and column statistics manifest are auto-rebuilt
+after each INSERT into a session-owned table.
 
 ### UPDATE
 
@@ -1479,6 +1496,8 @@ UPDATE features SET label = 'churn' WHERE score > 0.8
 ```
 
 Currently supports constant-expression assignments. Full expression evaluation (referencing other columns) is planned.
+
+UPDATE on a PRIMARY KEY column is not permitted. To change a row's key, DELETE the row and re-INSERT with the new key values.
 
 ### DELETE
 

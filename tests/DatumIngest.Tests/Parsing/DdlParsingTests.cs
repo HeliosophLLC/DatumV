@@ -457,6 +457,9 @@ public class DdlParsingTests
         Assert.Equal(2, create.Columns.Count);
         Assert.True(create.Columns[0].PrimaryKey);
         Assert.False(create.Columns[1].PrimaryKey);
+        Assert.NotNull(create.PrimaryKeyColumns);
+        Assert.Single(create.PrimaryKeyColumns);
+        Assert.Equal("id", create.PrimaryKeyColumns[0]);
     }
 
     /// <summary>
@@ -503,6 +506,51 @@ public class DdlParsingTests
         Assert.Equal("value", create.Columns[2].Name);
         Assert.False(create.Columns[0].PrimaryKey);
         Assert.False(create.Columns[1].PrimaryKey);
+    }
+
+    /// <summary>
+    /// Table-level PRIMARY KEY clause: <c>PRIMARY KEY (user_id, product_id)</c>.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_TableLevelCompositePrimaryKey()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE orders (user_id INT, product_id INT, quantity INT, PRIMARY KEY (user_id, product_id))");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Equal(3, create.Columns.Count);
+        Assert.NotNull(create.PrimaryKeyColumns);
+        Assert.Equal(2, create.PrimaryKeyColumns.Count);
+        Assert.Equal("user_id", create.PrimaryKeyColumns[0]);
+        Assert.Equal("product_id", create.PrimaryKeyColumns[1]);
+    }
+
+    /// <summary>
+    /// Table-level PRIMARY KEY with a single column.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_TableLevelSinglePrimaryKey()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE orders (id INT, name STRING, PRIMARY KEY (id))");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.NotNull(create.PrimaryKeyColumns);
+        Assert.Single(create.PrimaryKeyColumns);
+        Assert.Equal("id", create.PrimaryKeyColumns[0]);
+    }
+
+    /// <summary>
+    /// No PK declared — PrimaryKeyColumns is null.
+    /// </summary>
+    [Fact]
+    public void CreateTempTable_NoPrimaryKey_PrimaryKeyColumnsIsNull()
+    {
+        Statement statement = SqlParser.ParseStatement(
+            "CREATE TEMP TABLE data (x INT, y STRING)");
+
+        CreateTempTableStatement create = Assert.IsType<CreateTempTableStatement>(statement);
+        Assert.Null(create.PrimaryKeyColumns);
     }
 
     // ───────────────────── ANALYZE ─────────────────────

@@ -1,3 +1,4 @@
+using System.Linq;
 using DatumIngest.Parsing.Ast;
 using DatumIngest.Parsing.Tokens;
 using Superpower;
@@ -1259,7 +1260,39 @@ public static class SqlParser
         ).OptionalOrDefault();
 
     /// <summary>
-    /// Parses <c>CREATE TEMP TABLE [IF NOT EXISTS] name (col type, ...) </c>.
+    /// Parses a table-level <c>PRIMARY KEY (col1, col2, ...)</c> constraint.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, string[]> TablePrimaryKeyConstraintParser =
+        from primaryKw in Token.EqualTo(SqlToken.Primary)
+        from keyKw in Token.EqualTo(SqlToken.Key)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from names in IdentifierOrKeywordAsName.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select names;
+
+    /// <summary>
+    /// Parses a column definition list with an optional trailing table-level
+    /// <c>PRIMARY KEY (col, ...)</c> constraint. Uses <c>.Try()</c> on each
+    /// <c>(comma, column)</c> pair so that the comma before <c>PRIMARY KEY</c>
+    /// is not greedily consumed by a column-definition lookahead.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (ColumnDefinition[] Columns, string[]? PrimaryKeyColumns)>
+        ColumnListWithOptionalPrimaryKeyParser =
+            from first in ColumnDefinitionParser
+            from rest in (
+                from comma in Token.EqualTo(SqlToken.Comma)
+                from column in ColumnDefinitionParser
+                select column
+            ).Try().Many()
+            from primaryKey in (
+                from comma in Token.EqualTo(SqlToken.Comma)
+                from constraint in TablePrimaryKeyConstraintParser
+                select constraint
+            ).AsNullable().OptionalOrDefault()
+            select (new[] { first }.Concat(rest).ToArray(), primaryKey);
+
+    /// <summary>
+    /// Parses <c>CREATE TEMP TABLE [IF NOT EXISTS] name (col type, ..., [PRIMARY KEY (col, ...)])</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Statement> CreateTempTableParser =
         from createKw in Token.EqualTo(SqlToken.Create)
@@ -1272,9 +1305,27 @@ public static class SqlParser
         from statement in asOrParen.Kind == SqlToken.As
             ? SP.Ref(() => QueryExpressionParser!)
                 .Select(query => (Statement)new CreateTempTableAsSelectStatement(tableName, query, ifNotExists))
-            : ColumnDefinitionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
-                .Then(columns => Token.EqualTo(SqlToken.RightParen)
-                    .Select(_ => (Statement)new CreateTempTableStatement(tableName, columns, ifNotExists)))
+            : ColumnListWithOptionalPrimaryKeyParser
+                .Then(result => Token.EqualTo(SqlToken.RightParen)
+                    .Select(_ =>
+                    {
+                        IReadOnlyList<string>? primaryKeyColumns = result.PrimaryKeyColumns;
+                        if (primaryKeyColumns is null)
+                        {
+                            List<string>? inlineKeys = null;
+                            foreach (ColumnDefinition column in result.Columns)
+                            {
+                                if (column.PrimaryKey)
+                                {
+                                    inlineKeys ??= new List<string>();
+                                    inlineKeys.Add(column.Name);
+                                }
+                            }
+                            primaryKeyColumns = inlineKeys;
+                        }
+                        return (Statement)new CreateTempTableStatement(tableName, result.Columns, ifNotExists,
+                            PrimaryKeyColumns: primaryKeyColumns);
+                    }))
         select statement;
 
     /// <summary>

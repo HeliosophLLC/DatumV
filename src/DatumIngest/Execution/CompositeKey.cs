@@ -65,6 +65,14 @@ public readonly struct CompositeKey : IEquatable<CompositeKey>
     /// <inheritdoc/>
     public override int GetHashCode() => _hashCode;
 
+    /// <summary>
+    /// Formats the key values for use in error messages.
+    /// </summary>
+    public override string ToString()
+    {
+        return string.Join(", ", _parts.Select(static value => value.IsNull ? "NULL" : value.ToString()));
+    }
+
     /// <inheritdoc/>
     public static bool operator ==(CompositeKey left, CompositeKey right) => left.Equals(right);
 
