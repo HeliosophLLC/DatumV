@@ -1,51 +1,89 @@
 # DatumIngest Roadmap
 
-The following features are architecturally accounted for but deferred from V1:
+## Open Items
+
+Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = multi-week or more
+
+| Feature | Complexity | Justification |
+|---------|:----------:|---------------|
+| **Pipe mode** | S | Output writers already support CSV/JSON/NDJSON; just needs a CLI flag to target stdout rather than a file |
+| **Aggregate finalization surcharge** | S | Add `FinalizationCost(long groupSize)` to `ICostAwareFunction`; implement on MEDIAN, PERCENTILE, and MODE — all other accumulators default to zero |
+| **Language server — semantic diagnostics** | S | Unknown table/column warnings already shipped (partial ✅); remaining work is type mismatch detection in the semantic analyzer |
+| **`WithChildren` on `IQueryOperator`** | S | Pure internal refactor — removes the operator-type switch in `InstrumentedOperator.InstrumentRecursive` and enables generic tree rewrites; no user-visible change |
+| **Data-dependent function costs** | S | Deprioritized — `ICostAwareFunction` already supports it; flat QU is accurate enough for typical vector dims (≤ 4096); trivially addable via base class when needed |
+| **Excel provider** | S–M | `ITableProvider` contract is ready; needs an XLSX library (e.g. ClosedXML) and column type inference from cell values |
+| **Adaptive batch sizing** | M | No existing infrastructure; requires row-size estimation from sampling and a feedback loop to adjust `BatchSize` at runtime |
+| **Predicate-filtered row count propagation** | M | Planner-only change using manifest `DistinctCount`/min/max to compute selectivity; refines `TryReorderJoins` inputs so filtered subsets of large tables get the right join role — see notes below |
+| **Language server — VS Code LSP extension** | M | Wraps the existing `LanguageServer` assembly in an LSP JSON-RPC stdio host; all language intelligence is already implemented |
+| **Data validation** | M | `CHECK` constraints / `VALIDATE` clause — new parser tokens, AST nodes, and a diagnostic evaluation pass that reports violations rather than aborting |
+| **`DataKind.Decimal` type** | L | `System.Decimal` fits inline in `DataValue` (no GC), but touches all operators, all providers (Parquet `DECIMAL` logical type), serializers, function overloads, and tests — see notes below |
+| **Late materialization — Parquet** | L | `IKeyedTableProvider` on `ParquetTableProvider` with synthetic row-number keying and row-group-level seeking via ParquetSharp; defers expensive binary/nested columns past joins |
+| **Late materialization — HDF5** | L | Same scope as Parquet; implicit row-index key and per-dataset lazy loading via PureHDF `HyperslabSelection` |
+| **P3 — Parallel Hash Join + Aggregate** | XL | Concurrent probe workers, bounded `Channel<Row>`, `IAggregateAccumulator.Merge` on all ~15 accumulators, server-side concurrency governor — see Engine Performance § P3 |
+| **P4 — DataValue Struct + Batch Execution** | XL | `DataValue` class → `readonly struct`; hundreds of call sites to migrate; foundational prerequisite for D9 vectorized execution — see Engine Performance § P4 |
+| **P5 — Memory-Mapped Sorted Indexes** | XL | New v4 fixed-width on-disk format, mmap infrastructure, sort-preserving key encoding per `DataKind`, breaking `.datum-index` change; prerequisite for P6 — see Engine Performance § P5 |
+| **P6 — ReferenceStore Session Isolation** | XL | Per-session `ReferenceStore`; `DataValue` encoding must embed a store ID; requires audit of all `FromString`/`FromVector`/`FromImage` call sites — see Engine Performance § P6 |
+| **Primary key persistence** | XL | Four interdependent phases: footer format, shard-aware INSERT with PK validation, compaction operator, uniqueness re-validation — see notes below |
+| **Dataset Revision Pipeline** | XL | Four phases: output manifest, two-pass vocabulary collection, `EstimateCost` RPC, gRPC `CreateOutput` with progress streaming — see Dataset Revision Pipeline (V3) |
+| **Datum File Compaction** | XL | Three phases: full compaction (tombstone + orphan removal), merge compaction (row group consolidation), automatic background compaction — see Datum File Compaction |
+
+### Under Consideration
+
+| Feature | Complexity | Justification |
+|---------|:----------:|---------------|
+| **Enum / Categorical type** (`DataKind.Categorical`) | L | `label_encode` and `hash_encode` cover most ML use cases today; a first-class type adds automatic encoding and domain validation but requires a `DataKind` extension — see Type System Extensions |
+| **Index encoding strategies** (dictionary B+Tree, RLE sorted, Roaring bitmaps, FOR/bit-packing) | XL | Breaking `.datum-index` format changes with major payoff for high-cardinality string and low-cardinality numeric columns at scale; no V1 blocker — see Index Encoding Strategies |
+
+---
+
+### Notes
+
+**Predicate-filtered row count propagation**: The greedy join reorderer currently uses raw `EstimatedRowCount` from the manifest. This refines it by multiplying each table's count by pushed-down WHERE predicate selectivity — equality predicates on high-NDV columns get `1/NDV`; range predicates use a fraction of the min/max domain; multi-predicate selectivities multiply (independence assumption). Captures most cost-based optimizer benefit without a full cardinality model. Motivating case: a 32M-row embedding table filtered to ~100 rows by a high-NDV predicate should be a build side, not the probe side — but the current heuristic sees 32M and gets it wrong.
+
+**`DataKind.Decimal` type**: `System.Decimal` is exactly 16 bytes and fits inline in the existing `DataValue` struct (`_numericBits` + `_bits1`) with no GC cost or layout change. Natural Parquet mapping via the `DECIMAL` logical type (fixed-length byte array with precision/scale annotations). Primary use case: exact-arithmetic aggregation (SUM on financial columns where `Float64` precision loss is unacceptable) and ingesting Parquet sources that carry `DECIMAL` columns today. `BigInteger` is explicitly out of scope — variable-length, heap-allocated, GC pressure in tight loops.
+
+**Primary key persistence**: PRIMARY KEY column metadata is currently session-only (`TableDescriptor`) and not persisted in the `.datum` file footer — acceptable for V1 temp tables, which are session-scoped. In a future durable ingestion model, clients send batches (shards) with externally-derived composite keys; the engine writes each batch, creates tombstone records for superseded rows, and later runs compaction. PK metadata in the footer enables compaction to validate uniqueness across shards without external coordination. Phases: (1) extend `DatumFileSchema`/footer with `PrimaryKeyColumns`; (2) read PK metadata on file open; (3) shard-aware INSERT validating PK across existing row groups; (4) compaction operator merging row groups, applying tombstones, re-validating uniqueness.
+
+---
+
+## Completed
 
 - ~~**GROUP BY / Aggregation**: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING~~ ✅
 - ~~**Spill-to-disk joins**: Grace hash join for datasets too large for memory~~ ✅
-- ~~**Parameterized queries**: Named `$parameter` syntax with early binding (AST-level substitution before planning). CLI via `--param key=value`, gRPC via `parameters` map on `QueryRequest`.~~ ✅
-- **Adaptive batch sizing**: Auto-tune based on row size estimates and available memory
-- **Excel provider**: Read .xlsx files (ITableProvider interface is ready)
-- ~~**Scalar subqueries**: Uncorrelated subqueries constant-fold at plan time; correlated subqueries inject a `ScalarSubqueryOperator` that executes per outer row with `OuterRow` context threading.~~ ✅
-- ~~**Scalar subquery decorrelation**: Rewrite correlated scalar subqueries with single-column equality correlation and an aggregate (`SELECT MAX(b.val) FROM b WHERE b.id = a.id`) into a `GROUP BY` + `LEFT JOIN`, reducing O(N×M) per-row execution to O(N+M). `TryDecorrelateScalarSubquery` in `SubqueryRewriter` detects the pattern and rewrites into a LEFT JOIN against the grouped inner query. Decorrelated scalar subqueries execute at ~12 ms / 9.85 MB vs. O(N×M) per-row.~~ ✅
-- ~~**IN / NOT IN / EXISTS / NOT EXISTS subqueries**: `SemiJoinRewriter` decorrelates correlated subqueries into LEFT SEMI / LEFT ANTI-SEMI hash joins. Uncorrelated IN subqueries are constant-folded to literal value lists; uncorrelated EXISTS subqueries are evaluated as boolean gates at plan time. NOT IN implements SQL-standard three-valued NULL semantics.~~ ✅
-- ~~**UNION / INTERSECT / EXCEPT**: Set operations between query results — all six variants (UNION, UNION ALL, INTERSECT, INTERSECT ALL, EXCEPT, EXCEPT ALL) with SQL-standard precedence (INTERSECT binds tighter than UNION/EXCEPT). Hash-based execution with spill-to-disk for UNION DISTINCT.~~ ✅
+- ~~**Parameterized queries**: Named `$parameter` syntax with early binding~~ ✅
+- ~~**Scalar subqueries**: Uncorrelated constant-fold at plan time; correlated via `ScalarSubqueryOperator` + `OuterRow` context threading~~ ✅
+- ~~**Scalar subquery decorrelation**: Rewrite to `GROUP BY` + `LEFT JOIN`, reducing O(N×M) per-row execution to O(N+M)~~ ✅
+- ~~**IN / NOT IN / EXISTS / NOT EXISTS subqueries**: `SemiJoinRewriter` → LEFT SEMI / LEFT ANTI-SEMI hash joins; NOT IN with three-valued NULL semantics~~ ✅
+- ~~**UNION / INTERSECT / EXCEPT**: All six variants with SQL-standard precedence; spill-to-disk for UNION DISTINCT~~ ✅
 - ~~**Window functions**: ROW_NUMBER, RANK, LAG, LEAD with OVER/PARTITION BY~~ ✅
-- ~~**Dataset splitting**: `hash_split(key, seed)` function returning a deterministic float in [0, 1) per row, enabling reproducible train/val/test splits via WHERE clauses. Combined with window functions (ROW_NUMBER + PARTITION BY), supports stratified splitting that preserves class proportions per split. Temporal splits already expressible via WHERE on date columns.~~ ✅
-- **Pipe mode**: Stream results to stdout as CSV/JSON/NDJSON
-- ~~**Top-N bounded sort**: Bounded priority queue in `OrderByOperator` for ORDER BY + LIMIT without full materialization~~ ✅
-- ~~**WHERE index seek**: Use sorted value indexes to fetch matching rows directly via `ISeekableTableProvider` instead of streaming and discarding — point lookups for high-selectivity equality predicates~~ ✅
-- ~~**Range predicate index pruning**: Extend sorted index chunk pruning to handle `<`, `<=`, `>`, `>=`, `BETWEEN`, and `IN` (currently equality only)~~ ✅
-- ~~**Seekable Parquet provider**: Implement `ISeekableTableProvider` on Parquet (row-group-level) to unlock index scan and WHERE index seek~~ ✅
-- ~~**Seekable HDF5 provider**: Implement `ISeekableTableProvider` on HDF5 using PureHDF `HyperslabSelection` for partial dataset reads~~ ✅
-- ~~**Index + manifest co-generation**: Single-pass `index-manifest` command producing both `.datum-index` and `.datum-manifest` with opt-in pairwise interactions~~ ✅
-- ~~**Greedy join reordering**: Place the largest table on the probe (streaming) side so LIMIT can short-circuit earlier; smaller tables become hash-table build sides. Gates on all-INNER, non-lateral joins with estimated row counts.~~ ✅
-- ~~**Multi-level bloom pruning**: Bloom filter acceleration traverses through nested join operators, propagating build-side key values to buried scan operators across the entire join tree instead of stopping at the first join boundary.~~ ✅
-- ~~**Hybrid Grace hash join**: Grace hash join now streams results for in-memory partitions during Phase 1b instead of buffering all probe rows. A LIMIT above the join short-circuits immediately after enough rows are found — eliminating catastrophic probe materialization (previously 21 GB for a 5-table join with LIMIT 100 on a 122 MB dataset).~~ ✅
-- ~~**Default memory budgets**: CLI defaults to 2 GB (`CliOptions.MemoryBudgetBytes`); server defaults to 256 MB (`DatumComputeOptions.MemoryBudgetBytes`). Both activate `GraceHashJoinExecutor` and the hybrid streaming probe automatically — no explicit `--memory-budget` flag required. CLI users can override or disable with `--memory-budget <size|0>`.~~ ✅
-- **Predicate-filtered row count propagation**: Multiply each table's `EstimatedRowCount` by the selectivity of pushed-down WHERE predicates before feeding the estimates to `TryReorderJoins`. Equality predicates on high-NDV columns get selectivity `1/NDV` (from the manifest `DistinctCount`); range predicates use a fraction of the domain from manifest min/max; multi-predicate selectivities are multiplied (independence assumption). This refines the greedy join order for queries where a small filtered subset of a large table should be a build side rather than the probe side — capturing most of the CBO benefit without a full cardinality model. 32M rows is nothing at the scale of production embedding tables or event logs; the greedy heuristic sees raw table sizes, not what actually flows through the join after a WHERE clause has cut the input by 99.9%.
-- **`DataKind.Decimal` type**: 128-bit fixed-point with configurable precision and scale (mirrors SQL `DECIMAL(p, s)`). `System.Decimal` is exactly 16 bytes and fits inline in the existing `DataValue` struct (`_numericBits` + `_bits1`) with no GC cost or layout change. Natural Parquet mapping via `DECIMAL` logical type (fixed-length byte array with precision/scale annotations). Primary use case: exact-arithmetic aggregation (SUM of financial columns where `Float64` precision loss is unacceptable) and ingesting Parquet sources that carry `DECIMAL` columns today. `BigInteger` is explicitly out of scope — variable-length, heap-allocated, no Parquet/Arrow representation, GC pressure in tight loops.
-- **Data-dependent function costs**: ~~Replace fixed per-invocation QU with `ComputeCost(DataKind[])` so vector/tensor operations scale with dimensionality~~ — Deprioritized. `ICostAwareFunction` already supports this pattern. Typical ETL vector dimensions (embeddings ≤4096, feature vectors <100) make flat QU 1–2 honest enough; supplemental scaling only matters beyond 100K elements. Trivially addable via base classes if needed.
-- **Resolution-aware image costs**: ~~Post-execution cost reporting from image transforms based on actual decoded resolution~~ ✅
-- ~~**Query metering system**: `QueryMeter` integrated into `ExecutionContext` for per-query QU accumulation across functions and operators, with `GetUsage` RPC for billing~~ ✅
-- **Aggregate finalization surcharge**: Extend `ICostAwareFunction` to aggregate functions with a one-time finalization cost proportional to group size (e.g. MEDIAN's O(N log N) sort, PERCENTILE sorting, MODE frequency scanning). Per-accumulation QU 2 is a reasonable first approximation; revisit if groups routinely exceed 100K rows.
-- ~~**Statistics-based partition pruning**: Skip row groups whose min/max statistics prove a predicate unsatisfiable~~ ✅
-- ~~**Bloom filter acceleration**: Use Parquet bloom filters to skip partitions for equality predicates~~ ✅
-- **Late materialization for Parquet provider**: Implement `IKeyedTableProvider` on `ParquetTableProvider` so expensive binary/nested columns can be deferred past joins. Requires synthetic row-number keying and row-group-level seeking via ParquetSharp.
-- **Late materialization for HDF5 provider**: Implement `IKeyedTableProvider` on `Hdf5TableProvider` so large multi-dimensional datasets can be deferred past joins. Requires implicit row-index key and lazy per-dataset loading.
+- ~~**Dataset splitting**: `hash_split(key, seed)` for reproducible train/val/test splits~~ ✅
+- ~~**Top-N bounded sort**: Bounded priority queue in `OrderByOperator` for ORDER BY + LIMIT~~ ✅
+- ~~**WHERE index seek**: Point lookups via `ISeekableTableProvider`~~ ✅
+- ~~**Range predicate index pruning**: `<`, `<=`, `>`, `>=`, `BETWEEN`, `IN` chunk pruning~~ ✅
+- ~~**Seekable Parquet provider**: `ISeekableTableProvider` at row-group level~~ ✅
+- ~~**Seekable HDF5 provider**: `ISeekableTableProvider` via PureHDF `HyperslabSelection`~~ ✅
+- ~~**Index + manifest co-generation**: Single-pass `index-manifest` command~~ ✅
+- ~~**Greedy join reordering**: Largest table on probe side; smaller tables as build sides~~ ✅
+- ~~**Multi-level bloom pruning**: Build-side key propagation through nested join operators~~ ✅
+- ~~**Hybrid Grace hash join**: Streaming probe for in-memory partitions; LIMIT short-circuits after N rows~~ ✅
+- ~~**Default memory budgets**: CLI 2 GB / server 256 MB; activates `GraceHashJoinExecutor` automatically~~ ✅
+- ~~**Statistics-based partition pruning**: Skip row groups whose min/max proves a predicate unsatisfiable~~ ✅
+- ~~**Bloom filter acceleration**: Parquet bloom filters for equality predicate partition skipping~~ ✅
 - ~~**Schema caching**: Skip re-inference on repeated queries~~ ✅
-- **Data validation**: CHECK constraints / VALIDATE clause for data quality gates
-- **Primary key persistence in datum files**: PRIMARY KEY column metadata is currently session-only (`TableDescriptor`), not persisted in the `.datum` file footer. For V1 temp tables this is acceptable — they're session-scoped. In a future ingestion model where datum files are durable artifacts, PK metadata must survive on disk so the engine can enforce uniqueness on append. The long-term vision: clients send batches (shards) with externally-derived composite keys (e.g., `(user_id, product_id)`); the engine writes each batch, creates tombstone records for superseded rows, and later runs compaction events to merge shards, eliminate tombstones, and consolidate into fewer row groups. PK metadata in the footer enables compaction to validate uniqueness across shards without external coordination. Requires: (1) extend `DatumFileSchema` / footer format with a `PrimaryKeyColumns` field, (2) read PK metadata back when opening a datum file, (3) shard-aware INSERT that validates PK across existing row groups, (4) compaction operator that merges row groups, applies tombstones, and re-validates uniqueness.
 - ~~**Language server (WASM)**: SQL autocomplete, diagnostics, hover via Blazor WebAssembly~~ ✅
 - ~~**Language server (SignalR)**: SignalR hub for server-side language intelligence~~ ✅
-- **Language server — VS Code LSP extension**: Wrap LanguageServer core in LSP JSON-RPC over stdio
-- ~~**Language server — multi-error diagnostics**: Error-recovering parser for multiple parse errors per document~~ ✅
-- **Language server — semantic diagnostics**: ~~Unknown table/column warnings~~, type mismatch detection ✅ (partial)
-- ~~**Language server — WASM size optimization**: Extract `DatumIngest.Parsing` with manifest POCOs to eliminate all transitive heavy dependencies from LanguageServer/Wasm~~ ✅
-- ~~**CASE / WHEN expressions**: Searched CASE (`CASE WHEN cond THEN ... END`) and simple CASE (`CASE expr WHEN value THEN ... ELSE ... END`). Requires new lexer tokens, AST nodes, and evaluator support. `iif()` provides basic inline conditional as a function today.~~ ✅
-- ~~**NULLIF function**: `NULLIF(a, b)` returns NULL when a equals b. `COALESCE(a, b, ...)` is already ✅ implemented as a registered function. `NULLIF` has no implementation yet — not registered as a function, not available as expression syntax. Straightforward to add alongside `CoalesceFunction`.~~ ✅
-- **`WithChildren` method on `IQueryOperator`**: A method like `IQueryOperator WithChildren(IReadOnlyList<IQueryOperator> children)` that returns a copy of the operator with replaced children. Enables `InstrumentedOperator.InstrumentRecursive` to use generic child discovery from `DescribeForExplain().Children` instead of operator-specific switch statements, and unlocks future copy-on-write tree rewrites.
+- ~~**Language server — multi-error diagnostics**: Error-recovering parser for multiple parse errors~~ ✅
+- ~~**Language server — WASM size optimization**: Extract `DatumIngest.Parsing` to eliminate heavy transitive dependencies~~ ✅
+- ~~**Language server — semantic diagnostics (unknown table/column warnings)**~~ ✅
+- ~~**CASE / WHEN expressions**: Searched CASE and simple CASE~~ ✅
+- ~~**NULLIF function**: `NULLIF(a, b)` returns NULL when a equals b~~ ✅
+- ~~**Query metering system**: `QueryMeter` in `ExecutionContext`, `GetUsage` RPC~~ ✅
+- ~~**Resolution-aware image costs**: Post-execution cost reporting from actual decoded resolution~~ ✅
+- ~~**Time-of-day type** (`DataKind.Time`)~~ ✅
+- ~~**Duration type** (`DataKind.Duration`)~~ ✅
+- ~~**Schema Matching**: Star-schema hub detection from manifest statistics~~ ✅
+- ~~**P1 — Merge Join**: Streaming two-pointer join for sorted equi-joins~~ ✅
+- ~~**P2 — Streaming Aggregate + LIMIT Short-Circuit**: `GroupByOperator` dual-mode hash/streaming~~ ✅
 
 ---
 
