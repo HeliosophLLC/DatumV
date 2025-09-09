@@ -113,7 +113,7 @@ public sealed class HoverProvider
             return $"{parameter.Name}: {parameter.Kind}{optional}";
         }));
 
-        string returnInfo = function.ReturnType is not null ? $" → {function.ReturnType}" : "";
+        string returnInfo = !string.IsNullOrEmpty(function.ReturnType) ? $" → {function.ReturnType}" : "";
         string signature = $"**{function.Name}**({parameters}){returnInfo}";
 
         if (function.IsTableValued)

@@ -134,6 +134,214 @@ public static class FunctionDocumentation
             Description = "Extracts the first substring matching a regular expression. With group_index (1-based), returns a specific capture group. Returns NULL if no match.",
             Category = FunctionCategory.String,
         });
+        Register(new FunctionSignature
+        {
+            Name = "upper",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Converts a string to upper case.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "lower",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Converts a string to lower case.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "trim",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Removes leading and trailing whitespace from a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "ltrim",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Removes leading whitespace from a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "rtrim",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Removes trailing whitespace from a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "btrim",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Removes leading and trailing whitespace from a string. Alias for trim.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "contains",
+            Parameters = [Parameter("value", "String"), Parameter("search", "String")],
+            ReturnType = "Boolean",
+            Description = "Returns true if value contains the search string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "starts_with",
+            Parameters = [Parameter("value", "String"), Parameter("prefix", "String")],
+            ReturnType = "Boolean",
+            Description = "Returns true if value starts with the given prefix.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "ends_with",
+            Parameters = [Parameter("value", "String"), Parameter("suffix", "String")],
+            ReturnType = "Boolean",
+            Description = "Returns true if value ends with the given suffix.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "position",
+            Parameters = [Parameter("string", "String"), Parameter("substring", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the 1-based index of the first occurrence of substring in string, or 0 if not found.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "replace",
+            Parameters = [Parameter("value", "String"), Parameter("search", "String"), Parameter("replacement", "String")],
+            ReturnType = "String",
+            Description = "Replaces all occurrences of search in value with replacement.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "concat",
+            Parameters = [Parameter("values", "String")],
+            ReturnType = "String",
+            Description = "Concatenates two or more strings. Null arguments are treated as empty strings.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "concat_ws",
+            Parameters = [Parameter("separator", "String"), Parameter("values", "String")],
+            ReturnType = "String",
+            Description = "Concatenates strings with a separator, skipping null values.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "repeat",
+            Parameters = [Parameter("value", "String"), Parameter("count", "Float32")],
+            ReturnType = "String",
+            Description = "Repeats a string the specified number of times.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "reverse",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Reverses the characters in a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "left",
+            Parameters = [Parameter("value", "String"), Parameter("length", "Float32")],
+            ReturnType = "String",
+            Description = "Returns the leftmost N characters of a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "right",
+            Parameters = [Parameter("value", "String"), Parameter("length", "Float32")],
+            ReturnType = "String",
+            Description = "Returns the rightmost N characters of a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "lpad",
+            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String")],
+            ReturnType = "String",
+            Description = "Left-pads a string to the specified length with a fill character.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "rpad",
+            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String")],
+            ReturnType = "String",
+            Description = "Right-pads a string to the specified length with a fill character.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_replace",
+            Parameters = [Parameter("input", "String"), Parameter("pattern", "String"), Parameter("replacement", "String")],
+            ReturnType = "String",
+            Description = "Replaces all substrings matching a regular expression with a replacement string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "word_count",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the number of whitespace-delimited words in a string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "split_part",
+            Parameters = [Parameter("value", "String"), Parameter("delimiter", "String"), Parameter("index", "Float32")],
+            ReturnType = "String",
+            Description = "Splits a string by a delimiter and returns the 1-based Nth part.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "initcap",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Converts the first character of each word to upper case.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "translate",
+            Parameters = [Parameter("value", "String"), Parameter("from", "String"), Parameter("to", "String")],
+            ReturnType = "String",
+            Description = "Replaces characters in value that appear in from with corresponding characters in to.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "ascii",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the ASCII code of the first character of the string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "chr",
+            Parameters = [Parameter("code", "Float32")],
+            ReturnType = "String",
+            Description = "Returns the character corresponding to the given ASCII code.",
+            Category = FunctionCategory.String,
+        });
 
         // ── Type Conversion ──
 
@@ -257,6 +465,89 @@ public static class FunctionDocumentation
             Parameters = [Parameter("value", "String")],
             ReturnType = "Float32",
             Description = "Returns 1 if the string can be parsed as a date, 0 otherwise.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "make_time",
+            Parameters = [Parameter("hour", "Float32"), Parameter("minute", "Float32"), Parameter("second", "Float32")],
+            ReturnType = "Time",
+            Description = "Constructs a Time value from hour, minute, and second components.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "current_time",
+            Parameters = [],
+            ReturnType = "Time",
+            Description = "Returns the current UTC time-of-day.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "date_span",
+            Parameters = [Parameter("start", "DateTime"), Parameter("end", "DateTime")],
+            ReturnType = "Duration",
+            Description = "Computes the Duration between two Date or DateTime values.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "date_offset",
+            Parameters = [Parameter("date", "DateTime"), Parameter("duration", "Duration")],
+            ReturnType = "DateTime",
+            Description = "Adds a Duration to a Date, DateTime, or Time value.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "time_diff",
+            Parameters = [Parameter("start_time", "Time"), Parameter("end_time", "Time")],
+            ReturnType = "Duration",
+            Description = "Computes the Duration between two Time values.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "make_duration",
+            Parameters = [Parameter("days", "Float32"), Parameter("hours", "Float32"), Parameter("minutes", "Float32"), Parameter("seconds", "Float32")],
+            ReturnType = "Duration",
+            Description = "Constructs a Duration from days, hours, minutes, and seconds.",
+            Category = FunctionCategory.Temporal,
+        });
+
+        // ── Duration Extraction ──
+
+        Register(new FunctionSignature
+        {
+            Name = "duration_seconds",
+            Parameters = [Parameter("duration", "Duration")],
+            ReturnType = "Float32",
+            Description = "Returns the total seconds of a Duration.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "duration_minutes",
+            Parameters = [Parameter("duration", "Duration")],
+            ReturnType = "Float32",
+            Description = "Returns the total minutes of a Duration.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "duration_hours",
+            Parameters = [Parameter("duration", "Duration")],
+            ReturnType = "Float32",
+            Description = "Returns the total hours of a Duration.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "duration_days",
+            Parameters = [Parameter("duration", "Duration")],
+            ReturnType = "Float32",
+            Description = "Returns the total days of a Duration.",
             Category = FunctionCategory.Temporal,
         });
 
@@ -655,6 +946,38 @@ public static class FunctionDocumentation
         });
         Register(new FunctionSignature
         {
+            Name = "is_even",
+            Parameters = [Parameter("value", "Float32")],
+            ReturnType = "Float32",
+            Description = "Returns 1 if the value is an even integer, 0 otherwise.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "is_odd",
+            Parameters = [Parameter("value", "Float32")],
+            ReturnType = "Float32",
+            Description = "Returns 1 if the value is an odd integer, 0 otherwise.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "iif",
+            Parameters = [Parameter("condition", "Float32"), Parameter("then_value", "Any"), Parameter("else_value", "Any")],
+            ReturnType = null,
+            Description = "Inline conditional: returns then_value when condition is truthy, else_value otherwise.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "choose",
+            Parameters = [Parameter("index", "Float32"), Parameter("values", "Any")],
+            ReturnType = null,
+            Description = "Selects a value from a list by 1-based index. Returns null if the index is out of bounds.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
             Name = "random",
             Parameters = [],
             ReturnType = "Float32",
@@ -790,6 +1113,199 @@ public static class FunctionDocumentation
             QueryUnitCost = 2,
         });
 
+        // ── Array ──
+
+        Register(new FunctionSignature
+        {
+            Name = "array",
+            Parameters = [Parameter("values", "Any")],
+            ReturnType = "Array",
+            Description = "Constructs a typed array from one or more same-kind arguments.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_length",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Float32",
+            Description = "Returns the number of elements in an array.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_get",
+            Parameters = [Parameter("array", "Array"), Parameter("index", "Float32")],
+            ReturnType = "Any",
+            Description = "Returns the element at a 1-based index in an array. Returns null if the index is out of bounds.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_contains",
+            Parameters = [Parameter("array", "Array"), Parameter("value", "Any")],
+            ReturnType = "Boolean",
+            Description = "Returns true if the array contains the given value.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_position",
+            Parameters = [Parameter("array", "Array"), Parameter("value", "Any")],
+            ReturnType = "Float32",
+            Description = "Returns the 1-based index of the first occurrence of value in the array, or 0 if not found.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_join",
+            Parameters = [Parameter("array", "Array"), Parameter("separator", "String")],
+            ReturnType = "String",
+            Description = "Joins the elements of an array into a string with the given separator.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_concat",
+            Parameters = [Parameter("left", "Array"), Parameter("right", "Array")],
+            ReturnType = "Array",
+            Description = "Concatenates two arrays of the same element kind.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_slice",
+            Parameters = [Parameter("array", "Array"), Parameter("start", "Float32"), Parameter("length", "Float32")],
+            ReturnType = "Array",
+            Description = "Extracts a sub-array using 1-based start position and length.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_sort",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Array",
+            Description = "Returns a sorted copy of an array in ascending order.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_reverse",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Array",
+            Description = "Returns a reversed copy of an array.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_distinct",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Array",
+            Description = "Returns distinct elements of an array in their original order.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_min",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Float32",
+            Description = "Returns the minimum numeric value in an array.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_max",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Float32",
+            Description = "Returns the maximum numeric value in an array.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_sum",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Float32",
+            Description = "Returns the sum of numeric values in an array.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_avg",
+            Parameters = [Parameter("array", "Array")],
+            ReturnType = "Float32",
+            Description = "Returns the arithmetic mean of numeric values in an array.",
+            Category = FunctionCategory.Utility,
+        });
+
+        // ── Bytes ──
+
+        Register(new FunctionSignature
+        {
+            Name = "bytes",
+            Parameters = [Parameter("values", "Float32")],
+            ReturnType = "UInt8Array",
+            Description = "Constructs a byte array from one or more scalar byte values (0–255).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "bytes_concat",
+            Parameters = [Parameter("arrays", "UInt8Array")],
+            ReturnType = "UInt8Array",
+            Description = "Concatenates two or more byte arrays into a single byte array.",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "bytes_slice",
+            Parameters = [Parameter("array", "UInt8Array"), Parameter("start", "Float32"), Parameter("length", "Float32")],
+            ReturnType = "UInt8Array",
+            Description = "Extracts a sub-range from a byte array using 1-based start position and length.",
+            Category = FunctionCategory.Utility,
+        });
+
+        // ── Categorical Encoding ──
+
+        Register(new FunctionSignature
+        {
+            Name = "one_hot",
+            Parameters = [Parameter("value", "String"), Parameter("categories", "String")],
+            ReturnType = "Vector",
+            Description = "Encodes a categorical value as a one-hot vector over the given category list.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "one_hot_unk",
+            Parameters = [Parameter("value", "String"), Parameter("categories", "String")],
+            ReturnType = "Vector",
+            Description = "Encodes a categorical value as a one-hot vector with an additional unknown bucket (K+1 dimensions).",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "label_encode",
+            Parameters = [Parameter("value", "String"), Parameter("categories", "String")],
+            ReturnType = "Float32",
+            Description = "Encodes a categorical string as a 0-based integer index. Returns -1 for unknown values.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "label_encode_unk",
+            Parameters = [Parameter("value", "String"), Parameter("categories", "String")],
+            ReturnType = "Float32",
+            Description = "Encodes a categorical string as a 0-based integer index. Unknown values map to the category count (K).",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "hash_encode",
+            Parameters = [Parameter("value", "String"), Parameter("num_buckets", "Float32")],
+            ReturnType = "Vector",
+            Description = "Hash-encodes a value into a one-hot vector across a fixed number of buckets.",
+            Category = FunctionCategory.Encoding,
+        });
+
         // ── Image — Metadata ──
 
         RegisterImageUnary("width", "Float32", "Returns the width (in pixels) of an image.");
@@ -835,16 +1351,16 @@ public static class FunctionDocumentation
 
         // ── Image — Analysis ──
 
-        RegisterImageUnary("brightness_mean", "Float32", "Mean brightness (luminance) across all pixels.");
-        RegisterImageUnary("brightness_std", "Float32", "Standard deviation of brightness across all pixels.");
-        RegisterImageUnary("brightness_histogram", "Vector", "256-bin histogram of brightness values.");
+        RegisterImageUnary("image_brightness_mean", "Float32", "Mean brightness (luminance) across all pixels.");
+        RegisterImageUnary("image_brightness_std", "Float32", "Standard deviation of brightness across all pixels.");
+        RegisterImageUnary("image_brightness_histogram", "Vector", "256-bin histogram of brightness values.");
         RegisterImageUnary("detect_blur", "Float32", "Laplacian variance blur detection score (lower = blurrier).");
         RegisterImageUnary("compression_artifact_score", "Float32", "Estimates JPEG compression artifact severity.");
 
         // ── Image — Pixel Statistics ──
 
-        RegisterImageUnary("pixel_mean", "Vector", "Per-channel mean pixel values.");
-        RegisterImageUnary("pixel_std", "Vector", "Per-channel pixel standard deviations.");
+        RegisterImageUnary("image_pixel_mean", "Vector", "Per-channel mean pixel values.");
+        RegisterImageUnary("image_pixel_std", "Vector", "Per-channel pixel standard deviations.");
 
         // ── Image — Transforms ──
 
@@ -1272,6 +1788,15 @@ public static class FunctionDocumentation
             Parameters = [Parameter("expression", "Float32"), Parameter("fraction", "Float32")],
             ReturnType = "Float32",
             Description = "Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error for large groups.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "ARRAY_AGG",
+            Parameters = [Parameter("expression", "Any")],
+            ReturnType = "Array",
+            Description = "Collects non-null values in the group into a typed array. Supports ORDER BY inside the function call.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
         });

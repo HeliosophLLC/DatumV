@@ -174,4 +174,55 @@ public sealed class FunctionDocumentationTests
             Assert.Contains(category, categoriesPresent);
         }
     }
+
+    // ───────────────────── Cross-registry consistency ─────────────────────
+
+    /// <summary>
+    /// Every name in <see cref="FunctionDocumentation"/> must match a function
+    /// registered in <see cref="FunctionRegistry"/>. Catches stale or misspelled
+    /// documentation keys such as the prior "brightness_histogram" vs
+    /// "image_brightness_histogram" mismatch.
+    /// </summary>
+    [Fact]
+    public void AllDocumentedNames_ExistInFunctionRegistry()
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+
+        HashSet<string> registeredNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in registry.ScalarFunctionNames) registeredNames.Add(name);
+        foreach (string name in registry.TableValuedFunctionNames) registeredNames.Add(name);
+        foreach (string name in registry.AggregateFunctionNames) registeredNames.Add(name);
+        foreach (string name in registry.WindowFunctionNames) registeredNames.Add(name);
+
+        List<string> undocumentedNames = FunctionDocumentation.All
+            .Select(function => function.Name)
+            .Where(name => !registeredNames.Contains(name))
+            .OrderBy(name => name)
+            .ToList();
+
+        Assert.Empty(undocumentedNames);
+    }
+
+    /// <summary>
+    /// Every function registered in <see cref="FunctionRegistry"/> should have an
+    /// entry in <see cref="FunctionDocumentation"/>. Catches functions added to the
+    /// registry that were never documented.
+    /// </summary>
+    [Fact]
+    public void AllRegisteredFunctions_HaveDocumentation()
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+
+        IEnumerable<string> allRegisteredNames = registry.ScalarFunctionNames
+            .Concat(registry.TableValuedFunctionNames)
+            .Concat(registry.AggregateFunctionNames)
+            .Concat(registry.WindowFunctionNames);
+
+        List<string> undocumented = allRegisteredNames
+            .Where(name => FunctionDocumentation.TryGet(name) is null)
+            .OrderBy(name => name)
+            .ToList();
+
+        Assert.Empty(undocumented);
+    }
 }
