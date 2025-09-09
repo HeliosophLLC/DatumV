@@ -1165,7 +1165,7 @@ public sealed class ScanOperator : IQueryOperator
             float floatValue => DataValue.FromFloat32(floatValue),
             double doubleValue => DataValue.FromFloat32((float)doubleValue),
             string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromFloat32(boolValue ? 1f : 0f),
+            bool boolValue => DataValue.FromBoolean(boolValue),
             _ => DataValue.Null(DataKind.Float32),
         };
     }

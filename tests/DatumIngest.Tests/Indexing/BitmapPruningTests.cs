@@ -397,6 +397,40 @@ public sealed class BitmapPruningTests
         Assert.Equal(1, scan.PrunedIndexChunks);
     }
 
+    // ───────────────────── Boolean column pruning ─────────────────────
+
+    /// <summary>
+    /// Verifies that a SQL <c>TRUE</c>/<c>FALSE</c> literal correctly matches a
+    /// <see cref="DataKind.Boolean"/>-typed bitmap index column. Before the fix,
+    /// <c>ConvertLiteralToDataValue(true)</c> produced <c>Float32(1f)</c>, which never
+    /// matched <c>Boolean(true)</c> dictionary keys, causing all chunks to be pruned
+    /// and returning zero rows.
+    /// </summary>
+    [Fact]
+    public async Task BitmapPruning_BooleanLiteralTrue_PrunesChunkWithOnlyFalseValues()
+    {
+        // 4 rows in 2 chunks of 2:
+        // Chunk 0: [false, false]   Chunk 1: [true, true]
+        // WHERE flag = TRUE → chunk 0 has no true entries → should be pruned.
+        Row[] rows = CreateBooleanRows("flag", false, false, true, true);
+        InMemoryProvider provider = new(rows);
+        BitmapIndexSet bitmapIndexes = BuildBitmapIndex("flag", rows, chunkSize: 2);
+        SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 2);
+
+        (ScanOperator scan, TableCatalog catalog) = CreateScanWithBitmaps(provider, sourceIndex,
+            new BinaryExpression(
+                new ColumnReference("flag"),
+                BinaryOperator.Equal,
+                new LiteralExpression(true)));
+
+        List<Row> results = await ExecuteScanAsync(scan, catalog);
+
+        Assert.Equal(2, scan.TotalIndexChunks);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+        Assert.Equal(2, results.Count);
+        Assert.All(results, row => Assert.True(row["flag"].AsBoolean()));
+    }
+
     // ───────────────────── Explain reports bitmap pruning ─────────────────────
 
     [Fact]
@@ -423,6 +457,17 @@ public sealed class BitmapPruningTests
         for (int i = 0; i < values.Length; i++)
         {
             rows[i] = new Row([columnName], [DataValue.FromString(values[i])]);
+        }
+
+        return rows;
+    }
+
+    private static Row[] CreateBooleanRows(string columnName, params bool[] values)
+    {
+        Row[] rows = new Row[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            rows[i] = new Row([columnName], [DataValue.FromBoolean(values[i])]);
         }
 
         return rows;

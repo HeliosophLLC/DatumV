@@ -367,7 +367,7 @@ public static class StatisticsPredicateEvaluator
             double doubleValue => DataValue.FromFloat32((float)doubleValue),
             decimal decimalValue => DataValue.FromFloat32((float)decimalValue),
             string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromFloat32(boolValue ? 1f : 0f),
+            bool boolValue => DataValue.FromBoolean(boolValue),
             _ => null,
         };
     }
@@ -414,6 +414,7 @@ public static class StatisticsPredicateEvaluator
             DataKind.UInt32 => value.AsUInt32(),
             DataKind.Int64 => value.AsInt64(),
             DataKind.UInt64 => value.AsUInt64(),
+            DataKind.Boolean => value.AsBoolean() ? 1d : 0d,
             _ => 0d,
         };
     }

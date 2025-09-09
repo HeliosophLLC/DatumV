@@ -42,6 +42,22 @@ public class StatisticsPredicateEvaluatorTests
         };
     }
 
+    /// <summary>
+    /// Builds a statistics dictionary for a single boolean column with min/max bounds.
+    /// </summary>
+    private static Dictionary<string, ColumnStatisticsRange> BoolStats(
+        string column, bool min, bool max, long rowCount = 100, long? nullCount = 0)
+    {
+        return new Dictionary<string, ColumnStatisticsRange>(StringComparer.OrdinalIgnoreCase)
+        {
+            [column] = new ColumnStatisticsRange(
+                DataValue.FromBoolean(min),
+                DataValue.FromBoolean(max),
+                nullCount,
+                rowCount)
+        };
+    }
+
     // ──────────────── Comparison: col op literal ────────────────
 
     [Fact]
@@ -543,6 +559,59 @@ public class StatisticsPredicateEvaluatorTests
         Dictionary<string, ColumnStatisticsRange> statistics = ScalarStats("x", 1f, 10f);
         BinaryExpression predicate = new(
             new ColumnReference("x"), BinaryOperator.Add, new LiteralExpression(5.0));
+
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics));
+    }
+
+    // ──────────────── Boolean columns ────────────────
+
+    /// <summary>
+    /// Verifies that a SQL <c>TRUE</c> literal correctly compares against
+    /// <see cref="DataKind.Boolean"/> column statistics. Partition contains only
+    /// <c>false</c> values (min = max = false), so <c>col = TRUE</c> must be skippable.
+    /// Before the fix, <c>LiteralToDataValue(true)</c> returned <c>Float32(1f)</c>
+    /// and <c>ToDouble(Boolean)</c> returned 0, causing inconsistent comparisons.
+    /// </summary>
+    [Fact]
+    public void Equal_BoolTrueAgainstFalseOnlyPartition_CanSkip()
+    {
+        // reordered = TRUE, partition contains only false → definitely no match.
+        Dictionary<string, ColumnStatisticsRange> statistics = BoolStats("reordered", false, false);
+        BinaryExpression predicate = new(
+            new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(true));
+
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics));
+    }
+
+    [Fact]
+    public void Equal_BoolFalseAgainstTrueOnlyPartition_CanSkip()
+    {
+        // reordered = FALSE, partition contains only true → definitely no match.
+        Dictionary<string, ColumnStatisticsRange> statistics = BoolStats("reordered", true, true);
+        BinaryExpression predicate = new(
+            new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(false));
+
+        Assert.True(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics));
+    }
+
+    [Fact]
+    public void Equal_BoolTrueAgainstMixedPartition_CannotSkip()
+    {
+        // reordered = TRUE, partition has both false and true → might match.
+        Dictionary<string, ColumnStatisticsRange> statistics = BoolStats("reordered", false, true);
+        BinaryExpression predicate = new(
+            new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(true));
+
+        Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics));
+    }
+
+    [Fact]
+    public void Equal_BoolTrueAgainstTrueOnlyPartition_CannotSkip()
+    {
+        // reordered = TRUE, partition contains only true → might match all rows.
+        Dictionary<string, ColumnStatisticsRange> statistics = BoolStats("reordered", true, true);
+        BinaryExpression predicate = new(
+            new ColumnReference("reordered"), BinaryOperator.Equal, new LiteralExpression(true));
 
         Assert.False(StatisticsPredicateEvaluator.CanSkipPartition(predicate, statistics));
     }
