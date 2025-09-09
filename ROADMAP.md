@@ -21,7 +21,7 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 | **Late materialization — HDF5** | L | Same scope as Parquet; implicit row-index key and per-dataset lazy loading via PureHDF `HyperslabSelection` |
 | **P3 — Parallel Hash Join + Aggregate** | XL | Concurrent probe workers, bounded `Channel<Row>`, `IAggregateAccumulator.Merge` on all ~15 accumulators, server-side concurrency governor — see Engine Performance § P3 |
 | **P4 — DataValue Struct + Batch Execution** | XL | `DataValue` class → `readonly struct`; hundreds of call sites to migrate; foundational prerequisite for D9 vectorized execution — see Engine Performance § P4 |
-| **P5 — Memory-Mapped Sorted Indexes** | XL | New v4 fixed-width on-disk format, mmap infrastructure, sort-preserving key encoding per `DataKind`, breaking `.datum-index` change; prerequisite for P6 — see Engine Performance § P5 |
+| ~~**P5 — Memory-Mapped Sorted Indexes**~~ | XL | ✅ v5 fixed-width on-disk format, mmap infrastructure (`DatumMemoryMappedReader`, `UnifiedIndexWriter/Reader`), `SortedIndexKeyEncoder` per `DataKind`, breaking `.datum-index` change |
 | **P6 — ReferenceStore Session Isolation** | XL | Per-session `ReferenceStore`; `DataValue` encoding must embed a store ID; requires audit of all `FromString`/`FromVector`/`FromImage` call sites — see Engine Performance § P6 |
 | **Primary key persistence** | XL | Four interdependent phases: footer format, shard-aware INSERT with PK validation, compaction operator, uniqueness re-validation — see notes below |
 | **Dataset Revision Pipeline** | XL | Four phases: output manifest, two-pass vocabulary collection, `EstimateCost` RPC, gRPC `CreateOutput` with progress streaming — see Dataset Revision Pipeline (V3) |

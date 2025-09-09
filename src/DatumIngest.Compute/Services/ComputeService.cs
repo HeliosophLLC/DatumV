@@ -189,7 +189,9 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             session.RecordQuery(request.Sql);
 
             long totalRowCount = 0;
-            long? maxRows = governor.MaxOutputRows;
+            long? maxRows = request.MaxRows > 0 ? request.MaxRows
+                : request.MaxRows < 0 ? null
+                : governor.MaxOutputRows;
             int? throttleMilliseconds = governor.ThrottleDelayMilliseconds;
 
             try

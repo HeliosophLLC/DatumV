@@ -126,6 +126,10 @@ message QueryRequest {
 
   // Named parameter bindings ($name in SQL) mapped to typed values.
   map<string, DataValueMessage> parameters = 3;
+
+  // Per-request row cap. Overrides the session-level max_output_rows for this
+  // query only. 0 = use the session default, positive = override, negative = disable.
+  int64 max_rows = 4;
 }
 
 // Streamed result message. Each message is either a row from a query
