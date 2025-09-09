@@ -8,7 +8,7 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 |---------|:----------:|---------------|
 | **Pipe mode** | S | Output writers already support CSV/JSON/NDJSON; just needs a CLI flag to target stdout rather than a file |
 | **Aggregate finalization surcharge** | S | Add `FinalizationCost(long groupSize)` to `ICostAwareFunction`; implement on MEDIAN, PERCENTILE, and MODE — all other accumulators default to zero |
-| **Language server — semantic diagnostics** | S | Unknown table/column warnings already shipped (partial ✅); remaining work is type mismatch detection in the semantic analyzer |
+| ~~**Language server — semantic diagnostics**~~ | S | ✅ Type mismatch detection + unknown table/column warnings both complete |
 | **`WithChildren` on `IQueryOperator`** | S | Pure internal refactor — removes the operator-type switch in `InstrumentedOperator.InstrumentRecursive` and enables generic tree rewrites; no user-visible change |
 | **Data-dependent function costs** | S | Deprioritized — `ICostAwareFunction` already supports it; flat QU is accurate enough for typical vector dims (≤ 4096); trivially addable via base class when needed |
 | **Excel provider** | S–M | `ITableProvider` contract is ready; needs an XLSX library (e.g. ClosedXML) and column type inference from cell values |

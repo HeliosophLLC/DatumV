@@ -44,6 +44,26 @@ public sealed class SemanticAnalyzerTests
         return new FunctionSignature { Name = name, Parameters = parameters };
     }
 
+    /// <summary>Builds a <see cref="TableColumnEntry"/> with the specified name and data kind.</summary>
+    private static TableColumnEntry TypedColumn(string name, string kind) =>
+        new() { Name = name, Kind = kind, Nullable = false };
+
+    /// <summary>Builds a table manifest entry with explicitly typed columns.</summary>
+    private static TableSchemaEntry TypedTable(string name, params TableColumnEntry[] columns) =>
+        new() { Name = name, Columns = [..columns] };
+
+    /// <summary>Builds a function signature with typed parameters and an explicit return type.</summary>
+    private static FunctionSignature TypedFunction(string name, string returnType, params (string Name, string Kind)[] parameters)
+    {
+        List<ParameterSignature> paramList = new();
+        foreach ((string paramName, string paramKind) in parameters)
+        {
+            paramList.Add(new ParameterSignature { Name = paramName, Kind = paramKind });
+        }
+
+        return new FunctionSignature { Name = name, ReturnType = returnType, Parameters = paramList };
+    }
+
     // ───────────────────── Valid SQL ─────────────────────
 
     [Fact]
@@ -509,5 +529,138 @@ public sealed class SemanticAnalyzerTests
         Assert.Contains(diagnostics, diagnostic =>
             diagnostic.Severity == DiagnosticSeverity.Warning &&
             diagnostic.Message.Contains("phantom"));
+    }
+
+    // ───────────────────── Type mismatch diagnostics ─────────────────────
+
+    [Fact]
+    public void Analyze_StringColumnInNumericFunction_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [TypedTable("t", TypedColumn("label", "String"))],
+            functions: [TypedFunction("sin", "Float32", ("x", "Float32"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT sin(label) FROM t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("sin") &&
+            diagnostic.Message.Contains("String"));
+    }
+
+    [Fact]
+    public void Analyze_NumericColumnInStringFunction_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [TypedTable("t", TypedColumn("price", "Float32"))],
+            functions: [TypedFunction("len", "Int32", ("value", "String"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT len(price) FROM t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("len") &&
+            diagnostic.Message.Contains("Float32"));
+    }
+
+    [Fact]
+    public void Analyze_CompatibleNumericKinds_ReturnsEmpty()
+    {
+        // Int32 is in the numeric category — should be accepted where Float32 is expected.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [TypedTable("t", TypedColumn("count", "Int32"))],
+            functions: [TypedFunction("sin", "Float32", ("x", "Float32"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT sin(count) FROM t", manifest);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Analyze_StringLiteralInStringFunction_ReturnsEmpty()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "x")],
+            functions: [TypedFunction("len", "Int32", ("value", "String"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT len('hello') FROM t", manifest);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Analyze_NumericLiteralInNumericFunction_ReturnsEmpty()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "x")],
+            functions: [TypedFunction("sin", "Float32", ("x", "Float32"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT sin(3.14) FROM t", manifest);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Analyze_StringLiteralInNumericFunction_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "x")],
+            functions: [TypedFunction("sin", "Float32", ("x", "Float32"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT sin('hello') FROM t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("sin"));
+    }
+
+    [Fact]
+    public void Analyze_AnyParameterKind_NeverWarns()
+    {
+        // "Any" parameters must never produce type-mismatch warnings.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [TypedTable("t", TypedColumn("label", "String"))],
+            functions: [Function("coalesce", "a", "b")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT coalesce(label, 'default') FROM t", manifest);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Analyze_CastToCompatibleType_ReturnsEmpty()
+    {
+        // CAST infers the target type; Float32 matches sin's Float32 parameter.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [TypedTable("t", TypedColumn("label", "String"))],
+            functions: [TypedFunction("sin", "Float32", ("x", "Float32"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT sin(CAST(label AS Float32)) FROM t", manifest);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Analyze_CastToIncompatibleType_ReturnsWarning()
+    {
+        // CAST to String still produces a warning when sin expects a numeric type.
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [TypedTable("t", TypedColumn("label", "String"))],
+            functions: [TypedFunction("sin", "Float32", ("x", "Float32"))]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT sin(CAST(label AS String)) FROM t", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("sin"));
     }
 }

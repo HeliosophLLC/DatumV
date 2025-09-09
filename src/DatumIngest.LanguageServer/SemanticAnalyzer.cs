@@ -14,35 +14,63 @@ internal sealed class SemanticAnalyzer
     private readonly LanguageServerManifest _manifest;
 
     /// <summary>
-    /// Index of table names → column sets for O(1) lookup.
+    /// Index of table names → (column name → DataKind string) for O(1) lookup.
     /// Keys are case-insensitive because DatumIngest SQL is case-insensitive.
     /// </summary>
-    private readonly Dictionary<string, HashSet<string>> _tableColumns;
+    private readonly Dictionary<string, Dictionary<string, string>> _tableColumnTypes;
 
     /// <summary>Known function names (case-insensitive).</summary>
     private readonly HashSet<string> _functionNames;
+
+    /// <summary>Function signatures indexed by name for argument type validation.</summary>
+    private readonly Dictionary<string, FunctionSignature> _functionSignatures;
+
+    // ── Type category sets for compatibility checks ──
+
+    private static readonly HashSet<string> NumericKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Float32", "Float64", "Int8", "Int16", "Int32", "Int64",
+        "UInt8", "UInt16", "UInt32", "UInt64",
+    };
+
+    private static readonly HashSet<string> VectorKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Vector", "Matrix", "Tensor",
+    };
+
+    private static readonly HashSet<string> ImageKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Image", "UInt8Array",
+    };
+
+    private static readonly HashSet<string> TemporalKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Date", "DateTime", "Time", "Duration",
+    };
 
     /// <summary>Creates a new analyzer bound to the given manifest.</summary>
     public SemanticAnalyzer(LanguageServerManifest manifest)
     {
         _manifest = manifest;
 
-        _tableColumns = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        _tableColumnTypes = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
         foreach (TableSchemaEntry table in _manifest.Tables)
         {
-            HashSet<string> columns = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> columnKinds = new(StringComparer.OrdinalIgnoreCase);
             foreach (TableColumnEntry column in table.Columns)
             {
-                columns.Add(column.Name);
+                columnKinds[column.Name] = column.Kind;
             }
 
-            _tableColumns[table.Name] = columns;
+            _tableColumnTypes[table.Name] = columnKinds;
         }
 
         _functionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _functionSignatures = new Dictionary<string, FunctionSignature>(StringComparer.OrdinalIgnoreCase);
         foreach (FunctionSignature function in _manifest.Functions)
         {
             _functionNames.Add(function.Name);
+            _functionSignatures[function.Name] = function;
         }
     }
 
@@ -203,7 +231,7 @@ internal sealed class SemanticAnalyzer
         switch (source)
         {
             case TableReference tableReference:
-                if (!_tableColumns.ContainsKey(tableReference.Name) &&
+                if (!_tableColumnTypes.ContainsKey(tableReference.Name) &&
                     !opaqueAliases.Contains(tableReference.Name))
                 {
                     EmitWarning(diagnostics, tableReference.Span,
@@ -274,6 +302,10 @@ internal sealed class SemanticAnalyzer
                 {
                     EmitWarning(diagnostics, functionCall.Span,
                         $"Unknown function '{functionCall.FunctionName}'.");
+                }
+                else
+                {
+                    ValidateFunctionArgTypes(functionCall, aliasToTable, opaqueAliases, diagnostics);
                 }
 
                 foreach (Expression argument in functionCall.Arguments)
@@ -409,6 +441,160 @@ internal sealed class SemanticAnalyzer
     }
 
     /// <summary>
+    /// Validates argument types for a known function call against its registered signature.
+    /// Only emits a warning when both the actual type and the expected type can be determined
+    /// with high confidence — conservative by design to minimise false positives.
+    /// </summary>
+    private void ValidateFunctionArgTypes(
+        FunctionCallExpression functionCall,
+        Dictionary<string, string> aliasToTable,
+        HashSet<string> opaqueAliases,
+        List<Diagnostic> diagnostics)
+    {
+        if (!_functionSignatures.TryGetValue(functionCall.FunctionName, out FunctionSignature? signature))
+        {
+            return;
+        }
+
+        for (int argumentIndex = 0; argumentIndex < functionCall.Arguments.Count; argumentIndex++)
+        {
+            // If the function has fewer parameters than arguments (variadic), apply
+            // the last parameter's constraint to all extra arguments.
+            int parameterIndex = System.Math.Min(argumentIndex, signature.Parameters.Count - 1);
+            if (parameterIndex < 0)
+            {
+                break;
+            }
+
+            ParameterSignature parameter = signature.Parameters[parameterIndex];
+
+            // "Any" means no type restriction — skip.
+            if (parameter.Kind.Equals("Any", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string? actualKind = TryInferType(functionCall.Arguments[argumentIndex], aliasToTable, opaqueAliases);
+            if (actualKind is null)
+            {
+                // Cannot determine type — skip rather than risk a false positive.
+                continue;
+            }
+
+            if (!IsTypeCompatible(actualKind, parameter.Kind))
+            {
+                EmitWarning(diagnostics, functionCall.Span,
+                    $"Argument {argumentIndex + 1} of {functionCall.FunctionName}() expects {parameter.Kind}, got {actualKind}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Attempts to infer the data kind of an expression from manifest information.
+    /// Returns null when the type cannot be determined with confidence.
+    /// </summary>
+    private string? TryInferType(
+        Expression expression,
+        Dictionary<string, string> aliasToTable,
+        HashSet<string> opaqueAliases)
+    {
+        return expression switch
+        {
+            ColumnReference column => TryInferColumnType(column, aliasToTable, opaqueAliases),
+            LiteralExpression { Value: string } => "String",
+            LiteralExpression { Value: double } => "Float32",
+            LiteralExpression { Value: bool } => "Boolean",
+            CastExpression cast => cast.TargetType,
+            FunctionCallExpression functionCall =>
+                _functionSignatures.TryGetValue(functionCall.FunctionName, out FunctionSignature? sig)
+                    ? sig.ReturnType
+                    : null,
+            UnaryExpression { Operator: UnaryOperator.Negate } unary =>
+                TryInferType(unary.Operand, aliasToTable, opaqueAliases),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Looks up the data kind of a column reference in the manifest.
+    /// Returns null when the column cannot be resolved (already warned separately).
+    /// </summary>
+    private string? TryInferColumnType(
+        ColumnReference column,
+        Dictionary<string, string> aliasToTable,
+        HashSet<string> opaqueAliases)
+    {
+        if (column.TableName is not null)
+        {
+            if (opaqueAliases.Contains(column.TableName))
+            {
+                return null;
+            }
+
+            if (aliasToTable.TryGetValue(column.TableName, out string? resolvedTable) &&
+                _tableColumnTypes.TryGetValue(resolvedTable, out Dictionary<string, string>? columnKinds) &&
+                columnKinds.TryGetValue(column.ColumnName, out string? kind))
+            {
+                return kind;
+            }
+
+            return null;
+        }
+
+        // Unqualified — return the first match across all tables in scope.
+        foreach (KeyValuePair<string, string> entry in aliasToTable)
+        {
+            if (_tableColumnTypes.TryGetValue(entry.Value, out Dictionary<string, string>? columnKinds) &&
+                columnKinds.TryGetValue(column.ColumnName, out string? kind))
+            {
+                return kind;
+            }
+        }
+
+        // If any opaque source is in scope, we cannot rule out the column existing there.
+        return null;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="actualKind"/> is compatible with
+    /// <paramref name="expectedKind"/>. Uses category-based matching so that,
+    /// for example, an Int32 column is accepted where Float32 is expected.
+    /// </summary>
+    private static bool IsTypeCompatible(string actualKind, string expectedKind)
+    {
+        if (actualKind.Equals(expectedKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Both numeric → compatible (e.g. Int32 column into Float32 parameter).
+        if (NumericKinds.Contains(actualKind) && NumericKinds.Contains(expectedKind))
+        {
+            return true;
+        }
+
+        // Both vector-family → compatible (Vector/Matrix/Tensor are interchangeable in most ops).
+        if (VectorKinds.Contains(actualKind) && VectorKinds.Contains(expectedKind))
+        {
+            return true;
+        }
+
+        // Both image-family → compatible.
+        if (ImageKinds.Contains(actualKind) && ImageKinds.Contains(expectedKind))
+        {
+            return true;
+        }
+
+        // Both temporal → compatible (Date/DateTime/Time/Duration).
+        if (TemporalKinds.Contains(actualKind) && TemporalKinds.Contains(expectedKind))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Validates a column reference against the manifest scope.
     /// </summary>
     private void ValidateColumnReference(
@@ -434,9 +620,9 @@ internal sealed class SemanticAnalyzer
             }
 
             if (aliasToTable.TryGetValue(column.TableName, out string? resolvedTable) &&
-                _tableColumns.TryGetValue(resolvedTable, out HashSet<string>? columns))
+                _tableColumnTypes.TryGetValue(resolvedTable, out Dictionary<string, string>? columnKinds))
             {
-                if (!columns.Contains(column.ColumnName))
+                if (!columnKinds.ContainsKey(column.ColumnName))
                 {
                     EmitWarning(diagnostics, column.Span,
                         $"Unknown column '{column.ColumnName}' in table '{resolvedTable}'.");
@@ -450,8 +636,8 @@ internal sealed class SemanticAnalyzer
         bool found = false;
         foreach (KeyValuePair<string, string> entry in aliasToTable)
         {
-            if (_tableColumns.TryGetValue(entry.Value, out HashSet<string>? columns) &&
-                columns.Contains(column.ColumnName))
+            if (_tableColumnTypes.TryGetValue(entry.Value, out Dictionary<string, string>? columnKinds) &&
+                columnKinds.ContainsKey(column.ColumnName))
             {
                 found = true;
                 break;
