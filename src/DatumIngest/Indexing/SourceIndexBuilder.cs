@@ -426,7 +426,7 @@ public sealed class SourceIndexBuilder
 
             IndexSchema indexSchema = new(schema, totalRowCount);
             return new SourceIndex(fingerprint, indexSchema, chunks, bloomFilterSet, sortedIndexSet,
-                zipDirectory: null, bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
+                bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
         }
         finally
         {
@@ -1560,7 +1560,7 @@ public sealed class IncrementalIndexBuilder : IDisposable
 
         IndexSchema indexSchema = new(schema, _totalRowCount);
         return new SourceIndex(_fingerprint, indexSchema, _chunks, bloomFilterSet, sortedIndexes: null,
-            zipDirectory: null, bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
+            bPlusTreeIndexes: null, bitmapIndexes: bitmapIndexSet);
     }
 
     /// <inheritdoc />

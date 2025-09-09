@@ -7,7 +7,7 @@ namespace DatumIngest.Tests.Indexing;
 
 /// <summary>
 /// End-to-end round-trip tests for B+Tree indexes through the
-/// <see cref="IndexWriter"/> → <see cref="IndexReader"/> pipeline.
+/// <see cref="UnifiedIndexWriter"/> → <see cref="UnifiedIndexReader"/> pipeline.
 /// Verifies that B+Tree sections survive serialization and remain
 /// queryable after deserialization.
 /// </summary>
@@ -22,15 +22,16 @@ public sealed class BPlusTreeRoundTripTests
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
         SourceIndex original = BuildSourceIndexWithBPlusTree("price", DataKind.Float32, entries);
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            Assert.NotNull(restored.BPlusTreeIndexes);
+            Assert.Equal(1, restored.BPlusTreeIndexes.Count);
 
-        Assert.NotNull(restored.BPlusTreeIndexes);
-        Assert.Equal(1, restored.BPlusTreeIndexes.Count);
-
-        bool found = restored.BPlusTreeIndexes.TryGetIndex("price", out BPlusTreeColumnIndex? columnIndex);
-        Assert.True(found);
-        Assert.NotNull(columnIndex);
-        Assert.Equal(entryCount, columnIndex.EntryCount);
+            bool found = restored.BPlusTreeIndexes.TryGetIndex("price", out BPlusTreeColumnIndex? columnIndex);
+            Assert.True(found);
+            Assert.NotNull(columnIndex);
+            Assert.Equal(entryCount, columnIndex.EntryCount);
+        });
     }
 
     [Fact]
@@ -46,14 +47,15 @@ public sealed class BPlusTreeRoundTripTests
         ];
 
         SourceIndex original = BuildSourceIndexWithBPlusTree("value", DataKind.Float32, entries);
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            Assert.True(restored.TryGetColumnIndex("value", out IColumnIndex? index));
 
-        Assert.True(restored.TryGetColumnIndex("value", out IColumnIndex? index));
-
-        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromFloat32(30.0f));
-        Assert.Single(result);
-        Assert.Equal(1, result[0].ChunkIndex);
-        Assert.Equal(0L, result[0].RowOffsetInChunk);
+            IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromFloat32(30.0f));
+            Assert.Single(result);
+            Assert.Equal(1, result[0].ChunkIndex);
+            Assert.Equal(0L, result[0].RowOffsetInChunk);
+        });
     }
 
     [Fact]
@@ -63,14 +65,15 @@ public sealed class BPlusTreeRoundTripTests
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
         SourceIndex original = BuildSourceIndexWithBPlusTree("x", DataKind.Float32, entries);
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            Assert.True(restored.TryGetColumnIndex("x", out IColumnIndex? index));
 
-        Assert.True(restored.TryGetColumnIndex("x", out IColumnIndex? index));
+            IReadOnlyList<ValueIndexEntry> range = index.FindRange(
+                DataValue.FromFloat32(50.0f), DataValue.FromFloat32(60.0f));
 
-        IReadOnlyList<ValueIndexEntry> range = index.FindRange(
-            DataValue.FromFloat32(50.0f), DataValue.FromFloat32(60.0f));
-
-        Assert.Equal(11, range.Count); // 50..60 inclusive
+            Assert.Equal(11, range.Count); // 50..60 inclusive
+        });
     }
 
     [Fact]
@@ -80,18 +83,19 @@ public sealed class BPlusTreeRoundTripTests
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
         SourceIndex original = BuildSourceIndexWithBPlusTree("col", DataKind.Float32, entries);
-        SourceIndex restored = WriteAndRead(original);
-
-        Assert.True(restored.TryGetColumnIndex("col", out IColumnIndex? index));
-
-        List<ValueIndexEntry> traversed = index.TraverseForward().ToList();
-        Assert.Equal(entryCount, traversed.Count);
-
-        // Verify ascending order.
-        for (int i = 1; i < traversed.Count; i++)
+        WithRoundTrip(original, restored =>
         {
-            Assert.True(traversed[i].Key.AsFloat32() >= traversed[i - 1].Key.AsFloat32());
-        }
+            Assert.True(restored.TryGetColumnIndex("col", out IColumnIndex? index));
+
+            List<ValueIndexEntry> traversed = index.TraverseForward().ToList();
+            Assert.Equal(entryCount, traversed.Count);
+
+            // Verify ascending order.
+            for (int i = 1; i < traversed.Count; i++)
+            {
+                Assert.True(traversed[i].Key.AsFloat32() >= traversed[i - 1].Key.AsFloat32());
+            }
+        });
     }
 
     // ───────────────────────── Multiple columns ─────────────────────────
@@ -129,20 +133,21 @@ public sealed class BPlusTreeRoundTripTests
 
         BPlusTreeIndexSet bTreeSet = new(indexes);
         SourceIndex original = BuildSourceIndexWithBTreeSet(bTreeSet);
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            Assert.NotNull(restored.BPlusTreeIndexes);
+            Assert.Equal(2, restored.BPlusTreeIndexes.Count);
 
-        Assert.NotNull(restored.BPlusTreeIndexes);
-        Assert.Equal(2, restored.BPlusTreeIndexes.Count);
+            // Verify price column.
+            Assert.True(restored.TryGetColumnIndex("price", out IColumnIndex? priceIndex));
+            IReadOnlyList<ValueIndexEntry> priceResult = priceIndex.FindExact(DataValue.FromFloat32(2.0f));
+            Assert.Single(priceResult);
 
-        // Verify price column.
-        Assert.True(restored.TryGetColumnIndex("price", out IColumnIndex? priceIndex));
-        IReadOnlyList<ValueIndexEntry> priceResult = priceIndex.FindExact(DataValue.FromFloat32(2.0f));
-        Assert.Single(priceResult);
-
-        // Verify name column.
-        Assert.True(restored.TryGetColumnIndex("name", out IColumnIndex? nameIndex));
-        IReadOnlyList<ValueIndexEntry> nameResult = nameIndex.FindExact(DataValue.FromString("beta"));
-        Assert.Single(nameResult);
+            // Verify name column.
+            Assert.True(restored.TryGetColumnIndex("name", out IColumnIndex? nameIndex));
+            IReadOnlyList<ValueIndexEntry> nameResult = nameIndex.FindExact(DataValue.FromString("beta"));
+            Assert.Single(nameResult);
+        });
     }
 
     // ───────────────────────── Coexistence with sorted indexes ─────────────────────────
@@ -191,17 +196,18 @@ public sealed class BPlusTreeRoundTripTests
         ]);
         IndexSchema indexSchema = new(schema, 2);
         SourceIndex original = new(fingerprint, indexSchema, Array.Empty<IndexChunk>(),
-            bloomFilters: null, sortedIndexes: sortedSet, zipDirectory: null, bPlusTreeIndexes: bTreeSet);
+            bloomFilters: null, sortedIndexes: sortedSet, bPlusTreeIndexes: bTreeSet);
 
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            // B+Tree column should be accessible via TryGetColumnIndex.
+            Assert.True(restored.TryGetColumnIndex("big_column", out IColumnIndex? bigIndex));
+            Assert.Equal(2, bigIndex.EntryCount);
 
-        // B+Tree column should be accessible via TryGetColumnIndex.
-        Assert.True(restored.TryGetColumnIndex("big_column", out IColumnIndex? bigIndex));
-        Assert.Equal(2, bigIndex.EntryCount);
-
-        // Sorted column should also be accessible.
-        Assert.True(restored.TryGetColumnIndex("small_column", out IColumnIndex? smallIndex));
-        Assert.Equal(2, smallIndex.EntryCount);
+            // Sorted column should also be accessible.
+            Assert.True(restored.TryGetColumnIndex("small_column", out IColumnIndex? smallIndex));
+            Assert.Equal(2, smallIndex.EntryCount);
+        });
     }
 
     // ───────────────────────── Large tree round-trip ─────────────────────────
@@ -213,20 +219,21 @@ public sealed class BPlusTreeRoundTripTests
         ValueIndexEntry[] entries = GenerateScalarEntries(entryCount);
 
         SourceIndex original = BuildSourceIndexWithBPlusTree("large", DataKind.Float32, entries);
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            Assert.True(restored.TryGetColumnIndex("large", out IColumnIndex? index));
+            Assert.Equal(entryCount, index.EntryCount);
 
-        Assert.True(restored.TryGetColumnIndex("large", out IColumnIndex? index));
-        Assert.Equal(entryCount, index.EntryCount);
+            // Spot-check a few lookups.
+            IReadOnlyList<ValueIndexEntry> first = index.FindExact(DataValue.FromFloat32(0.0f));
+            Assert.Single(first);
 
-        // Spot-check a few lookups.
-        IReadOnlyList<ValueIndexEntry> first = index.FindExact(DataValue.FromFloat32(0.0f));
-        Assert.Single(first);
+            IReadOnlyList<ValueIndexEntry> last = index.FindExact(DataValue.FromFloat32((float)(entryCount - 1)));
+            Assert.Single(last);
 
-        IReadOnlyList<ValueIndexEntry> last = index.FindExact(DataValue.FromFloat32((float)(entryCount - 1)));
-        Assert.Single(last);
-
-        IReadOnlyList<ValueIndexEntry> mid = index.FindExact(DataValue.FromFloat32((float)(entryCount / 2)));
-        Assert.Single(mid);
+            IReadOnlyList<ValueIndexEntry> mid = index.FindExact(DataValue.FromFloat32((float)(entryCount / 2)));
+            Assert.Single(mid);
+        });
     }
 
     // ───────────────────────── String keys round-trip ─────────────────────────
@@ -243,13 +250,14 @@ public sealed class BPlusTreeRoundTripTests
         ];
 
         SourceIndex original = BuildSourceIndexWithBPlusTree("fruit", DataKind.String, entries);
-        SourceIndex restored = WriteAndRead(original);
+        WithRoundTrip(original, restored =>
+        {
+            Assert.True(restored.TryGetColumnIndex("fruit", out IColumnIndex? index));
 
-        Assert.True(restored.TryGetColumnIndex("fruit", out IColumnIndex? index));
-
-        IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromString("cherry"));
-        Assert.Single(result);
-        Assert.Equal(1, result[0].ChunkIndex);
+            IReadOnlyList<ValueIndexEntry> result = index.FindExact(DataValue.FromString("cherry"));
+            Assert.Single(result);
+            Assert.Equal(1, result[0].ChunkIndex);
+        });
     }
 
     // ───────────────────────── Helpers ─────────────────────────
@@ -326,19 +334,25 @@ public sealed class BPlusTreeRoundTripTests
         IndexSchema indexSchema = new(schema, 100);
 
         return new SourceIndex(fingerprint, indexSchema, Array.Empty<IndexChunk>(),
-            bloomFilters: null, sortedIndexes: null, zipDirectory: null, bPlusTreeIndexes: bTreeSet);
+            bloomFilters: null, sortedIndexes: null, bPlusTreeIndexes: bTreeSet);
     }
 
-    private static SourceIndex WriteAndRead(SourceIndex index)
+    private static void WithRoundTrip(SourceIndex index, Action<SourceIndex> test)
     {
-        using MemoryStream stream = new();
-        IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
-        writer.Write(indexSet, stream);
-
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet restoredSet = reader.Read(stream);
-        return restoredSet.Tables["test"];
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            using (FileStream stream = File.Create(tempFile))
+            {
+                SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
+                UnifiedIndexWriter.Write(indexSet, stream);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
+            test(mapped.IndexSet.Tables["test"]);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 }

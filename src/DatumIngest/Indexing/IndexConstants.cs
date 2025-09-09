@@ -1,27 +1,12 @@
-namespace DatumIngest.Indexing;
+﻿namespace DatumIngest.Indexing;
 
 /// <summary>
-/// Constants and enumerations for the <c>.datum-index</c> binary file format.
-/// The format uses a table-of-contents at the end of the file (like ZIP central directory)
-/// to enable sequential writing and random-access reading.
+/// Shared numeric constants for index building, fingerprinting, and automatic
+/// index-type selection. These values are independent of any particular on-disk
+/// format version and are referenced by the build pipeline and query planner.
 /// </summary>
 public static class IndexConstants
 {
-    /// <summary>Magic bytes identifying a datum-index file: ASCII "DTIX".</summary>
-    public static ReadOnlySpan<byte> Magic => "DTIX"u8;
-
-    /// <summary>Current format version. Version 3 adds per-column Zstd compression for sorted indexes.</summary>
-    public const ushort FormatVersion = 3;
-
-    /// <summary>
-    /// Reserved table index value indicating a shared section (e.g. fingerprint, table directory)
-    /// that applies to all tables in the index file.
-    /// </summary>
-    public const byte SharedTableIndex = 0xFF;
-
-    /// <summary>Size of the fixed file header in bytes (magic + version + flags + TOC offset).</summary>
-    public const int HeaderSize = 16;
-
     /// <summary>
     /// Size of each 64 KiB sample read during fingerprint computation.
     /// </summary>
@@ -46,41 +31,4 @@ public static class IndexConstants
     /// at most this many distinct values use bitmap indexes instead of sorted or B+Tree.
     /// </summary>
     public const int BitmapAutoThreshold = 256;
-}
-
-/// <summary>
-/// Identifies the type of a section within a <c>.datum-index</c> file.
-/// Each section is a contiguous block of bytes located via the table of contents.
-/// </summary>
-public enum IndexSectionType : byte
-{
-    /// <summary>Source file fingerprint (size + striped hash) for staleness detection.</summary>
-    Fingerprint = 0,
-
-    /// <summary>Cached schema (column names, kinds, nullability) and total row count.</summary>
-    Schema = 1,
-
-    /// <summary>Chunk boundaries with per-column min/max/null/cardinality statistics.</summary>
-    ChunkDirectory = 2,
-
-    /// <summary>Per-column, per-chunk bloom filters for membership testing.</summary>
-    BloomFilters = 3,
-
-    /// <summary>Per-column sorted value arrays for binary-search key lookup.</summary>
-    SortedIndexes = 4,
-
-    /// <summary>Cached ZIP central directory entries.</summary>
-    ZipDirectory = 5,
-
-    /// <summary>Per-chunk byte offsets into the source file for seekable providers.</summary>
-    RowOffsets = 6,
-
-    /// <summary>Maps table indexes to table names within a multi-table index.</summary>
-    TableDirectory = 7,
-
-    /// <summary>Per-column B+Tree indexes with compressed leaf pages for disk-resident key lookup.</summary>
-    BTreeIndexes = 8,
-
-    /// <summary>Per-column bitmap indexes for low-cardinality columns with per-value, per-chunk bitsets.</summary>
-    BitmapIndexes = 9,
 }

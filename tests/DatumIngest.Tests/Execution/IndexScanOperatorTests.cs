@@ -1043,7 +1043,6 @@ public sealed class IndexScanOperatorTests
             [chunk],
             bloomFilters: null,
             sortedIndexes: null,
-            zipDirectory: null,
             bPlusTreeIndexes: bTreeSet);
     }
 
@@ -1087,7 +1086,6 @@ public sealed class IndexScanOperatorTests
             chunks,
             bloomFilters: null,
             sortedIndexes: null,
-            zipDirectory: null,
             bPlusTreeIndexes: bTreeSet);
     }
 

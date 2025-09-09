@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace DatumIngest.Model;
 
 /// <summary>
-/// Global append-only store for reference-type payloads that <see cref="DataValue"/>
+/// Append-only store for reference-type payloads that <see cref="DataValue"/>
 /// cannot hold inline (strings, float arrays, byte arrays, image handles, typed
 /// arrays).  Each <see cref="DataValue"/> with the <c>HasReference</c> flag set
 /// stores an integer index into this store instead of an <c>object?</c> field,
@@ -11,19 +11,23 @@ namespace DatumIngest.Model;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The store uses a single global instance with lock-free append
-/// (<see cref="Interlocked.Increment(ref int)"/> for index allocation) and
-/// a lock only for rare geometric resizing.  This makes it safe for use
-/// across threads and async continuations without thread-affinity constraints.
+/// A global fallback store handles unscoped usage (tests, one-off allocations).
+/// Call <see cref="BeginQueryScope"/> before a query to install an isolated store
+/// for the current async execution context; all child continuations inherit it
+/// automatically.  Call <see cref="EndQueryScope"/> after result consumption to
+/// reset and discard the scoped store.
 /// </para>
 /// <para>
-/// Call <see cref="Reset"/> at query boundaries when no concurrent readers
-/// or writers exist to reclaim memory.
+/// This design lets concurrent queries (e.g. parallel gRPC streams) each carry
+/// their own isolated store without interfering with one another, while code
+/// that never calls <see cref="BeginQueryScope"/> — including all unit tests —
+/// falls back to the shared global store and continues to work unchanged.
 /// </para>
 /// </remarks>
 internal sealed class ReferenceStore
 {
-    private static readonly ReferenceStore Instance = new();
+    private static readonly ReferenceStore _globalFallback = new();
+    private static readonly AsyncLocal<ReferenceStore?> _current = new();
 
     private volatile object?[] _items;
     private int _count;
@@ -39,10 +43,27 @@ internal sealed class ReferenceStore
     }
 
     /// <summary>
-    /// Returns the global reference store singleton.
+    /// Returns the store for the current query scope, or the global fallback
+    /// store when no scope has been established via <see cref="BeginQueryScope"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static ReferenceStore CurrentOrCreate() => Instance;
+    internal static ReferenceStore CurrentOrCreate() => _current.Value ?? _globalFallback;
+
+    /// <summary>
+    /// Starts a new isolated store for the current async query context.
+    /// Must be called before any query work that produces <see cref="DataValue"/> references.
+    /// </summary>
+    internal static void BeginQueryScope() => _current.Value = new ReferenceStore();
+
+    /// <summary>
+    /// Clears the current query's store and removes the scope.
+    /// Call after <c>FinalizeAsync</c> and all result consumption.
+    /// </summary>
+    internal static void EndQueryScope()
+    {
+        _current.Value?.Reset();
+        _current.Value = null;
+    }
 
     /// <summary>
     /// Appends a reference-type object and returns its integer index.

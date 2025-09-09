@@ -278,28 +278,34 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndex index = incremental.Finalize();
 
-        // Write and read back.
-        using MemoryStream stream = new();
-        IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
-        writer.Write(indexSet, stream, incremental.SpillWriter);
+        // Write and read back via the v5 unified format.
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            using (FileStream stream = File.Create(tempFile))
+            {
+                SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
+                UnifiedIndexWriter.Write(indexSet, stream, incremental.SpillWriter);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
+            SourceIndex restored = mapped.IndexSet.Tables["test"];
 
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet restoredSet = reader.Read(stream);
-        SourceIndex restored = restoredSet.Tables["test"];
+            Assert.NotNull(restored.BitmapIndexes);
+            Assert.True(restored.BitmapIndexes.TryGetIndex("color", out BitmapColumnIndex? bitmapIndex));
+            Assert.Equal(2, bitmapIndex.DistinctValues.Count);
 
-        Assert.NotNull(restored.BitmapIndexes);
-        Assert.True(restored.BitmapIndexes.TryGetIndex("color", out BitmapColumnIndex? bitmapIndex));
-        Assert.Equal(2, bitmapIndex.DistinctValues.Count);
+            ChunkBitmap redBitmap = bitmapIndex.GetChunkBitmap(DataValue.FromString("red"), 0);
+            Assert.Equal(3, redBitmap.PopCount());
+            Assert.True(redBitmap.IsSet(0));
+            Assert.True(redBitmap.IsSet(1));
+            Assert.True(redBitmap.IsSet(2));
 
-        ChunkBitmap redBitmap = bitmapIndex.GetChunkBitmap(DataValue.FromString("red"), 0);
-        Assert.Equal(3, redBitmap.PopCount());
-        Assert.True(redBitmap.IsSet(0));
-        Assert.True(redBitmap.IsSet(1));
-        Assert.True(redBitmap.IsSet(2));
-
-        incremental.Dispose();
+            incremental.Dispose();
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 
     // ───────────────────────── Bitmap coexists with sorted ─────────────────────────
@@ -321,23 +327,29 @@ public sealed class BitmapBuildPipelineTests
 
         SourceIndex index = incremental.Finalize();
 
-        using MemoryStream stream = new();
-        IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
-        writer.Write(indexSet, stream, incremental.SpillWriter);
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            using (FileStream stream = File.Create(tempFile))
+            {
+                SourceIndexSet indexSet = SourceIndexSet.Create("test", index);
+                UnifiedIndexWriter.Write(indexSet, stream, incremental.SpillWriter);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
+            SourceIndex restored = mapped.IndexSet.Tables["test"];
 
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet restoredSet = reader.Read(stream);
-        SourceIndex restored = restoredSet.Tables["test"];
+            // Both types should be present.
+            Assert.NotNull(restored.BitmapIndexes);
+            Assert.NotNull(restored.MappedSortedIndexes);
+            Assert.True(restored.BitmapIndexes.TryGetIndex("color", out _));
+            Assert.True(restored.MappedSortedIndexes.ContainsKey("color"));
 
-        // Both types should be present.
-        Assert.NotNull(restored.BitmapIndexes);
-        Assert.NotNull(restored.SortedIndexes);
-        Assert.True(restored.BitmapIndexes.TryGetIndex("color", out _));
-        Assert.True(restored.SortedIndexes.HasColumn("color"));
-
-        incremental.Dispose();
+            incremental.Dispose();
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 
     // ───────────────────────── Helpers ─────────────────────────

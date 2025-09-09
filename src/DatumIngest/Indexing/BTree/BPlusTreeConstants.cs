@@ -2,8 +2,7 @@ namespace DatumIngest.Indexing.BTree;
 
 /// <summary>
 /// Constants for the B+Tree on-disk format used within <c>.datum-index</c> files.
-/// Pages are fixed 8 KiB, laid out sequentially within a
-/// <see cref="IndexSectionType.BTreeIndexes"/> section.
+/// Pages are fixed 8 KiB, laid out sequentially within the B+Tree section.
 /// </summary>
 internal static class BPlusTreeConstants
 {

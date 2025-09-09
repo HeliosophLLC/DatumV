@@ -152,17 +152,24 @@ public sealed class SourceAnalyzerTests
             [(CreateDescriptor("test"), new InMemoryTableProvider(rows))],
             sourceStream: null, CancellationToken.None);
 
-        using MemoryStream stream = new();
-        IndexWriter writer = new();
-        writer.Write(result.IndexSet, stream);
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            using (FileStream stream = File.Create(tempFile))
+            {
+                UnifiedIndexWriter.Write(result.IndexSet, stream);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
+            SourceIndexSet restored = mapped.IndexSet;
 
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet restored = reader.Read(stream);
-
-        Assert.Equal(result.IndexSet.Tables.Count, restored.Tables.Count);
-        Assert.True(restored.Tables.ContainsKey("test"));
-        Assert.Equal(2, restored.Tables["test"].Schema.TotalRowCount);
+            Assert.Equal(result.IndexSet.Tables.Count, restored.Tables.Count);
+            Assert.True(restored.Tables.ContainsKey("test"));
+            Assert.Equal(2, restored.Tables["test"].Schema.TotalRowCount);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 
     [Fact]

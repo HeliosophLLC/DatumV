@@ -5,10 +5,10 @@ using DatumIngest.Indexing.BTree;
 namespace DatumIngest.Indexing;
 
 /// <summary>
-/// In-memory representation of a <c>.datum-index</c> file. Aggregates the fingerprint,
+/// In-memory representation of a v5 unified <c>.datum-index</c> file. Aggregates the fingerprint,
 /// cached schema, chunk directory, and optional acceleration structures (bloom filters,
-/// sorted value indexes, ZIP directory cache). Constructed by <see cref="SourceIndexBuilder"/>
-/// and serialized/deserialized by <see cref="IndexWriter"/>/<see cref="IndexReader"/>.
+/// sorted value indexes, B+Tree, bitmap). Constructed by <see cref="SourceIndexBuilder"/>
+/// and serialized/deserialized by <see cref="UnifiedIndexWriter"/>/<see cref="UnifiedIndexReader"/>.
 /// </summary>
 public sealed class SourceIndex
 {
@@ -32,12 +32,6 @@ public sealed class SourceIndex
     /// or <c>null</c> if sorted indexes were not built.
     /// </summary>
     public SortedValueIndexSet? SortedIndexes { get; }
-
-    /// <summary>
-    /// Cached ZIP central directory entries,
-    /// or <c>null</c> if the source is not a ZIP file.
-    /// </summary>
-    public ZipDirectoryCache? ZipDirectory { get; }
 
     /// <summary>
     /// Per-column B+Tree indexes for demand-paged key lookup on large datasets,
@@ -66,15 +60,13 @@ public sealed class SourceIndex
     /// <param name="chunks">Ordered list of row chunks with column statistics.</param>
     /// <param name="bloomFilters">Optional bloom filter set for membership testing.</param>
     /// <param name="sortedIndexes">Optional sorted value indexes for key lookup.</param>
-    /// <param name="zipDirectory">Optional cached ZIP central directory.</param>
     public SourceIndex(
         SourceFingerprint fingerprint,
         IndexSchema schema,
         IReadOnlyList<IndexChunk> chunks,
         BloomFilterSet? bloomFilters = null,
-        SortedValueIndexSet? sortedIndexes = null,
-        ZipDirectoryCache? zipDirectory = null)
-        : this(fingerprint, schema, chunks, bloomFilters, sortedIndexes, zipDirectory, bPlusTreeIndexes: null)
+        SortedValueIndexSet? sortedIndexes = null)
+        : this(fingerprint, schema, chunks, bloomFilters, sortedIndexes, bPlusTreeIndexes: null)
     {
     }
 
@@ -87,7 +79,6 @@ public sealed class SourceIndex
         IReadOnlyList<IndexChunk> chunks,
         BloomFilterSet? bloomFilters,
         SortedValueIndexSet? sortedIndexes,
-        ZipDirectoryCache? zipDirectory,
         BPlusTreeIndexSet? bPlusTreeIndexes,
         BitmapIndexSet? bitmapIndexes = null,
         Dictionary<string, MappedSortedIndex>? mappedSortedIndexes = null)
@@ -97,7 +88,6 @@ public sealed class SourceIndex
         Chunks = chunks;
         BloomFilters = bloomFilters;
         SortedIndexes = sortedIndexes;
-        ZipDirectory = zipDirectory;
         BPlusTreeIndexes = bPlusTreeIndexes;
         BitmapIndexes = bitmapIndexes;
         MappedSortedIndexes = mappedSortedIndexes;

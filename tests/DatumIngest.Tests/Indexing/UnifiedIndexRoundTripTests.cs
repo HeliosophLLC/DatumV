@@ -501,7 +501,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         BPlusTreeIndexSet bTreeSet = new(bTreeIndexes);
         SourceIndex original = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null, sortedIndexes: null, zipDirectory: null,
+            bloomFilters: null, sortedIndexes: null,
             bPlusTreeIndexes: bTreeSet);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("btree", original);
@@ -552,7 +552,7 @@ public sealed class UnifiedIndexRoundTripTests : IDisposable
 
         BitmapIndexSet bitmapSet = new(bitmapIndexes);
         SourceIndex original = new(fingerprint, indexSchema, chunks,
-            bloomFilters: null, sortedIndexes: null, zipDirectory: null,
+            bloomFilters: null, sortedIndexes: null,
             bPlusTreeIndexes: null, bitmapIndexes: bitmapSet);
 
         using MappedSourceIndexSet mapped = WriteAndReopen("bitmap", original);

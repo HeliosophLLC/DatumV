@@ -34,7 +34,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         SourceIndex index = CreateTestIndex(rowCount: 2);
         WriteSidecar(csvPath, "data", index);
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "data", csvPath, new Dictionary<string, string>()));
 
@@ -50,7 +50,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         string csvPath = Path.Combine(_tempDirectory, "missing.csv");
         File.WriteAllText(csvPath, "id\n1\n");
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "data", csvPath, new Dictionary<string, string>()));
 
@@ -67,7 +67,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         SourceIndex sidecarIndex = CreateTestIndex(rowCount: 1);
         WriteSidecar(csvPath, "data", sidecarIndex);
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "data", csvPath, new Dictionary<string, string>()));
         catalog.RegisterIndex("data", explicitIndex);
@@ -86,7 +86,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         WriteSidecar(csvPath1, "images", CreateTestIndex(rowCount: 2));
         WriteSidecar(csvPath2, "labels", CreateTestIndex(rowCount: 2));
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "images", csvPath1, new Dictionary<string, string>()));
         catalog.Register(new TableDescriptor("csv", "labels", csvPath2, new Dictionary<string, string>()));
@@ -104,7 +104,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         SourceIndex index = CreateTestIndex(rowCount: 1);
         WriteSidecar(datumPath, "orders_csv", index);
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "orders_alias", datumPath, new Dictionary<string, string>()));
 
@@ -125,7 +125,7 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         SourceIndex index = CreateTestIndex(rowCount: 42);
         WriteSidecar(csvPath, "lazy", index);
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "lazy", csvPath, new Dictionary<string, string>()));
 
@@ -154,18 +154,17 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
         string sidecarPath = csvPath + ".datum-index";
         using (FileStream stream = File.Create(sidecarPath))
         {
-            IndexWriter writer = new();
-        // Write entries for both alias names in a single sidecar set.
+            // Write entries for both alias names in a single sidecar set.
             SourceFingerprint fingerprint = new(0, new byte[32]);
             SourceIndexSet indexSet = new(fingerprint, new Dictionary<string, SourceIndex>(StringComparer.OrdinalIgnoreCase)
             {
                 ["alias_a"] = index,
                 ["alias_b"] = index,
             });
-            writer.Write(indexSet, stream);
+            UnifiedIndexWriter.Write(indexSet, stream);
         }
 
-        TableCatalog catalog = new();
+        using TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         catalog.Register(new TableDescriptor("csv", "alias_a", csvPath, new Dictionary<string, string>()));
         catalog.Register(new TableDescriptor("csv", "alias_b", csvPath, new Dictionary<string, string>()));
@@ -245,9 +244,8 @@ public sealed class SidecarIndexDiscoveryTests : IDisposable
     {
         string sidecarPath = sourceFilePath + ".datum-index";
         using FileStream stream = File.Create(sidecarPath);
-        IndexWriter writer = new();
         SourceIndexSet indexSet = SourceIndexSet.Create(tableName, index);
-        writer.Write(indexSet, stream);
+        UnifiedIndexWriter.Write(indexSet, stream);
     }
 
     private static void WriteV5Sidecar(string sourceFilePath, string tableName, SourceIndex index)

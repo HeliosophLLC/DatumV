@@ -90,33 +90,39 @@ public sealed class IndexDeduplicationTests
         // Verify via round-trip serialization.
         SourceIndexSet indexSet = new(fingerprint, new Dictionary<string, SourceIndex> { ["test"] = index });
 
-        using MemoryStream stream = new();
-        IndexWriter indexWriter = new();
-        indexWriter.Write(indexSet, stream, incremental.SpillWriter, compressIndexes: false);
-
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet deserialized = reader.Read(stream);
-        SourceIndex roundTripped = deserialized.Tables["test"];
-
-        Assert.NotNull(roundTripped.BitmapIndexes);
-        Assert.True(roundTripped.BitmapIndexes.TryGetIndex("category", out _));
-
-        if (roundTripped.SortedIndexes is not null)
+        string tempFile1 = Path.GetTempFileName();
+        try
         {
-            Assert.False(
-                roundTripped.SortedIndexes.HasColumn("category"),
-                "After round-trip, low-cardinality column 'category' should not appear in sorted indexes.");
-        }
+            using (FileStream stream = File.Create(tempFile1))
+            {
+                UnifiedIndexWriter.Write(indexSet, stream, incremental.SpillWriter);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile1);
+            SourceIndex roundTripped = mapped.IndexSet.Tables["test"];
 
-        if (roundTripped.BPlusTreeIndexes is not null)
+            Assert.NotNull(roundTripped.BitmapIndexes);
+            Assert.True(roundTripped.BitmapIndexes.TryGetIndex("category", out _));
+
+            if (roundTripped.SortedIndexes is not null)
+            {
+                Assert.False(
+                    roundTripped.SortedIndexes.HasColumn("category"),
+                    "After round-trip, low-cardinality column 'category' should not appear in sorted indexes.");
+            }
+
+            if (roundTripped.BPlusTreeIndexes is not null)
+            {
+                Assert.False(
+                    roundTripped.BPlusTreeIndexes.TryGetIndex("category", out _),
+                    "After round-trip, low-cardinality column 'category' should not appear in B+Tree indexes.");
+            }
+
+            incremental.Dispose();
+        }
+        finally
         {
-            Assert.False(
-                roundTripped.BPlusTreeIndexes.TryGetIndex("category", out _),
-                "After round-trip, low-cardinality column 'category' should not appear in B+Tree indexes.");
+            File.Delete(tempFile1);
         }
-
-        incremental.Dispose();
     }
 
     /// <summary>
@@ -333,21 +339,27 @@ public sealed class IndexDeduplicationTests
         // Round-trip through serialization to verify no sorted/B+Tree entries leak through.
         SourceIndexSet indexSet = new(fingerprint, new Dictionary<string, SourceIndex> { ["test"] = index });
 
-        using MemoryStream stream = new();
-        IndexWriter indexWriter = new();
-        indexWriter.Write(indexSet, stream, incremental.SpillWriter, compressIndexes: false);
+        string tempFile2 = Path.GetTempFileName();
+        try
+        {
+            using (FileStream stream = File.Create(tempFile2))
+            {
+                UnifiedIndexWriter.Write(indexSet, stream, incremental.SpillWriter);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile2);
+            SourceIndex roundTripped = mapped.IndexSet.Tables["test"];
 
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet deserialized = reader.Read(stream);
-        SourceIndex roundTripped = deserialized.Tables["test"];
+            Assert.NotNull(roundTripped.BitmapIndexes);
+            Assert.True(roundTripped.BitmapIndexes.TryGetIndex("category", out _));
+            Assert.Null(roundTripped.SortedIndexes);
+            Assert.Null(roundTripped.BPlusTreeIndexes);
 
-        Assert.NotNull(roundTripped.BitmapIndexes);
-        Assert.True(roundTripped.BitmapIndexes.TryGetIndex("category", out _));
-        Assert.Null(roundTripped.SortedIndexes);
-        Assert.Null(roundTripped.BPlusTreeIndexes);
-
-        incremental.Dispose();
+            incremental.Dispose();
+        }
+        finally
+        {
+            File.Delete(tempFile2);
+        }
     }
 
     // ───────────────────────── Deferred Reindex ─────────────────────────

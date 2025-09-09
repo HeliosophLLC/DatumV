@@ -373,7 +373,6 @@ public sealed class BitmapPruningTests
             chunks,
             bloomFilters: null,
             sortedIndexes: sortedSet,
-            zipDirectory: null,
             bPlusTreeIndexes: null,
             bitmapIndexes: bitmapIndexes);
 
@@ -522,7 +521,6 @@ public sealed class BitmapPruningTests
             chunks,
             bloomFilters: null,
             sortedIndexes: null,
-            zipDirectory: null,
             bPlusTreeIndexes: null,
             bitmapIndexes: bitmapIndexes);
     }

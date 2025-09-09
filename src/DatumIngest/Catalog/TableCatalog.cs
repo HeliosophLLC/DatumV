@@ -499,20 +499,9 @@ public sealed class TableCatalog : IDisposable
             return;
         }
 
-        SourceIndexSet indexSet;
-
-        if (IsUnifiedIndexFormat(sidecarPath))
-        {
-            MappedSourceIndexSet mapped = UnifiedIndexReader.Open(sidecarPath);
-            _mappedIndexSets.Add(mapped);
-            indexSet = mapped.IndexSet;
-        }
-        else
-        {
-            IndexReader reader = new();
-            using FileStream stream = File.OpenRead(sidecarPath);
-            indexSet = reader.Read(stream);
-        }
+        MappedSourceIndexSet mapped = UnifiedIndexReader.Open(sidecarPath);
+        _mappedIndexSets.Add(mapped);
+        SourceIndexSet indexSet = mapped.IndexSet;
 
         foreach (string name in pendingNames)
         {
@@ -527,24 +516,6 @@ public sealed class TableCatalog : IDisposable
                 _indexes[name] = entry;
             }
         }
-    }
-
-    /// <summary>
-    /// Detects whether a <c>.datum-index</c> file uses the v5 unified memory-mapped format
-    /// by checking its four-byte magic header (<c>DXIX</c>) rather than the v2/v3 <c>DTIX</c> magic.
-    /// </summary>
-    private static bool IsUnifiedIndexFormat(string filePath)
-    {
-        Span<byte> magic = stackalloc byte[4];
-
-        using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-
-        if (stream.Read(magic) < 4)
-        {
-            return false;
-        }
-
-        return magic.SequenceEqual(UnifiedIndexWriter.MagicBytes);
     }
 
     private void DiscoverSidecarManifest(

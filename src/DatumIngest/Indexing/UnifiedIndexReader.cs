@@ -212,7 +212,7 @@ internal static class UnifiedIndexReader
 
             tables[tableNames[tableIndex]] = new SourceIndex(
                 fingerprint, schema, chunks, bloomFilters, sortedIndexes,
-                zipDirectory: null, bPlusTreeIndexes, bitmapIndexes, mappedSortedIndexes);
+                bPlusTreeIndexes, bitmapIndexes, mappedSortedIndexes);
         }
 
         return new SourceIndexSet(fingerprint, tables);

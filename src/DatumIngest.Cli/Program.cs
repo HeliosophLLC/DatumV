@@ -149,18 +149,9 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
 
         SourceIndexSet indexSet;
 
-        if (IsUnifiedIndexFormat(indexPath))
-        {
-            MappedSourceIndexSet mapped = UnifiedIndexReader.Open(indexPath);
-            catalog.TrackMappedIndexSet(mapped);
-            indexSet = mapped.IndexSet;
-        }
-        else
-        {
-            IndexReader reader = new();
-            using FileStream stream = File.OpenRead(indexPath);
-            indexSet = reader.Read(stream);
-        }
+        MappedSourceIndexSet mapped = UnifiedIndexReader.Open(indexPath);
+        catalog.TrackMappedIndexSet(mapped);
+        indexSet = mapped.IndexSet;
 
         // Derive table name from the index file path by stripping the .datum-index suffix.
         string fileName = Path.GetFileName(indexPath);
@@ -194,21 +185,6 @@ static void LoadIndexes(TableCatalog catalog, CliOptions options)
             }
         }
     }
-}
-
-// Detects whether a .datum-index file uses the v5 unified format (DXIX magic).
-static bool IsUnifiedIndexFormat(string filePath)
-{
-    Span<byte> magic = stackalloc byte[4];
-
-    using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-
-    if (stream.Read(magic) < 4)
-    {
-        return false;
-    }
-
-    return magic.SequenceEqual(UnifiedIndexWriter.MagicBytes);
 }
 
 static SourceIndexBuilder CreateIndexBuilder(CliOptions options)
@@ -936,6 +912,8 @@ static async Task<int> RunQueryRepeatedAsync(QueryExpression query, TableCatalog
 
 static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog, CliOptions options)
 {
+    ReferenceStore.BeginQueryScope();
+
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
@@ -1029,7 +1007,7 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
             batch.Return();
         }
 
-        ReferenceStore.CurrentOrCreate().Reset();
+        ReferenceStore.EndQueryScope();
 
         if (!schemaInitialized)
         {
@@ -1069,13 +1047,15 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
         progress.WriteSummary();
     }
 
-    ReferenceStore.CurrentOrCreate().Reset();
+    ReferenceStore.EndQueryScope();
     context.LocalBufferPool.DumpStats();
     return 0;
 }
 
 static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catalog, int limit)
 {
+    ReferenceStore.BeginQueryScope();
+
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
@@ -1121,7 +1101,7 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
         }
     }
 
-    ReferenceStore.CurrentOrCreate().Reset();
+    ReferenceStore.EndQueryScope();
     stopwatch.Stop();
     Console.WriteLine($"\n{count} row(s) in {stopwatch.Elapsed.TotalSeconds:F2} second(s)");
     return 0;
@@ -1129,6 +1109,8 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
 
 static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog)
 {
+    ReferenceStore.BeginQueryScope();
+
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
@@ -1155,7 +1137,7 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
         batch.Return();
     }
 
-    ReferenceStore.CurrentOrCreate().Reset();
+    ReferenceStore.EndQueryScope();
     progress.WriteSummary();
     Console.WriteLine();
 
@@ -1178,6 +1160,8 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
 
 static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catalog, bool analyze, long? memoryBudgetBytes)
 {
+    ReferenceStore.BeginQueryScope();
+
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
     IQueryOperator plan = await planner.PlanAsync(query, CancellationToken.None);
@@ -1202,7 +1186,7 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
         {
         }
 
-        ReferenceStore.CurrentOrCreate().Reset();
+        ReferenceStore.EndQueryScope();
         InstrumentedOperator.PopulateMetrics(explainPlan, instrumentedRoot);
     }
 
@@ -1212,6 +1196,8 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
 
 static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog catalog, string? outputPath)
 {
+    ReferenceStore.BeginQueryScope();
+
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
     QueryPlanner planner = new(catalog, functionRegistry);
 
@@ -1252,7 +1238,7 @@ static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog cata
         batch.Return();
     }
 
-    ReferenceStore.CurrentOrCreate().Reset();
+    ReferenceStore.EndQueryScope();
     progress.WriteSummary();
 
     IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();

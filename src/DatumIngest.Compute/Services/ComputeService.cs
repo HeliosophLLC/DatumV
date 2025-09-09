@@ -145,6 +145,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         try
         {
+            ReferenceStore.BeginQueryScope();
+
             // Link the gRPC per-call token, the session-level token, and
             // the per-query token so that any of the three can stop the stream.
             using CancellationTokenSource linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
@@ -324,6 +326,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
         finally
         {
+            ReferenceStore.EndQueryScope();
             session.UnregisterQuery(activeQuery.QueryId);
         }
     }

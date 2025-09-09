@@ -539,19 +539,26 @@ public sealed class SourceIndexBuilderTests
             [(CreateDescriptor("alpha"), provider1), (CreateDescriptor("beta"), provider2)],
             sourceStream: null, CancellationToken.None);
 
-        using MemoryStream stream = new();
-        IndexWriter writer = new();
-        writer.Write(original, stream);
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            using (FileStream stream = File.Create(tempFile))
+            {
+                UnifiedIndexWriter.Write(original, stream);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
+            SourceIndexSet restored = mapped.IndexSet;
 
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet restored = reader.Read(stream);
-
-        Assert.Equal(original.Tables.Count, restored.Tables.Count);
-        Assert.True(restored.Tables.ContainsKey("alpha"));
-        Assert.True(restored.Tables.ContainsKey("beta"));
-        Assert.Equal(2, restored.Tables["alpha"].Schema.TotalRowCount);
-        Assert.Equal(2, restored.Tables["beta"].Schema.TotalRowCount);
+            Assert.Equal(original.Tables.Count, restored.Tables.Count);
+            Assert.True(restored.Tables.ContainsKey("alpha"));
+            Assert.True(restored.Tables.ContainsKey("beta"));
+            Assert.Equal(2, restored.Tables["alpha"].Schema.TotalRowCount);
+            Assert.Equal(2, restored.Tables["beta"].Schema.TotalRowCount);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 
     [Fact]

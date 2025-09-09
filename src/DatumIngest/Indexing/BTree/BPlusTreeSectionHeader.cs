@@ -3,7 +3,7 @@ using DatumIngest.Model;
 namespace DatumIngest.Indexing.BTree;
 
 /// <summary>
-/// Header written at the start of a <see cref="IndexSectionType.BTreeIndexes"/> section,
+/// Header written at the start of the B+Tree section within a <c>.datum-index</c> file,
 /// before the contiguous array of B+Tree pages. Describes the tree's shape so readers
 /// can locate the root and compute page file offsets.
 /// </summary>

@@ -22,7 +22,7 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 | **P3 — Parallel Hash Join + Aggregate** | XL | Concurrent probe workers, bounded `Channel<Row>`, `IAggregateAccumulator.Merge` on all ~15 accumulators, server-side concurrency governor — see Engine Performance § P3 |
 | **P4 — DataValue Struct + Batch Execution** | XL | `DataValue` class → `readonly struct`; hundreds of call sites to migrate; foundational prerequisite for D9 vectorized execution — see Engine Performance § P4 |
 | ~~**P5 — Memory-Mapped Sorted Indexes**~~ | XL | ✅ v5 fixed-width on-disk format, mmap infrastructure (`DatumMemoryMappedReader`, `UnifiedIndexWriter/Reader`), `SortedIndexKeyEncoder` per `DataKind`, breaking `.datum-index` change |
-| **P6 — ReferenceStore Session Isolation** | XL | Per-session `ReferenceStore`; `DataValue` encoding must embed a store ID; requires audit of all `FromString`/`FromVector`/`FromImage` call sites — see Engine Performance § P6 |
+| **P6 — ReferenceStore Session Isolation** | M | `AsyncLocal<ReferenceStore?>` per-query scoping with global fallback; `BeginQueryScope`/`EndQueryScope` wired into `ComputeService` and CLI — see Engine Performance § P6 |
 | **Primary key persistence** | XL | Four interdependent phases: footer format, shard-aware INSERT with PK validation, compaction operator, uniqueness re-validation — see notes below |
 | **Dataset Revision Pipeline** | XL | Four phases: output manifest, two-pass vocabulary collection, `EstimateCost` RPC, gRPC `CreateOutput` with progress streaming — see Dataset Revision Pipeline (V3) |
 | **Datum File Compaction** | XL | Three phases: full compaction (tombstone + orphan removal), merge compaction (row group consolidation), automatic background compaction — see Datum File Compaction |
@@ -176,21 +176,17 @@ Replace the v3 sorted index format (variable-length `WriteDataValue` entries, Zs
 
 ### P6. ReferenceStore Session Isolation
 
-`ReferenceStore` is currently a process-global static `object?[]` that backs all `DataValue` instances holding managed references (strings, byte arrays, vectors, etc.). Every `DataValue.FromString()` call allocates a slot in this shared array. In a multi-tenant server with concurrent sessions, this creates two problems:
+**Status**: ✅ Implemented via `AsyncLocal<ReferenceStore?>` per-query scoping.
 
-1. **Cross-session leakage**: String values materialized by one session's query remain in `ReferenceStore` indefinitely because there is no mechanism to release slots when a session ends. Over time, the store grows monotonically, leaking memory proportional to the total volume of distinct string/array values ever touched across all sessions.
+`ReferenceStore` uses a two-tier design: a process-global `_globalFallback` singleton for code paths that run outside an explicit query scope (tests, one-shot CLI invocations where the process exits after each command), and an `AsyncLocal<ReferenceStore?> _current` that is set to a fresh isolated store by `BeginQueryScope()` at the start of each query. `EndQueryScope()` resets and clears the store when the query finishes, releasing all referenced objects (strings, byte arrays, vectors, images) accumulated during that query's execution.
 
-2. **Unbounded growth under concurrent load**: With N concurrent sessions each processing datasets with string columns, the global `ReferenceStore` accumulates N×M entries (M = distinct strings per session). There is no eviction, no LRU, no per-session scoping.
+No `DataValue` struct layout changes were required — all cross-context `DataValue` usage flows through the global fallback. `BeginQueryScope()` must be called from the parent async context so the value propagates to all child continuations (child contexts inherit but cannot write back to the parent).
 
-**Required changes**:
-- **Per-session `ReferenceStore`** instances instead of the process-global static. Each session's `ExecutionContext` (or a new `SessionContext`) owns a `ReferenceStore` that is disposed when the session ends, releasing all referenced objects.
-- **`DataValue` must encode which store it belongs to**, or all `DataValue` instances within a session must be consumed before the store is disposed. The current 4-byte `_referenceIndex` field could be split into a 2-byte session/store ID + 2-byte index (64K entries per store per segment), or a two-level indirection `StoreTable[storeId][index]`. The exact encoding depends on the expected concurrency × cardinality.
-- **Arena-backed strings bypass this entirely**: `DataValue.FromStringSlice` (arena-backed) stores offset+length instead of a reference index. Expanding arena usage to more code paths (e.g., index reader, provider deserialization) reduces `ReferenceStore` pressure and makes session isolation cheaper.
-- **Audit all `DataValue.FromString` / `FromVector` / `FromImage` call sites**: Ensure each runs in a session context and allocates into the correct per-session store. The provider pipeline, function evaluator, and index reader are the key code paths.
+`BeginQueryScope`/`EndQueryScope` are wired into:
+- `ComputeService.Query()` (gRPC)
+- `RunQueryAsync`, `RunExploreAsync`, `RunStatsAsync`, `RunExplainAsync`, `RunManifestAsync` (CLI)
 
-**Risk if deferred**: In a single-user CLI, the process exits after each command — no leak. In the gRPC `ComputeService` or `Server` REPL running long-lived sessions, this is a memory leak proportional to usage. It becomes a blocker the moment multi-session compute is deployed.
-
-**Prerequisite for**: ~~Temp tables (per-session materialized results)~~ ✅ shipped, multi-tenant compute service, long-lived REPL sessions.
+`DatumIngest.csproj` exposes `ReferenceStore` internals to `DatumIngest.Compute` via `InternalsVisibleTo`.
 
 ---
 

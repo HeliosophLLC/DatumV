@@ -20,6 +20,7 @@
     <InternalsVisibleTo Include="DatumIngest.Tests" />
     <InternalsVisibleTo Include="DatumIngest.Cli" />
     <InternalsVisibleTo Include="DatumIngest.Server" />
+    <InternalsVisibleTo Include="DatumIngest.Compute" />
   </ItemGroup>
 
   <ItemGroup>

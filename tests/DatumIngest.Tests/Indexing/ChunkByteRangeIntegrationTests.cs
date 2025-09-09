@@ -170,23 +170,29 @@ public sealed class ChunkByteRangeIntegrationTests : IDisposable
 
         SourceIndex original = await builder.BuildAsync(descriptor, provider, null, CancellationToken.None);
 
-        // Write and read back.
-        using MemoryStream stream = new();
-        IndexWriter writer = new();
-        SourceIndexSet indexSet = SourceIndexSet.Create("test", original);
-        writer.Write(indexSet, stream);
-
-        stream.Position = 0;
-        IndexReader reader = new();
-        SourceIndexSet deserializedSet = reader.Read(stream);
-        SourceIndex deserialized = deserializedSet.Tables["test"];
-
-        Assert.Equal(original.Chunks.Count, deserialized.Chunks.Count);
-
-        for (int i = 0; i < original.Chunks.Count; i++)
+        // Write and read back via the v5 unified format.
+        string tempFile = Path.GetTempFileName();
+        try
         {
-            Assert.Equal(original.Chunks[i].SourceByteOffset, deserialized.Chunks[i].SourceByteOffset);
-            Assert.Equal(original.Chunks[i].SourceByteLength, deserialized.Chunks[i].SourceByteLength);
+            using (FileStream stream = File.Create(tempFile))
+            {
+                SourceIndexSet indexSet = SourceIndexSet.Create("test", original);
+                UnifiedIndexWriter.Write(indexSet, stream);
+            }
+            using MappedSourceIndexSet mapped = UnifiedIndexReader.Open(tempFile);
+            SourceIndex deserialized = mapped.IndexSet.Tables["test"];
+
+            Assert.Equal(original.Chunks.Count, deserialized.Chunks.Count);
+
+            for (int i = 0; i < original.Chunks.Count; i++)
+            {
+                Assert.Equal(original.Chunks[i].SourceByteOffset, deserialized.Chunks[i].SourceByteOffset);
+                Assert.Equal(original.Chunks[i].SourceByteLength, deserialized.Chunks[i].SourceByteLength);
+            }
+        }
+        finally
+        {
+            File.Delete(tempFile);
         }
     }
 
