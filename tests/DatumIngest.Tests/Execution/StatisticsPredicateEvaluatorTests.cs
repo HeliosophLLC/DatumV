@@ -569,8 +569,10 @@ public class StatisticsPredicateEvaluatorTests
     /// Verifies that a SQL <c>TRUE</c> literal correctly compares against
     /// <see cref="DataKind.Boolean"/> column statistics. Partition contains only
     /// <c>false</c> values (min = max = false), so <c>col = TRUE</c> must be skippable.
-    /// Before the fix, <c>LiteralToDataValue(true)</c> returned <c>Float32(1f)</c>
-    /// and <c>ToDouble(Boolean)</c> returned 0, causing inconsistent comparisons.
+    /// Before centralization, the removed <c>LiteralToDataValue</c> helper returned
+    /// <c>Float32(1f)</c> for booleans and <c>ToDouble(Boolean)</c> returned 0,
+    /// causing inconsistent comparisons. Now <see cref="DataValue.FromLiteral"/>
+    /// produces the correct <c>Boolean</c> kind.
     /// </summary>
     [Fact]
     public void Equal_BoolTrueAgainstFalseOnlyPartition_CanSkip()

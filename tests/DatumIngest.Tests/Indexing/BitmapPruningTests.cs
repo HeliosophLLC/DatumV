@@ -401,10 +401,12 @@ public sealed class BitmapPruningTests
 
     /// <summary>
     /// Verifies that a SQL <c>TRUE</c>/<c>FALSE</c> literal correctly matches a
-    /// <see cref="DataKind.Boolean"/>-typed bitmap index column. Before the fix,
-    /// <c>ConvertLiteralToDataValue(true)</c> produced <c>Float32(1f)</c>, which never
-    /// matched <c>Boolean(true)</c> dictionary keys, causing all chunks to be pruned
-    /// and returning zero rows.
+    /// <see cref="DataKind.Boolean"/>-typed bitmap index column. Before centralization,
+    /// the removed <c>ConvertLiteralToDataValue</c> helper produced <c>Float32(1f)</c>
+    /// for boolean literals, which never matched <c>Boolean(true)</c> dictionary keys,
+    /// causing all chunks to be pruned and returning zero rows.
+    /// Now <see cref="DataValue.FromLiteral"/> produces the correct kind, and
+    /// <see cref="BitmapColumnIndex"/> normalizes lookup keys via <see cref="DataValue.CoerceToKind"/>.
     /// </summary>
     [Fact]
     public async Task BitmapPruning_BooleanLiteralTrue_PrunesChunkWithOnlyFalseValues()
@@ -429,6 +431,39 @@ public sealed class BitmapPruningTests
         Assert.Equal(1, scan.PrunedIndexChunks);
         Assert.Equal(2, results.Count);
         Assert.All(results, row => Assert.True(row["flag"].AsBoolean()));
+    }
+
+    // ───────────────────── Cross-type coercion pruning ─────────────────────
+
+    /// <summary>
+    /// Verifies that a <c>Float64</c> literal (as the SQL parser produces for numeric
+    /// constants) is correctly coerced to the bitmap column's <c>Int32</c> key kind by
+    /// <see cref="BitmapColumnIndex"/>'s internal key normalization. Without coercion,
+    /// <c>Float64(30.0)</c> would never match <c>Int32(30)</c> dictionary keys.
+    /// </summary>
+    [Fact]
+    public async Task BitmapPruning_Float64LiteralAgainstInt32Column_CoercesAndPrunes()
+    {
+        // 4 rows in 2 chunks of 2:
+        // Chunk 0: [10, 20]   Chunk 1: [30, 40]
+        // WHERE quantity = 30.0 (double) → only chunk 1 should match.
+        Row[] rows = CreateInt32Rows("quantity", 10, 20, 30, 40);
+        InMemoryProvider provider = new(rows);
+        BitmapIndexSet bitmapIndexes = BuildBitmapIndex("quantity", rows, chunkSize: 2);
+        SourceIndex sourceIndex = CreateSourceIndexWithBitmaps(rows, bitmapIndexes, chunkSize: 2);
+
+        (ScanOperator scan, TableCatalog catalog) = CreateScanWithBitmaps(provider, sourceIndex,
+            new BinaryExpression(
+                new ColumnReference("quantity"),
+                BinaryOperator.Equal,
+                new LiteralExpression(30.0)));
+
+        List<Row> results = await ExecuteScanAsync(scan, catalog);
+
+        Assert.Equal(2, scan.TotalIndexChunks);
+        Assert.Equal(1, scan.PrunedIndexChunks);
+        Assert.Single(results);
+        Assert.Equal(30, results[0]["quantity"].AsInt32());
     }
 
     // ───────────────────── Explain reports bitmap pruning ─────────────────────
@@ -468,6 +503,17 @@ public sealed class BitmapPruningTests
         for (int i = 0; i < values.Length; i++)
         {
             rows[i] = new Row([columnName], [DataValue.FromBoolean(values[i])]);
+        }
+
+        return rows;
+    }
+
+    private static Row[] CreateInt32Rows(string columnName, params int[] values)
+    {
+        Row[] rows = new Row[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            rows[i] = new Row([columnName], [DataValue.FromInt32(values[i])]);
         }
 
         return rows;
@@ -556,9 +602,11 @@ public sealed class BitmapPruningTests
         }
 
         IReadOnlyList<string> columnNames = rows[0].ColumnNames;
-        ColumnInfo[] columns = columnNames
-            .Select(name => new ColumnInfo(name, DataKind.String, false))
-            .ToArray();
+        ColumnInfo[] columns = new ColumnInfo[columnNames.Count];
+        for (int i = 0; i < columnNames.Count; i++)
+        {
+            columns[i] = new ColumnInfo(columnNames[i], rows[0][columnNames[i]].Kind, false);
+        }
 
         return new SourceIndex(
             new SourceFingerprint(100, DummyHash),

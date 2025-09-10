@@ -749,7 +749,7 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
         return !bitmapIndex.ChunkContainsValue(literalValue, chunkIndex);
     }
 
@@ -774,7 +774,7 @@ public sealed class ScanOperator : IQueryOperator
                 return false;
             }
 
-            DataValue value = ConvertLiteralToDataValue(literal.Value);
+            DataValue value = DataValue.FromLiteral(literal.Value);
 
             if (bitmapIndex.ChunkContainsValue(value, chunkIndex))
             {
@@ -896,7 +896,7 @@ public sealed class ScanOperator : IQueryOperator
             return null;
         }
 
-        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
         ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(literalValue, chunkIndex);
         return bitmap.Bits.ToArray();
     }
@@ -924,7 +924,7 @@ public sealed class ScanOperator : IQueryOperator
                 return null;
             }
 
-            DataValue value = ConvertLiteralToDataValue(literal.Value);
+            DataValue value = DataValue.FromLiteral(literal.Value);
             ChunkBitmap bitmap = bitmapIndex.GetChunkBitmap(value, chunkIndex);
 
             if (result is null)
@@ -1017,7 +1017,7 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
         IReadOnlySet<int> matchingChunks = index.FindChunksContaining(literalValue);
         return !matchingChunks.Contains(chunkIndex);
     }
@@ -1057,7 +1057,7 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue literalValue = ConvertLiteralToDataValue(rawLiteral);
+        DataValue literalValue = DataValue.FromLiteral(rawLiteral);
 
         IReadOnlySet<int> matchingChunks = effectiveOperator switch
         {
@@ -1110,8 +1110,8 @@ public sealed class ScanOperator : IQueryOperator
             return false;
         }
 
-        DataValue low = ConvertLiteralToDataValue(lowLiteral.Value);
-        DataValue high = ConvertLiteralToDataValue(highLiteral.Value);
+        DataValue low = DataValue.FromLiteral(lowLiteral.Value);
+        DataValue high = DataValue.FromLiteral(highLiteral.Value);
         IReadOnlySet<int> matchingChunks = index.FindChunksInRange(low, high);
         return !matchingChunks.Contains(chunkIndex);
     }
@@ -1141,7 +1141,7 @@ public sealed class ScanOperator : IQueryOperator
                 return false;
             }
 
-            DataValue value = ConvertLiteralToDataValue(literal.Value);
+            DataValue value = DataValue.FromLiteral(literal.Value);
             IReadOnlySet<int> matchingChunks = index.FindChunksContaining(value);
 
             if (matchingChunks.Contains(chunkIndex))
@@ -1153,22 +1153,7 @@ public sealed class ScanOperator : IQueryOperator
         return true;
     }
 
-    /// <summary>
-    /// Converts an AST literal value (<see cref="LiteralExpression.Value"/>) to a <see cref="DataValue"/>.
-    /// </summary>
-    private static DataValue ConvertLiteralToDataValue(object rawLiteral)
-    {
-        return rawLiteral switch
-        {
-            int intValue => DataValue.FromFloat32(intValue),
-            long longValue => DataValue.FromFloat32(longValue),
-            float floatValue => DataValue.FromFloat32(floatValue),
-            double doubleValue => DataValue.FromFloat32((float)doubleValue),
-            string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromBoolean(boolValue),
-            _ => DataValue.Null(DataKind.Float32),
-        };
-    }
+
 
     /// <summary>
     /// Attempts to collect row positions from index-seekable predicates (equality,
@@ -1322,7 +1307,7 @@ public sealed class ScanOperator : IQueryOperator
 
                 if (columnName is not null && rawLiteral is not null)
                 {
-                    results.Add((columnName, ConvertLiteralToDataValue(rawLiteral)));
+                    results.Add((columnName, DataValue.FromLiteral(rawLiteral)));
                 }
             }
         }
@@ -1350,8 +1335,8 @@ public sealed class ScanOperator : IQueryOperator
         {
             results.Add((
                 columnRef.ColumnName,
-                ConvertLiteralToDataValue(lowLiteral.Value),
-                ConvertLiteralToDataValue(highLiteral.Value)));
+                DataValue.FromLiteral(lowLiteral.Value),
+                DataValue.FromLiteral(highLiteral.Value)));
         }
     }
 
@@ -1382,7 +1367,7 @@ public sealed class ScanOperator : IQueryOperator
                     return;
                 }
 
-                values.Add(ConvertLiteralToDataValue(literal.Value));
+                values.Add(DataValue.FromLiteral(literal.Value));
             }
 
             results.Add((columnRef.ColumnName, values));

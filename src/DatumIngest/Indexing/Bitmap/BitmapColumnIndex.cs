@@ -21,6 +21,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     private readonly Dictionary<DataValue, ChunkLocation[]>? _chunkLocations;
     private readonly int _chunkCount;
     private readonly int[] _chunkRowCounts;
+    private readonly DataKind? _keyKind;
 
     /// <summary>
     /// Describes the position and size of a single compressed bitmap payload within a
@@ -63,6 +64,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         _compressedBitmaps = compressedBitmaps;
         _chunkCount = chunkCount;
         _chunkRowCounts = chunkRowCounts;
+        _keyKind = InferKeyKind(compressedBitmaps.Keys);
     }
 
     /// <summary>
@@ -89,6 +91,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         _chunkLocations = chunkLocations;
         _chunkCount = chunkCount;
         _chunkRowCounts = chunkRowCounts;
+        _keyKind = InferKeyKind(chunkLocations.Keys);
     }
 
     /// <inheritdoc/>
@@ -155,12 +158,14 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
             return ChunkBitmap.Create(0);
         }
 
+        DataValue normalized = NormalizeKey(value);
+
         if (_compressedBitmaps is not null)
         {
-            return GetChunkBitmapFromHeap(value, chunkIndex);
+            return GetChunkBitmapFromHeap(normalized, chunkIndex);
         }
 
-        return GetChunkBitmapFromAccessor(value, chunkIndex);
+        return GetChunkBitmapFromAccessor(normalized, chunkIndex);
     }
 
     /// <summary>
@@ -210,12 +215,14 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     /// <inheritdoc/>
     public bool ChunkContainsValue(DataValue value, int chunkIndex)
     {
+        DataValue normalized = NormalizeKey(value);
+
         if (_compressedBitmaps is not null)
         {
-            return ChunkContainsValueFromHeap(value, chunkIndex);
+            return ChunkContainsValueFromHeap(normalized, chunkIndex);
         }
 
-        return ChunkContainsValueFromAccessor(value, chunkIndex);
+        return ChunkContainsValueFromAccessor(normalized, chunkIndex);
     }
 
     /// <summary>
@@ -269,11 +276,12 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     /// <inheritdoc/>
     public IReadOnlySet<int> FindChunksContaining(DataValue value)
     {
+        DataValue normalized = NormalizeKey(value);
         HashSet<int> chunks = new();
 
         if (_compressedBitmaps is not null)
         {
-            if (!_compressedBitmaps.TryGetValue(value, out byte[][]? chunkBitmaps))
+            if (!_compressedBitmaps.TryGetValue(normalized, out byte[][]? chunkBitmaps))
             {
                 return chunks;
             }
@@ -294,7 +302,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         }
         else
         {
-            if (!_chunkLocations!.TryGetValue(value, out ChunkLocation[]? locations))
+            if (!_chunkLocations!.TryGetValue(normalized, out ChunkLocation[]? locations))
             {
                 return chunks;
             }
@@ -319,5 +327,31 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         }
 
         return chunks;
+    }
+
+    /// <summary>
+    /// Coerces a lookup value to match the <see cref="DataKind"/> of keys stored in this
+    /// index, ensuring dictionary lookups succeed even when the caller's literal type differs
+    /// from the column's storage type (e.g. <see cref="DataKind.Float64"/> literal against
+    /// a <see cref="DataKind.Boolean"/> bitmap key).
+    /// </summary>
+    private DataValue NormalizeKey(DataValue value)
+    {
+        if (_keyKind is null || value.Kind == _keyKind.Value)
+        {
+            return value;
+        }
+
+        return value.CoerceToKind(_keyKind.Value);
+    }
+
+    /// <summary>
+    /// Infers the <see cref="DataKind"/> of dictionary keys from the first key.
+    /// Returns <c>null</c> when the dictionary is empty.
+    /// </summary>
+    private static DataKind? InferKeyKind(ICollection<DataValue> keys)
+    {
+        using IEnumerator<DataValue> enumerator = keys.GetEnumerator();
+        return enumerator.MoveNext() ? enumerator.Current.Kind : null;
     }
 }

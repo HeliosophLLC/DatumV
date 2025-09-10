@@ -163,10 +163,10 @@ public static class StatisticsPredicateEvaluator
 
             foreach (Expression valueExpression in inExpression.Values)
             {
-                if (valueExpression is LiteralExpression literal)
+                if (valueExpression is LiteralExpression { Value: not null } literal)
                 {
-                    DataValue? literalValue = LiteralToDataValue(literal.Value, range.Minimum.Value.Kind);
-                    if (literalValue is not null && CompareValues(range.Minimum.Value, literalValue.Value) == 0)
+                    DataValue literalValue = DataValue.FromLiteral(literal.Value);
+                    if (CompareValues(range.Minimum.Value, literalValue) == 0)
                     {
                         return true;
                     }
@@ -179,20 +179,16 @@ public static class StatisticsPredicateEvaluator
         // col IN (v1, v2, ...) — skip if every literal is outside [min, max].
         foreach (Expression valueExpression in inExpression.Values)
         {
-            if (valueExpression is not LiteralExpression literal)
+            if (valueExpression is not LiteralExpression { Value: not null } literal)
             {
                 return false; // Non-literal value — cannot evaluate.
             }
 
-            DataValue? literalValue = LiteralToDataValue(literal.Value, range.Minimum.Value.Kind);
-            if (literalValue is null)
-            {
-                return false; // Cannot convert — be conservative.
-            }
+            DataValue literalValue = DataValue.FromLiteral(literal.Value);
 
             // If any value falls within [min, max], we cannot skip.
-            if (CompareValues(literalValue.Value, range.Minimum.Value) >= 0
-                && CompareValues(literalValue.Value, range.Maximum.Value) <= 0)
+            if (CompareValues(literalValue, range.Minimum.Value) >= 0
+                && CompareValues(literalValue, range.Maximum.Value) <= 0)
             {
                 return false;
             }
@@ -230,8 +226,8 @@ public static class StatisticsPredicateEvaluator
             return false;
         }
 
-        DataValue? lowValue = LiteralToDataValue(lowLiteral.Value, range.Minimum.Value.Kind);
-        DataValue? highValue = LiteralToDataValue(highLiteral.Value, range.Minimum.Value.Kind);
+        DataValue? lowValue = lowLiteral.Value is null ? null : DataValue.FromLiteral(lowLiteral.Value);
+        DataValue? highValue = highLiteral.Value is null ? null : DataValue.FromLiteral(highLiteral.Value);
 
         if (lowValue is null || highValue is null)
         {
@@ -304,9 +300,8 @@ public static class StatisticsPredicateEvaluator
         if (binary.Left is ColumnReference leftColumn && binary.Right is LiteralExpression rightLiteral)
         {
             columnName = leftColumn.ColumnName;
-            DataValue? temp = LiteralToDataValue(rightLiteral.Value, targetKind: null);
-            if (temp is null) return false;
-            literalValue = temp.Value;
+            if (rightLiteral.Value is null) return false;
+            literalValue = DataValue.FromLiteral(rightLiteral.Value);
             return true;
         }
 
@@ -314,9 +309,8 @@ public static class StatisticsPredicateEvaluator
         if (binary.Left is LiteralExpression leftLiteral && binary.Right is ColumnReference rightColumn)
         {
             columnName = rightColumn.ColumnName;
-            DataValue? temp = LiteralToDataValue(leftLiteral.Value, targetKind: null);
-            if (temp is null) return false;
-            literalValue = temp.Value;
+            if (leftLiteral.Value is null) return false;
+            literalValue = DataValue.FromLiteral(leftLiteral.Value);
             flipped = true;
             return true;
         }
@@ -349,28 +343,7 @@ public static class StatisticsPredicateEvaluator
         };
     }
 
-    /// <summary>
-    /// Converts an AST literal value to a <see cref="DataValue"/>.
-    /// </summary>
-    internal static DataValue? LiteralToDataValue(object? value, DataKind? targetKind)
-    {
-        if (value is null)
-        {
-            return null; // NULL literals don't participate in statistics comparisons.
-        }
 
-        return value switch
-        {
-            int intValue => DataValue.FromFloat32(intValue),
-            long longValue => DataValue.FromFloat32(longValue),
-            float floatValue => DataValue.FromFloat32(floatValue),
-            double doubleValue => DataValue.FromFloat32((float)doubleValue),
-            decimal decimalValue => DataValue.FromFloat32((float)decimalValue),
-            string stringValue => DataValue.FromString(stringValue),
-            bool boolValue => DataValue.FromBoolean(boolValue),
-            _ => null,
-        };
-    }
 
     /// <summary>
     /// Compares two <see cref="DataValue"/> instances using the same semantics
