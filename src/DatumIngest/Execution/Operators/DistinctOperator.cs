@@ -48,6 +48,16 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
     /// <inheritdoc />
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        // DISTINCT must scan enough input rows to find N unique values —
+        // it cannot predict how many input rows are needed. Strip RowLimit
+        // to prevent child operators (e.g. JoinOperator) from picking
+        // strategies like index nested-loop that only pay off when the
+        // consumer needs few rows.
+        if (context.RowLimit is not null)
+        {
+            context = new ExecutionContext(context) { RowLimit = null };
+        }
+
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
 

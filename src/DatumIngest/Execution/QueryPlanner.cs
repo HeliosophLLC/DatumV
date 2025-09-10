@@ -2297,6 +2297,16 @@ public sealed class QueryPlanner
             return false;
         }
 
+        // Blocking operators (GROUP BY, DISTINCT, HAVING) must consume all
+        // join output before LIMIT can take effect, so the LIMIT cannot
+        // short-circuit the join. In that situation index NLJ degrades to
+        // per-row seeks across the entire probe side — catastrophically
+        // worse than a hash join.
+        if (statement.GroupBy is not null || statement.Distinct || statement.Having is not null)
+        {
+            return false;
+        }
+
         // Only INNER and LeftSemi joins — must match what IndexNestedLoopJoinExecutor supports.
         if (join.Type is not (JoinType.Inner or JoinType.LeftSemi))
         {

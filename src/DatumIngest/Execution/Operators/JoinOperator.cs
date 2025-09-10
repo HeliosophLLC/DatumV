@@ -187,8 +187,18 @@ public sealed class JoinOperator : IQueryOperator
                 {
                     yield return batch;
                 }
+
+                if (!indexNlj.CircuitBreakerTripped)
+                {
+                    yield break;
+                }
+
+                // Circuit breaker tripped — NLJ exceeded its probe-row trial
+                // budget and yielded nothing (output was buffered and discarded).
+                // Fall through to hash join for correct execution.
             }
-            else if (context.MemoryBudgetBytes is long memoryBudget)
+
+            if (context.MemoryBudgetBytes is long memoryBudget)
             {
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                 IQueryOperator buildSide = _flipped ? _left : _right;

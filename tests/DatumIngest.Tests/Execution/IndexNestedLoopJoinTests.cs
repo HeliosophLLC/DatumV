@@ -814,6 +814,219 @@ public sealed class IndexNestedLoopJoinTests
     }
 
     // ------------------------------------------------------------------
+    //  Circuit breaker tests
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Verifies that the NLJ executor trips the circuit breaker when the number
+    /// of probe rows exceeds the trial budget. The executor must yield no output
+    /// and set <see cref="IndexNestedLoopJoinExecutor.CircuitBreakerTripped"/>.
+    /// </summary>
+    [Fact]
+    public async Task CircuitBreaker_ExceedsTrialBudget_TripsAndYieldsNothing()
+    {
+        // Build side: single row.
+        Row[] buildRows =
+        [
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+        ];
+
+        ValueIndexEntry[] entries =
+        [
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+        ];
+
+        SortedValueIndex sortedIndex = new(entries);
+        IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 1)];
+
+        // Probe side: generate more rows than the trial budget.
+        // With RowLimit=10 the trial budget is min(10*10, 5000) = 100.
+        // Create 200 probe rows, all matching the single build row.
+        Row[] probeRows = Enumerable.Range(0, 200)
+            .Select(i => MakeRow(
+                ("p.id", DataValue.FromFloat32(1f)),
+                ("p.score", DataValue.FromFloat32(i))))
+            .ToArray();
+
+        MockOperator probe = new(probeRows);
+        MockOperator buildOperator = new();
+
+        JoinKeyExtractionResult extraction = new(
+            [(new ColumnReference("p", "id"), new ColumnReference("id"))],
+            Residual: null);
+
+        TableDescriptor descriptor = CreateDescriptor("build");
+        SeekableInMemoryProvider provider = new(buildRows);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
+        {
+            RowLimit = 10,
+        };
+
+        ExpressionEvaluator evaluator = new(DefaultFunctions);
+        IndexNestedLoopJoinExecutor executor = new(
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
+
+        List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, buildOperator, context));
+
+        Assert.Empty(results);
+        Assert.True(executor.CircuitBreakerTripped,
+            "Circuit breaker should trip when probe row count exceeds trial budget.");
+    }
+
+    /// <summary>
+    /// Verifies that the NLJ executor completes normally (no circuit breaker) when
+    /// the probe row count stays within the trial budget, and all output is yielded.
+    /// </summary>
+    [Fact]
+    public async Task CircuitBreaker_WithinTrialBudget_CompletesNormally()
+    {
+        Row[] buildRows =
+        [
+            MakeRow(("id", DataValue.FromFloat32(1f)), ("name", DataValue.FromString("Alice"))),
+        ];
+
+        ValueIndexEntry[] entries =
+        [
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+        ];
+
+        SortedValueIndex sortedIndex = new(entries);
+        IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 1)];
+
+        // 50 probe rows, all matching. With RowLimit=10, budget = 100. 50 < 100.
+        Row[] probeRows = Enumerable.Range(0, 50)
+            .Select(i => MakeRow(
+                ("p.id", DataValue.FromFloat32(1f)),
+                ("p.score", DataValue.FromFloat32(i))))
+            .ToArray();
+
+        MockOperator probe = new(probeRows);
+        MockOperator buildOperator = new();
+
+        JoinKeyExtractionResult extraction = new(
+            [(new ColumnReference("p", "id"), new ColumnReference("id"))],
+            Residual: null);
+
+        TableDescriptor descriptor = CreateDescriptor("build");
+        SeekableInMemoryProvider provider = new(buildRows);
+
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
+        {
+            RowLimit = 10,
+        };
+
+        ExpressionEvaluator evaluator = new(DefaultFunctions);
+        IndexNestedLoopJoinExecutor executor = new(
+            JoinType.Inner, extraction, sortedIndex, chunks, descriptor, buildAlias: null, evaluator);
+
+        List<Row> results = await CollectAsync(executor.ExecuteAsync(probe, buildOperator, context));
+
+        Assert.Equal(50, results.Count);
+        Assert.False(executor.CircuitBreakerTripped,
+            "Circuit breaker should not trip when probe rows are within budget.");
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="JoinOperator"/> falls through to hash join when the
+    /// NLJ circuit breaker trips, and the final result is still correct.
+    /// </summary>
+    [Fact]
+    public async Task JoinOperator_CircuitBreakerTrips_FallsBackToHashJoinWithCorrectResults()
+    {
+        // Build side: 3 distinct rows.
+        Row[] buildRows =
+        [
+            MakeRow(("r.id", DataValue.FromFloat32(1f)), ("r.val", DataValue.FromString("A"))),
+            MakeRow(("r.id", DataValue.FromFloat32(2f)), ("r.val", DataValue.FromString("B"))),
+            MakeRow(("r.id", DataValue.FromFloat32(3f)), ("r.val", DataValue.FromString("C"))),
+        ];
+
+        ValueIndexEntry[] indexEntries =
+        [
+            new(DataValue.FromFloat32(1f), ChunkIndex: 0, RowOffsetInChunk: 0),
+            new(DataValue.FromFloat32(2f), ChunkIndex: 0, RowOffsetInChunk: 1),
+            new(DataValue.FromFloat32(3f), ChunkIndex: 0, RowOffsetInChunk: 2),
+        ];
+
+        SortedValueIndex sortedIndex = new(indexEntries);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["r.id"] = sortedIndex,
+        });
+
+        IReadOnlyList<IndexChunk> chunks = [CreateChunk(rowOffset: 0, rowCount: 3)];
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(100, new byte[32]),
+            new IndexSchema(
+                new Schema([
+                    new ColumnInfo("r.id", DataKind.Float32, false),
+                    new ColumnInfo("r.val", DataKind.String, false)]), 3),
+            chunks,
+            sortedIndexes: sortedIndexSet);
+
+        TableDescriptor buildDescriptor = CreateDescriptor("build");
+        ScanOperator buildScan = new(buildDescriptor, requiredColumns: null);
+        buildScan.SetSourceIndex(sourceIndex);
+
+        // Generate 200 probe rows cycling through ids 1-3.
+        // With RowLimit=10, trial budget = 100. 200 > 100 → circuit breaker trips.
+        Row[] probeRows = Enumerable.Range(0, 200)
+            .Select(i => MakeRow(
+                ("l.id", DataValue.FromFloat32((i % 3) + 1f)),
+                ("l.name", DataValue.FromString($"Row{i}"))))
+            .ToArray();
+
+        MockOperator probeOperator = new(probeRows);
+
+        JoinOperator join = new(
+            probeOperator,
+            buildScan,
+            JoinType.Inner,
+            new BinaryExpression(
+                new ColumnReference("l", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("r", "id")));
+
+        SeekableInMemoryProvider provider = new(buildRows);
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("test", () => provider);
+        catalog.Register(buildDescriptor);
+
+        ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool())
+        {
+            RowLimit = 10,
+        };
+
+        List<Row> results = await CollectAsync(join, context);
+
+        // All 200 probe rows match one of the 3 build rows → 200 result rows.
+        Assert.Equal(200, results.Count);
+
+        // Verify correctness — every probe row should have a matching build value.
+        foreach (Row row in results)
+        {
+            float probeId = row["l.id"].AsFloat32();
+            string buildVal = row["r.val"].AsString();
+            string expected = probeId switch
+            {
+                1f => "A",
+                2f => "B",
+                3f => "C",
+                _ => throw new Exception($"Unexpected probe id: {probeId}"),
+            };
+            Assert.Equal(expected, buildVal);
+        }
+    }
+
+    // ------------------------------------------------------------------
     //  Helpers
     // ------------------------------------------------------------------
 

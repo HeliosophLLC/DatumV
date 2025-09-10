@@ -34,6 +34,14 @@ internal sealed class IndexNestedLoopJoinExecutor
     private readonly TableDescriptor _buildDescriptor;
     private readonly string? _buildAlias;
     private readonly ExpressionEvaluator _evaluator;
+    private bool _circuitBreakerTripped;
+
+    /// <summary>
+    /// Maximum number of probe rows the executor will process before tripping
+    /// the circuit breaker. Derived from <see cref="ExecutionContext.RowLimit"/>
+    /// (10× the expected output) and capped at this absolute maximum.
+    /// </summary>
+    private const int MaxTrialProbeRows = 5_000;
 
     /// <summary>
     /// Creates an index nested loop join executor.
@@ -68,6 +76,13 @@ internal sealed class IndexNestedLoopJoinExecutor
         _buildAlias = buildAlias;
         _evaluator = evaluator;
     }
+
+    /// <summary>
+    /// When <c>true</c>, the executor exceeded its probe-row trial budget and
+    /// stopped without yielding any output. The caller should fall through to
+    /// an alternative join strategy (e.g. hash join).
+    /// </summary>
+    internal bool CircuitBreakerTripped => _circuitBreakerTripped;
 
     /// <summary>
     /// Executes the index nested loop join.
@@ -108,11 +123,33 @@ internal sealed class IndexNestedLoopJoinExecutor
 
         RowBatch? outputBatch = null;
 
+        // Trial budget: buffer NLJ output for at most this many probe rows.
+        // If the probe side exceeds this budget, the circuit breaker trips and
+        // the caller falls back to hash join. This prevents pathological
+        // per-row-seek behavior when a blocking operator above the join
+        // swallows the LIMIT short-circuit that NLJ depends on.
+        int trialBudget = Math.Min((context.RowLimit ?? 500) * 10, MaxTrialProbeRows);
+        List<RowBatch> trialBuffer = new();
+        long probeRowsProcessed = 0;
+
         await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
             for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
             {
             Row probeRow = probeBatch[probeBatchIndex];
+
+            if (++probeRowsProcessed > trialBudget)
+            {
+                // Too many probe rows — NLJ is not benefiting from
+                // LIMIT short-circuit. Discard buffered output and signal
+                // the caller to fall back to hash join.
+                probeBatch.Return();
+                outputBatch?.Return();
+                foreach (RowBatch buffered in trialBuffer) { buffered.Return(); }
+                _circuitBreakerTripped = true;
+                yield break;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             // Evaluate the probe-side key.
@@ -140,7 +177,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 {
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
                     outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                     continue;
                 }
 
@@ -172,7 +209,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 {
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
                     outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                    if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                 }
 
                 continue;
@@ -200,10 +237,17 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                 outputBatch ??= RowBatch.Rent(context.BatchSize);
                 outputBatch.Add(combined);
-                if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
+                if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
             }
             }
             probeBatch.Return();
+        }
+
+        // Trial completed — NLJ processed all probe rows within budget.
+        // Yield the buffered output batches.
+        foreach (RowBatch buffered in trialBuffer)
+        {
+            yield return buffered;
         }
 
         if (outputBatch is not null)

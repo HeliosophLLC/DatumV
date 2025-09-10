@@ -2023,6 +2023,123 @@ public class QueryPlannerTests
     }
 
     /// <summary>
+    /// Verifies that the planner does NOT set <see cref="JoinOperator.PreferIndexNestedLoop"/>
+    /// when a GROUP BY clause is present, even with a LIMIT. GROUP BY is a blocking operator
+    /// that must consume all join output before LIMIT can take effect, so the LIMIT cannot
+    /// short-circuit the join — making index nested-loop catastrophically worse than hash join.
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoinWithLimitAndGroupBy_DoesNotSetPreferIndexNestedLoop()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("seekable", () => new SeekableStubProvider());
+
+        TableDescriptor probeDescriptor = new("seekable", "probe_table", "probe.datum", new Dictionary<string, string>());
+        TableDescriptor buildDescriptor = new("seekable", "build_table", "build.datum", new Dictionary<string, string>());
+        catalog.Register(probeDescriptor);
+        catalog.Register(buildDescriptor);
+
+        SortedValueIndex sortedIndex = new([new ValueIndexEntry(DataValue.FromFloat32(1f), 0, 0)]);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["build_id"] = sortedIndex,
+        });
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(10, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("build_id", DataKind.Float32, false)]), 10),
+            [],
+            sortedIndexes: sortedIndexSet);
+
+        catalog.RegisterIndex("build_table", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // LIMIT present but GROUP BY blocks short-circuit propagation.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("probe_table")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("build_table"),
+                    new BinaryExpression(
+                        new ColumnReference("probe_table", "probe_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("build_table", "build_id")))
+            ],
+            GroupBy: new GroupByClause([new ColumnReference("probe_table", "probe_id")]),
+            Limit: 20);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator? join = FindOperator<JoinOperator>(plan);
+        Assert.NotNull(join);
+        Assert.False(join.PreferIndexNestedLoop,
+            "Planner must not set PreferIndexNestedLoop when GROUP BY blocks LIMIT propagation to the join.");
+    }
+
+    /// <summary>
+    /// Verifies that the planner does NOT set <see cref="JoinOperator.PreferIndexNestedLoop"/>
+    /// when DISTINCT is present, even with a LIMIT. DISTINCT must see all rows before
+    /// deduplication, preventing the LIMIT from short-circuiting the join.
+    /// </summary>
+    [Fact]
+    public void Plan_InnerJoinWithLimitAndDistinct_DoesNotSetPreferIndexNestedLoop()
+    {
+        TableCatalog catalog = new();
+        catalog.RegisterProvider("seekable", () => new SeekableStubProvider());
+
+        TableDescriptor probeDescriptor = new("seekable", "probe_table", "probe.datum", new Dictionary<string, string>());
+        TableDescriptor buildDescriptor = new("seekable", "build_table", "build.datum", new Dictionary<string, string>());
+        catalog.Register(probeDescriptor);
+        catalog.Register(buildDescriptor);
+
+        SortedValueIndex sortedIndex = new([new ValueIndexEntry(DataValue.FromFloat32(1f), 0, 0)]);
+        SortedValueIndexSet sortedIndexSet = new(new Dictionary<string, SortedValueIndex>
+        {
+            ["build_id"] = sortedIndex,
+        });
+
+        SourceIndex sourceIndex = new(
+            new SourceFingerprint(10, new byte[32]),
+            new IndexSchema(
+                new Schema([new ColumnInfo("build_id", DataKind.Float32, false)]), 10),
+            [],
+            sortedIndexes: sortedIndexSet);
+
+        catalog.RegisterIndex("build_table", sourceIndex);
+
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        // LIMIT present but DISTINCT blocks short-circuit propagation.
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("probe_table")),
+            Joins:
+            [
+                new JoinClause(
+                    JoinType.Inner,
+                    new TableReference("build_table"),
+                    new BinaryExpression(
+                        new ColumnReference("probe_table", "probe_id"),
+                        BinaryOperator.Equal,
+                        new ColumnReference("build_table", "build_id")))
+            ],
+            Distinct: true,
+            Limit: 20);
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        JoinOperator? join = FindOperator<JoinOperator>(plan);
+        Assert.NotNull(join);
+        Assert.False(join.PreferIndexNestedLoop,
+            "Planner must not set PreferIndexNestedLoop when DISTINCT blocks LIMIT propagation to the join.");
+    }
+
+    /// <summary>
     /// Verifies that the planner chooses a <see cref="MergeJoinOperator"/> over a hash join
     /// when the build side exceeds the B+Tree auto-threshold row count, even when the leading
     /// ORDER BY / GROUP BY column does not match the join key.  At that scale the cost of

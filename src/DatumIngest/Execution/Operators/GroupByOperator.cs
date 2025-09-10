@@ -121,6 +121,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// <inheritdoc/>
     public IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        // GroupBy is a blocking operator — it must consume ALL input before
+        // emitting any output. A downstream RowLimit cannot short-circuit the
+        // child operators, so strip it to prevent children (e.g. JoinOperator)
+        // from picking strategies like index nested-loop that only pay off when
+        // the consumer needs few rows.
+        if (context.RowLimit is not null)
+        {
+            context = new ExecutionContext(context) { RowLimit = null };
+        }
+
         if (_streamingSorted)
         {
             return ExecuteStreamingAsync(context);
