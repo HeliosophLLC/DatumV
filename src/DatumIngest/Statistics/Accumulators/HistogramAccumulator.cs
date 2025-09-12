@@ -206,9 +206,14 @@ public sealed class HistogramAccumulator : IStatisticAccumulator
 
         foreach (double sample in _samples)
         {
-            int bin = (int)((long)sample - intMin) / (int)binWidth;
+            long offset = (long)sample - intMin;
+            int bin = (int)(offset / binWidth);
 
-            if (bin >= effectiveBinCount)
+            if (bin < 0)
+            {
+                bin = 0;
+            }
+            else if (bin >= effectiveBinCount)
             {
                 bin = effectiveBinCount - 1;
             }

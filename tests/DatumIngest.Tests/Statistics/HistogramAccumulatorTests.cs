@@ -238,4 +238,86 @@ public sealed class HistogramAccumulatorTests
         long totalInBins = result.Counts.Sum();
         Assert.Equal(5, totalInBins);
     }
+
+    /// <summary>
+    /// Regression test: integer data spanning a very large range (e.g. MIMIC-III ROW_ID
+    /// from 0 to 2,000,000+) caused <see cref="int"/> overflow in the bin-index calculation
+    /// inside <c>BuildIntegerAlignedBins</c>. The <c>(int)binWidth</c> cast wrapped to a
+    /// negative value, producing a negative array index and
+    /// <see cref="IndexOutOfRangeException"/>.
+    /// </summary>
+    [Fact]
+    public void GetResult_LargeIntegerRange_DoesNotThrowOverflow()
+    {
+        HistogramAccumulator accumulator = new(binCount: 20);
+
+        // Simulate a column with integer IDs spanning 0 to 5,000,000.
+        Random random = new(42);
+        for (int i = 0; i < 1_000; i++)
+        {
+            double value = random.Next(0, 5_000_001);
+            accumulator.Add(DataValue.FromFloat64(value));
+        }
+
+        // Must not throw IndexOutOfRangeException.
+        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+
+        Assert.True(result.BinEdges.Count >= 2, "Should have at least 2 bin edges.");
+        Assert.True(result.Counts.Count >= 1, "Should have at least 1 bin.");
+        Assert.Equal(1_000, result.Counts.Sum());
+        Assert.True(result.IntegerValued, "All values are whole numbers.");
+    }
+
+    /// <summary>
+    /// Reproduces the MIMIC-III NOTEEVENTS crash: de-identified dates shifted to
+    /// year 2138 produce epoch values around 5.3 billion — well beyond
+    /// <see cref="int.MaxValue"/>. The original <c>(int)</c> cast on
+    /// <c>((long)sample - intMin)</c> and <c>(int)binWidth</c> caused overflow
+    /// and a negative array index.
+    /// </summary>
+    [Fact]
+    public void GetResult_EpochTimestampRange_DoesNotThrowOverflow()
+    {
+        HistogramAccumulator accumulator = new(binCount: 50);
+
+        // Epoch seconds for de-identified dates spanning year 2100–2138.
+        // These values exceed int.MaxValue (~2.1 billion).
+        double baseEpoch = 4_102_444_800.0; // ~2100-01-01 UTC
+        Random random = new(42);
+        for (int i = 0; i < 500; i++)
+        {
+            double value = baseEpoch + random.Next(0, 1_200_000_000);
+            accumulator.Add(DataValue.FromFloat64(value));
+        }
+
+        // Must not throw IndexOutOfRangeException.
+        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+
+        Assert.True(result.BinEdges.Count >= 2);
+        Assert.Equal(500, result.Counts.Sum());
+        Assert.True(result.IntegerValued);
+    }
+
+    /// <summary>
+    /// Verifies correctness with an extremely wide integer range where <c>binWidth</c>
+    /// exceeds <see cref="int.MaxValue"/>, ensuring the <see cref="long"/> division
+    /// path in <c>BuildIntegerAlignedBins</c> produces valid bin indices.
+    /// </summary>
+    [Fact]
+    public void GetResult_ExtremeIntegerRange_BinWidthExceedsIntMax()
+    {
+        HistogramAccumulator accumulator = new(binCount: 10);
+
+        // Range: 0 to 10 billion. binWidth ≈ 1 billion, well above int.MaxValue.
+        accumulator.Add(DataValue.FromFloat64(0.0));
+        accumulator.Add(DataValue.FromFloat64(1_000_000_000.0));
+        accumulator.Add(DataValue.FromFloat64(5_000_000_000.0));
+        accumulator.Add(DataValue.FromFloat64(10_000_000_000.0));
+
+        HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
+
+        Assert.True(result.BinEdges.Count >= 2);
+        Assert.Equal(4, result.Counts.Sum());
+        Assert.Equal(0.0, result.BinEdges[0]);
+    }
 }
