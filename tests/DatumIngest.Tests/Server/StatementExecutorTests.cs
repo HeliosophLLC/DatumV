@@ -821,6 +821,74 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Contains("mutually exclusive", result.Message);
     }
 
+    /// <summary>
+    /// A scalar subquery in a computed column definition is rejected before execution.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_Computed_RejectsSubquery()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (x INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1)");
+
+        CommandResult result = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN y INT AS (SELECT MAX(x) FROM data)");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("Subquery", result.Message);
+        Assert.Contains("not allowed in computed column", result.Message);
+    }
+
+    /// <summary>
+    /// An IN (subquery) expression in a computed column definition is rejected before execution.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_Computed_RejectsInSubquery()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (x INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1)");
+
+        CommandResult result = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN flag BOOLEAN AS x IN (SELECT x FROM data)");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("IN (subquery)", result.Message);
+        Assert.Contains("not allowed in computed column", result.Message);
+    }
+
+    /// <summary>
+    /// A window function in a computed column definition is rejected before execution.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_Computed_RejectsWindowFunction()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (x INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1)");
+
+        CommandResult result = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN rn INT AS ROW_NUMBER() OVER (ORDER BY x)");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("Window function", result.Message);
+        Assert.Contains("not allowed in computed column", result.Message);
+    }
+
+    /// <summary>
+    /// A subquery nested inside a CASE expression in a computed column is still rejected.
+    /// </summary>
+    [Fact]
+    public async Task AlterTableAddColumn_Computed_RejectsNestedSubquery()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (x INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1)");
+
+        CommandResult result = await ExecuteAsync(
+            "ALTER TABLE data ADD COLUMN y INT AS CASE WHEN x > 0 THEN (SELECT MAX(x) FROM data) ELSE 0 END");
+
+        Assert.Equal(CommandResultKind.Error, result.Kind);
+        Assert.Contains("Subquery", result.Message);
+        Assert.Contains("not allowed in computed column", result.Message);
+    }
+
     // ──────────────────── CREATE TEMP TABLE AS SELECT ────────────────────
 
     /// <summary>

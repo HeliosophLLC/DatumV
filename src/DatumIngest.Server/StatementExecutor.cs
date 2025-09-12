@@ -1077,6 +1077,13 @@ internal sealed class StatementExecutor
         DataKind targetKind)
     {
         Expression computedExpression = statement.ComputedExpression!;
+
+        string? disallowed = FindDisallowedComputedColumnExpression(computedExpression);
+        if (disallowed is not null)
+        {
+            return CommandResult.Error(
+                $"{disallowed} expressions are not allowed in computed column definitions.");
+        }
         DatumEncodedPage[] pages;
 
         using (DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath))
@@ -1596,5 +1603,89 @@ internal sealed class StatementExecutor
             _ => throw new InvalidOperationException(
                 $"Cannot coerce {value.Kind} to {targetKind} in computed column expression."),
         };
+    }
+
+    /// <summary>
+    /// Recursively walks an expression tree and returns the name of the first
+    /// disallowed node type found, or <c>null</c> if the expression is valid
+    /// for use in a computed column definition. Subquery and window function
+    /// expressions are rejected because computed columns are evaluated row-by-row
+    /// without access to the query planner.
+    /// </summary>
+    private static string? FindDisallowedComputedColumnExpression(Expression expression)
+    {
+        switch (expression)
+        {
+            case SubqueryExpression:
+                return "Subquery";
+            case InSubqueryExpression:
+                return "IN (subquery)";
+            case ExistsExpression:
+                return "EXISTS";
+            case WindowFunctionCallExpression:
+                return "Window function";
+
+            case BinaryExpression binary:
+                return FindDisallowedComputedColumnExpression(binary.Left)
+                    ?? FindDisallowedComputedColumnExpression(binary.Right);
+
+            case UnaryExpression unary:
+                return FindDisallowedComputedColumnExpression(unary.Operand);
+
+            case FunctionCallExpression function:
+                foreach (Expression argument in function.Arguments)
+                {
+                    string? result = FindDisallowedComputedColumnExpression(argument);
+                    if (result is not null) return result;
+                }
+                return null;
+
+            case LikeExpression like:
+                return FindDisallowedComputedColumnExpression(like.Expression)
+                    ?? FindDisallowedComputedColumnExpression(like.Pattern)
+                    ?? FindDisallowedComputedColumnExpression(like.EscapeCharacter);
+
+            case InExpression inExpression:
+                string? inResult = FindDisallowedComputedColumnExpression(inExpression.Expression);
+                if (inResult is not null) return inResult;
+                foreach (Expression value in inExpression.Values)
+                {
+                    inResult = FindDisallowedComputedColumnExpression(value);
+                    if (inResult is not null) return inResult;
+                }
+                return null;
+
+            case BetweenExpression between:
+                return FindDisallowedComputedColumnExpression(between.Expression)
+                    ?? FindDisallowedComputedColumnExpression(between.Low)
+                    ?? FindDisallowedComputedColumnExpression(between.High);
+
+            case IsNullExpression isNull:
+                return FindDisallowedComputedColumnExpression(isNull.Expression);
+
+            case CastExpression cast:
+                return FindDisallowedComputedColumnExpression(cast.Expression);
+
+            case CaseExpression caseExpression:
+                if (caseExpression.Operand is not null)
+                {
+                    string? operandResult = FindDisallowedComputedColumnExpression(caseExpression.Operand);
+                    if (operandResult is not null) return operandResult;
+                }
+                foreach (WhenClause whenClause in caseExpression.WhenClauses)
+                {
+                    string? whenResult = FindDisallowedComputedColumnExpression(whenClause.Condition)
+                        ?? FindDisallowedComputedColumnExpression(whenClause.Result);
+                    if (whenResult is not null) return whenResult;
+                }
+                if (caseExpression.ElseResult is not null)
+                {
+                    return FindDisallowedComputedColumnExpression(caseExpression.ElseResult);
+                }
+                return null;
+
+            default:
+                return null;
+        }
     }
 }
