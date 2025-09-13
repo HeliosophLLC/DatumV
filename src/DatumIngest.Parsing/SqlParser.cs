@@ -1633,7 +1633,14 @@ public static class SqlParser
         TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
 
         // Fast path: try the full parser first. If it succeeds, no recovery needed.
-        TokenListParserResult<SqlToken, QueryExpression> fullResult = FullParser.TryParse(tokens);
+        // Also accept trailing semicolons so that "SELECT 1;" does not fall through
+        // to the recovery path.
+        TokenListParser<SqlToken, QueryExpression> tolerantParser =
+            from query in QueryExpressionParser
+            from _ in Token.EqualTo(SqlToken.Semicolon).Many()
+            select query;
+
+        TokenListParserResult<SqlToken, QueryExpression> fullResult = tolerantParser.AtEnd().TryParse(tokens);
         if (fullResult.HasValue)
         {
             return new ParseResult(fullResult.Value);
@@ -1949,6 +1956,12 @@ public static class SqlParser
                 offsetValue = offsetResult.Value;
                 position += CountConsumed(tokenArray, position, offsetResult.Remainder);
             }
+        }
+
+        // ── Trailing semicolons ──
+        while (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Semicolon)
+        {
+            position++;
         }
 
         // ── Trailing tokens ──

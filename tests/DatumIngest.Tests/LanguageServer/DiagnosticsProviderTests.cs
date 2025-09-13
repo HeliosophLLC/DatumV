@@ -44,6 +44,24 @@ public sealed class DiagnosticsProviderTests
         Assert.Empty(diagnostics);
     }
 
+    // ───────────────────── Trailing semicolons ─────────────────────
+
+    [Fact]
+    public void GetDiagnostics_TrailingSemicolon_ReturnsEmpty()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics("SELECT x FROM t;");
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void GetDiagnostics_MultipleTrailingSemicolons_ReturnsEmpty()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics("SELECT x FROM t;;");
+
+        Assert.Empty(diagnostics);
+    }
+
     // ───────────────────── Parse errors ─────────────────────
 
     [Fact]
