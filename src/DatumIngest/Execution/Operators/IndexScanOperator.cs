@@ -21,6 +21,14 @@ namespace DatumIngest.Execution.Operators;
 /// </remarks>
 public sealed class IndexScanOperator : IQueryOperator
 {
+    /// <summary>
+    /// Maximum number of index entries accumulated before flushing, even when all
+    /// entries belong to the same chunk. Without this cap, a single-chunk file
+    /// (common for CSV imports) would accumulate all entries before yielding any
+    /// rows — blocking early termination from downstream LIMIT or GROUP BY operators.
+    /// </summary>
+    private const int MaxIndexEntriesPerFlush = 8192;
+
     private readonly TableDescriptor _descriptor;
     private readonly IReadOnlySet<string>? _requiredColumns;
     private readonly IColumnIndex _columnIndex;
@@ -123,9 +131,11 @@ public sealed class IndexScanOperator : IQueryOperator
 
             foreach (ValueIndexEntry entry in traversal)
             {
-                if (indexEntries.Count > 0 && entry.ChunkIndex != currentChunkIndex)
+                if (indexEntries.Count > 0
+                    && (entry.ChunkIndex != currentChunkIndex
+                        || indexEntries.Count >= MaxIndexEntriesPerFlush))
                 {
-                    // Chunk boundary: flush the accumulated entries.
+                    // Chunk boundary or size cap: flush the accumulated entries.
                     await foreach (Row row in FlushIndexEntriesAsync(
                         seekable, indexEntries, cancellationToken).ConfigureAwait(false))
                     {

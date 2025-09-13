@@ -967,6 +967,51 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(1f, rows[3]["event_count"].AsFloat32());
     }
 
+    /// <summary>
+    /// JOIN with GROUP BY, COUNT, and LIMIT on a filtered table produces correct
+    /// results.  Regression: on large single-chunk files, IndexScanOperator
+    /// accumulated all index entries before yielding any rows, blocking early
+    /// termination from LIMIT and causing a 30-second timeout.
+    /// </summary>
+    [Fact]
+    public async Task JoinWithGroupByAndLimit_FilteredSide_ReturnsCorrectResults()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE purchase_log (purchase_id INT, purchase_kind STRING)");
+        await ExecuteAsync(
+            "INSERT INTO purchase_log VALUES " +
+            "(1, 'prior'), (2, 'train'), (3, 'prior'), (4, 'train'), " +
+            "(5, 'prior'), (6, 'train'), (7, 'prior'), (8, 'train')");
+
+        await ExecuteAsync("CREATE TEMP TABLE line_items (item_id INT, purchase_id INT)");
+        await ExecuteAsync(
+            "INSERT INTO line_items VALUES " +
+            "(100, 2), (101, 2), (102, 4), (103, 4), (104, 4), " +
+            "(105, 6), (106, 8), (107, 8)");
+
+        CommandResult result = await ExecuteAsync(
+            "SELECT p.purchase_id, COUNT(*) AS basket_size " +
+            "FROM purchase_log p " +
+            "JOIN line_items li ON p.purchase_id = li.purchase_id " +
+            "WHERE p.purchase_kind = 'train' " +
+            "GROUP BY p.purchase_id " +
+            "ORDER BY p.purchase_id " +
+            "LIMIT 3");
+
+        Assert.Equal(CommandResultKind.StreamingRows, result.Kind);
+        List<Row> rows = await CollectRowsAsync(result);
+
+        Assert.Equal(3, rows.Count);
+
+        Assert.Equal(2, rows[0]["purchase_id"].AsInt32());
+        Assert.Equal(2f, rows[0]["basket_size"].AsFloat32());
+
+        Assert.Equal(4, rows[1]["purchase_id"].AsInt32());
+        Assert.Equal(3f, rows[1]["basket_size"].AsFloat32());
+
+        Assert.Equal(6, rows[2]["purchase_id"].AsInt32());
+        Assert.Equal(1f, rows[2]["basket_size"].AsFloat32());
+    }
+
     // ──────────────────── Multiple operations ────────────────────
 
     /// <summary>

@@ -250,6 +250,9 @@ public sealed class ScanOperator : IQueryOperator
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
 
+        try
+        {
+
         // When a source index is available and either a filter hint, bloom pruning
         // keys, sorted index pruning keys, bitmap indexes, or column indexes are present,
         // apply chunk-level pruning.
@@ -332,6 +335,12 @@ public sealed class ScanOperator : IQueryOperator
             {
                 yield return batch;
             }
+        }
+
+        }
+        finally
+        {
+            (provider as IDisposable)?.Dispose();
         }
     }
 
