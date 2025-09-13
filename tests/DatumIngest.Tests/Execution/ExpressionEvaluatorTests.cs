@@ -1256,7 +1256,8 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Case_NullResult_AdoptsResolvedKind()
     {
-        // CASE WHEN false THEN '0' END → no match, no ELSE → null with Scalar kind
+        // CASE WHEN false THEN '0' END → no match, no ELSE → null with Int32 kind
+        // (String + Int32 unifies to Int32; string values are parsed at runtime).
         Row row = MakeRow(("x", DataValue.FromFloat32(5)));
         DataValue result = _evaluator.Evaluate(
             new CaseExpression(
@@ -1268,7 +1269,7 @@ public class ExpressionEvaluatorTests
                 null),
             row);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(DataKind.Int32, result.Kind);
     }
 
     [Fact]
@@ -1282,5 +1283,34 @@ public class ExpressionEvaluatorTests
             MakeRow());
         Assert.Equal(DataKind.String, result.Kind);
         Assert.Equal("yes", result.AsString());
+    }
+
+    /// <summary>
+    /// Reproduces the bug where SUM(CASE WHEN col='x' THEN 1 ELSE 0 END) returns
+    /// NULL because the type resolver declared integer literals as Float32 while
+    /// the evaluator produced Int32 values. The coercion from Int32 to Float32
+    /// failed (no widening path), producing typed nulls that SUM silently skipped.
+    /// </summary>
+    [Fact]
+    public void Case_IntegerLiteral_PreservesInt32Kind()
+    {
+        Row row = MakeRow(("eval_set", DataValue.FromString("train")));
+        CaseExpression caseExpression = new(
+            null,
+            [
+                new WhenClause(
+                    new BinaryExpression(
+                        new ColumnReference("eval_set"),
+                        BinaryOperator.Equal,
+                        new LiteralExpression("train")),
+                    new LiteralExpression(1)),
+            ],
+            new LiteralExpression(0));
+
+        DataValue result = _evaluator.Evaluate(caseExpression, row);
+
+        Assert.False(result.IsNull, "CASE with integer literals should not produce NULL.");
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(1, result.AsInt32());
     }
 }

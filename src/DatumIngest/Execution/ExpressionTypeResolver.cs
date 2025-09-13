@@ -51,7 +51,10 @@ public static class ExpressionTypeResolver
 
         return literal.Value switch
         {
-            int or long or float or double => DataKind.Float32,
+            int => DataKind.Int32,
+            long => DataKind.Int64,
+            float => DataKind.Float32,
+            double => DataKind.Float64,
             string => DataKind.String,
             bool => DataKind.Boolean,
             _ => null,

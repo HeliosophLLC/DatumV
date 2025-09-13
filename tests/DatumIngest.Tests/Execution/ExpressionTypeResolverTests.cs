@@ -24,10 +24,10 @@ public sealed class ExpressionTypeResolverTests
     // ───────────────────── Literals ─────────────────────
 
     [Theory]
-    [InlineData(42, DataKind.Float32)]
-    [InlineData(42L, DataKind.Float32)]
+    [InlineData(42, DataKind.Int32)]
+    [InlineData(42L, DataKind.Int64)]
     [InlineData(3.14f, DataKind.Float32)]
-    [InlineData(3.14, DataKind.Float32)]
+    [InlineData(3.14, DataKind.Float64)]
     [InlineData(true, DataKind.Boolean)]
     public void ResolveLiteral_NumericOrBool_ReturnsScalar(object value, DataKind expected)
     {
@@ -119,7 +119,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Float64, result);
     }
 
     // ───────────────────── Unary expressions ─────────────────────
@@ -256,7 +256,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Int32, result);
     }
 
     [Fact]
@@ -320,7 +320,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Int32, result);
     }
 
     [Fact]
