@@ -10,11 +10,18 @@ public sealed class ParseResult
 {
     /// <summary>
     /// The parsed query expression. May be <see langword="null"/> if parsing failed entirely
-    /// and no partial tree could be recovered. When errors are present, the tree
-    /// may contain <see cref="ErrorExpression"/> placeholder nodes where recovery
-    /// skipped unparseable input.
+    /// and no partial tree could be recovered, or if the input is a DDL/DML batch.
+    /// When errors are present, the tree may contain <see cref="ErrorExpression"/>
+    /// placeholder nodes where recovery skipped unparseable input.
     /// </summary>
     public QueryExpression? Query { get; }
+
+    /// <summary>
+    /// The parsed statements when the input is a DDL/DML batch or a
+    /// semicolon-separated sequence of statements. <see langword="null"/> when
+    /// the recovery parser was used (which only produces <see cref="Query"/>).
+    /// </summary>
+    public IReadOnlyList<Statement>? Statements { get; }
 
     /// <summary>
     /// The parsed AST as a <see cref="SelectStatement"/>, for backward compatibility.
@@ -30,12 +37,22 @@ public sealed class ParseResult
     public IReadOnlyList<ParseError> Errors { get; }
 
     /// <summary>Whether the input was parsed without any errors.</summary>
-    public bool IsSuccess => Errors.Count == 0 && Query is not null;
+    public bool IsSuccess => Errors.Count == 0 && (Query is not null || Statements is not null);
 
-    /// <summary>Creates a successful parse result with no errors.</summary>
+    /// <summary>Creates a successful parse result for a single query expression.</summary>
     internal ParseResult(QueryExpression query)
     {
         Query = query;
+        Errors = [];
+    }
+
+    /// <summary>Creates a successful parse result for a batch of statements (DDL/DML/queries).</summary>
+    internal ParseResult(IReadOnlyList<Statement> statements)
+    {
+        // When the batch is a single query statement, extract the QueryExpression
+        // so that semantic analysis (table/column validation) still works.
+        Query = statements is [QueryStatement single] ? single.Query : null;
+        Statements = statements;
         Errors = [];
     }
 

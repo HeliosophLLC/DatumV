@@ -251,4 +251,43 @@ public sealed class ErrorRecoveryTests
         TableReference actualTable = Assert.IsType<TableReference>(result.Statement.From.Source);
         Assert.Equal(expectedTable.Name, actualTable.Name);
     }
+
+    // ───────────────────── DDL / DML statements ─────────────────────
+
+    [Theory]
+    [InlineData("CREATE TEMP TABLE #t (id INT, name TEXT)")]
+    [InlineData("DROP TABLE #t")]
+    [InlineData("INSERT INTO #t (id) VALUES (1)")]
+    [InlineData("UPDATE #t SET name = 'x' WHERE id = 1")]
+    [InlineData("DELETE FROM #t WHERE id = 1")]
+    [InlineData("ALTER TABLE #t ADD COLUMN score REAL")]
+    [InlineData("ANALYZE orders")]
+    public void DdlDml_ReturnsSuccessWithNoErrors(string sql)
+    {
+        ParseResult result = SqlParser.TryParseRecovering(sql);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Statements);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void DdlWithTrailingSemicolon_ReturnsSuccess()
+    {
+        ParseResult result = SqlParser.TryParseRecovering("UPDATE #t SET name = 'x';");
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void SemicolonSeparatedBatch_ReturnsSuccess()
+    {
+        ParseResult result = SqlParser.TryParseRecovering(
+            "INSERT INTO #t (id) VALUES (1); SELECT id FROM #t");
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Statements);
+        Assert.Equal(2, result.Statements!.Count);
+    }
 }

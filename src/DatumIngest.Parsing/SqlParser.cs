@@ -1632,21 +1632,21 @@ public static class SqlParser
     {
         TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
 
-        // Fast path: try the full parser first. If it succeeds, no recovery needed.
-        // Also accept trailing semicolons so that "SELECT 1;" does not fall through
-        // to the recovery path.
-        TokenListParser<SqlToken, QueryExpression> tolerantParser =
-            from query in QueryExpressionParser
-            from _ in Token.EqualTo(SqlToken.Semicolon).Many()
-            select query;
+        // Fast path: try the full batch parser first. This handles all statement
+        // types (SELECT, CREATE, INSERT, UPDATE, DELETE, ALTER, ANALYZE) and
+        // semicolon-separated batches. If it succeeds, no recovery needed.
+        TokenListParserResult<SqlToken, IReadOnlyList<Statement>> batchResult =
+            FullBatchParser.TryParse(tokens);
 
-        TokenListParserResult<SqlToken, QueryExpression> fullResult = tolerantParser.AtEnd().TryParse(tokens);
-        if (fullResult.HasValue)
+        if (batchResult.HasValue)
         {
-            return new ParseResult(fullResult.Value);
+            return new ParseResult(batchResult.Value);
         }
 
         // Recovery path: parse clause-by-clause, collecting errors.
+        // This only handles SELECT queries — DDL/DML that failed the fast path
+        // will produce an "Expected SELECT keyword." error, which is appropriate
+        // since the DDL/DML itself was syntactically invalid.
         return ParseWithRecovery(tokens);
     }
 

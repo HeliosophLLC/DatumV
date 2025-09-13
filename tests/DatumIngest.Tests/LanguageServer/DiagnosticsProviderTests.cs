@@ -62,6 +62,32 @@ public sealed class DiagnosticsProviderTests
         Assert.Empty(diagnostics);
     }
 
+    // ───────────────────── DDL / DML statements ─────────────────────
+
+    [Theory]
+    [InlineData("CREATE TEMP TABLE #t (id INT, name TEXT)")]
+    [InlineData("DROP TABLE #t")]
+    [InlineData("DROP TABLE IF EXISTS #t")]
+    [InlineData("INSERT INTO #t (id) VALUES (1)")]
+    [InlineData("UPDATE #t SET name = 'x' WHERE id = 1")]
+    [InlineData("DELETE FROM #t WHERE id = 1")]
+    [InlineData("ALTER TABLE #t ADD COLUMN score REAL")]
+    [InlineData("ANALYZE orders")]
+    public void GetDiagnostics_ValidDdlDml_ReturnsEmpty(string sql)
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(sql);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void GetDiagnostics_DdlWithTrailingSemicolon_ReturnsEmpty()
+    {
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics("UPDATE #t SET name = 'x';");
+
+        Assert.Empty(diagnostics);
+    }
+
     // ───────────────────── Parse errors ─────────────────────
 
     [Fact]
