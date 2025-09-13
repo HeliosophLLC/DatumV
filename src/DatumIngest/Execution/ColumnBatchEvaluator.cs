@@ -211,8 +211,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
             DataValue[] right = EvaluateColumn(binary.Right, batch);
             DataValue[] result = RentBuffer(rowCount);
 
-            DataValue trueValue = DataValue.FromFloat32(1f);
-            DataValue falseValue = DataValue.FromFloat32(0f);
+            DataValue trueValue = DataValue.FromBoolean(true);
+            DataValue falseValue = DataValue.FromBoolean(false);
 
             for (int row = 0; row < rowCount; row++)
             {
@@ -231,8 +231,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
             DataValue[] right = EvaluateColumn(binary.Right, batch);
             DataValue[] result = RentBuffer(rowCount);
 
-            DataValue trueValue = DataValue.FromFloat32(1f);
-            DataValue falseValue = DataValue.FromFloat32(0f);
+            DataValue trueValue = DataValue.FromBoolean(true);
+            DataValue falseValue = DataValue.FromBoolean(false);
 
             for (int row = 0; row < rowCount; row++)
             {
@@ -371,9 +371,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] left, DataValue[] right, DataValue[] result, int rowCount,
         ColumnBatch batch, Func<int, bool> predicate)
     {
-        DataValue trueValue = DataValue.FromFloat32(1f);
-        DataValue falseValue = DataValue.FromFloat32(0f);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
+        DataValue trueValue = DataValue.FromBoolean(true);
+        DataValue falseValue = DataValue.FromBoolean(false);
+        DataValue nullResult = DataValue.Null(DataKind.Boolean);
 
         for (int row = 0; row < rowCount; row++)
         {
@@ -430,9 +430,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] left, DataValue[] right, DataValue[] result, int rowCount,
         ColumnBatch batch)
     {
-        DataValue trueValue = DataValue.FromFloat32(1f);
-        DataValue falseValue = DataValue.FromFloat32(0f);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
+        DataValue trueValue = DataValue.FromBoolean(true);
+        DataValue falseValue = DataValue.FromBoolean(false);
+        DataValue nullResult = DataValue.Null(DataKind.Boolean);
 
         for (int row = 0; row < rowCount; row++)
         {
@@ -465,18 +465,18 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] operand = EvaluateColumn(unary.Operand, batch);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
 
         switch (unary.Operator)
         {
             case UnaryOperator.Not:
-                DataValue trueValue = DataValue.FromFloat32(1f);
-                DataValue falseValue = DataValue.FromFloat32(0f);
+                DataValue notNullResult = DataValue.Null(DataKind.Boolean);
+                DataValue trueValue = DataValue.FromBoolean(true);
+                DataValue falseValue = DataValue.FromBoolean(false);
                 for (int row = 0; row < rowCount; row++)
                 {
                     if (operand[row].IsNull)
                     {
-                        result[row] = nullResult;
+                        result[row] = notNullResult;
                         continue;
                     }
 
@@ -485,11 +485,12 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 break;
 
             case UnaryOperator.Negate:
+                DataValue negateNullResult = DataValue.Null(DataKind.Float32);
                 for (int row = 0; row < rowCount; row++)
                 {
                     if (operand[row].IsNull)
                     {
-                        result[row] = nullResult;
+                        result[row] = negateNullResult;
                         continue;
                     }
 
@@ -512,8 +513,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] operand = EvaluateColumn(isNull.Expression, batch);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
-        DataValue trueValue = DataValue.FromFloat32(1f);
-        DataValue falseValue = DataValue.FromFloat32(0f);
+        DataValue trueValue = DataValue.FromBoolean(true);
+        DataValue falseValue = DataValue.FromBoolean(false);
 
         if (isNull.Negated)
         {
@@ -542,9 +543,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] high = EvaluateColumn(between.High, batch);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
-        DataValue trueValue = DataValue.FromFloat32(1f);
-        DataValue falseValue = DataValue.FromFloat32(0f);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
+        DataValue trueValue = DataValue.FromBoolean(true);
+        DataValue falseValue = DataValue.FromBoolean(false);
+        DataValue nullResult = DataValue.Null(DataKind.Boolean);
 
         for (int row = 0; row < rowCount; row++)
         {
@@ -577,9 +578,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] target = EvaluateColumn(inExpression.Expression, batch);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
-        DataValue trueValue = DataValue.FromFloat32(inExpression.Negated ? 0f : 1f);
-        DataValue falseValue = DataValue.FromFloat32(inExpression.Negated ? 1f : 0f);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
+        DataValue trueValue = DataValue.FromBoolean(!inExpression.Negated);
+        DataValue falseValue = DataValue.FromBoolean(inExpression.Negated);
+        DataValue nullResult = DataValue.Null(DataKind.Boolean);
 
         // Fast path: all values are literals → build a HashSet once.
         if (TryGetOrBuildLiteralValueSet(inExpression, out HashSet<DataValue> valueSet, out bool hasNullCandidate))

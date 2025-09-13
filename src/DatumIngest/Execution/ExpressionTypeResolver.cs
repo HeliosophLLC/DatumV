@@ -30,10 +30,10 @@ public static class ExpressionTypeResolver
             BinaryExpression binary => ResolveBinary(binary, sourceSchema, functions),
             UnaryExpression unary => ResolveUnary(unary, sourceSchema, functions),
             FunctionCallExpression function => ResolveFunction(function, sourceSchema, functions),
-            InExpression => DataKind.Float32,
-            BetweenExpression => DataKind.Float32,
-            IsNullExpression => DataKind.Float32,
-            LikeExpression => DataKind.Float32,
+            InExpression => DataKind.Boolean,
+            BetweenExpression => DataKind.Boolean,
+            IsNullExpression => DataKind.Boolean,
+            LikeExpression => DataKind.Boolean,
             CastExpression cast => ResolveCast(cast),
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
@@ -136,10 +136,10 @@ public static class ExpressionTypeResolver
 
     private static DataKind? ResolveBinary(BinaryExpression binary, Schema sourceSchema, FunctionRegistry functions)
     {
-        // Comparison and logical operators always produce Scalar (boolean result).
+        // Comparison and logical operators always produce Boolean.
         if (IsComparisonOrLogical(binary.Operator))
         {
-            return DataKind.Float32;
+            return DataKind.Boolean;
         }
 
         // Arithmetic operators: find common kind of both operands.
@@ -165,8 +165,8 @@ public static class ExpressionTypeResolver
     {
         return unary.Operator switch
         {
-            // NOT always produces a boolean (Scalar).
-            UnaryOperator.Not => DataKind.Float32,
+            // NOT always produces Boolean.
+            UnaryOperator.Not => DataKind.Boolean,
 
             // Negate preserves the operand kind.
             UnaryOperator.Negate => ResolveType(unary.Operand, sourceSchema, functions) ?? DataKind.Float32,

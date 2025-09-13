@@ -239,9 +239,9 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32()); // equal
-        Assert.Equal(0f, result[1].AsFloat32()); // not equal
-        Assert.Equal(0f, result[2].AsFloat32()); // not equal
+        Assert.True(result[0].AsBoolean()); // equal
+        Assert.False(result[1].AsBoolean()); // not equal
+        Assert.False(result[2].AsBoolean()); // not equal
     }
 
     [Fact]
@@ -261,9 +261,9 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32());
-        Assert.Equal(0f, result[1].AsFloat32());
-        Assert.Equal(0f, result[2].AsFloat32());
+        Assert.True(result[0].AsBoolean());
+        Assert.False(result[1].AsBoolean());
+        Assert.False(result[2].AsBoolean());
     }
 
     [Fact]
@@ -300,8 +300,8 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32());
-        Assert.Equal(0f, result[1].AsFloat32());
+        Assert.True(result[0].AsBoolean());
+        Assert.False(result[1].AsBoolean());
     }
 
     // ───────────────────────── AND / OR ─────────────────────────
@@ -312,10 +312,10 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatch batch = MakeBatch(
             ["a", "b"],
             [
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(1f)],
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(0f)],
-                [DataValue.FromFloat32(0f), DataValue.FromFloat32(1f)],
-                [DataValue.FromFloat32(0f), DataValue.FromFloat32(0f)],
+                [DataValue.FromBoolean(true), DataValue.FromBoolean(true)],
+                [DataValue.FromBoolean(true), DataValue.FromBoolean(false)],
+                [DataValue.FromBoolean(false), DataValue.FromBoolean(true)],
+                [DataValue.FromBoolean(false), DataValue.FromBoolean(false)],
             ]);
 
         Expression expression = new BinaryExpression(
@@ -324,10 +324,10 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32());
-        Assert.Equal(0f, result[1].AsFloat32());
-        Assert.Equal(0f, result[2].AsFloat32());
-        Assert.Equal(0f, result[3].AsFloat32());
+        Assert.True(result[0].AsBoolean());
+        Assert.False(result[1].AsBoolean());
+        Assert.False(result[2].AsBoolean());
+        Assert.False(result[3].AsBoolean());
     }
 
     [Fact]
@@ -336,10 +336,10 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatch batch = MakeBatch(
             ["a", "b"],
             [
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(1f)],
-                [DataValue.FromFloat32(1f), DataValue.FromFloat32(0f)],
-                [DataValue.FromFloat32(0f), DataValue.FromFloat32(1f)],
-                [DataValue.FromFloat32(0f), DataValue.FromFloat32(0f)],
+                [DataValue.FromBoolean(true), DataValue.FromBoolean(true)],
+                [DataValue.FromBoolean(true), DataValue.FromBoolean(false)],
+                [DataValue.FromBoolean(false), DataValue.FromBoolean(true)],
+                [DataValue.FromBoolean(false), DataValue.FromBoolean(false)],
             ]);
 
         Expression expression = new BinaryExpression(
@@ -348,10 +348,10 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32());
-        Assert.Equal(1f, result[1].AsFloat32());
-        Assert.Equal(1f, result[2].AsFloat32());
-        Assert.Equal(0f, result[3].AsFloat32());
+        Assert.True(result[0].AsBoolean());
+        Assert.True(result[1].AsBoolean());
+        Assert.True(result[2].AsBoolean());
+        Assert.False(result[3].AsBoolean());
     }
 
     // ───────────────────────── Unary ─────────────────────────
@@ -360,15 +360,15 @@ public sealed class ColumnBatchEvaluatorTests
     public void UnaryNotColumn()
     {
         using ColumnBatch batch = SingleColumnBatch("flag",
-            DataValue.FromFloat32(1f), DataValue.FromFloat32(0f), DataValue.Null(DataKind.Float32));
+            DataValue.FromBoolean(true), DataValue.FromBoolean(false), DataValue.Null(DataKind.Boolean));
 
         Expression expression = new UnaryExpression(UnaryOperator.Not, new ColumnReference("flag"));
 
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(0f, result[0].AsFloat32());
-        Assert.Equal(1f, result[1].AsFloat32());
+        Assert.False(result[0].AsBoolean());
+        Assert.True(result[1].AsBoolean());
         Assert.True(result[2].IsNull);
     }
 
@@ -400,9 +400,9 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(0f, result[0].AsFloat32());
-        Assert.Equal(1f, result[1].AsFloat32());
-        Assert.Equal(0f, result[2].AsFloat32());
+        Assert.False(result[0].AsBoolean());
+        Assert.True(result[1].AsBoolean());
+        Assert.False(result[2].AsBoolean());
     }
 
     [Fact]
@@ -416,8 +416,8 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32());
-        Assert.Equal(0f, result[1].AsFloat32());
+        Assert.True(result[0].AsBoolean());
+        Assert.False(result[1].AsBoolean());
     }
 
     // ───────────────────────── BETWEEN ─────────────────────────
@@ -437,9 +437,9 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32()); // 5 in [5,10]
-        Assert.Equal(0f, result[1].AsFloat32()); // 15 not in [5,10]
-        Assert.Equal(1f, result[2].AsFloat32()); // 10 in [5,10]
+        Assert.True(result[0].AsBoolean()); // 5 in [5,10]
+        Assert.False(result[1].AsBoolean()); // 15 not in [5,10]
+        Assert.True(result[2].AsBoolean()); // 10 in [5,10]
     }
 
     // ───────────────────────── IN ─────────────────────────
@@ -458,9 +458,9 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(1f, result[0].AsFloat32()); // 1 in (1,3)
-        Assert.Equal(0f, result[1].AsFloat32()); // 2 not in (1,3)
-        Assert.Equal(1f, result[2].AsFloat32()); // 3 in (1,3)
+        Assert.True(result[0].AsBoolean()); // 1 in (1,3)
+        Assert.False(result[1].AsBoolean()); // 2 not in (1,3)
+        Assert.True(result[2].AsBoolean()); // 3 in (1,3)
     }
 
     [Fact]
@@ -477,8 +477,8 @@ public sealed class ColumnBatchEvaluatorTests
         using ColumnBatchEvaluator evaluator = new(_functions);
         DataValue[] result = evaluator.EvaluateColumn(expression, batch);
 
-        Assert.Equal(0f, result[0].AsFloat32()); // 1 NOT IN (1) → false
-        Assert.Equal(1f, result[1].AsFloat32()); // 2 NOT IN (1) → true
+        Assert.False(result[0].AsBoolean()); // 1 NOT IN (1) → false
+        Assert.True(result[1].AsBoolean()); // 2 NOT IN (1) → true
     }
 
     // ───────────────────────── CASE ─────────────────────────

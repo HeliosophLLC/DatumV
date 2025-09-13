@@ -98,14 +98,14 @@ public sealed class ExpressionTypeResolverTests
     [InlineData(BinaryOperator.Like)]
     [InlineData(BinaryOperator.ILike)]
     [InlineData(BinaryOperator.Regexp)]
-    public void ResolveBinary_ComparisonOrLogical_ReturnsScalar(BinaryOperator op)
+    public void ResolveBinary_ComparisonOrLogical_ReturnsBoolean(BinaryOperator op)
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new BinaryExpression(new ColumnReference("id"), op, new LiteralExpression(5)),
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Boolean, result);
     }
 
     [Fact]
@@ -125,14 +125,14 @@ public sealed class ExpressionTypeResolverTests
     // ───────────────────── Unary expressions ─────────────────────
 
     [Fact]
-    public void ResolveUnary_Not_ReturnsScalar()
+    public void ResolveUnary_Not_ReturnsBoolean()
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new UnaryExpression(UnaryOperator.Not, new ColumnReference("id")),
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Boolean, result);
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public sealed class ExpressionTypeResolverTests
     // ───────────────────── Special expressions ─────────────────────
 
     [Fact]
-    public void ResolveIn_ReturnsScalar()
+    public void ResolveIn_ReturnsBoolean()
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new InExpression(
@@ -193,11 +193,11 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Boolean, result);
     }
 
     [Fact]
-    public void ResolveBetween_ReturnsScalar()
+    public void ResolveBetween_ReturnsBoolean()
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new BetweenExpression(
@@ -207,18 +207,18 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Boolean, result);
     }
 
     [Fact]
-    public void ResolveIsNull_ReturnsScalar()
+    public void ResolveIsNull_ReturnsBoolean()
     {
         DataKind? result = ExpressionTypeResolver.ResolveType(
             new IsNullExpression(new ColumnReference("name")),
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float32, result);
+        Assert.Equal(DataKind.Boolean, result);
     }
 
     [Fact]

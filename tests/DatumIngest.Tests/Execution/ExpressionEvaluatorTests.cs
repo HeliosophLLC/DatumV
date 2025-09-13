@@ -193,7 +193,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Equal,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Equal,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.NotEqual,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.LessThan,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.GreaterThan,
                 new LiteralExpression(3)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.LessThanOrEqual,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.GreaterThanOrEqual,
                 new LiteralExpression(5)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -277,7 +277,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Equal,
                 new LiteralExpression("abc")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.LessThan,
                 new LiteralExpression("def")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     // ─────────────── Logical operators ───────────────
@@ -303,7 +303,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.And,
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.And,
                 new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -327,7 +327,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Or,
                 new LiteralExpression(0)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -339,7 +339,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Or,
                 new LiteralExpression(0)),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -348,7 +348,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Not, new LiteralExpression(1)),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new UnaryExpression(UnaryOperator.Not, new LiteralExpression(0)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -402,7 +402,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(3),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)]),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -413,7 +413,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(4),
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)]),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -425,7 +425,7 @@ public class ExpressionEvaluatorTests
                 [new LiteralExpression(1), new LiteralExpression(2), new LiteralExpression(3)],
                 Negated: true),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -458,7 +458,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(3),
                 [new LiteralExpression(null), new LiteralExpression(3)]),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -472,9 +472,9 @@ public class ExpressionEvaluatorTests
         Row row2 = MakeRow(("value", DataValue.FromFloat32(99)));
         Row row3 = MakeRow(("value", DataValue.FromFloat32(10)));
 
-        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row1).AsFloat32());
-        Assert.Equal(0f, _evaluator.Evaluate(inExpr, row2).AsFloat32());
-        Assert.Equal(1f, _evaluator.Evaluate(inExpr, row3).AsFloat32());
+        Assert.True(_evaluator.Evaluate(inExpr, row1).AsBoolean());
+        Assert.False(_evaluator.Evaluate(inExpr, row2).AsBoolean());
+        Assert.True(_evaluator.Evaluate(inExpr, row3).AsBoolean());
     }
 
     [Fact]
@@ -489,7 +489,7 @@ public class ExpressionEvaluatorTests
         InExpression inExpr = new(new LiteralExpression(999), values);
 
         DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -504,7 +504,7 @@ public class ExpressionEvaluatorTests
         InExpression inExpr = new(new LiteralExpression(9999), values, Negated: true);
 
         DataValue result = _evaluator.Evaluate(inExpr, MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     // ─────────────── BETWEEN expression ───────────────
@@ -518,7 +518,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -530,7 +530,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -542,7 +542,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(1),
                 new LiteralExpression(10)),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -555,7 +555,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression(10),
                 Negated: true),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     // ─────────────── IS NULL ───────────────
@@ -567,7 +567,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x")),
             row);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -577,7 +577,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x")),
             row);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -587,7 +587,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new IsNullExpression(new ColumnReference("x"), Negated: true),
             row);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     // ─────────────── LIKE ───────────────
@@ -601,7 +601,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("hello%")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -613,7 +613,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("%world")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -625,7 +625,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -637,7 +637,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -649,7 +649,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("hello")),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -661,7 +661,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Like,
                 new LiteralExpression("Hello")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     // ─────────────── ILIKE ───────────────
@@ -675,7 +675,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.ILike,
                 new LiteralExpression("hello%")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -687,7 +687,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.ILike,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -699,7 +699,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.ILike,
                 new LiteralExpression("c_t")),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     // ─────────────── REGEXP ───────────────
@@ -713,7 +713,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("\\d+")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -725,7 +725,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("^\\d{3}-\\d{4}$")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -737,7 +737,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("^\\d+$")),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -749,7 +749,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("hello")),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -761,7 +761,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.Regexp,
                 new LiteralExpression("(?i)hello")),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -788,7 +788,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -801,7 +801,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -814,7 +814,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("!"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -827,7 +827,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: false),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -840,7 +840,7 @@ public class ExpressionEvaluatorTests
                 new LiteralExpression("\\"),
                 CaseInsensitive: true),
             MakeRow());
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -993,7 +993,7 @@ public class ExpressionEvaluatorTests
                 BinaryOperator.GreaterThanOrEqual,
                 new ColumnReference("threshold")),
             row);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     // ─────────────── Duration arithmetic ───────────────

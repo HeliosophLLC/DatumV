@@ -201,30 +201,30 @@ public sealed class ExpressionEvaluator
         {
             if (!EvaluateAsBoolean(binary.Left, row))
             {
-                return DataValue.FromFloat32(0f);
+                return DataValue.FromBoolean(false);
             }
 
             if (!EvaluateAsBoolean(binary.Right, row))
             {
-                return DataValue.FromFloat32(0f);
+                return DataValue.FromBoolean(false);
             }
 
-            return DataValue.FromFloat32(1f);
+            return DataValue.FromBoolean(true);
         }
 
         if (binary.Operator == BinaryOperator.Or)
         {
             if (EvaluateAsBoolean(binary.Left, row))
             {
-                return DataValue.FromFloat32(1f);
+                return DataValue.FromBoolean(true);
             }
 
             if (EvaluateAsBoolean(binary.Right, row))
             {
-                return DataValue.FromFloat32(1f);
+                return DataValue.FromBoolean(true);
             }
 
-            return DataValue.FromFloat32(0f);
+            return DataValue.FromBoolean(false);
         }
 
         {
@@ -270,13 +270,15 @@ public sealed class ExpressionEvaluator
 
         if (operand.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return unary.Operator == UnaryOperator.Not
+                ? DataValue.Null(DataKind.Boolean)
+                : DataValue.Null(DataKind.Float32);
         }
 
         return unary.Operator switch
         {
-            UnaryOperator.Not => DataValue.FromFloat32(
-                EvaluateAsBoolean(unary.Operand, row) ? 0f : 1f),
+            UnaryOperator.Not => DataValue.FromBoolean(
+                !EvaluateAsBoolean(unary.Operand, row)),
             UnaryOperator.Negate => DataValue.FromFloat32(-ToFloat(operand)),
             _ => throw new InvalidOperationException(
                 $"Unsupported unary operator: {unary.Operator}."),
@@ -393,7 +395,7 @@ public sealed class ExpressionEvaluator
 
         if (target.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Boolean);
         }
 
         // Fast path: when all values are literals (e.g. constant-folded from an
@@ -420,15 +422,15 @@ public sealed class ExpressionEvaluator
 
             if (found)
             {
-                return DataValue.FromFloat32(inExpr.Negated ? 0f : 1f);
+                return DataValue.FromBoolean(!inExpr.Negated);
             }
 
             if (hasNullCandidate)
             {
-                return DataValue.Null(DataKind.Float32);
+                return DataValue.Null(DataKind.Boolean);
             }
 
-            return DataValue.FromFloat32(inExpr.Negated ? 1f : 0f);
+            return DataValue.FromBoolean(inExpr.Negated);
         }
 
         // Slow path: values contain non-literal expressions that depend on the row.
@@ -499,7 +501,7 @@ public sealed class ExpressionEvaluator
 
             if (CompareDataValues(target, candidate) == 0)
             {
-                return DataValue.FromFloat32(inExpr.Negated ? 0f : 1f);
+                return DataValue.FromBoolean(!inExpr.Negated);
             }
         }
 
@@ -508,10 +510,10 @@ public sealed class ExpressionEvaluator
         // For NOT IN, this means rows are filtered out by EvaluateAsBoolean.
         if (hasNullCandidate)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Boolean);
         }
 
-        return DataValue.FromFloat32(inExpr.Negated ? 1f : 0f);
+        return DataValue.FromBoolean(inExpr.Negated);
     }
 
     private DataValue EvaluateBetween(BetweenExpression between, Row row)
@@ -522,7 +524,7 @@ public sealed class ExpressionEvaluator
 
         if (target.IsNull || low.IsNull || high.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Boolean);
         }
 
         float targetValue = ToFloat(target);
@@ -535,7 +537,7 @@ public sealed class ExpressionEvaluator
             inRange = !inRange;
         }
 
-        return DataValue.FromFloat32(inRange ? 1f : 0f);
+        return DataValue.FromBoolean(inRange);
     }
 
     private DataValue EvaluateIsNull(IsNullExpression isNull, Row row)
@@ -548,7 +550,7 @@ public sealed class ExpressionEvaluator
             result = !result;
         }
 
-        return DataValue.FromFloat32(result ? 1f : 0f);
+        return DataValue.FromBoolean(result);
     }
 
     /// <summary>
@@ -756,10 +758,10 @@ public sealed class ExpressionEvaluator
             CastExpression cast => ExpressionTypeResolver.ResolveCastTargetKind(cast.TargetType),
             BinaryExpression => DataKind.Float32,
             UnaryExpression => DataKind.Float32,
-            InExpression => DataKind.Float32,
-            BetweenExpression => DataKind.Float32,
-            IsNullExpression => DataKind.Float32,
-            LikeExpression => DataKind.Float32,
+            InExpression => DataKind.Boolean,
+            BetweenExpression => DataKind.Boolean,
+            IsNullExpression => DataKind.Boolean,
+            LikeExpression => DataKind.Boolean,
             _ => null,
         };
     }
@@ -808,19 +810,19 @@ public sealed class ExpressionEvaluator
             result = !result;
         }
 
-        return DataValue.FromFloat32(result ? 1f : 0f);
+        return DataValue.FromBoolean(result);
     }
 
     private static DataValue CompareValuesLe(DataValue left, DataValue right)
     {
         int comparison = CompareDataValues(left, right);
-        return DataValue.FromFloat32(comparison <= 0 ? 1f : 0f);
+        return DataValue.FromBoolean(comparison <= 0);
     }
 
     private static DataValue CompareValuesGe(DataValue left, DataValue right)
     {
         int comparison = CompareDataValues(left, right);
-        return DataValue.FromFloat32(comparison >= 0 ? 1f : 0f);
+        return DataValue.FromBoolean(comparison >= 0);
     }
 
     private static int CompareDataValues(DataValue left, DataValue right)
@@ -899,7 +901,7 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
-        return DataValue.FromFloat32(matches ? 1f : 0f);
+        return DataValue.FromBoolean(matches);
     }
 
     /// <summary>
@@ -927,7 +929,7 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
-        return DataValue.FromFloat32(matches ? 1f : 0f);
+        return DataValue.FromBoolean(matches);
     }
 
     /// <summary>
@@ -953,7 +955,7 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input);
-        return DataValue.FromFloat32(matches ? 1f : 0f);
+        return DataValue.FromBoolean(matches);
     }
 
     /// <summary>
@@ -969,7 +971,7 @@ public sealed class ExpressionEvaluator
 
         if (input.IsNull || pattern.IsNull || escapeValue.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Boolean);
         }
 
         if (input.Kind != DataKind.String || pattern.Kind != DataKind.String || escapeValue.Kind != DataKind.String)
@@ -1029,6 +1031,6 @@ public sealed class ExpressionEvaluator
         }
 
         bool matches = regex.IsMatch(input.AsString());
-        return DataValue.FromFloat32(matches ? 1f : 0f);
+        return DataValue.FromBoolean(matches);
     }
 }
