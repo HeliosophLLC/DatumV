@@ -54,6 +54,12 @@ public sealed class TableCatalog : IDisposable
     private readonly List<string> _tempFiles = new();
 
     /// <summary>
+    /// Tables that have been modified by DDL/DML since their last ANALYZE or sidecar rebuild.
+    /// When a table name is absent from this set, ANALYZE is a no-op.
+    /// </summary>
+    private readonly HashSet<string> _analysisPending = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Initializes a new <see cref="TableCatalog"/> with all built-in provider factories
     /// pre-registered (csv, json, jsonl, parquet, hdf5, zip, idx).
     /// </summary>
@@ -104,9 +110,39 @@ public sealed class TableCatalog : IDisposable
             _indexes.Remove(tableName);
             _manifests.Remove(tableName);
             _pendingIndexSidecarPaths.Remove(tableName);
+            _analysisPending.Remove(tableName);
         }
 
         return removed;
+    }
+
+    /// <summary>
+    /// Marks a table as having been modified since its last analysis.
+    /// A subsequent ANALYZE will rebuild sidecars; without this flag, ANALYZE is a no-op.
+    /// </summary>
+    /// <param name="tableName">The logical table name.</param>
+    public void MarkAnalysisPending(string tableName)
+    {
+        _analysisPending.Add(tableName);
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> if the table has been modified since its last analysis.
+    /// </summary>
+    /// <param name="tableName">The logical table name.</param>
+    public bool IsAnalysisPending(string tableName)
+    {
+        return _analysisPending.Contains(tableName);
+    }
+
+    /// <summary>
+    /// Clears the analysis-pending flag, indicating that sidecars are up to date.
+    /// Called after a successful sidecar rebuild.
+    /// </summary>
+    /// <param name="tableName">The logical table name.</param>
+    public void ClearAnalysisPending(string tableName)
+    {
+        _analysisPending.Remove(tableName);
     }
 
     /// <summary>

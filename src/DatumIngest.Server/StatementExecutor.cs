@@ -245,6 +245,7 @@ internal sealed class StatementExecutor
             }
 
             AppendBufferedRows(descriptor.FilePath, schema, columnBuffers, (uint)insertedRows);
+            _session.Catalog.MarkAnalysisPending(tableName);
 
             if (descriptor.Mutability == TableMutability.SessionOwned)
             {
@@ -349,6 +350,7 @@ internal sealed class StatementExecutor
         ManifestSerializer.WriteToFileAsync(tableName, manifest, manifestPath).GetAwaiter().GetResult();
 
         _session.Catalog.RegisterManifest(tableName, manifest);
+        _session.Catalog.ClearAnalysisPending(tableName);
     }
 
     private async Task<(List<List<DataValue>> ColumnBuffers, long RowCount)> CollectRowsFromQueryAsync(
@@ -619,6 +621,7 @@ internal sealed class StatementExecutor
         {
             using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
             DatumFileEditor.ReplaceColumns(stream, replacements);
+            _session.Catalog.MarkAnalysisPending(tableName);
         }
 
         return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
@@ -830,6 +833,7 @@ internal sealed class StatementExecutor
         {
             using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
             DatumFileEditor.ReplaceColumns(stream, replacements);
+            _session.Catalog.MarkAnalysisPending(tableName);
         }
 
         return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
@@ -893,6 +897,7 @@ internal sealed class StatementExecutor
             {
                 using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
                 DatumFileEditor.MarkDeleted(stream, tombstoneUpdates);
+                _session.Catalog.MarkAnalysisPending(tableName);
             }
 
             return CommandResult.AffectedRows(totalDeleted, $"Deleted {totalDeleted} rows from '{tableName}'.");
@@ -901,6 +906,11 @@ internal sealed class StatementExecutor
         // Conditional DELETE: evaluate the WHERE predicate per row per row group.
         long deletedRows = await ExecuteConditionalDeleteAsync(
             descriptor.FilePath, schema, rowGroups, statement.Where, cancellationToken).ConfigureAwait(false);
+
+        if (deletedRows > 0)
+        {
+            _session.Catalog.MarkAnalysisPending(tableName);
+        }
 
         return CommandResult.AffectedRows(deletedRows, $"Deleted {deletedRows} rows from '{tableName}'.");
     }
@@ -1061,6 +1071,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.AddColumn(stream, newColumn, pages);
         }
 
+        _session.Catalog.MarkAnalysisPending(tableName);
         return CommandResult.AffectedRows(0, $"Added column '{statement.ColumnName}' to '{tableName}'.");
     }
 
@@ -1141,6 +1152,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.AddColumn(stream, newColumn, pages);
         }
 
+        _session.Catalog.MarkAnalysisPending(descriptor.Name);
         return CommandResult.AffectedRows(0, $"Added computed column '{statement.ColumnName}' to '{descriptor.Name}'.");
     }
 
@@ -1157,6 +1169,12 @@ internal sealed class StatementExecutor
         if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
+        }
+
+        if (descriptor.Mutability == TableMutability.SessionOwned
+            && !_session.Catalog.IsAnalysisPending(tableName))
+        {
+            return CommandResult.AffectedRows(0, $"Table '{tableName}' is already up to date.");
         }
 
         RebuildTempTableSidecars(tableName, descriptor.FilePath);

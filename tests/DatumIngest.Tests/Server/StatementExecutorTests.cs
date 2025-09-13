@@ -1293,6 +1293,58 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Contains("does not exist", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// ANALYZE immediately after INSERT is a no-op because INSERT auto-rebuilds sidecars.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTable_AfterInsert_IsNoOp()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
+
+        CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
+        Assert.Equal(CommandResultKind.AffectedRows, analyzeResult.Kind);
+        Assert.Contains("up to date", analyzeResult.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Running ANALYZE twice without intervening mutations skips the second invocation.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTable_DoubleAnalyze_SecondIsNoOp()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1), (2)");
+
+        // Mutate so first ANALYZE is meaningful.
+        await ExecuteAsync("UPDATE data SET id = id + 10");
+
+        CommandResult firstAnalyze = await ExecuteAsync("ANALYZE data");
+        Assert.Contains("Analyzed", firstAnalyze.Message);
+
+        CommandResult secondAnalyze = await ExecuteAsync("ANALYZE data");
+        Assert.Contains("up to date", secondAnalyze.Message);
+    }
+
+    /// <summary>
+    /// ANALYZE after DELETE proceeds because sidecars are stale.
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTable_AfterDelete_Proceeds()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE data (id INT)");
+        await ExecuteAsync("INSERT INTO data VALUES (1), (2), (3)");
+
+        await ExecuteAsync("DELETE FROM data WHERE id = 3");
+
+        CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
+        Assert.Contains("Analyzed", analyzeResult.Message);
+
+        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        Assert.True(hasManifest);
+        Assert.Equal(2, manifest!.RowCount);
+    }
+
     // ──────────────────── MODE() WITHIN GROUP ────────────────────
 
     /// <summary>
