@@ -106,4 +106,44 @@ public static class JoinKeyExtractor
 
         return result;
     }
+
+    /// <summary>
+    /// Normalizes equality expressions in the ON condition so that probe-side
+    /// (left operator) column references appear on the left and build-side
+    /// (right operator) column references appear on the right. This ensures
+    /// the <see cref="JoinKeyExtractionResult.KeyPairs"/> convention is
+    /// maintained regardless of the order in which the user wrote the condition
+    /// or whether join reordering changed which table is on which side.
+    /// </summary>
+    /// <param name="onCondition">The ON condition expression to normalize.</param>
+    /// <param name="leftAliases">Table aliases available on the probe (left) side of the join.</param>
+    /// <returns>The normalized ON condition.</returns>
+    public static Expression NormalizeKeyOrder(Expression onCondition, HashSet<string> leftAliases)
+    {
+        if (onCondition is BinaryExpression binary && binary.Operator == BinaryOperator.And)
+        {
+            Expression normalizedLeft = NormalizeKeyOrder(binary.Left, leftAliases);
+            Expression normalizedRight = NormalizeKeyOrder(binary.Right, leftAliases);
+            if (ReferenceEquals(normalizedLeft, binary.Left) && ReferenceEquals(normalizedRight, binary.Right))
+                return onCondition;
+            return new BinaryExpression(normalizedLeft, BinaryOperator.And, normalizedRight);
+        }
+
+        if (onCondition is BinaryExpression equality && equality.Operator == BinaryOperator.Equal)
+        {
+            HashSet<string> leftRefAliases = ColumnReferenceCollector.CollectTableAliases(equality.Left);
+            HashSet<string> rightRefAliases = ColumnReferenceCollector.CollectTableAliases(equality.Right);
+
+            bool leftRefsProbe = leftRefAliases.Overlaps(leftAliases);
+            bool rightRefsProbe = rightRefAliases.Overlaps(leftAliases);
+
+            // Swap when the right side references the probe and the left does not.
+            if (rightRefsProbe && !leftRefsProbe)
+            {
+                return new BinaryExpression(equality.Right, BinaryOperator.Equal, equality.Left);
+            }
+        }
+
+        return onCondition;
+    }
 }

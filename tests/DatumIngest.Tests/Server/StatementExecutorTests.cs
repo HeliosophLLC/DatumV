@@ -912,6 +912,61 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(2, rows.Count);
     }
 
+    // ──────────────────── Join key normalization ────────────────────
+
+    /// <summary>
+    /// Three-table INNER join with GROUP BY where join reordering causes the ON
+    /// condition's AST-order left/right to no longer match the physical probe/build
+    /// assignment. Without key normalization, the hash join evaluates the build-side
+    /// key expression against the wrong row and throws "Column not found in row".
+    /// </summary>
+    [Fact]
+    public async Task ThreeTableJoinWithGroupBy_AfterReordering_ProducesCorrectResults()
+    {
+        // 'events' is the largest table — the reorderer will promote it to probe.
+        // The original SQL has 'users' in FROM, so ON conditions are written with
+        // users on the left. After reordering, users moves to the build side.
+        await ExecuteAsync("CREATE TEMP TABLE users (user_id INT, name STRING)");
+        await ExecuteAsync("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')");
+
+        await ExecuteAsync("CREATE TEMP TABLE events (event_id INT, user_ref INT, category_ref INT)");
+        await ExecuteAsync("INSERT INTO events VALUES (10, 1, 100), (20, 1, 200), (30, 2, 100), (40, 2, 200), (50, 2, 100)");
+
+        await ExecuteAsync("CREATE TEMP TABLE categories (cat_id INT, label STRING)");
+        await ExecuteAsync("INSERT INTO categories VALUES (100, 'Login'), (200, 'Purchase')");
+
+        // Note: join columns have DIFFERENT names (user_id vs user_ref, cat_id vs category_ref)
+        // so the unqualified-name fallback cannot mask a key-side mismatch.
+        CommandResult result = await ExecuteAsync(
+            "SELECT u.name, c.label, COUNT(e.event_id) AS event_count " +
+            "FROM users u " +
+            "JOIN events e ON u.user_id = e.user_ref " +
+            "JOIN categories c ON e.category_ref = c.cat_id " +
+            "GROUP BY u.name, c.label " +
+            "ORDER BY u.name, c.label");
+
+        Assert.Equal(CommandResultKind.StreamingRows, result.Kind);
+        List<Row> rows = await CollectRowsAsync(result);
+
+        Assert.Equal(4, rows.Count);
+
+        Assert.Equal("Alice", rows[0]["name"].AsString());
+        Assert.Equal("Login", rows[0]["label"].AsString());
+        Assert.Equal(1f, rows[0]["event_count"].AsFloat32());
+
+        Assert.Equal("Alice", rows[1]["name"].AsString());
+        Assert.Equal("Purchase", rows[1]["label"].AsString());
+        Assert.Equal(1f, rows[1]["event_count"].AsFloat32());
+
+        Assert.Equal("Bob", rows[2]["name"].AsString());
+        Assert.Equal("Login", rows[2]["label"].AsString());
+        Assert.Equal(2f, rows[2]["event_count"].AsFloat32());
+
+        Assert.Equal("Bob", rows[3]["name"].AsString());
+        Assert.Equal("Purchase", rows[3]["label"].AsString());
+        Assert.Equal(1f, rows[3]["event_count"].AsFloat32());
+    }
+
     // ──────────────────── Multiple operations ────────────────────
 
     /// <summary>

@@ -561,7 +561,15 @@ public sealed class QueryPlanner
                         // context.RowLimit at runtime.
                         bool preferIndexNestedLoop = ShouldPreferIndexNestedLoop(statement, currentRight, join);
 
-                        source = new JoinOperator(source, currentRight, join.Type, join.OnCondition,
+                        // Normalize the ON condition so that probe-side (left) column
+                        // references appear on the Left of each equality. After join
+                        // reordering, the AST-order Left/Right may no longer correspond
+                        // to the actual probe/build sides.
+                        Expression? normalizedOnCondition = join.OnCondition is not null
+                            ? JoinKeyExtractor.NormalizeKeyOrder(join.OnCondition, leftAliases)
+                            : null;
+
+                        source = new JoinOperator(source, currentRight, join.Type, normalizedOnCondition,
                             flipped: flipped, preferIndexNestedLoop: preferIndexNestedLoop);
                     }
                 }

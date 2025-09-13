@@ -232,4 +232,85 @@ public class JoinKeyExtractorTests
 
         Assert.Null(result);
     }
+
+    // ─────────────── NormalizeKeyOrder ───────────────
+
+    /// <summary>
+    /// When the ON condition already has probe-side on the left, no swap occurs.
+    /// </summary>
+    [Fact]
+    public void NormalizeKeyOrder_ProbeAlreadyOnLeft_NoChange()
+    {
+        Expression condition = new BinaryExpression(
+            new ColumnReference("o", "id"),
+            BinaryOperator.Equal,
+            new ColumnReference("p", "id"));
+
+        HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase) { "o" };
+
+        Expression normalized = JoinKeyExtractor.NormalizeKeyOrder(condition, leftAliases);
+
+        Assert.Same(condition, normalized);
+    }
+
+    /// <summary>
+    /// When the ON condition has probe-side on the right, the equality is swapped.
+    /// This occurs after join reordering when the original AST order no longer
+    /// matches the physical probe/build assignment.
+    /// </summary>
+    [Fact]
+    public void NormalizeKeyOrder_ProbeOnRight_SwapsEquality()
+    {
+        Expression condition = new BinaryExpression(
+            new ColumnReference("p", "id"),
+            BinaryOperator.Equal,
+            new ColumnReference("o", "id"));
+
+        HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase) { "o" };
+
+        Expression normalized = JoinKeyExtractor.NormalizeKeyOrder(condition, leftAliases);
+
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(normalized);
+        ColumnReference left = Assert.IsType<ColumnReference>(binary.Left);
+        ColumnReference right = Assert.IsType<ColumnReference>(binary.Right);
+        Assert.Equal("o", left.TableName);
+        Assert.Equal("p", right.TableName);
+    }
+
+    /// <summary>
+    /// Compound AND conditions normalize each conjunct independently.
+    /// </summary>
+    [Fact]
+    public void NormalizeKeyOrder_CompoundAnd_NormalizesEachConjunct()
+    {
+        // ON p.id = o.id AND o.name = q.name
+        // After normalization with leftAliases = {o}:
+        //   o.id = p.id AND o.name = q.name
+        Expression condition = new BinaryExpression(
+            new BinaryExpression(
+                new ColumnReference("p", "id"),
+                BinaryOperator.Equal,
+                new ColumnReference("o", "id")),
+            BinaryOperator.And,
+            new BinaryExpression(
+                new ColumnReference("o", "name"),
+                BinaryOperator.Equal,
+                new ColumnReference("q", "name")));
+
+        HashSet<string> leftAliases = new(StringComparer.OrdinalIgnoreCase) { "o" };
+
+        Expression normalized = JoinKeyExtractor.NormalizeKeyOrder(condition, leftAliases);
+
+        BinaryExpression and = Assert.IsType<BinaryExpression>(normalized);
+        BinaryExpression first = Assert.IsType<BinaryExpression>(and.Left);
+        BinaryExpression second = Assert.IsType<BinaryExpression>(and.Right);
+
+        // First conjunct was swapped: o.id = p.id
+        ColumnReference firstLeft = Assert.IsType<ColumnReference>(first.Left);
+        Assert.Equal("o", firstLeft.TableName);
+
+        // Second conjunct was already correct: o.name = q.name
+        ColumnReference secondLeft = Assert.IsType<ColumnReference>(second.Left);
+        Assert.Equal("o", secondLeft.TableName);
+    }
 }
