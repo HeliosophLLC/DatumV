@@ -203,8 +203,12 @@ public sealed class ProjectOperator : IQueryOperator
                         {
                             if (IsExcluded(firstRow.ColumnNames[index], allColumns.ExcludedColumns))
                                 continue;
+                            Expression? replacement = FindReplacement(
+                                firstRow.ColumnNames[index], allColumns.ReplacedColumns);
                             names.Add(firstRow.ColumnNames[index]);
-                            slots.Add(ProjectionSlot.CopyOrdinal(index));
+                            slots.Add(replacement is not null
+                                ? ProjectionSlot.Evaluate(replacement)
+                                : ProjectionSlot.CopyOrdinal(index));
                         }
                         break;
 
@@ -219,8 +223,12 @@ public sealed class ProjectOperator : IQueryOperator
                             {
                                 if (IsExcluded(columnName, tableColumns.ExcludedColumns, prefix))
                                     continue;
+                                Expression? replacement = FindReplacement(
+                                    columnName, tableColumns.ReplacedColumns, prefix);
                                 names.Add(columnName);
-                                slots.Add(ProjectionSlot.CopyOrdinal(index));
+                                slots.Add(replacement is not null
+                                    ? ProjectionSlot.Evaluate(replacement)
+                                    : ProjectionSlot.CopyOrdinal(index));
                             }
                         }
                         break;
@@ -392,5 +400,52 @@ public sealed class ProjectOperator : IQueryOperator
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Finds a replacement expression for a column name in a
+    /// <c>SELECT * REPLACE (...)</c> or <c>SELECT table.* REPLACE (...)</c> clause.
+    /// Uses the same qualified/unqualified matching logic as <see cref="IsExcluded"/>.
+    /// </summary>
+    /// <param name="columnName">The full column name (may be qualified as <c>table.col</c>).</param>
+    /// <param name="replacedColumns">The replacement list, or <see langword="null"/> if no replacements were specified.</param>
+    /// <param name="qualifierPrefix">
+    /// When non-null, the <c>table.</c> prefix stripped from <paramref name="columnName"/> before
+    /// matching against replacement column names.
+    /// </param>
+    /// <returns>The replacement expression if matched, or <see langword="null"/>.</returns>
+    internal static Expression? FindReplacement(
+        string columnName,
+        IReadOnlyList<ColumnReplacement>? replacedColumns,
+        string? qualifierPrefix = null)
+    {
+        if (replacedColumns is null || replacedColumns.Count == 0)
+            return null;
+
+        foreach (ColumnReplacement replaced in replacedColumns)
+        {
+            if (columnName.Equals(replaced.ColumnName, StringComparison.OrdinalIgnoreCase))
+                return replaced.Expression;
+
+            if (qualifierPrefix is null)
+            {
+                int dotIndex = columnName.IndexOf('.');
+                if (dotIndex >= 0
+                    && columnName.AsSpan(dotIndex + 1).Equals(replaced.ColumnName.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return replaced.Expression;
+                }
+            }
+            else
+            {
+                if (columnName.StartsWith(qualifierPrefix, StringComparison.OrdinalIgnoreCase)
+                    && columnName.AsSpan(qualifierPrefix.Length).Equals(replaced.ColumnName.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return replaced.Expression;
+                }
+            }
+        }
+
+        return null;
     }
 }

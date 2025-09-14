@@ -242,6 +242,117 @@ public class OperatorTests
         Assert.Equal(3f, rows[0]["t.c"].AsFloat32());
     }
 
+    // ─────────────── SELECT * REPLACE tests ───────────────
+
+    [Fact]
+    public async Task Project_SelectStarReplace_ReplacesColumnValue()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("a", DataValue.FromFloat32(10f)),
+                ("b", DataValue.FromFloat32(20f)),
+                ("c", DataValue.FromFloat32(30f))));
+
+        ProjectOperator project = new(source,
+            [new SelectAllColumns(
+                ReplacedColumns: [new ColumnReplacement(
+                    new BinaryExpression(
+                        new ColumnReference("b"),
+                        BinaryOperator.Multiply,
+                        new LiteralExpression(2)),
+                    "b")])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0].FieldCount);
+        Assert.Equal(10f, rows[0]["a"].AsFloat32());
+        Assert.Equal(40f, rows[0]["b"].AsFloat32());
+        Assert.Equal(30f, rows[0]["c"].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Project_SelectStarReplace_MultipleReplacements()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("a", DataValue.FromFloat32(5f)),
+                ("b", DataValue.FromFloat32(10f)),
+                ("c", DataValue.FromFloat32(15f))));
+
+        ProjectOperator project = new(source,
+            [new SelectAllColumns(
+                ReplacedColumns: [
+                    new ColumnReplacement(
+                        new BinaryExpression(
+                            new ColumnReference("a"),
+                            BinaryOperator.Add,
+                            new LiteralExpression(1)),
+                        "a"),
+                    new ColumnReplacement(
+                        new BinaryExpression(
+                            new ColumnReference("c"),
+                            BinaryOperator.Multiply,
+                            new LiteralExpression(0)),
+                        "c")])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(3, rows[0].FieldCount);
+        Assert.Equal(6f, rows[0]["a"].AsFloat32());
+        Assert.Equal(10f, rows[0]["b"].AsFloat32());
+        Assert.Equal(0f, rows[0]["c"].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Project_SelectStarExceptAndReplace_Combined()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("id", DataValue.FromFloat32(1f)),
+                ("price", DataValue.FromFloat32(500f)),
+                ("name", DataValue.FromString("widget"))));
+
+        ProjectOperator project = new(source,
+            [new SelectAllColumns(
+                ExcludedColumns: ["id"],
+                ReplacedColumns: [new ColumnReplacement(
+                    new BinaryExpression(
+                        new ColumnReference("price"),
+                        BinaryOperator.Divide,
+                        new LiteralExpression(100)),
+                    "price")])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(5f, rows[0]["price"].AsFloat32());
+        Assert.Equal("widget", rows[0]["name"].AsString());
+    }
+
+    [Fact]
+    public async Task Project_SelectTableStarReplace_ReplacesColumnValue()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("t.x", DataValue.FromFloat32(100f)),
+                ("t.y", DataValue.FromFloat32(200f))));
+
+        ProjectOperator project = new(source,
+            [new SelectTableColumns("t",
+                ReplacedColumns: [new ColumnReplacement(
+                    new BinaryExpression(
+                        new ColumnReference("t", "y"),
+                        BinaryOperator.Add,
+                        new LiteralExpression(50)),
+                    "y")])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(100f, rows[0]["t.x"].AsFloat32());
+        Assert.Equal(250f, rows[0]["t.y"].AsFloat32());
+    }
+
     [Fact]
     public async Task Project_NamedColumns()
     {

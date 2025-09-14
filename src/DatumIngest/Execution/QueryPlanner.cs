@@ -369,7 +369,7 @@ public sealed class QueryPlanner
 
         // SELECT projection (skip if SELECT *).
         bool hasStarOnly = statement.Columns.Count == 1
-            && statement.Columns[0] is SelectAllColumns { ExcludedColumns: null };
+            && statement.Columns[0] is SelectAllColumns { ExcludedColumns: null, ReplacedColumns: null };
         if (!hasStarOnly)
         {
             columnBatchOperator = new Operators.ColumnBatchProjectOperator(columnBatchOperator, statement.Columns);
@@ -867,7 +867,7 @@ public sealed class QueryPlanner
                 string? fromAlias = GetSourceAlias(statement.From.Source);
                 if (fromAlias is not null)
                 {
-                    expanded.Add(new SelectTableColumns(fromAlias, ExcludedColumns: selectAll.ExcludedColumns));
+                    expanded.Add(new SelectTableColumns(fromAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns));
                 }
             }
 
@@ -876,7 +876,7 @@ public sealed class QueryPlanner
                 string? joinAlias = GetSourceAlias(join.Source);
                 if (joinAlias is not null)
                 {
-                    expanded.Add(new SelectTableColumns(joinAlias, ExcludedColumns: selectAll.ExcludedColumns));
+                    expanded.Add(new SelectTableColumns(joinAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns));
                 }
             }
 
@@ -888,7 +888,7 @@ public sealed class QueryPlanner
 
         {
         bool hasStarOnly = projectionColumns.Count == 1
-            && projectionColumns[0] is SelectAllColumns { ExcludedColumns: null }
+            && projectionColumns[0] is SelectAllColumns { ExcludedColumns: null, ReplacedColumns: null }
             && letBindings is null;
         if (!hasStarOnly)
         {

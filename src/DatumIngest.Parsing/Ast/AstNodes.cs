@@ -93,24 +93,39 @@ public enum MaterializationHint
 public record SelectColumn(Expression Expression, string? Alias = null);
 
 /// <summary>
-/// Represents <c>SELECT *</c> or <c>SELECT * EXCEPT (col1, col2)</c> as a column entry.
+/// A column replacement entry in a <c>REPLACE (expr AS name, ...)</c> clause.
+/// The <paramref name="ColumnName"/> must match an existing column in the wildcard expansion;
+/// the <paramref name="Expression"/> is evaluated in place of the original value.
+/// </summary>
+/// <param name="Expression">The replacement expression to evaluate.</param>
+/// <param name="ColumnName">The column name to replace (must match an existing source column).</param>
+public sealed record ColumnReplacement(Expression Expression, string ColumnName);
+
+/// <summary>
+/// Represents <c>SELECT *</c>, <c>SELECT * EXCEPT (col1, col2)</c>,
+/// or <c>SELECT * REPLACE (expr AS col, ...)</c> as a column entry.
 /// </summary>
 /// <param name="ExcludedColumns">Column names to exclude from the wildcard expansion, or <see langword="null"/> for an unfiltered <c>SELECT *</c>.</param>
+/// <param name="ReplacedColumns">Columns whose values are replaced by expressions, or <see langword="null"/> when no replacements are specified.</param>
 public sealed record SelectAllColumns(
-    IReadOnlyList<string>? ExcludedColumns = null) : SelectColumn(
+    IReadOnlyList<string>? ExcludedColumns = null,
+    IReadOnlyList<ColumnReplacement>? ReplacedColumns = null) : SelectColumn(
     new LiteralExpression(null),
     null);
 
 /// <summary>
-/// Represents <c>SELECT table.*</c> or <c>SELECT table.* EXCEPT (col1, col2)</c> as a column entry.
+/// Represents <c>SELECT table.*</c>, <c>SELECT table.* EXCEPT (col1, col2)</c>,
+/// or <c>SELECT table.* REPLACE (expr AS col, ...)</c> as a column entry.
 /// </summary>
 /// <param name="TableName">The table alias or name preceding the dot-star.</param>
 /// <param name="Span">Source location span for diagnostic reporting.</param>
 /// <param name="ExcludedColumns">Column names to exclude from the table wildcard expansion, or <see langword="null"/> for an unfiltered <c>SELECT table.*</c>.</param>
+/// <param name="ReplacedColumns">Columns whose values are replaced by expressions, or <see langword="null"/> when no replacements are specified.</param>
 public sealed record SelectTableColumns(
     string TableName,
     SourceSpan? Span = null,
-    IReadOnlyList<string>? ExcludedColumns = null) : SelectColumn(
+    IReadOnlyList<string>? ExcludedColumns = null,
+    IReadOnlyList<ColumnReplacement>? ReplacedColumns = null) : SelectColumn(
     new ColumnReference(TableName, "*"),
     null);
 

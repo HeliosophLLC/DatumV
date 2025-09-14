@@ -151,10 +151,12 @@ internal sealed class SemanticAnalyzer
             {
                 ValidateTableQualifier(tableColumns.TableName, tableColumns.Span, aliasToTable, opaqueAliases, diagnostics);
                 ValidateExcludedColumns(tableColumns.ExcludedColumns, tableColumns.TableName, aliasToTable, opaqueAliases, diagnostics);
+                ValidateReplacedColumns(tableColumns.ReplacedColumns, tableColumns.TableName, aliasToTable, opaqueAliases, diagnostics);
             }
             else if (column is SelectAllColumns allColumns)
             {
                 ValidateExcludedColumns(allColumns.ExcludedColumns, null, aliasToTable, opaqueAliases, diagnostics);
+                ValidateReplacedColumns(allColumns.ReplacedColumns, null, aliasToTable, opaqueAliases, diagnostics);
             }
             else
             {
@@ -716,6 +718,68 @@ internal sealed class SemanticAnalyzer
                 {
                     EmitWarning(diagnostics, null,
                         $"EXCEPT column '{excluded}' not found in any table in scope.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates that replacement column names in a <c>SELECT * REPLACE (...)</c> or
+    /// <c>SELECT table.* REPLACE (...)</c> clause reference columns that exist in the
+    /// manifest. Also analyzes the replacement expressions for column/function references.
+    /// When no manifest data is available (opaque sources), validation is skipped.
+    /// </summary>
+    private void ValidateReplacedColumns(
+        IReadOnlyList<ColumnReplacement>? replacedColumns,
+        string? tableAlias,
+        Dictionary<string, string> aliasToTable,
+        HashSet<string> opaqueAliases,
+        List<Diagnostic> diagnostics)
+    {
+        if (replacedColumns is null || replacedColumns.Count == 0)
+            return;
+
+        foreach (ColumnReplacement replacement in replacedColumns)
+        {
+            AnalyzeExpression(replacement.Expression, aliasToTable, opaqueAliases, diagnostics);
+
+            if (tableAlias is not null)
+            {
+                if (opaqueAliases.Contains(tableAlias))
+                    continue;
+
+                if (!aliasToTable.TryGetValue(tableAlias, out string? resolvedTable))
+                    continue;
+
+                if (!_tableColumnTypes.TryGetValue(resolvedTable, out Dictionary<string, string>? columnKinds))
+                    continue;
+
+                if (!columnKinds.ContainsKey(replacement.ColumnName))
+                {
+                    EmitWarning(diagnostics, null,
+                        $"REPLACE column '{replacement.ColumnName}' not found in table '{resolvedTable}'.");
+                }
+            }
+            else
+            {
+                if (opaqueAliases.Count > 0)
+                    continue;
+
+                bool found = false;
+                foreach (KeyValuePair<string, string> entry in aliasToTable)
+                {
+                    if (_tableColumnTypes.TryGetValue(entry.Value, out Dictionary<string, string>? columnKinds)
+                        && columnKinds.ContainsKey(replacement.ColumnName))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    EmitWarning(diagnostics, null,
+                        $"REPLACE column '{replacement.ColumnName}' not found in any table in scope.");
                 }
             }
         }

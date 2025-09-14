@@ -179,8 +179,12 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
                         {
                             if (ProjectOperator.IsExcluded(firstBatch.GetColumnName(index), allColumns.ExcludedColumns))
                                 continue;
+                            Expression? replacement = ProjectOperator.FindReplacement(
+                                firstBatch.GetColumnName(index), allColumns.ReplacedColumns);
                             names.Add(firstBatch.GetColumnName(index));
-                            slots.Add(ColumnarProjectionSlot.CopyOrdinal(index));
+                            slots.Add(replacement is not null
+                                ? ColumnarProjectionSlot.Evaluate(replacement)
+                                : ColumnarProjectionSlot.CopyOrdinal(index));
                         }
                         break;
 
@@ -193,8 +197,12 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
                             {
                                 if (ProjectOperator.IsExcluded(columnName, tableColumns.ExcludedColumns, prefix))
                                     continue;
+                                Expression? replacement = ProjectOperator.FindReplacement(
+                                    columnName, tableColumns.ReplacedColumns, prefix);
                                 names.Add(columnName);
-                                slots.Add(ColumnarProjectionSlot.CopyOrdinal(index));
+                                slots.Add(replacement is not null
+                                    ? ColumnarProjectionSlot.Evaluate(replacement)
+                                    : ColumnarProjectionSlot.CopyOrdinal(index));
                             }
                         }
                         break;

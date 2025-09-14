@@ -203,6 +203,9 @@ public enum SqlToken
     /// <summary>The EXCEPT keyword (set operation).</summary>
     Except,
 
+    /// <summary>The REPLACE keyword (wildcard column replacement).</summary>
+    Replace,
+
     /// <summary>The LET keyword (named memoized binding in SELECT).</summary>
     Let,
 

@@ -206,6 +206,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("UNION"), SqlToken.Union, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("INTERSECT"), SqlToken.Intersect, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("EXCEPT"), SqlToken.Except, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("REPLACE"), SqlToken.Replace, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ALL"), SqlToken.All, requireDelimiters: true)
 
             // LET binding keyword

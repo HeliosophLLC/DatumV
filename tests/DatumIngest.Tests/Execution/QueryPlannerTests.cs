@@ -2342,6 +2342,51 @@ public class QueryPlannerTests
         // Plain SELECT * still optimizes to bare ScanOperator.
         Assert.IsType<ScanOperator>(plan);
     }
+
+    // ─────────────── SELECT * REPLACE tests ───────────────
+
+    [Fact]
+    public void Plan_SelectStarReplace_ProducesProjectOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns(
+                ReplacedColumns: [new ColumnReplacement(
+                    new BinaryExpression(
+                        new ColumnReference("x"),
+                        BinaryOperator.Multiply,
+                        new LiteralExpression(2)),
+                    "x")])],
+            From: new FromClause(new TableReference("test")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // REPLACE forces a ProjectOperator even though it's a star query.
+        Assert.IsType<ProjectOperator>(plan);
+    }
+
+    [Fact]
+    public void Plan_SelectTableStarReplace_ProducesProjectOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectTableColumns("test",
+                ReplacedColumns: [new ColumnReplacement(
+                    new BinaryExpression(
+                        new ColumnReference("x"),
+                        BinaryOperator.Add,
+                        new LiteralExpression(1)),
+                    "x")])],
+            From: new FromClause(new TableReference("test")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<ProjectOperator>(plan);
+    }
 }
 
 /// <summary>

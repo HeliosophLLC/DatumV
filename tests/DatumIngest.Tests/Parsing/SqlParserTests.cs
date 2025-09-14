@@ -122,6 +122,67 @@ public class SqlParserTests
         Assert.Null(tableColumns.ExcludedColumns);
     }
 
+    // ───────────────────── SELECT * REPLACE ─────────────────────
+
+    [Fact]
+    public void SelectStarReplace()
+    {
+        SelectStatement result = Parse("SELECT * REPLACE (x * 2 AS x) FROM t");
+
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.Null(allColumns.ExcludedColumns);
+        Assert.NotNull(allColumns.ReplacedColumns);
+        Assert.Single(allColumns.ReplacedColumns);
+        Assert.Equal("x", allColumns.ReplacedColumns[0].ColumnName);
+        Assert.IsType<BinaryExpression>(allColumns.ReplacedColumns[0].Expression);
+    }
+
+    [Fact]
+    public void SelectStarReplace_MultipleReplacements()
+    {
+        SelectStatement result = Parse("SELECT * REPLACE (a + 1 AS a, UPPER(b) AS b) FROM t");
+
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.NotNull(allColumns.ReplacedColumns);
+        Assert.Equal(2, allColumns.ReplacedColumns.Count);
+        Assert.Equal("a", allColumns.ReplacedColumns[0].ColumnName);
+        Assert.Equal("b", allColumns.ReplacedColumns[1].ColumnName);
+    }
+
+    [Fact]
+    public void SelectStarExceptAndReplace()
+    {
+        SelectStatement result = Parse("SELECT * EXCEPT (id) REPLACE (x / 100.0 AS x) FROM t");
+
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.NotNull(allColumns.ExcludedColumns);
+        Assert.Equal(new[] { "id" }, allColumns.ExcludedColumns);
+        Assert.NotNull(allColumns.ReplacedColumns);
+        Assert.Single(allColumns.ReplacedColumns);
+        Assert.Equal("x", allColumns.ReplacedColumns[0].ColumnName);
+    }
+
+    [Fact]
+    public void SelectTableStarReplace()
+    {
+        SelectStatement result = Parse("SELECT t.* REPLACE (price / 100.0 AS price) FROM t");
+
+        SelectTableColumns tableColumns = Assert.IsType<SelectTableColumns>(result.Columns[0]);
+        Assert.Equal("t", tableColumns.TableName);
+        Assert.NotNull(tableColumns.ReplacedColumns);
+        Assert.Single(tableColumns.ReplacedColumns);
+        Assert.Equal("price", tableColumns.ReplacedColumns[0].ColumnName);
+    }
+
+    [Fact]
+    public void SelectStar_HasNullReplacedColumns()
+    {
+        SelectStatement result = Parse("SELECT * FROM t");
+
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.Null(allColumns.ReplacedColumns);
+    }
+
     [Fact]
     public void SelectWithAlias()
     {

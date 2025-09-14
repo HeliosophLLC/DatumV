@@ -613,19 +613,41 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         select (IReadOnlyList<string>)columns;
 
-    /// <summary>SELECT * or SELECT * EXCEPT (col1, col2) (all columns with optional exclusion).</summary>
+    /// <summary>
+    /// A single replacement item inside a REPLACE clause: <c>expression AS column_name</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, ColumnReplacement> ReplacementItem =
+        from expression in ExpressionParser
+        from asKw in Token.EqualTo(SqlToken.As)
+        from name in Token.EqualTo(SqlToken.Identifier)
+        select new ColumnReplacement(expression, GetTokenText(name));
+
+    /// <summary>
+    /// An optional REPLACE clause that follows <c>*</c> or <c>table.*</c> (and optional EXCEPT)
+    /// to substitute column values: <c>* REPLACE (expr AS col1, expr AS col2)</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyList<ColumnReplacement>> ReplaceColumnsClause =
+        from replaceKw in Token.EqualTo(SqlToken.Replace)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from items in ReplacementItem.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (IReadOnlyList<ColumnReplacement>)items;
+
+    /// <summary>SELECT * or SELECT * EXCEPT (col1, col2) or SELECT * REPLACE (expr AS col) (all columns with optional exclusion/replacement).</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> StarColumn =
         from star in Token.EqualTo(SqlToken.Star)
         from excluded in ExceptColumnsClause.Try().AsNullable().OptionalOrDefault()
-        select (SelectColumn)new SelectAllColumns(excluded);
+        from replaced in ReplaceColumnsClause.Try().AsNullable().OptionalOrDefault()
+        select (SelectColumn)new SelectAllColumns(excluded, replaced);
 
-    /// <summary>SELECT table.* or SELECT table.* EXCEPT (col1, col2) (all columns from a specific table with optional exclusion).</summary>
+    /// <summary>SELECT table.* or SELECT table.* EXCEPT (col1, col2) or SELECT table.* REPLACE (expr AS col) (all columns from a specific table with optional exclusion/replacement).</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> TableStarColumn =
         from table in Token.EqualTo(SqlToken.Identifier)
         from dot in Token.EqualTo(SqlToken.Dot)
         from star in Token.EqualTo(SqlToken.Star)
         from excluded in ExceptColumnsClause.Try().AsNullable().OptionalOrDefault()
-        select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star), excluded);
+        from replaced in ReplaceColumnsClause.Try().AsNullable().OptionalOrDefault()
+        select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star), excluded, replaced);
 
     /// <summary>A single expression column with optional AS alias.</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ExpressionColumn =
