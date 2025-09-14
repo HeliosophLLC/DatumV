@@ -62,19 +62,24 @@ public sealed class NthValueFunction : IWindowFunction
                 throw new ArgumentException("NTH_VALUE() requires n >= 1.");
             }
 
+            // Derive the null kind from the source expression so empty-frame
+            // and no-match nulls carry the correct type.
+            DataValue sample = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
+            DataValue typedNull = DataValue.Null(sample.Kind);
+
             for (int i = 0; i < partitionRows.Count; i++)
             {
                 (int start, int end) = WindowFunctionHelper.ResolveFrameBounds(frame, i, partitionRows.Count);
 
                 if (start > end)
                 {
-                    results[i] = DataValue.Null(DataKind.Float32);
+                    results[i] = typedNull;
                     continue;
                 }
 
                 results[i] = fromLast
-                    ? FindNthFromLast(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling)
-                    : FindNthFromFirst(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling);
+                    ? FindNthFromLast(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling, typedNull)
+                    : FindNthFromFirst(partitionRows, argumentExpressions, evaluator, start, end, n, nullHandling, typedNull);
             }
         }
 
@@ -85,7 +90,8 @@ public sealed class NthValueFunction : IWindowFunction
             int start,
             int end,
             int n,
-            NullHandling nullHandling)
+            NullHandling nullHandling,
+            DataValue typedNull)
         {
             int count = 0;
             for (int j = start; j <= end; j++)
@@ -104,7 +110,7 @@ public sealed class NthValueFunction : IWindowFunction
                 }
             }
 
-            return DataValue.Null(DataKind.Float32);
+            return typedNull;
         }
 
         private static DataValue FindNthFromLast(
@@ -114,7 +120,8 @@ public sealed class NthValueFunction : IWindowFunction
             int start,
             int end,
             int n,
-            NullHandling nullHandling)
+            NullHandling nullHandling,
+            DataValue typedNull)
         {
             int count = 0;
             for (int j = end; j >= start; j--)
@@ -133,7 +140,7 @@ public sealed class NthValueFunction : IWindowFunction
                 }
             }
 
-            return DataValue.Null(DataKind.Float32);
+            return typedNull;
         }
     }
 }

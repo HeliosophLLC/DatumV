@@ -41,19 +41,24 @@ public sealed class FirstValueFunction : IWindowFunction
             NullHandling nullHandling = NullHandling.RespectNulls,
             bool fromLast = false)
         {
+            // Derive the null kind from the source expression so empty-frame
+            // and IGNORE NULLS nulls carry the correct type.
+            DataValue sample = evaluator.Evaluate(argumentExpressions[0], partitionRows[0]);
+            DataValue typedNull = DataValue.Null(sample.Kind);
+
             for (int i = 0; i < partitionRows.Count; i++)
             {
                 (int start, int end) = WindowFunctionHelper.ResolveFrameBounds(frame, i, partitionRows.Count);
 
                 if (start > end)
                 {
-                    results[i] = DataValue.Null(DataKind.Float32);
+                    results[i] = typedNull;
                     continue;
                 }
 
                 if (nullHandling == NullHandling.IgnoreNulls)
                 {
-                    DataValue found = DataValue.Null(DataKind.Float32);
+                    DataValue found = typedNull;
                     for (int j = start; j <= end; j++)
                     {
                         DataValue candidate = evaluator.Evaluate(argumentExpressions[0], partitionRows[j]);
