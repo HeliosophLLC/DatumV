@@ -116,53 +116,53 @@ public class DateFormattingFunctionTests
     }
 
     [Fact]
-    public void IsDate_ValidDateString_Returns1()
+    public void IsDate_ValidDateString_ReturnsTrue()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("2024-01-15")]);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
-    public void IsDate_ValidDateTimeString_Returns1()
+    public void IsDate_ValidDateTimeString_ReturnsTrue()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("2024-01-15T10:30:00Z")]);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
-    public void IsDate_InvalidString_Returns0()
+    public void IsDate_InvalidString_ReturnsFalse()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("not a date")]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
-    public void IsDate_EmptyString_Returns0()
+    public void IsDate_EmptyString_ReturnsFalse()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("")]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
-    public void IsDate_DateInput_Returns1()
+    public void IsDate_DateInput_ReturnsTrue()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromDate(new DateOnly(2024, 1, 15))]);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
-    public void IsDate_DateTimeInput_Returns1()
+    public void IsDate_DateTimeInput_ReturnsTrue()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromDateTime(new DateTimeOffset(2024, 1, 15, 10, 30, 0, TimeSpan.Zero))
         ]);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -171,15 +171,15 @@ public class DateFormattingFunctionTests
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
         Assert.True(result.IsNull);
-        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(DataKind.Boolean, result.Kind);
     }
 
     [Fact]
-    public void IsDate_Iso8601WithOffset_Returns1()
+    public void IsDate_Iso8601WithOffset_ReturnsTrue()
     {
         IsDateFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("2024-06-15T10:30:00+05:30")]);
-        Assert.Equal(1f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -201,8 +201,8 @@ public class DateFormattingFunctionTests
     public void IsDate_ValidateArguments_AcceptsAllValidKinds()
     {
         IsDateFunction function = new();
-        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.String]));
-        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Date]));
-        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.DateTime]));
+        Assert.Equal(DataKind.Boolean, function.ValidateArguments([DataKind.String]));
+        Assert.Equal(DataKind.Boolean, function.ValidateArguments([DataKind.Date]));
+        Assert.Equal(DataKind.Boolean, function.ValidateArguments([DataKind.DateTime]));
     }
 }

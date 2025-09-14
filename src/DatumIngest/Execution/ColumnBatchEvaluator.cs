@@ -395,9 +395,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] left, DataValue[] right, DataValue[] result, int rowCount,
         ColumnBatch batch, Dictionary<string, Regex> cache, RegexOptions options)
     {
-        DataValue trueValue = DataValue.FromFloat32(1f);
-        DataValue falseValue = DataValue.FromFloat32(0f);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
+        DataValue trueValue = DataValue.FromBoolean(true);
+        DataValue falseValue = DataValue.FromBoolean(false);
+        DataValue nullResult = DataValue.Null(DataKind.Boolean);
 
         for (int row = 0; row < rowCount; row++)
         {
@@ -813,9 +813,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[] pattern = EvaluateColumn(like.Pattern, batch);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
-        DataValue trueValue = DataValue.FromFloat32(1f);
-        DataValue falseValue = DataValue.FromFloat32(0f);
-        DataValue nullResult = DataValue.Null(DataKind.Float32);
+        DataValue trueValue = DataValue.FromBoolean(true);
+        DataValue falseValue = DataValue.FromBoolean(false);
+        DataValue nullResult = DataValue.Null(DataKind.Boolean);
 
         RegexOptions options = like.CaseInsensitive
             ? RegexOptions.CultureInvariant | RegexOptions.IgnoreCase

@@ -200,25 +200,25 @@ public class JsonFunctionTests
     // ───────────────── JsonExistsFunction ─────────────────
 
     [Fact]
-    public void JsonExists_PathExists_Returns1()
+    public void JsonExists_PathExists_ReturnsTrue()
     {
         JsonExistsFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromJsonValue("{\"name\": \"Alice\"}"),
             DataValue.FromString("name")
         ]);
-        Assert.Equal(1.0f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
-    public void JsonExists_PathMissing_Returns0()
+    public void JsonExists_PathMissing_ReturnsFalse()
     {
         JsonExistsFunction function = new();
         DataValue result = function.Execute([
             DataValue.FromJsonValue("{\"name\": \"Alice\"}"),
             DataValue.FromString("missing")
         ]);
-        Assert.Equal(0.0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -229,18 +229,18 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"a\": {\"b\": {\"c\": 1}}}"),
             DataValue.FromString("a.b.c")
         ]);
-        Assert.Equal(1.0f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
-    public void JsonExists_NullInput_Returns0()
+    public void JsonExists_NullInput_ReturnsFalse()
     {
         JsonExistsFunction function = new();
         DataValue result = function.Execute([
             DataValue.Null(DataKind.JsonValue),
             DataValue.FromString("key")
         ]);
-        Assert.Equal(0.0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     // ───────────────── JsonArrayLengthFunction ─────────────────

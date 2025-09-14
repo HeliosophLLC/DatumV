@@ -33,7 +33,7 @@ public sealed class JsonExistsFunction : IScalarFunction
             throw new ArgumentException($"json_exists() second argument must be String, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Boolean;
     }
 
     /// <inheritdoc />
@@ -42,13 +42,13 @@ public sealed class JsonExistsFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.FromFloat32(0.0f);
+            return DataValue.FromBoolean(false);
         }
 
         string json = input.Kind == DataKind.JsonValue ? input.AsJsonValue() : input.AsString();
         string path = arguments[1].AsString();
 
         bool exists = JsonValueFunction.NavigatePath(json, path) is not null;
-        return DataValue.FromFloat32(exists ? 1.0f : 0.0f);
+        return DataValue.FromBoolean(exists);
     }
 }

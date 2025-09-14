@@ -377,7 +377,7 @@ public sealed class VecCountNonzeroFunction : IScalarFunction
     }
 }
 
-/// <summary>Returns 1 if any element is non-zero, 0 otherwise.</summary>
+/// <summary>Returns true if any element is non-zero, false otherwise.</summary>
 public sealed class VecAnyFunction : IScalarFunction
 {
     /// <inheritdoc />
@@ -393,23 +393,23 @@ public sealed class VecAnyFunction : IScalarFunction
             throw new ArgumentException("vec_any() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_any() does not support {argumentKinds[0]}.");
-        return DataKind.Float32;
+        return DataKind.Boolean;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Boolean);
         float[] data = ExtractFloats(arguments[0]);
         for (int i = 0; i < data.Length; i++)
         {
-            if (data[i] != 0f) return DataValue.FromFloat32(1f);
+            if (data[i] != 0f) return DataValue.FromBoolean(true);
         }
-        return DataValue.FromFloat32(0f);
+        return DataValue.FromBoolean(false);
     }
 }
 
-/// <summary>Returns 1 if all elements are non-zero, 0 otherwise.</summary>
+/// <summary>Returns true if all elements are non-zero, false otherwise.</summary>
 public sealed class VecAllFunction : IScalarFunction
 {
     /// <inheritdoc />
@@ -425,19 +425,19 @@ public sealed class VecAllFunction : IScalarFunction
             throw new ArgumentException("vec_all() requires exactly 1 argument.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_all() does not support {argumentKinds[0]}.");
-        return DataKind.Float32;
+        return DataKind.Boolean;
     }
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
-        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Boolean);
         float[] data = ExtractFloats(arguments[0]);
         for (int i = 0; i < data.Length; i++)
         {
-            if (data[i] == 0f) return DataValue.FromFloat32(0f);
+            if (data[i] == 0f) return DataValue.FromBoolean(false);
         }
-        return DataValue.FromFloat32(1f);
+        return DataValue.FromBoolean(true);
     }
 }
 

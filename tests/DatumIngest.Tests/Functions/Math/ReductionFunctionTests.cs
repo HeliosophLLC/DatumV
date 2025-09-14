@@ -113,25 +113,25 @@ public class ReductionFunctionTests
     [Fact]
     public void VecAny_HasNonzero()
     {
-        Assert.Equal(1f, new VecAnyFunction().Execute([DataValue.FromVector([0f, 0f, 1f])]).AsFloat32());
+        Assert.True(new VecAnyFunction().Execute([DataValue.FromVector([0f, 0f, 1f])]).AsBoolean());
     }
 
     [Fact]
     public void VecAny_AllZero()
     {
-        Assert.Equal(0f, new VecAnyFunction().Execute([DataValue.FromVector([0f, 0f, 0f])]).AsFloat32());
+        Assert.False(new VecAnyFunction().Execute([DataValue.FromVector([0f, 0f, 0f])]).AsBoolean());
     }
 
     [Fact]
     public void VecAll_AllNonzero()
     {
-        Assert.Equal(1f, new VecAllFunction().Execute([DataValue.FromVector([1f, 2f, 3f])]).AsFloat32());
+        Assert.True(new VecAllFunction().Execute([DataValue.FromVector([1f, 2f, 3f])]).AsBoolean());
     }
 
     [Fact]
     public void VecAll_HasZero()
     {
-        Assert.Equal(0f, new VecAllFunction().Execute([DataValue.FromVector([1f, 0f, 3f])]).AsFloat32());
+        Assert.False(new VecAllFunction().Execute([DataValue.FromVector([1f, 0f, 3f])]).AsBoolean());
     }
 
     [Fact]
