@@ -211,7 +211,7 @@ internal static class ProtoConverter
     {
         if (message.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.UnknownNull();
         }
 
         return message.ValueCase switch
@@ -235,7 +235,7 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.Int64Value => DataValue.FromInt64(message.Int64Value),
             DataValueMessage.ValueOneofCase.Uint64Value => DataValue.FromUInt64(message.Uint64Value),
             DataValueMessage.ValueOneofCase.Float64Value => DataValue.FromFloat64(message.Float64Value),
-            _ => DataValue.Null(DataKind.Float32),
+            _ => DataValue.UnknownNull(),
         };
     }
 }

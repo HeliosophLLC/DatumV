@@ -20,7 +20,7 @@ public static class ParameterValueParser
     {
         if (string.Equals(value, "null", StringComparison.OrdinalIgnoreCase))
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.UnknownNull();
         }
 
         if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase))

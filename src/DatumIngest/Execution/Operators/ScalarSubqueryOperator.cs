@@ -106,7 +106,7 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
                 DataValue scalarResult;
                 if (firstRow is null)
                 {
-                    scalarResult = DataValue.Null(DataKind.Float32);
+                    scalarResult = DataValue.UnknownNull();
                 }
                 else
                 {

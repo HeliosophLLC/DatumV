@@ -3381,7 +3381,7 @@ public sealed class QueryPlanner
 
         if (literal.Value is null)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.UnknownNull();
         }
 
         return literal.Value switch
