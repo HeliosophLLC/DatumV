@@ -261,9 +261,17 @@ public enum ShardMode
 }
 
 /// <summary>
-/// The GROUP BY clause with one or more grouping expressions.
+/// The GROUP BY clause with one or more grouping expressions, or
+/// <c>GROUP BY ALL</c> which derives grouping keys from non-aggregate SELECT columns.
 /// </summary>
-public sealed record GroupByClause(IReadOnlyList<Expression> Expressions);
+/// <param name="Expressions">
+/// The explicit grouping expressions, or an empty list when <paramref name="IsAll"/> is <see langword="true"/>.
+/// </param>
+/// <param name="IsAll">
+/// When <see langword="true"/>, the planner infers grouping keys from the non-aggregate
+/// columns in the SELECT list. <paramref name="Expressions"/> is empty in this case.
+/// </param>
+public sealed record GroupByClause(IReadOnlyList<Expression> Expressions, bool IsAll = false);
 
 /// <summary>
 /// The PIVOT clause that rotates distinct values of a column into output columns,

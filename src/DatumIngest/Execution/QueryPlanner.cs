@@ -629,6 +629,39 @@ public sealed class QueryPlanner
             IReadOnlyList<Expression> groupByExpressions =
                 statement.GroupBy?.Expressions ?? Array.Empty<Expression>();
 
+            // GROUP BY ALL: derive grouping keys from non-aggregate SELECT columns.
+            if (statement.GroupBy is { IsAll: true })
+            {
+                List<Expression> inferred = new();
+
+                foreach (SelectColumn column in statement.Columns)
+                {
+                    if (column is SelectAllColumns or SelectTableColumns)
+                    {
+                        continue;
+                    }
+
+                    if (!ExpressionContainsAggregate(column.Expression, _functionRegistry))
+                    {
+                        inferred.Add(column.Expression);
+                    }
+                }
+
+                if (statement.LetBindings is not null)
+                {
+                    foreach (LetBinding binding in statement.LetBindings)
+                    {
+                        if (binding.OutputAlias is not null
+                            && !ExpressionContainsAggregate(binding.Expression, _functionRegistry))
+                        {
+                            inferred.Add(binding.Expression);
+                        }
+                    }
+                }
+
+                groupByExpressions = inferred;
+            }
+
             List<AggregateColumn> aggregateColumns = new();
             List<SelectColumn> rewrittenColumns = new();
 

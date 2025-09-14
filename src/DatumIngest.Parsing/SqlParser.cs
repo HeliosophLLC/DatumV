@@ -874,12 +874,15 @@ public static class SqlParser
 
     // ───────────────────── GROUP BY clause ─────────────────────
 
-    /// <summary>GROUP BY expr1, expr2, ...</summary>
+    /// <summary>GROUP BY ALL | GROUP BY expr1, expr2, ...</summary>
     private static readonly TokenListParser<SqlToken, GroupByClause> GroupByClauseParser =
         from groupKw in Token.EqualTo(SqlToken.Group)
         from byKw in Token.EqualTo(SqlToken.By)
-        from expressions in ExpressionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
-        select new GroupByClause(expressions);
+        from result in Token.EqualTo(SqlToken.All)
+            .Select(_ => new GroupByClause(Array.Empty<Expression>(), IsAll: true))
+            .Or(ExpressionParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+                .Select(expressions => new GroupByClause(expressions)))
+        select result;
 
     // ───────────────────── HAVING clause ─────────────────────
 

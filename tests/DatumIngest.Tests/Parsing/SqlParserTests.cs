@@ -1181,6 +1181,38 @@ public class SqlParserTests
         Assert.Equal("category", groupKey.ColumnName);
     }
 
+    [Fact]
+    public void GroupByAll_SetsIsAllFlag()
+    {
+        SelectStatement result = Parse(
+            "SELECT department, region, COUNT(*) FROM sales GROUP BY ALL");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.True(result.GroupBy.IsAll);
+        Assert.Empty(result.GroupBy.Expressions);
+    }
+
+    [Fact]
+    public void GroupByAll_CaseInsensitive()
+    {
+        SelectStatement result = Parse(
+            "SELECT x, SUM(y) FROM t GROUP BY all");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.True(result.GroupBy.IsAll);
+    }
+
+    [Fact]
+    public void GroupByExplicit_IsAllIsFalse()
+    {
+        SelectStatement result = Parse(
+            "SELECT department, COUNT(*) FROM sales GROUP BY department");
+
+        Assert.NotNull(result.GroupBy);
+        Assert.False(result.GroupBy.IsAll);
+        Assert.Single(result.GroupBy.Expressions);
+    }
+
     // ───────────────────── CASE expressions ─────────────────────
 
     [Fact]

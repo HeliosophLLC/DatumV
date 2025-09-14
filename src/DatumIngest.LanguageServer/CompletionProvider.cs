@@ -66,6 +66,7 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterGroupBy:
                 AddColumns(items, allTables: true);
+                AddKeywords(items, ["ALL"]);
                 break;
 
             case CompletionZoneKind.AfterHaving:
