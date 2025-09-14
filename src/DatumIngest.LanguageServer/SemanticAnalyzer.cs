@@ -25,6 +25,66 @@ internal sealed class SemanticAnalyzer
     /// <summary>Function signatures indexed by name for argument type validation.</summary>
     private readonly Dictionary<string, FunctionSignature> _functionSignatures;
 
+    // ── Built-in virtual schema tables (known statically, no manifest needed) ──
+
+    /// <summary>
+    /// Maps virtual schema names to their known table names and column schemas.
+    /// Column schemas use the same (name → DataKind string) format as
+    /// <see cref="_tableColumnTypes"/> for consistent downstream validation.
+    /// </summary>
+    private static readonly Dictionary<string, Dictionary<string, Dictionary<string, string>>> VirtualSchemaColumns =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["information_schema"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["tables"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["table_catalog"] = "String",
+                    ["table_schema"] = "String",
+                    ["table_name"] = "String",
+                    ["table_type"] = "String",
+                },
+                ["columns"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["table_catalog"] = "String",
+                    ["table_schema"] = "String",
+                    ["table_name"] = "String",
+                    ["column_name"] = "String",
+                    ["ordinal_position"] = "Int32",
+                    ["data_type"] = "String",
+                    ["is_nullable"] = "String",
+                },
+                ["schemata"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["catalog_name"] = "String",
+                    ["schema_name"] = "String",
+                },
+            },
+            ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["providers"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["provider_name"] = "String",
+                },
+                ["functions"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["function_name"] = "String",
+                    ["function_type"] = "String",
+                },
+                ["statistics"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["table_name"] = "String",
+                    ["column_name"] = "String",
+                    ["data_type"] = "String",
+                    ["row_count"] = "Int64",
+                    ["distinct_count"] = "Int64",
+                    ["null_ratio"] = "Float64",
+                    ["min_value"] = "String",
+                    ["max_value"] = "String",
+                },
+            },
+        };
+
     // ── Type category sets for compatibility checks ──
 
     private static readonly HashSet<string> NumericKinds = new(StringComparer.OrdinalIgnoreCase)
@@ -238,7 +298,27 @@ internal sealed class SemanticAnalyzer
         switch (source)
         {
             case TableReference tableReference:
-                if (!_tableColumnTypes.ContainsKey(tableReference.Name) &&
+                if (tableReference.SchemaName is not null)
+                {
+                    // Schema-qualified reference (e.g. information_schema.tables).
+                    // Validate against the built-in virtual schema definitions.
+                    if (!TryResolveVirtualTable(
+                            tableReference.SchemaName, tableReference.Name,
+                            out Dictionary<string, string>? virtualColumns) ||
+                        virtualColumns is null)
+                    {
+                        EmitWarning(diagnostics, tableReference.Span,
+                            $"Unknown table '{tableReference.SchemaName}.{tableReference.Name}'.");
+                    }
+                    else
+                    {
+                        // Expose the virtual table's columns for downstream
+                        // column-reference validation under the effective alias.
+                        string virtualKey = $"{tableReference.SchemaName}.{tableReference.Name}";
+                        _tableColumnTypes.TryAdd(virtualKey, virtualColumns);
+                    }
+                }
+                else if (!_tableColumnTypes.ContainsKey(tableReference.Name) &&
                     !opaqueAliases.Contains(tableReference.Name))
                 {
                     EmitWarning(diagnostics, tableReference.Span,
@@ -248,10 +328,22 @@ internal sealed class SemanticAnalyzer
                 // Register both alias and raw name so column references
                 // qualified by either succeed.
                 string effectiveName = tableReference.Alias ?? tableReference.Name;
-                aliasToTable[effectiveName] = tableReference.Name;
-                if (tableReference.Alias is not null)
+                if (tableReference.SchemaName is not null)
                 {
-                    aliasToTable[tableReference.Alias] = tableReference.Name;
+                    string qualifiedName = $"{tableReference.SchemaName}.{tableReference.Name}";
+                    aliasToTable[effectiveName] = qualifiedName;
+                    if (tableReference.Alias is not null)
+                    {
+                        aliasToTable[tableReference.Alias] = qualifiedName;
+                    }
+                }
+                else
+                {
+                    aliasToTable[effectiveName] = tableReference.Name;
+                    if (tableReference.Alias is not null)
+                    {
+                        aliasToTable[tableReference.Alias] = tableReference.Name;
+                    }
                 }
 
                 break;
@@ -838,5 +930,27 @@ internal sealed class SemanticAnalyzer
             EndLine = line,
             EndColumn = column + span.Length,
         });
+    }
+
+    /// <summary>
+    /// Checks whether a schema-qualified table reference points to a known
+    /// built-in virtual schema table. When found, returns the column schema
+    /// for downstream column validation.
+    /// </summary>
+    private static bool TryResolveVirtualTable(
+        string schemaName,
+        string tableName,
+        out Dictionary<string, string>? columnTypes)
+    {
+        columnTypes = null;
+
+        if (VirtualSchemaColumns.TryGetValue(schemaName, out Dictionary<string, Dictionary<string, string>>? tables) &&
+            tables.TryGetValue(tableName, out Dictionary<string, string>? columns))
+        {
+            columnTypes = columns;
+            return true;
+        }
+
+        return false;
     }
 }

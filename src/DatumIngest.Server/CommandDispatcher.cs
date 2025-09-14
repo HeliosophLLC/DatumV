@@ -174,7 +174,7 @@ public sealed class CommandDispatcher
             query = ParameterBinder.Bind(query, parameters);
         }
 
-        QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry);
+        QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
         ExecutionContext context = new(cancellationToken, session.FunctionRegistry, queryContext.Catalog, localBufferPool, queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
@@ -199,7 +199,7 @@ public sealed class CommandDispatcher
     private static async Task<Schema> ResolveQuerySchemaAsync(
         Session session, QueryContext queryContext, SelectStatement statement, CancellationToken cancellationToken)
     {
-        QuerySchemaResolver resolver = new(queryContext.Catalog, session.FunctionRegistry);
+        QuerySchemaResolver resolver = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
         ResolvedQuerySchema resolved = await resolver.ResolveAsync(statement, cancellationToken).ConfigureAwait(false);
 
         // Build a source schema for type inference on expressions.
@@ -445,7 +445,7 @@ public sealed class CommandDispatcher
         string actualSql = analyze ? sql["analyze ".Length..] : sql;
 
         QueryExpression query = SqlParser.Parse(actualSql);
-        QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry);
+        QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
         IQueryOperator plan = await planner.PlanAsync(query, cancellationToken).ConfigureAwait(false);
 
         ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);

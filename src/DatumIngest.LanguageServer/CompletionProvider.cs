@@ -145,7 +145,30 @@ public sealed class CompletionProvider
                 SortOrder = 0,
             });
         }
+
+        // Offer built-in virtual schema tables (e.g. information_schema.tables).
+        foreach ((string schemaName, string[] tableNames) in VirtualSchemaTables)
+        {
+            foreach (string tableName in tableNames)
+            {
+                string qualifiedName = $"{schemaName}.{tableName}";
+                items.Add(new CompletionItem
+                {
+                    Label = qualifiedName,
+                    Kind = CompletionItemKind.Table,
+                    Detail = $"Virtual table ({schemaName})",
+                    InsertText = qualifiedName,
+                    SortOrder = 2,
+                });
+            }
+        }
     }
+
+    private static readonly (string SchemaName, string[] TableNames)[] VirtualSchemaTables =
+    [
+        ("information_schema", ["tables", "columns", "schemata"]),
+        ("datum_catalog", ["providers", "functions", "statistics"]),
+    ];
 
     private void AddColumns(List<CompletionItem> items, bool allTables)
     {

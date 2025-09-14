@@ -735,10 +735,16 @@ public static class SqlParser
         ).AsNullable().OptionalOrDefault()
         select new TablesampleClause(method, percentage, seed);
 
-    /// <summary>A table reference with optional TABLESAMPLE clause and alias.</summary>
+    /// <summary>A table reference with optional schema qualifier, TABLESAMPLE clause, and alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> TableReferenceParser =
-        from name in Token.EqualTo(SqlToken.Identifier)
+        from first in Token.EqualTo(SqlToken.Identifier)
             .Or(Token.EqualTo(SqlToken.StringLiteral))
+        from schemaQualified in (
+            from dot in Token.EqualTo(SqlToken.Dot)
+            from second in Token.EqualTo(SqlToken.Identifier)
+                .Or(Token.EqualTo(SqlToken.StringLiteral))
+            select second
+        ).OptionalOrDefault()
         from tablesample in TablesampleClauseParser.AsNullable().OptionalOrDefault()
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
@@ -746,7 +752,9 @@ public static class SqlParser
             select GetTokenText(aliasName)
         ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
         .OptionalOrDefault()
-        select (TableSource)new TableReference(GetTokenText(name), alias, ToSpan(name), tablesample);
+        select (TableSource)(schemaQualified.HasValue
+            ? new TableReference(GetTokenText(schemaQualified), alias, ToSpan(first, schemaQualified), tablesample, SchemaName: GetTokenText(first))
+            : new TableReference(GetTokenText(first), alias, ToSpan(first), tablesample));
 
     /// <summary>A subquery source: (SELECT ...) AS alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> SubquerySourceParser =

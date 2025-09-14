@@ -915,7 +915,8 @@ static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog
     ReferenceStore.BeginQueryScope();
 
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry);
+    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
 
     using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
@@ -1057,7 +1058,8 @@ static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catal
     ReferenceStore.BeginQueryScope();
 
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry);
+    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
 
     using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
@@ -1112,7 +1114,8 @@ static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog
     ReferenceStore.BeginQueryScope();
 
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry);
+    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
 
     using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
@@ -1163,7 +1166,8 @@ static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catal
     ReferenceStore.BeginQueryScope();
 
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry);
+    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
     IQueryOperator plan = await planner.PlanAsync(query, CancellationToken.None);
 
     // Build the static explain plan from the original operator tree.
@@ -1199,7 +1203,8 @@ static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog cata
     ReferenceStore.BeginQueryScope();
 
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry);
+    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
+    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
 
     using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
     ExecutionContext context = new(
@@ -1269,7 +1274,8 @@ static async Task<int> RunSchemaAsync(QueryExpression query, TableCatalog catalo
     }
 
     FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    QuerySchemaResolver resolver = new(catalog, functionRegistry);
+    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
+    QuerySchemaResolver resolver = new(catalog, functionRegistry, virtualSchemaRegistry);
     ResolvedQuerySchema schema = await resolver.ResolveAsync(selectQuery.Statement, CancellationToken.None);
 
     // Print header.

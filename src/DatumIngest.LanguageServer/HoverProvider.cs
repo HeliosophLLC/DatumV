@@ -78,13 +78,28 @@ public sealed class HoverProvider
             return GetFunctionHover(name);
         }
 
-        // If preceded by a dot, it's a qualified column — find the qualifier.
+        // If preceded by a dot, it could be a qualified column (table.column)
+        // or a virtual schema table (schema.table).
         if (currentIndex >= 2 &&
             tokens[currentIndex - 1].Kind == SqlToken.Dot &&
             (tokens[currentIndex - 2].Kind == SqlToken.Identifier || IsKeywordToken(tokens[currentIndex - 2].Kind)))
         {
             string qualifier = tokens[currentIndex - 2].Text;
+
+            // Check if this is a virtual schema table reference (e.g. information_schema.tables).
+            string? virtualHover = GetVirtualTableHover(qualifier, name);
+            if (virtualHover is not null)
+            {
+                return virtualHover;
+            }
+
             return GetQualifiedColumnHover(qualifier, name);
+        }
+
+        // Check if the identifier is a known virtual schema name itself (e.g. hovering over "information_schema").
+        if (VirtualSchemaDescriptions.ContainsKey(name))
+        {
+            return $"**Schema: {name}**\n\n{VirtualSchemaDescriptions[name]}";
         }
 
         // Try as table name first, then as unqualified column.
@@ -342,6 +357,48 @@ public sealed class HoverProvider
     private static bool IsKeywordToken(SqlToken kind)
     {
         return kind < SqlToken.Identifier;
+    }
+
+    // ─────────────────── Virtual schema hover support ───────────────────
+
+    private static readonly Dictionary<string, string> VirtualSchemaDescriptions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["information_schema"] = "PostgreSQL-compatible metadata schema exposing tables, columns, and schemata.",
+            ["datum_catalog"] = "DatumIngest-specific metadata schema exposing providers, functions, and statistics.",
+        };
+
+    private static readonly Dictionary<string, Dictionary<string, string>> VirtualTableDescriptions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["information_schema"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["tables"] = "Lists all tables (BASE TABLE, TEMPORARY TABLE) with their schema assignment.",
+                ["columns"] = "Lists all columns of all tables with ordinal position, data type, and nullability.",
+                ["schemata"] = "Lists the known schema namespaces (public, temp, information_schema, datum_catalog).",
+            },
+            ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["providers"] = "Lists all registered data providers.",
+                ["functions"] = "Lists all available functions with their type (SCALAR, AGGREGATE, TABLE_VALUED, WINDOW).",
+                ["statistics"] = "Lists column-level statistics from feature manifests.",
+            },
+        };
+
+    /// <summary>
+    /// Returns hover content for a schema-qualified virtual table reference
+    /// (e.g. <c>information_schema.tables</c>), or <see langword="null"/> if
+    /// the schema/table combination is not a known virtual table.
+    /// </summary>
+    private static string? GetVirtualTableHover(string schemaName, string tableName)
+    {
+        if (VirtualTableDescriptions.TryGetValue(schemaName, out Dictionary<string, string>? tables) &&
+            tables.TryGetValue(tableName, out string? description))
+        {
+            return $"**{schemaName}.{tableName}**\n\n{description}";
+        }
+
+        return null;
     }
 }
 

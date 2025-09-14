@@ -1417,6 +1417,131 @@ Supported table sources:
 - JOINs (INNER, LEFT, RIGHT, FULL OUTER, CROSS — outer joins mark the outer side nullable)
 - Subqueries (`FROM (SELECT ...) AS sub` — recursively infers output column types)
 - Table-valued functions (`RANGE`, `UNNEST` — via `ISchemaAwareTableFunction`)
+- Virtual schema tables (`information_schema.tables`, `datum_catalog.functions`, etc.)
+
+## Virtual Schemas
+
+DatumIngest supports **schema-qualified table references** using `schema_name.table_name` syntax. Two virtual schemas are built in: `information_schema` (PostgreSQL-compatible metadata) and `datum_catalog` (DatumIngest-specific catalog views). Virtual schemas are read-only — DDL/DML statements against them are rejected.
+
+### Schema-qualified syntax
+
+```sql
+-- Query a virtual schema table
+SELECT * FROM information_schema.tables
+
+-- With an alias
+SELECT t.table_name, t.table_type FROM information_schema.tables AS t
+
+-- Join virtual schema with real data
+SELECT c.column_name, c.data_type
+FROM information_schema.columns AS c
+WHERE c.table_name = 'orders_csv'
+ORDER BY c.ordinal_position
+```
+
+Schema and table names are case-insensitive.
+
+### `information_schema`
+
+PostgreSQL-compatible metadata views reflecting all tables visible in the current catalog. Temp tables appear with `table_schema = 'temp'` and `table_type = 'TEMPORARY TABLE'`; all other sources appear under `schema = 'public'` as `'BASE TABLE'`.
+
+#### `information_schema.tables`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_catalog` | String | Always `'datum'` |
+| `table_schema` | String | `'public'` or `'temp'` |
+| `table_name` | String | Table name as registered in the catalog |
+| `table_type` | String | `'BASE TABLE'` or `'TEMPORARY TABLE'` |
+
+```sql
+-- List all tables and their types
+SELECT table_schema, table_name, table_type
+FROM information_schema.tables
+ORDER BY table_schema, table_name
+```
+
+#### `information_schema.columns`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_catalog` | String | Always `'datum'` |
+| `table_schema` | String | `'public'` or `'temp'` |
+| `table_name` | String | Parent table name |
+| `column_name` | String | Column name |
+| `ordinal_position` | Int32 | 1-based column position |
+| `data_type` | String | DatumIngest `DataKind` name (e.g. `'Float32'`, `'String'`) |
+| `is_nullable` | String | `'YES'` or `'NO'` |
+
+```sql
+-- Show columns for a specific table
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'orders_csv'
+ORDER BY ordinal_position
+```
+
+#### `information_schema.schemata`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `catalog_name` | String | Always `'datum'` |
+| `schema_name` | String | `'public'`, `'temp'`, `'information_schema'`, or `'datum_catalog'` |
+
+```sql
+SELECT schema_name FROM information_schema.schemata
+```
+
+### `datum_catalog`
+
+DatumIngest-specific metadata views exposing providers, functions, and per-column statistics from manifests.
+
+#### `datum_catalog.providers`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `provider_name` | String | Format provider name (e.g. `'csv'`, `'parquet'`, `'hdf5'`) |
+
+```sql
+SELECT provider_name FROM datum_catalog.providers
+```
+
+#### `datum_catalog.functions`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `function_name` | String | Function name |
+| `function_type` | String | `'SCALAR'`, `'AGGREGATE'`, `'TABLE_VALUED'`, or `'WINDOW'` |
+
+```sql
+-- List all aggregate functions
+SELECT function_name FROM datum_catalog.functions
+WHERE function_type = 'AGGREGATE'
+ORDER BY function_name
+```
+
+#### `datum_catalog.statistics`
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `table_name` | String | NO | Source table name |
+| `column_name` | String | NO | Column name |
+| `data_type` | String | NO | DatumIngest `DataKind` name |
+| `row_count` | Int64 | NO | Total row count from manifest |
+| `distinct_count` | Int64 | NO | Estimated distinct values (HyperLogLog) |
+| `null_ratio` | Float64 | YES | Fraction of null values |
+| `min_value` | String | YES | Minimum value (as string, where available) |
+| `max_value` | String | YES | Maximum value (as string, where available) |
+
+Only tables with a `.datum-manifest` sidecar or session-generated statistics appear in this view.
+
+```sql
+-- Show statistics for all columns of a table
+SELECT column_name, data_type, row_count, distinct_count, null_ratio
+FROM datum_catalog.statistics
+WHERE table_name = 'orders_csv'
+ORDER BY column_name
+```
 
 ## DDL / DML
 

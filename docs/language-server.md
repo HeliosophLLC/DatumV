@@ -98,7 +98,7 @@ The completion engine classifies the cursor position using tokenizer-only analys
 |------|---------|-------------|
 | `StatementStart` | Empty input | `SELECT` |
 | `AfterSelect` | After `SELECT` | Columns, scalar functions, `FROM`, `AS`, `CAST` |
-| `AfterFrom` / `AfterJoin` | After `FROM` or `JOIN` | Tables, table-valued functions. Table names that require quoting (contain spaces, hyphens, or collide with keywords) are automatically double-quoted in the inserted text. |
+| `AfterFrom` / `AfterJoin` | After `FROM` or `JOIN` | Tables, table-valued functions, virtual schema tables (`information_schema.tables`, `datum_catalog.functions`, etc.). Table names that require quoting (contain spaces, hyphens, or collide with keywords) are automatically double-quoted in the inserted text. |
 | `AfterWhere` / `AfterOn` | After `WHERE` or `ON` | Columns, functions, `AND`, `OR`, `NOT`, etc. |
 | `AfterOrderBy` | After `ORDER BY` | Columns, `ASC`, `DESC` |
 | `AfterDot` | After `alias.` | Columns from the qualified table |
@@ -128,6 +128,10 @@ The diagnostics pipeline uses an **error-recovering parser** that collects multi
 
 All lookups are **case-insensitive** — the manifest may use `Users` while the query says `users`.
 
+### Virtual schema references
+
+Schema-qualified references to `information_schema` and `datum_catalog` tables are recognized without requiring the manifest to contain them. The analyzer validates both the schema name and the table name within it — `FROM information_schema.tables` produces no warning, while `FROM information_schema.nonexistent` produces an "Unknown table" warning and `FROM bogus_schema.anything` produces an "Unknown schema" warning. Column references against virtual schema tables are also validated against their known schemas.
+
 ### Opaque sources
 
 Subqueries and table-valued function sources are treated as **opaque**: their output columns are unknown at manifest-analysis time, so column references qualified by a subquery alias or function alias are never flagged.
@@ -143,6 +147,7 @@ Hovering over a token shows contextual documentation:
 - **Keywords** — Brief description of the SQL clause
 - **Functions** — Full signature with parameter types and description
 - **Tables** — Column list with types and nullability
+- **Virtual schemas** — Schema description (e.g. "PostgreSQL-compatible metadata schema") and table description (e.g. "Lists all tables visible in the current catalog")
 - **Columns** — Data kind, nullability, and source table
 
 ## Syntax Highlighting

@@ -140,13 +140,15 @@ public sealed record FromClause(TableSource Source);
 public abstract record TableSource;
 
 /// <summary>
-/// A reference to a named table, optionally aliased, with optional row sampling.
+/// A reference to a named table, optionally schema-qualified (e.g. <c>information_schema.tables</c>),
+/// optionally aliased, with optional row sampling.
 /// </summary>
 public sealed record TableReference(
     string Name,
     string? Alias = null,
     SourceSpan? Span = null,
-    TablesampleClause? Tablesample = null) : TableSource;
+    TablesampleClause? Tablesample = null,
+    string? SchemaName = null) : TableSource;
 
 /// <summary>
 /// The sampling method used in a TABLESAMPLE clause.

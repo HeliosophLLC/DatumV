@@ -20,16 +20,23 @@ public sealed class QueryPlanner
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functionRegistry;
+    private readonly VirtualSchemaRegistry? _virtualSchemaRegistry;
 
     /// <summary>
-    /// Creates a query planner for the given table catalog and function registry.
+    /// Creates a query planner for the given table catalog, function registry,
+    /// and optional virtual schema registry.
     /// </summary>
     /// <param name="catalog">The catalog used to resolve table names.</param>
     /// <param name="functionRegistry">The registry used to resolve table-valued functions.</param>
-    public QueryPlanner(TableCatalog catalog, FunctionRegistry functionRegistry)
+    /// <param name="virtualSchemaRegistry">
+    /// Optional registry for virtual schemas (e.g. <c>information_schema</c>, <c>datum_catalog</c>).
+    /// When <see langword="null"/>, schema-qualified table references are not resolved.
+    /// </param>
+    public QueryPlanner(TableCatalog catalog, FunctionRegistry functionRegistry, VirtualSchemaRegistry? virtualSchemaRegistry = null)
     {
         _catalog = catalog;
         _functionRegistry = functionRegistry;
+        _virtualSchemaRegistry = virtualSchemaRegistry;
     }
 
     /// <summary>
@@ -3455,6 +3462,12 @@ public sealed class QueryPlanner
         bool hasJoins,
         IReadOnlyDictionary<string, CommonTableExpressionOperator>? commonTableExpressionOperators = null)
     {
+        // Virtual schema reference: schema.table (e.g. information_schema.tables).
+        if (tableRef.SchemaName is not null)
+        {
+            return PlanVirtualTableReference(tableRef, allReferencedColumns, hasJoins);
+        }
+
         // CTE reference: return the shared CTE operator wrapped with an alias.
         if (commonTableExpressionOperators is not null &&
             commonTableExpressionOperators.TryGetValue(tableRef.Name, out CommonTableExpressionOperator? commonTableExpressionOperator))
@@ -3543,6 +3556,53 @@ public sealed class QueryPlanner
         if (tableRef.Alias is not null || hasJoins)
         {
             scanOperator = new AliasOperator(scanOperator, tableRef.Alias ?? tableRef.Name);
+        }
+
+        return scanOperator;
+    }
+
+    /// <summary>
+    /// Plans a schema-qualified table reference (e.g. <c>information_schema.tables</c>)
+    /// by resolving the schema and table through the virtual schema registry.
+    /// </summary>
+    private IQueryOperator PlanVirtualTableReference(
+        TableReference tableRef,
+        HashSet<(string? TableName, string ColumnName)> allReferencedColumns,
+        bool hasJoins)
+    {
+        if (_virtualSchemaRegistry is null)
+        {
+            throw new InvalidOperationException(
+                $"Schema-qualified table reference '{tableRef.SchemaName}.{tableRef.Name}' " +
+                "is not supported in this context.");
+        }
+
+        IVirtualSchema? virtualSchema = _virtualSchemaRegistry.TryResolve(tableRef.SchemaName!);
+
+        if (virtualSchema is null)
+        {
+            throw new InvalidOperationException(
+                $"Unknown schema: '{tableRef.SchemaName}'.");
+        }
+
+        IVirtualTableSource? virtualSource = virtualSchema.TryResolve(tableRef.Name);
+
+        if (virtualSource is null)
+        {
+            throw new InvalidOperationException(
+                $"Table '{tableRef.Name}' not found in schema '{tableRef.SchemaName}'.");
+        }
+
+        string effectiveAlias = tableRef.Alias ?? tableRef.Name;
+        IReadOnlySet<string>? requiredColumns =
+            ComputeRequiredColumns(effectiveAlias, allReferencedColumns);
+
+        IQueryOperator scanOperator = new VirtualTableScanOperator(
+            virtualSource, tableRef.SchemaName!, tableRef.Name, requiredColumns);
+
+        if (tableRef.Alias is not null || hasJoins)
+        {
+            scanOperator = new AliasOperator(scanOperator, effectiveAlias);
         }
 
         return scanOperator;

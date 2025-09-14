@@ -370,7 +370,7 @@ internal sealed class StatementExecutor
             query = ParameterBinder.Bind(query, parameters);
         }
 
-        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry);
+        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry, _session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
 
         try
@@ -697,7 +697,7 @@ internal sealed class StatementExecutor
         ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
         Dictionary<CompositeKey, DataValue[]> assignmentMap = new();
 
-        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry);
+        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry, _session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
 
         try
@@ -1259,7 +1259,7 @@ internal sealed class StatementExecutor
             query = ParameterBinder.Bind(query, parameters);
         }
 
-        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry);
+        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry, _session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
 
         try

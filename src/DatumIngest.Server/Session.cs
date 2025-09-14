@@ -36,6 +36,7 @@ public sealed class Session : IDisposable
         DatasetId = datasetId;
         Catalog = catalog;
         FunctionRegistry = functionRegistry;
+        VirtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
         Governor = governor ?? QueryGovernor.Unlimited;
         CreatedAt = DateTimeOffset.UtcNow;
         LastActivityAt = CreatedAt;
@@ -55,6 +56,9 @@ public sealed class Session : IDisposable
 
     /// <summary>Gets the shared function registry.</summary>
     public FunctionRegistry FunctionRegistry { get; }
+
+    /// <summary>Gets the virtual schema registry for resolving schema-qualified table references.</summary>
+    public VirtualSchemaRegistry VirtualSchemaRegistry { get; }
 
     /// <summary>Gets the resource governance limits for this session.</summary>
     public QueryGovernor Governor { get; }

@@ -15,16 +15,27 @@ public sealed class QuerySchemaResolver
 {
     private readonly TableCatalog _catalog;
     private readonly FunctionRegistry _functionRegistry;
+    private readonly VirtualSchemaRegistry? _virtualSchemaRegistry;
 
     /// <summary>
-    /// Creates a resolver backed by the given catalog and function registry.
+    /// Creates a resolver backed by the given catalog, function registry,
+    /// and optional virtual schema registry.
     /// </summary>
     /// <param name="catalog">The catalog used to resolve table names to schemas.</param>
     /// <param name="functionRegistry">The registry used to resolve table-valued function schemas.</param>
-    public QuerySchemaResolver(TableCatalog catalog, FunctionRegistry functionRegistry)
+    /// <param name="virtualSchemaRegistry">
+    /// Optional registry for resolving schema-qualified table references
+    /// (e.g. <c>information_schema.columns</c>). When <see langword="null"/>,
+    /// schema-qualified references are not resolved.
+    /// </param>
+    public QuerySchemaResolver(
+        TableCatalog catalog,
+        FunctionRegistry functionRegistry,
+        VirtualSchemaRegistry? virtualSchemaRegistry = null)
     {
         _catalog = catalog;
         _functionRegistry = functionRegistry;
+        _virtualSchemaRegistry = virtualSchemaRegistry;
     }
 
     /// <summary>
@@ -126,9 +137,10 @@ public sealed class QuerySchemaResolver
     }
 
     /// <summary>
-    /// Resolves a named table reference. If the name matches a CTE definition,
-    /// the CTE body's schema is resolved recursively; otherwise the schema is
-    /// fetched from the catalog.
+    /// Resolves a named table reference. Schema-qualified references
+    /// (e.g. <c>information_schema.tables</c>) are resolved through the
+    /// <see cref="VirtualSchemaRegistry"/>. Unqualified names check CTE
+    /// definitions first, then fall through to the catalog.
     /// Applies the alias (or table name) as the source identifier.
     /// </summary>
     private async Task<IReadOnlyList<ResolvedColumn>> ResolveTableReferenceAsync(
@@ -136,6 +148,12 @@ public sealed class QuerySchemaResolver
         IReadOnlyDictionary<string, CommonTableExpression>? commonTableExpressionsByName,
         CancellationToken cancellationToken)
     {
+        // Schema-qualified references resolve through the virtual schema registry.
+        if (tableReference.SchemaName is not null)
+        {
+            return ResolveVirtualTableReference(tableReference);
+        }
+
         // Check CTE definitions before falling through to the catalog.
         if (commonTableExpressionsByName is not null &&
             commonTableExpressionsByName.TryGetValue(tableReference.Name, out CommonTableExpression? commonTableExpression))
@@ -149,6 +167,27 @@ public sealed class QuerySchemaResolver
 
         string sourceIdentifier = tableReference.Alias ?? tableReference.Name;
         return ToResolvedColumns(schema, sourceIdentifier);
+    }
+
+    /// <summary>
+    /// Resolves a schema-qualified table reference through the virtual schema registry.
+    /// </summary>
+    private IReadOnlyList<ResolvedColumn> ResolveVirtualTableReference(TableReference tableReference)
+    {
+        IVirtualSchema? virtualSchema = _virtualSchemaRegistry?.TryResolve(tableReference.SchemaName!);
+        if (virtualSchema is not null)
+        {
+            IVirtualTableSource? virtualTableSource = virtualSchema.TryResolve(tableReference.Name);
+            if (virtualTableSource is not null)
+            {
+                Schema schema = virtualTableSource.GetSchema();
+                string sourceIdentifier = tableReference.Alias ?? tableReference.Name;
+                return ToResolvedColumns(schema, sourceIdentifier);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Unknown schema-qualified table: {tableReference.SchemaName}.{tableReference.Name}.");
     }
 
     /// <summary>

@@ -663,4 +663,84 @@ public sealed class SemanticAnalyzerTests
             diagnostic.Severity == DiagnosticSeverity.Warning &&
             diagnostic.Message.Contains("sin"));
     }
+
+    // ─────────────────── Virtual schema references ───────────────────
+
+    [Fact]
+    public void Analyze_InformationSchemaTables_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT * FROM information_schema.tables", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
+
+    [Fact]
+    public void Analyze_InformationSchemaColumns_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT column_name FROM information_schema.columns", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
+
+    [Fact]
+    public void Analyze_DatumCatalogFunctions_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT function_name FROM datum_catalog.functions", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
+
+    [Fact]
+    public void Analyze_UnknownVirtualSchemaTable_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT * FROM information_schema.nonexistent", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("information_schema.nonexistent"));
+    }
+
+    [Fact]
+    public void Analyze_UnknownSchema_ReturnsWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT * FROM fake_schema.tables", manifest);
+
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("fake_schema.tables"));
+    }
+
+    [Fact]
+    public void Analyze_VirtualSchemaWithAlias_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT t.table_name FROM information_schema.tables t", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
 }
