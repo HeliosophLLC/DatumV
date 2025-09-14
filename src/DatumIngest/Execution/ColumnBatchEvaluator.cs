@@ -156,7 +156,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     {
         if (literal.Value is null)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.UnknownNull();
         }
 
         return literal.Value switch
@@ -752,7 +752,19 @@ public sealed class ColumnBatchEvaluator : IDisposable
             }
             else
             {
-                DataValue nullValue = DataValue.Null(DataKind.Float32);
+                // Determine the null kind from the first resolved (non-null) result
+                // so unresolved rows have a consistent type with resolved ones.
+                DataKind nullKind = DataKind.Float32;
+                for (int row = 0; row < rowCount; row++)
+                {
+                    if (resolved[row] && !result[row].IsNull)
+                    {
+                        nullKind = result[row].Kind;
+                        break;
+                    }
+                }
+
+                DataValue nullValue = DataValue.Null(nullKind);
                 for (int row = 0; row < rowCount; row++)
                 {
                     if (!resolved[row])

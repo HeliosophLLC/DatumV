@@ -215,9 +215,9 @@ public sealed class UnnestFunction : IElementKindAwareTableFunction
         return element.ValueKind switch
         {
             JsonValueKind.String => DataValue.FromString(element.GetString()!),
-            JsonValueKind.Number => DataValue.FromFloat32(element.GetSingle()),
-            JsonValueKind.True => DataValue.FromFloat32(1.0f),
-            JsonValueKind.False => DataValue.FromFloat32(0.0f),
+            JsonValueKind.Number => DataValue.FromFloat64(element.GetDouble()),
+            JsonValueKind.True => DataValue.FromBoolean(true),
+            JsonValueKind.False => DataValue.FromBoolean(false),
             JsonValueKind.Null => DataValue.Null(DataKind.String),
             JsonValueKind.Array or JsonValueKind.Object => DataValue.FromJsonValue(element.GetRawText()),
             _ => DataValue.Null(DataKind.String),

@@ -316,6 +316,20 @@ public readonly struct DataValue : IEquatable<DataValue>
         };
     }
 
+    /// <summary>
+    /// Creates a null value whose type is not statically known.
+    /// </summary>
+    /// <remarks>
+    /// SQL NULL has no inherent type. When a NULL literal appears outside a typed context
+    /// (e.g. <c>SELECT NULL</c>), neither the parser nor the evaluator can determine its
+    /// kind. This factory produces a <see cref="DataKind.Float32"/> null — chosen because
+    /// Float32 is the engine's default numeric kind and widens to Float64 via
+    /// <see cref="TypeCoercion"/>. Downstream consumers (aggregations, output writers,
+    /// CASE coercion) resolve the actual kind from context. Call sites should prefer a
+    /// typed <see cref="Null(DataKind)"/> when the expected kind is known.
+    /// </remarks>
+    public static DataValue UnknownNull() => NullFloat32;
+
     // ───────────────────────── Literal conversion ─────────────────────────
 
     /// <summary>

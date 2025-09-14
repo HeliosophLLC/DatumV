@@ -26,7 +26,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"age\": 30}"),
             DataValue.FromString("age")
         ]);
-        Assert.Equal(30f, result.AsFloat32());
+        Assert.Equal(30.0, result.AsFloat64());
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"active\": true}"),
             DataValue.FromString("active")
         ]);
-        Assert.Equal(1.0f, result.AsFloat32());
+        Assert.True(result.AsBoolean());
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"active\": false}"),
             DataValue.FromString("active")
         ]);
-        Assert.Equal(0.0f, result.AsFloat32());
+        Assert.False(result.AsBoolean());
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"items\": [10, 20, 30]}"),
             DataValue.FromString("items.1")
         ]);
-        Assert.Equal(20f, result.AsFloat32());
+        Assert.Equal(20.0, result.AsFloat64());
     }
 
     [Fact]

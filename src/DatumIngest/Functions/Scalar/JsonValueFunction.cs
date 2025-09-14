@@ -6,7 +6,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <summary>
 /// Extracts a scalar value from a JSON string at a given dot-separated path.
 /// <c>json_value(column, jsonPath)</c>
-/// Returns String, Scalar, or null depending on the JSON value type.
+/// Returns String, Float64, Boolean, or null depending on the JSON value type.
 /// </summary>
 public sealed class JsonValueFunction : IScalarFunction
 {
@@ -59,9 +59,9 @@ public sealed class JsonValueFunction : IScalarFunction
         return element.Value.ValueKind switch
         {
             JsonValueKind.String => DataValue.FromString(element.Value.GetString()!),
-            JsonValueKind.Number => DataValue.FromFloat32(element.Value.GetSingle()),
-            JsonValueKind.True => DataValue.FromFloat32(1.0f),
-            JsonValueKind.False => DataValue.FromFloat32(0.0f),
+            JsonValueKind.Number => DataValue.FromFloat64(element.Value.GetDouble()),
+            JsonValueKind.True => DataValue.FromBoolean(true),
+            JsonValueKind.False => DataValue.FromBoolean(false),
             JsonValueKind.Null => DataValue.Null(DataKind.String),
             // Arrays and objects are not scalar — return null for json_value.
             _ => DataValue.Null(DataKind.String),

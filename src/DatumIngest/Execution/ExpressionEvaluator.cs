@@ -139,7 +139,7 @@ public sealed class ExpressionEvaluator
     {
         if (literal.Value is null)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.UnknownNull();
         }
 
         return literal.Value switch
@@ -232,9 +232,16 @@ public sealed class ExpressionEvaluator
             DataValue right = Evaluate(binary.Right, row);
 
             // NULL propagation: any operation with NULL yields NULL (except IS NULL checks).
+            // Comparisons and pattern operators produce Boolean nulls; arithmetic produces
+            // Float32 nulls (the engine's default numeric kind).
             if (left.IsNull || right.IsNull)
             {
-                return DataValue.Null(DataKind.Float32);
+                return binary.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual
+                    or BinaryOperator.LessThan or BinaryOperator.GreaterThan
+                    or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThanOrEqual
+                    or BinaryOperator.Like or BinaryOperator.ILike or BinaryOperator.Regexp
+                    ? DataValue.Null(DataKind.Boolean)
+                    : DataValue.Null(DataKind.Float32);
             }
 
             return binary.Operator switch

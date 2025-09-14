@@ -57,9 +57,9 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([json]);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1f, rows[0]["item1"].AsFloat32());
+        Assert.Equal(1.0, rows[0]["item1"].AsFloat64());
         Assert.Equal("a", rows[0]["item2"].AsString());
-        Assert.Equal(2f, rows[1]["item1"].AsFloat32());
+        Assert.Equal(2.0, rows[1]["item1"].AsFloat64());
         Assert.Equal("b", rows[1]["item2"].AsString());
     }
 
@@ -114,9 +114,9 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([json]);
 
         Assert.Equal(3, rows.Count);
-        Assert.Equal(1.5f, rows[0]["value"].AsFloat32(), 0.001f);
-        Assert.Equal(2.5f, rows[1]["value"].AsFloat32(), 0.001f);
-        Assert.Equal(3.5f, rows[2]["value"].AsFloat32(), 0.001f);
+        Assert.Equal(1.5, rows[0]["value"].AsFloat64(), 0.001);
+        Assert.Equal(2.5, rows[1]["value"].AsFloat64(), 0.001);
+        Assert.Equal(3.5, rows[2]["value"].AsFloat64(), 0.001);
     }
 
     [Fact]
@@ -126,8 +126,8 @@ public class UnnestFunctionTests
         List<Row> rows = await CollectRows([json]);
 
         Assert.Equal(2, rows.Count);
-        Assert.Equal(1.0f, rows[0]["value"].AsFloat32());
-        Assert.Equal(0.0f, rows[1]["value"].AsFloat32());
+        Assert.True(rows[0]["value"].AsBoolean());
+        Assert.False(rows[1]["value"].AsBoolean());
     }
 
     [Fact]
