@@ -93,16 +93,24 @@ public enum MaterializationHint
 public record SelectColumn(Expression Expression, string? Alias = null);
 
 /// <summary>
-/// Represents <c>SELECT *</c> as a column entry.
+/// Represents <c>SELECT *</c> or <c>SELECT * EXCEPT (col1, col2)</c> as a column entry.
 /// </summary>
-public sealed record SelectAllColumns() : SelectColumn(
+/// <param name="ExcludedColumns">Column names to exclude from the wildcard expansion, or <see langword="null"/> for an unfiltered <c>SELECT *</c>.</param>
+public sealed record SelectAllColumns(
+    IReadOnlyList<string>? ExcludedColumns = null) : SelectColumn(
     new LiteralExpression(null),
     null);
 
 /// <summary>
-/// Represents <c>SELECT table.*</c> as a column entry.
+/// Represents <c>SELECT table.*</c> or <c>SELECT table.* EXCEPT (col1, col2)</c> as a column entry.
 /// </summary>
-public sealed record SelectTableColumns(string TableName, SourceSpan? Span = null) : SelectColumn(
+/// <param name="TableName">The table alias or name preceding the dot-star.</param>
+/// <param name="Span">Source location span for diagnostic reporting.</param>
+/// <param name="ExcludedColumns">Column names to exclude from the table wildcard expansion, or <see langword="null"/> for an unfiltered <c>SELECT table.*</c>.</param>
+public sealed record SelectTableColumns(
+    string TableName,
+    SourceSpan? Span = null,
+    IReadOnlyList<string>? ExcludedColumns = null) : SelectColumn(
     new ColumnReference(TableName, "*"),
     null);
 

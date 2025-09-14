@@ -198,9 +198,11 @@ public sealed class ProjectOperator : IQueryOperator
             {
                 switch (column)
                 {
-                    case SelectAllColumns:
+                    case SelectAllColumns allColumns:
                         for (int index = 0; index < firstRow.FieldCount; index++)
                         {
+                            if (IsExcluded(firstRow.ColumnNames[index], allColumns.ExcludedColumns))
+                                continue;
                             names.Add(firstRow.ColumnNames[index]);
                             slots.Add(ProjectionSlot.CopyOrdinal(index));
                         }
@@ -215,6 +217,8 @@ public sealed class ProjectOperator : IQueryOperator
                                 || columnName.Equals(
                                     tableColumns.TableName, StringComparison.OrdinalIgnoreCase))
                             {
+                                if (IsExcluded(columnName, tableColumns.ExcludedColumns, prefix))
+                                    continue;
                                 names.Add(columnName);
                                 slots.Add(ProjectionSlot.CopyOrdinal(index));
                             }
@@ -338,5 +342,55 @@ public sealed class ProjectOperator : IQueryOperator
 
         internal static ProjectionSlot Evaluate(Expression expression) =>
             new() { SourceOrdinal = -1, Expression = expression };
+    }
+
+    /// <summary>
+    /// Checks whether a column name appears in the exclusion list of a
+    /// <c>SELECT * EXCEPT (...)</c> or <c>SELECT table.* EXCEPT (...)</c> clause.
+    /// </summary>
+    /// <param name="columnName">The full column name (may be qualified as <c>table.col</c>).</param>
+    /// <param name="excludedColumns">The exclusion list, or <see langword="null"/> if no exclusion was specified.</param>
+    /// <param name="qualifierPrefix">
+    /// When non-null, the <c>table.</c> prefix stripped from <paramref name="columnName"/> before
+    /// matching against <paramref name="excludedColumns"/>. Used for <c>SELECT table.* EXCEPT (...)</c>
+    /// where the user specifies unqualified names in the exclusion list.
+    /// </param>
+    internal static bool IsExcluded(
+        string columnName,
+        IReadOnlyList<string>? excludedColumns,
+        string? qualifierPrefix = null)
+    {
+        if (excludedColumns is null || excludedColumns.Count == 0)
+            return false;
+
+        // For unqualified wildcard (SELECT *), match the full column name
+        // or just the unqualified portion after the dot.
+        foreach (string excluded in excludedColumns)
+        {
+            if (columnName.Equals(excluded, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Match unqualified exclusion against qualified column: "id" matches "orders.id".
+            if (qualifierPrefix is null)
+            {
+                int dotIndex = columnName.IndexOf('.');
+                if (dotIndex >= 0
+                    && columnName.AsSpan(dotIndex + 1).Equals(excluded.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                // For table.* EXCEPT (col), strip the prefix and match.
+                if (columnName.StartsWith(qualifierPrefix, StringComparison.OrdinalIgnoreCase)
+                    && columnName.AsSpan(qualifierPrefix.Length).Equals(excluded.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

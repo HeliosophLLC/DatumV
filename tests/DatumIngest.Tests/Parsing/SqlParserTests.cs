@@ -51,6 +51,36 @@ public class SqlParserTests
     }
 
     [Fact]
+    public void SelectStarExcept()
+    {
+        SelectStatement result = Parse("SELECT * EXCEPT (a, b) FROM t");
+
+        Assert.Single(result.Columns);
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.NotNull(allColumns.ExcludedColumns);
+        Assert.Equal(new[] { "a", "b" }, allColumns.ExcludedColumns);
+    }
+
+    [Fact]
+    public void SelectStarExcept_SingleColumn()
+    {
+        SelectStatement result = Parse("SELECT * EXCEPT (id) FROM t");
+
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.NotNull(allColumns.ExcludedColumns);
+        Assert.Equal(new[] { "id" }, allColumns.ExcludedColumns);
+    }
+
+    [Fact]
+    public void SelectStar_HasNullExcludedColumns()
+    {
+        SelectStatement result = Parse("SELECT * FROM t");
+
+        SelectAllColumns allColumns = Assert.IsType<SelectAllColumns>(result.Columns[0]);
+        Assert.Null(allColumns.ExcludedColumns);
+    }
+
+    [Fact]
     public void SelectTableStar()
     {
         SelectStatement result = Parse("SELECT t.* FROM t");
@@ -58,6 +88,38 @@ public class SqlParserTests
         Assert.Single(result.Columns);
         SelectTableColumns tableColumns = Assert.IsType<SelectTableColumns>(result.Columns[0]);
         Assert.Equal("t", tableColumns.TableName);
+    }
+
+    [Fact]
+    public void SelectTableStarExcept()
+    {
+        SelectStatement result = Parse("SELECT t.* EXCEPT (a) FROM t");
+
+        Assert.Single(result.Columns);
+        SelectTableColumns tableColumns = Assert.IsType<SelectTableColumns>(result.Columns[0]);
+        Assert.Equal("t", tableColumns.TableName);
+        Assert.NotNull(tableColumns.ExcludedColumns);
+        Assert.Equal(new[] { "a" }, tableColumns.ExcludedColumns);
+    }
+
+    [Fact]
+    public void SelectTableStarExcept_MultipleColumns()
+    {
+        SelectStatement result = Parse("SELECT t.* EXCEPT (x, y, z) FROM t");
+
+        SelectTableColumns tableColumns = Assert.IsType<SelectTableColumns>(result.Columns[0]);
+        Assert.Equal("t", tableColumns.TableName);
+        Assert.NotNull(tableColumns.ExcludedColumns);
+        Assert.Equal(new[] { "x", "y", "z" }, tableColumns.ExcludedColumns);
+    }
+
+    [Fact]
+    public void SelectTableStar_HasNullExcludedColumns()
+    {
+        SelectStatement result = Parse("SELECT t.* FROM t");
+
+        SelectTableColumns tableColumns = Assert.IsType<SelectTableColumns>(result.Columns[0]);
+        Assert.Null(tableColumns.ExcludedColumns);
     }
 
     [Fact]

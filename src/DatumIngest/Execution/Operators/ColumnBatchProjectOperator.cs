@@ -174,9 +174,11 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
             {
                 switch (column)
                 {
-                    case SelectAllColumns:
+                    case SelectAllColumns allColumns:
                         for (int index = 0; index < firstBatch.ColumnCount; index++)
                         {
+                            if (ProjectOperator.IsExcluded(firstBatch.GetColumnName(index), allColumns.ExcludedColumns))
+                                continue;
                             names.Add(firstBatch.GetColumnName(index));
                             slots.Add(ColumnarProjectionSlot.CopyOrdinal(index));
                         }
@@ -189,6 +191,8 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
                             string columnName = firstBatch.GetColumnName(index);
                             if (columnName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                             {
+                                if (ProjectOperator.IsExcluded(columnName, tableColumns.ExcludedColumns, prefix))
+                                    continue;
                                 names.Add(columnName);
                                 slots.Add(ColumnarProjectionSlot.CopyOrdinal(index));
                             }

@@ -2293,6 +2293,55 @@ public class QueryPlannerTests
         Assert.NotNull(join);
         Assert.False(join.Flipped, "INNER JOINs should not be flipped");
     }
+
+    // ─────────────── SELECT * EXCEPT tests ───────────────
+
+    [Fact]
+    public void Plan_SelectStarExcept_ProducesProjectOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns(ExcludedColumns: ["id"])],
+            From: new FromClause(new TableReference("test")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // EXCEPT forces a ProjectOperator even though it's a star query.
+        Assert.IsType<ProjectOperator>(plan);
+    }
+
+    [Fact]
+    public void Plan_SelectTableStarExcept_ProducesProjectOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectTableColumns("test", ExcludedColumns: ["id"])],
+            From: new FromClause(new TableReference("test")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        Assert.IsType<ProjectOperator>(plan);
+    }
+
+    [Fact]
+    public void Plan_SelectStarWithoutExcept_ProducesScanOperator()
+    {
+        TableCatalog catalog = CreateCatalogWithCsv("test", "dummy.csv");
+        QueryPlanner planner = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = new(
+            Columns: [new SelectAllColumns()],
+            From: new FromClause(new TableReference("test")));
+
+        IQueryOperator plan = planner.Plan(statement);
+
+        // Plain SELECT * still optimizes to bare ScanOperator.
+        Assert.IsType<ScanOperator>(plan);
+    }
 }
 
 /// <summary>

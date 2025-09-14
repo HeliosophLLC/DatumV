@@ -150,8 +150,13 @@ internal sealed class SemanticAnalyzer
             if (column is SelectTableColumns tableColumns)
             {
                 ValidateTableQualifier(tableColumns.TableName, tableColumns.Span, aliasToTable, opaqueAliases, diagnostics);
+                ValidateExcludedColumns(tableColumns.ExcludedColumns, tableColumns.TableName, aliasToTable, opaqueAliases, diagnostics);
             }
-            else if (column is not SelectAllColumns)
+            else if (column is SelectAllColumns allColumns)
+            {
+                ValidateExcludedColumns(allColumns.ExcludedColumns, null, aliasToTable, opaqueAliases, diagnostics);
+            }
+            else
             {
                 AnalyzeExpression(column.Expression, aliasToTable, opaqueAliases, diagnostics);
             }
@@ -649,6 +654,70 @@ internal sealed class SemanticAnalyzer
         {
             EmitWarning(diagnostics, column.Span,
                 $"Unknown column '{column.ColumnName}'.");
+        }
+    }
+
+    /// <summary>
+    /// Validates that excluded column names in a <c>SELECT * EXCEPT (...)</c> or
+    /// <c>SELECT table.* EXCEPT (...)</c> clause reference columns that exist in the
+    /// manifest. When no manifest data is available (opaque sources), validation is skipped.
+    /// </summary>
+    private void ValidateExcludedColumns(
+        IReadOnlyList<string>? excludedColumns,
+        string? tableAlias,
+        Dictionary<string, string> aliasToTable,
+        HashSet<string> opaqueAliases,
+        List<Diagnostic> diagnostics)
+    {
+        if (excludedColumns is null || excludedColumns.Count == 0)
+            return;
+
+        if (tableAlias is not null)
+        {
+            // table.* EXCEPT (...) — validate against the specific table.
+            if (opaqueAliases.Contains(tableAlias))
+                return;
+
+            if (!aliasToTable.TryGetValue(tableAlias, out string? resolvedTable))
+                return;
+
+            if (!_tableColumnTypes.TryGetValue(resolvedTable, out Dictionary<string, string>? columnKinds))
+                return;
+
+            foreach (string excluded in excludedColumns)
+            {
+                if (!columnKinds.ContainsKey(excluded))
+                {
+                    EmitWarning(diagnostics, null,
+                        $"EXCEPT column '{excluded}' not found in table '{resolvedTable}'.");
+                }
+            }
+        }
+        else
+        {
+            // * EXCEPT (...) — validate against all tables in scope.
+            if (opaqueAliases.Count > 0)
+                return;
+
+            foreach (string excluded in excludedColumns)
+            {
+                bool found = false;
+                foreach (KeyValuePair<string, string> entry in aliasToTable)
+                {
+                    if (_tableColumnTypes.TryGetValue(entry.Value, out Dictionary<string, string>? columnKinds)
+                        && columnKinds.ContainsKey(excluded))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    EmitWarning(diagnostics, null,
+                        $"EXCEPT column '{excluded}' not found in any table in scope.");
+                }
+            }
         }
     }
 

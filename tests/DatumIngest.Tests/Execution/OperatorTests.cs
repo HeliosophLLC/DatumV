@@ -188,6 +188,61 @@ public class OperatorTests
     }
 
     [Fact]
+    public async Task Project_SelectStarExcept_ExcludesNamedColumns()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("a", DataValue.FromFloat32(1f)),
+                ("b", DataValue.FromString("x")),
+                ("c", DataValue.FromFloat32(3f))));
+
+        ProjectOperator project = new(source, [new SelectAllColumns(ExcludedColumns: ["b"])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(1f, rows[0]["a"].AsFloat32());
+        Assert.Equal(3f, rows[0]["c"].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Project_SelectStarExcept_MultipleExclusions()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("a", DataValue.FromFloat32(1f)),
+                ("b", DataValue.FromFloat32(2f)),
+                ("c", DataValue.FromFloat32(3f)),
+                ("d", DataValue.FromFloat32(4f))));
+
+        ProjectOperator project = new(source, [new SelectAllColumns(ExcludedColumns: ["a", "c"])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(2f, rows[0]["b"].AsFloat32());
+        Assert.Equal(4f, rows[0]["d"].AsFloat32());
+    }
+
+    [Fact]
+    public async Task Project_SelectTableStarExcept_ExcludesNamedColumns()
+    {
+        MockOperator source = new(
+            MakeRow(
+                ("t.a", DataValue.FromFloat32(1f)),
+                ("t.b", DataValue.FromString("x")),
+                ("t.c", DataValue.FromFloat32(3f))));
+
+        ProjectOperator project = new(source, [new SelectTableColumns("t", ExcludedColumns: ["b"])]);
+
+        List<Row> rows = await CollectAsync(project);
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+        Assert.Equal(1f, rows[0]["t.a"].AsFloat32());
+        Assert.Equal(3f, rows[0]["t.c"].AsFloat32());
+    }
+
+    [Fact]
     public async Task Project_NamedColumns()
     {
         MockOperator source = new(

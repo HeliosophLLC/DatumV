@@ -600,17 +600,32 @@ public static class SqlParser
 
     // ───────────────────── SELECT columns ─────────────────────
 
-    /// <summary>SELECT * (all columns).</summary>
-    private static readonly TokenListParser<SqlToken, SelectColumn> StarColumn =
-        Token.EqualTo(SqlToken.Star)
-            .Select(_ => (SelectColumn)new SelectAllColumns());
+    /// <summary>
+    /// An optional EXCEPT clause that follows <c>*</c> or <c>table.*</c> to exclude
+    /// specific columns from the wildcard expansion: <c>* EXCEPT (col1, col2)</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyList<string>> ExceptColumnsClause =
+        from exceptKw in Token.EqualTo(SqlToken.Except)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from columns in Token.EqualTo(SqlToken.Identifier)
+            .Select(GetTokenText)
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (IReadOnlyList<string>)columns;
 
-    /// <summary>SELECT table.* (all columns from a specific table).</summary>
+    /// <summary>SELECT * or SELECT * EXCEPT (col1, col2) (all columns with optional exclusion).</summary>
+    private static readonly TokenListParser<SqlToken, SelectColumn> StarColumn =
+        from star in Token.EqualTo(SqlToken.Star)
+        from excluded in ExceptColumnsClause.Try().AsNullable().OptionalOrDefault()
+        select (SelectColumn)new SelectAllColumns(excluded);
+
+    /// <summary>SELECT table.* or SELECT table.* EXCEPT (col1, col2) (all columns from a specific table with optional exclusion).</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> TableStarColumn =
         from table in Token.EqualTo(SqlToken.Identifier)
         from dot in Token.EqualTo(SqlToken.Dot)
         from star in Token.EqualTo(SqlToken.Star)
-        select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star));
+        from excluded in ExceptColumnsClause.Try().AsNullable().OptionalOrDefault()
+        select (SelectColumn)new SelectTableColumns(GetTokenText(table), ToSpan(table, star), excluded);
 
     /// <summary>A single expression column with optional AS alias.</summary>
     private static readonly TokenListParser<SqlToken, SelectColumn> ExpressionColumn =
