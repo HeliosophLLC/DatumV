@@ -1809,6 +1809,24 @@ public static class FunctionDocumentation
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
         });
+        Register(new FunctionSignature
+        {
+            Name = "ARG_MAX",
+            Parameters = [Parameter("value", "Any"), Parameter("key", "Comparable")],
+            ReturnType = "Any (same as value)",
+            Description = "Returns the value from the row where the key column is at its maximum. Null keys are ignored. Ties are broken by first-encountered row.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "ARG_MIN",
+            Parameters = [Parameter("value", "Any"), Parameter("key", "Comparable")],
+            ReturnType = "Any (same as value)",
+            Description = "Returns the value from the row where the key column is at its minimum. Null keys are ignored. Ties are broken by first-encountered row.",
+            IsAggregate = true,
+            Category = FunctionCategory.Aggregate,
+        });
 
         RegisterWindowFunctions();
     }

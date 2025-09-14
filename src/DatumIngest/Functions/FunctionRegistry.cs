@@ -498,6 +498,8 @@ public sealed class FunctionRegistry
         registry.RegisterAggregate(new Aggregates.ApproximatePercentileFunction());
         registry.RegisterAggregate(new Aggregates.StringAggregateFunction());
         registry.RegisterAggregate(new Aggregates.ArrayAggregateFunction());
+        registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: true, "ARG_MAX"));
+        registry.RegisterAggregate(new Aggregates.ArgMaxFunction(findMaximum: false, "ARG_MIN"));
 
         // Window
         registry.RegisterWindow(new Window.RowNumberFunction());
