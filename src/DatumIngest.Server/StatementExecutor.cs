@@ -13,23 +13,26 @@ using ExecutionContext = DatumIngest.Execution.ExecutionContext;
 namespace DatumIngest.Server;
 
 /// <summary>
-/// Executes DDL and DML <see cref="Statement"/> nodes against a session's catalog
+/// Executes DDL and DML <see cref="Statement"/> nodes against a query context's catalog
 /// and temp table storage. Handles CREATE TEMP TABLE, INSERT, UPDATE, DELETE,
 /// ALTER ADD, and DROP TABLE operations.
 /// </summary>
 internal sealed class StatementExecutor
 {
     private readonly Session _session;
+    private readonly QueryContext _queryContext;
     private readonly ParallelismBudget? _parallelismBudget;
 
     /// <summary>
     /// Initializes a new statement executor.
     /// </summary>
-    /// <param name="session">The session owning the catalog and temp directory.</param>
+    /// <param name="session">The session owning the governor and function registry.</param>
+    /// <param name="queryContext">The query context providing the layered catalog and temp file isolation.</param>
     /// <param name="parallelismBudget">Optional global parallelism budget, or <see langword="null"/> for unlimited.</param>
-    internal StatementExecutor(Session session, ParallelismBudget? parallelismBudget = null)
+    internal StatementExecutor(Session session, QueryContext queryContext, ParallelismBudget? parallelismBudget = null)
     {
         _session = session;
+        _queryContext = queryContext;
         _parallelismBudget = parallelismBudget;
     }
 
@@ -80,7 +83,7 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
-        if (_session.Catalog.TryResolve(tableName, out _))
+        if (_queryContext.Catalog.TryResolve(tableName, out _))
         {
             if (statement.IfNotExists)
             {
@@ -120,7 +123,7 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
-        if (_session.Catalog.TryResolve(tableName, out _))
+        if (_queryContext.Catalog.TryResolve(tableName, out _))
         {
             if (statement.IfNotExists)
             {
@@ -150,7 +153,7 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
-        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        if (!_queryContext.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             if (statement.IfExists)
             {
@@ -163,7 +166,7 @@ internal sealed class StatementExecutor
         CommandResult? mutabilityError = CheckMutability(descriptor);
         if (mutabilityError is not null) return mutabilityError;
 
-        _session.Catalog.Unregister(tableName);
+        _queryContext.Catalog.Unregister(tableName);
 
         // Best-effort delete of the backing file.
         try
@@ -191,7 +194,7 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
-        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        if (!_queryContext.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
@@ -245,7 +248,7 @@ internal sealed class StatementExecutor
             }
 
             AppendBufferedRows(descriptor.FilePath, schema, columnBuffers, (uint)insertedRows);
-            _session.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.MarkAnalysisPending(tableName);
 
             if (descriptor.Mutability == TableMutability.SessionOwned)
             {
@@ -334,7 +337,7 @@ internal sealed class StatementExecutor
 
         indexBuilder.Dispose();
 
-        _session.Catalog.RegisterIndex(tableName, sourceIndex);
+        _queryContext.Catalog.RegisterIndex(tableName, sourceIndex);
 
         // Build and register the manifest.
         IReadOnlyDictionary<string, ColumnStatistics> statistics = statisticsCollector.GetStatistics();
@@ -349,8 +352,8 @@ internal sealed class StatementExecutor
         string manifestPath = FileFormatDetector.GetSidecarBasePath(filePath) + ".datum-manifest";
         ManifestSerializer.WriteToFileAsync(tableName, manifest, manifestPath).GetAwaiter().GetResult();
 
-        _session.Catalog.RegisterManifest(tableName, manifest);
-        _session.Catalog.ClearAnalysisPending(tableName);
+        _queryContext.Catalog.RegisterManifest(tableName, manifest);
+        _queryContext.Catalog.ClearAnalysisPending(tableName);
     }
 
     private async Task<(List<List<DataValue>> ColumnBuffers, long RowCount)> CollectRowsFromQueryAsync(
@@ -367,12 +370,12 @@ internal sealed class StatementExecutor
             query = ParameterBinder.Bind(query, parameters);
         }
 
-        QueryPlanner planner = new(_session.Catalog, _session.FunctionRegistry);
+        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
 
         try
         {
-            ExecutionContext context = new(cancellationToken, _session.FunctionRegistry, _session.Catalog, localBufferPool, queryMeter,
+            ExecutionContext context = new(cancellationToken, _session.FunctionRegistry, _queryContext.Catalog, localBufferPool, queryMeter,
                 memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
@@ -464,7 +467,7 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
-        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        if (!_queryContext.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
@@ -621,7 +624,7 @@ internal sealed class StatementExecutor
         {
             using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
             DatumFileEditor.ReplaceColumns(stream, replacements);
-            _session.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.MarkAnalysisPending(tableName);
         }
 
         return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
@@ -694,7 +697,7 @@ internal sealed class StatementExecutor
         ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
         Dictionary<CompositeKey, DataValue[]> assignmentMap = new();
 
-        QueryPlanner planner = new(_session.Catalog, _session.FunctionRegistry);
+        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
 
         try
@@ -702,7 +705,7 @@ internal sealed class StatementExecutor
             ExecutionContext context = new(
                 cancellationToken,
                 _session.FunctionRegistry,
-                _session.Catalog,
+                _queryContext.Catalog,
                 localBufferPool,
                 queryMeter,
                 memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
@@ -833,7 +836,7 @@ internal sealed class StatementExecutor
         {
             using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
             DatumFileEditor.ReplaceColumns(stream, replacements);
-            _session.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.MarkAnalysisPending(tableName);
         }
 
         return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
@@ -852,7 +855,7 @@ internal sealed class StatementExecutor
 
         string tableName = statement.TableName;
 
-        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        if (!_queryContext.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
@@ -897,7 +900,7 @@ internal sealed class StatementExecutor
             {
                 using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
                 DatumFileEditor.MarkDeleted(stream, tombstoneUpdates);
-                _session.Catalog.MarkAnalysisPending(tableName);
+                _queryContext.Catalog.MarkAnalysisPending(tableName);
             }
 
             return CommandResult.AffectedRows(totalDeleted, $"Deleted {totalDeleted} rows from '{tableName}'.");
@@ -909,7 +912,7 @@ internal sealed class StatementExecutor
 
         if (deletedRows > 0)
         {
-            _session.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.MarkAnalysisPending(tableName);
         }
 
         return CommandResult.AffectedRows(deletedRows, $"Deleted {deletedRows} rows from '{tableName}'.");
@@ -1023,7 +1026,7 @@ internal sealed class StatementExecutor
             return CommandResult.Error("DEFAULT and AS (computed) are mutually exclusive on ALTER TABLE ADD COLUMN.");
         }
 
-        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        if (!_queryContext.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
@@ -1071,7 +1074,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.AddColumn(stream, newColumn, pages);
         }
 
-        _session.Catalog.MarkAnalysisPending(tableName);
+        _queryContext.Catalog.MarkAnalysisPending(tableName);
         return CommandResult.AffectedRows(0, $"Added column '{statement.ColumnName}' to '{tableName}'.");
     }
 
@@ -1152,7 +1155,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.AddColumn(stream, newColumn, pages);
         }
 
-        _session.Catalog.MarkAnalysisPending(descriptor.Name);
+        _queryContext.Catalog.MarkAnalysisPending(descriptor.Name);
         return CommandResult.AffectedRows(0, $"Added computed column '{statement.ColumnName}' to '{descriptor.Name}'.");
     }
 
@@ -1166,13 +1169,13 @@ internal sealed class StatementExecutor
     {
         string tableName = statement.TableName;
 
-        if (!_session.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
+        if (!_queryContext.Catalog.TryResolve(tableName, out TableDescriptor? descriptor) || descriptor is null)
         {
             return CommandResult.Error($"Table '{tableName}' does not exist.");
         }
 
         if (descriptor.Mutability == TableMutability.SessionOwned
-            && !_session.Catalog.IsAnalysisPending(tableName))
+            && !_queryContext.Catalog.IsAnalysisPending(tableName))
         {
             return CommandResult.AffectedRows(0, $"Table '{tableName}' is already up to date.");
         }
@@ -1233,9 +1236,7 @@ internal sealed class StatementExecutor
 
     private string GetTempFilePath(string tableName)
     {
-        string tempDirectory = Path.Combine(Path.GetTempPath(), $"datum_session_{_session.SessionId:N}");
-        Directory.CreateDirectory(tempDirectory);
-        return Path.Combine(tempDirectory, $"{tableName}.datum");
+        return _queryContext.GetTempFilePath(tableName);
     }
 
     private void RegisterTempTable(string tableName, string filePath, IReadOnlyList<string>? primaryKeyColumns = null)
@@ -1243,7 +1244,7 @@ internal sealed class StatementExecutor
         TableDescriptor descriptor = new("datum", tableName, filePath, new Dictionary<string, string>(),
             Mutability: TableMutability.SessionOwned,
             PrimaryKeyColumns: primaryKeyColumns);
-        _session.Catalog.Register(descriptor);
+        _queryContext.Catalog.Register(descriptor);
     }
 
     private async Task<long> MaterializeQueryToFileAsync(
@@ -1258,12 +1259,12 @@ internal sealed class StatementExecutor
             query = ParameterBinder.Bind(query, parameters);
         }
 
-        QueryPlanner planner = new(_session.Catalog, _session.FunctionRegistry);
+        QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
 
         try
         {
-            ExecutionContext context = new(cancellationToken, _session.FunctionRegistry, _session.Catalog, localBufferPool, queryMeter,
+            ExecutionContext context = new(cancellationToken, _session.FunctionRegistry, _queryContext.Catalog, localBufferPool, queryMeter,
                 memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
             {
                 DegreeOfParallelism = Environment.ProcessorCount,

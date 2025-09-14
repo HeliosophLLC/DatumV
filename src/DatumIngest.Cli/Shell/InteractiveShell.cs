@@ -41,6 +41,7 @@ internal sealed class InteractiveShell
         SessionManager sessionManager = new(functionRegistry);
         QueryGovernor governor = new(null, null, null, MemoryBudgetBytes: _memoryBudgetBytes);
         Session session = sessionManager.CreateLocalSession(SessionRole.Admin, _catalog, governor);
+        QueryContext queryContext = session.CreateQueryContext("Shell");
         CommandDispatcher dispatcher = new(sessionManager);
         TableFormatter formatter = new();
 
@@ -148,7 +149,7 @@ internal sealed class InteractiveShell
                     }
 
                     // Route to engine.
-                    await ExecuteAndRenderAsync(dispatcher, session, trimmedLine, formatter, timerEnabled, cancellationToken).ConfigureAwait(false);
+                    await ExecuteAndRenderAsync(dispatcher, session, queryContext, trimmedLine, formatter, timerEnabled, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -177,7 +178,7 @@ internal sealed class InteractiveShell
                     sql = $".explain {remainder}";
                 }
 
-                await ExecuteAndRenderAsync(dispatcher, session, sql, formatter, timerEnabled, cancellationToken).ConfigureAwait(false);
+                await ExecuteAndRenderAsync(dispatcher, session, queryContext, sql, formatter, timerEnabled, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -197,6 +198,7 @@ internal sealed class InteractiveShell
     private static async Task ExecuteAndRenderAsync(
         CommandDispatcher dispatcher,
         Session session,
+        QueryContext queryContext,
         string input,
         TableFormatter formatter,
         bool timerEnabled,
@@ -206,7 +208,7 @@ internal sealed class InteractiveShell
             ? System.Diagnostics.Stopwatch.StartNew()
             : null;
 
-        CommandResult result = await dispatcher.DispatchAsync(session, input, cancellationToken).ConfigureAwait(false);
+        CommandResult result = await dispatcher.DispatchAsync(session, queryContext, input, cancellationToken).ConfigureAwait(false);
 
         switch (result.Kind)
         {

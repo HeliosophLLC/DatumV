@@ -15,6 +15,7 @@ public sealed class Session : IDisposable
 {
     private CancellationTokenSource _sessionCancellationTokenSource = new();
     private readonly ConcurrentDictionary<Guid, ActiveQuery> _activeQueries = new();
+    private readonly ConcurrentDictionary<Guid, QueryContext> _queryContexts = new();
     private readonly List<string> _queryHistory = new();
     private readonly object _lock = new();
     private long _totalQueryUnits;
@@ -133,11 +134,12 @@ public sealed class Session : IDisposable
     /// query completes or faults.
     /// </summary>
     /// <param name="sql">The SQL text of the query being executed.</param>
+    /// <param name="contextId">The identifier of the query context executing the query.</param>
     /// <returns>The newly registered <see cref="ActiveQuery"/> with a server-assigned identifier.</returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the session has reached its <see cref="QueryGovernor.MaxConcurrentQueries"/> limit.
     /// </exception>
-    public ActiveQuery RegisterQuery(string sql)
+    public ActiveQuery RegisterQuery(string sql, Guid contextId)
     {
         if (Governor.MaxConcurrentQueries.HasValue &&
             _activeQueries.Count >= Governor.MaxConcurrentQueries.Value)
@@ -147,7 +149,7 @@ public sealed class Session : IDisposable
                 "Cancel or wait for an active query to complete before starting a new one.");
         }
 
-        ActiveQuery activeQuery = new(sql);
+        ActiveQuery activeQuery = new(sql, contextId);
         _activeQueries.TryAdd(activeQuery.QueryId, activeQuery);
         return activeQuery;
     }
@@ -181,6 +183,27 @@ public sealed class Session : IDisposable
     }
 
     /// <summary>
+    /// Cancels all active queries belonging to a specific query context.
+    /// </summary>
+    /// <param name="contextId">The identifier of the query context whose queries should be cancelled.</param>
+    /// <returns>The number of queries that were cancelled.</returns>
+    public int CancelQueriesByContext(Guid contextId)
+    {
+        int count = 0;
+
+        foreach (ActiveQuery activeQuery in _activeQueries.Values)
+        {
+            if (activeQuery.ContextId == contextId)
+            {
+                activeQuery.Cancel();
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// Cancels all active queries and resets the session-level cancellation
     /// scope so the session can be reused for subsequent commands.
     /// </summary>
@@ -211,6 +234,58 @@ public sealed class Session : IDisposable
         return _activeQueries.Values.ToList();
     }
 
+    // ──────────────────── Query Contexts ────────────────────
+
+    /// <summary>
+    /// Creates a new query context with its own isolated temp table namespace.
+    /// </summary>
+    /// <param name="label">Human-readable label for debugging (e.g. "Tab 1", "SQL Assistant").</param>
+    /// <returns>The newly created query context.</returns>
+    public QueryContext CreateQueryContext(string label)
+    {
+        QueryContext queryContext = new(SessionId, Catalog, label);
+        _queryContexts.TryAdd(queryContext.ContextId, queryContext);
+        return queryContext;
+    }
+
+    /// <summary>
+    /// Resolves a query context by its identifier.
+    /// </summary>
+    /// <param name="contextId">The context identifier.</param>
+    /// <returns>The matching query context, or <see langword="null"/> if not found.</returns>
+    public QueryContext? GetQueryContext(Guid contextId)
+    {
+        _queryContexts.TryGetValue(contextId, out QueryContext? queryContext);
+        return queryContext;
+    }
+
+    /// <summary>
+    /// Destroys a query context, dropping all its temp tables and cleaning up
+    /// associated storage. Active queries on the context are not automatically
+    /// cancelled — the caller must cancel them first if needed.
+    /// </summary>
+    /// <param name="contextId">The context identifier.</param>
+    /// <returns><see langword="true"/> if the context was found and destroyed; otherwise <see langword="false"/>.</returns>
+    public bool DestroyQueryContext(Guid contextId)
+    {
+        if (_queryContexts.TryRemove(contextId, out QueryContext? queryContext))
+        {
+            queryContext.Dispose();
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns a snapshot of all query contexts in this session.
+    /// </summary>
+    /// <returns>A read-only list of query contexts.</returns>
+    public IReadOnlyList<QueryContext> GetQueryContexts()
+    {
+        return _queryContexts.Values.ToList();
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {
@@ -220,6 +295,14 @@ public sealed class Session : IDisposable
         }
 
         _activeQueries.Clear();
+
+        foreach (QueryContext queryContext in _queryContexts.Values)
+        {
+            queryContext.Dispose();
+        }
+
+        _queryContexts.Clear();
+
         _sessionCancellationTokenSource.Dispose();
         Catalog.Dispose();
     }

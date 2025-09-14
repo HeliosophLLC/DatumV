@@ -90,31 +90,22 @@ public sealed class DatumComputeConnection : IDisposable
     }
 
     /// <summary>
-    /// Cancels one or all active queries on the caller's own session. The session
-    /// remains open and can run new queries immediately.
+    /// Cancels all active queries on the specified query context.
     /// </summary>
-    /// <param name="sessionId">The session whose active query should be cancelled.</param>
-    /// <param name="queryId">
-    /// Optional query identifier. When provided, only the specified query is
-    /// cancelled. When <see langword="null"/> or empty, all active queries on
-    /// the session are cancelled.
-    /// </param>
+    /// <param name="sessionId">The session that owns the query context.</param>
+    /// <param name="contextId">The context whose active queries should be cancelled.</param>
     /// <param name="cancellationToken">Cancellation token for this RPC call.</param>
     /// <returns>The server's confirmation message.</returns>
     public async Task<string> CancelActiveQueryAsync(
         string sessionId,
-        string? queryId = null,
+        string contextId,
         CancellationToken cancellationToken = default)
     {
         CancelQueryRequest request = new()
         {
             SessionId = sessionId,
+            ContextId = contextId,
         };
-
-        if (!string.IsNullOrEmpty(queryId))
-        {
-            request.QueryId = queryId;
-        }
 
         CancelQueryResponse response = await Client.CancelQueryAsync(
             request, cancellationToken: cancellationToken).ConfigureAwait(false);

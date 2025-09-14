@@ -177,6 +177,12 @@ grpcurl -plaintext \
   -d '{"role": "admin"}' \
   localhost:5050 datum_compute.DatumCompute/CreateSession
 
+# Create a query context (returns context_id)
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>", "label": "Tab 1"}' \
+  localhost:5050 datum_compute.DatumCompute/CreateQueryContext
+
 # Add a data source
 grpcurl -plaintext \
   -H "x-api-key: my-secret-key" \
@@ -186,19 +192,25 @@ grpcurl -plaintext \
 # Run a query (server-streaming)
 grpcurl -plaintext \
   -H "x-api-key: my-secret-key" \
-  -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine LIMIT 5"}' \
+  -d '{"session_id": "<SESSION_ID>", "context_id": "<CONTEXT_ID>", "sql": "SELECT alcohol, quality FROM wine LIMIT 5"}' \
   localhost:5050 datum_compute.DatumCompute/Query
 
 # Run a query with parameters
 grpcurl -plaintext \
   -H "x-api-key: my-secret-key" \
-  -d '{"session_id": "<SESSION_ID>", "sql": "SELECT alcohol, quality FROM wine WHERE quality > $min_quality", "parameters": {"min_quality": {"float32_value": 6}}}' \
+  -d '{"session_id": "<SESSION_ID>", "context_id": "<CONTEXT_ID>", "sql": "SELECT alcohol, quality FROM wine WHERE quality > $min_quality", "parameters": {"min_quality": {"float32_value": 6}}}' \
   localhost:5050 datum_compute.DatumCompute/Query
 
-# List tables
+# Cancel active queries on a context
 grpcurl -plaintext \
   -H "x-api-key: my-secret-key" \
-  -d '{"session_id": "<SESSION_ID>"}' \
+  -d '{"session_id": "<SESSION_ID>", "context_id": "<CONTEXT_ID>"}' \
+  localhost:5050 datum_compute.DatumCompute/CancelQuery
+
+# List tables (includes context's temp tables)
+grpcurl -plaintext \
+  -H "x-api-key: my-secret-key" \
+  -d '{"session_id": "<SESSION_ID>", "context_id": "<CONTEXT_ID>"}' \
   localhost:5050 datum_compute.DatumCompute/ListTables
 
 # Destroy session
@@ -265,6 +277,55 @@ Begins a 30-second grace period for the session rather than immediately freeing 
 
 > **Note:** The deferred sweep only occurs if `AddSessionExpiryTimer` was called during host setup. Without the background timer, sessions in their grace period remain live indefinitely.
 
+### Query Contexts
+
+A **query context** is a lightweight isolation boundary within a session, analogous to a separate tab in a SQL editor. Each context has its own temp table namespace, so `CREATE TEMP TABLE` in one context is invisible to others. Queries and cancellation require a `context_id`; catalog inspection RPCs (`GetSchema`, `ListTables`, `Explain`) accept an optional `context_id` — when provided, the context's temp tables are included in resolution; when omitted, only the session's base catalog is visible.
+
+#### CreateQueryContext
+
+Creates a new query context within a session.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+| `label` | `string` | Human-readable label for debugging (e.g. `"Tab 1"`, `"SQL Assistant"`). |
+
+**Returns:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `context_id` | `string` | Unique context identifier scoped to the session. |
+
+#### DestroyQueryContext
+
+Destroys a query context, dropping all its temp tables and cleaning up associated storage. Active queries on the context are cancelled first.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+| `context_id` | `string` | Context to destroy. |
+
+**Errors:** `NotFound` if the session or context does not exist.
+
+#### ListQueryContexts
+
+Lists all query contexts on a session.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+
+**Response (`ListQueryContextsResponse`):** `repeated QueryContextInfoMessage contexts`.
+
+**`QueryContextInfoMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `context_id` | `string` | Unique context identifier. |
+| `label` | `string` | Human-readable label set at creation time. |
+| `created_at` | `string` | ISO 8601 timestamp when the context was created. |
+| `temp_table_count` | `int32` | Number of temp tables currently held by this context. |
+
 ### Query Execution
 
 #### Query (server-streaming)
@@ -276,6 +337,7 @@ Executes one or more semicolon-separated SQL statements and streams results back
 | `session_id` | `string` | Session GUID. |
 | `sql` | `string` | One or more semicolon-separated SQL statements. |
 | `parameters` | `map<string, DataValueMessage>` | Named parameter bindings for `$name` placeholders. Keys are parameter names without the `$` prefix. Values are typed `DataValueMessage` instances. Empty map if no parameters. Parameters are shared across all statements in the batch. |
+| `context_id` | `string` | Query context that owns temp tables for this execution. Temp table creation and resolution are scoped to this context. |
 
 **Stream response (`QueryResult`):**
 
@@ -307,8 +369,8 @@ Executes one or more semicolon-separated SQL statements and streams results back
 **Cancellation:** The stream can be stopped in three ways:
 
 1. **Client disconnect** — disposing the streaming call (`stream.Dispose()`) triggers gRPC call cancellation on the server.
-2. **Targeted cancel** — the same session (or an admin via `KillQuery`) calls `CancelQuery` with the query's `query_id`. Only the targeted query is cancelled; other concurrent queries on the session continue.
-3. **Cancel all** — calling `CancelQuery` or `KillQuery` without a `query_id` cancels all active queries on the session and resets the session-level cancellation scope.
+2. **Context cancel** — the same session calls `CancelQuery` with the query context's `context_id`. All active queries on that context are cancelled; queries on other contexts are unaffected.
+3. **Admin kill** — an admin session calls `KillQuery` targeting a specific `query_id` or all queries on the target session.
 
 The server links the gRPC call token, the session-level token, and the per-query token, so any of the three cancellation sources stops the row stream immediately.
 
@@ -323,6 +385,7 @@ Returns the execution plan for a SQL query without running it.
 | `session_id` | `string` | Session GUID. |
 | `sql` | `string` | SQL query to explain. |
 | `analyze` | `bool` | Reserved for future use. When `true`, the query will be executed and runtime metrics (row counts, timing) will be collected. Not yet implemented. |
+| `context_id` | `string` | *(Optional)* Query context for temp table resolution in the plan. When empty, resolves against the session's base catalog only. |
 
 **Response fields:**
 
@@ -359,18 +422,30 @@ Returns the execution plan for a SQL query without running it.
 
 #### GetSchema
 
-Returns the column schema of a registered table.
+Returns the column schema of a registered table. When a `context_id` is provided, temp tables in that context's overlay are included in resolution.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID. |
 | `table_name` | `string` | Name of the table. |
+| `context_id` | `string` | *(Optional)* Query context for temp table resolution. When empty, resolves against the session's base catalog only. |
 
 **Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, and `nullable`.
 
-#### ListTables / ListProviders
+#### ListTables
 
-Returns string lists of registered tables or format providers.
+Returns the list of tables visible to a session. When a `context_id` is provided, the context's temp tables are included alongside session-wide base tables.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | `string` | Session GUID. |
+| `context_id` | `string` | *(Optional)* Query context whose temp tables are included alongside session-wide base tables. When empty, lists only the session's base tables. |
+
+**Returns:** `repeated string items`.
+
+#### ListProviders
+
+Returns the list of registered format providers.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -474,16 +549,16 @@ Cancels one or all active queries on another session. The target query's cancell
 
 #### CancelQuery
 
-Cancels one or all active queries on the caller's own session. Unlike `KillQuery`, this does not require admin privileges — any session can cancel its own queries. The session remains open and can run new queries.
+Cancels all active queries on a query context. Unlike `KillQuery`, this does not require admin privileges — any session can cancel queries on its own contexts. The session and context remain open and can run new queries immediately.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `session_id` | `string` | Session GUID of the caller. |
-| `query_id` | `string` | Optional. When set, cancels only the specified query. When empty, cancels all active queries on the session and resets the session-level cancellation scope. |
+| `context_id` | `string` | The query context whose active queries should be cancelled. |
 
-**Returns:** `message` — confirmation text. The session is immediately ready for new queries.
+**Returns:** `message` — confirmation text indicating the number of queries cancelled.
 
-**Errors:** `NotFound` if the session ID is not found; `InvalidArgument` if the query ID is not found.
+**Errors:** `NotFound` if the session or context is not found.
 
 #### ListActiveQueries
 
@@ -502,6 +577,7 @@ Returns the currently executing queries on a session. Does not require admin pri
 | `query_id` | `string` | Server-assigned query identifier (GUID). |
 | `sql` | `string` | The SQL text of the query. |
 | `started_at` | `string` | ISO 8601 timestamp when the query started. |
+| `context_id` | `string` | The query context this query is executing on. |
 
 #### GetUsage
 
@@ -564,6 +640,16 @@ CreateSessionResponse session = await connection.Client.CreateSessionAsync(
 
 string sessionId = session.SessionId;
 
+// Create a query context (analogous to opening a new editor tab).
+CreateQueryContextResponse context = await connection.Client.CreateQueryContextAsync(
+    new CreateQueryContextRequest
+    {
+        SessionId = sessionId,
+        Label = "Tab 1",
+    });
+
+string contextId = context.ContextId;
+
 // Add a CSV source.
 await connection.Client.AddSourceAsync(
     new AddSourceRequest
@@ -577,6 +663,7 @@ using AsyncServerStreamingCall<QueryResult> stream = connection.Client.Query(
     new QueryRequest
     {
         SessionId = sessionId,
+        ContextId = contextId,
         Sql = "SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 10",
         Parameters =
         {
@@ -617,7 +704,7 @@ Dispose the streaming call to stop the server from sending more rows:
 
 ```csharp
 using AsyncServerStreamingCall<QueryResult> stream = connection.Client.Query(
-    new QueryRequest { SessionId = sessionId, Sql = "SELECT * FROM huge_table" });
+    new QueryRequest { SessionId = sessionId, ContextId = contextId, Sql = "SELECT * FROM huge_table" });
 
 await foreach (QueryResult result in stream.ResponseStream.ReadAllAsync())
 {
@@ -628,15 +715,12 @@ await foreach (QueryResult result in stream.ResponseStream.ReadAllAsync())
 }
 ```
 
-To cancel the active query on your own session from a separate call
+To cancel all active queries on a query context from a separate call
 (e.g. a UI "Cancel" button or a concurrent task):
 
 ```csharp
-// Cancel all active queries on the session.
-string message = await connection.CancelActiveQueryAsync(sessionId);
-
-// Or cancel a specific query by its server-assigned ID (from QueryResult.QueryId).
-string message = await connection.CancelActiveQueryAsync(sessionId, queryId: queryId);
+// Cancel all active queries on the specified context.
+string message = await connection.CancelActiveQueryAsync(sessionId, contextId);
 ```
 
 To cancel another session's query (requires admin):
@@ -657,7 +741,7 @@ To list currently executing queries on a session:
 ListActiveQueriesResponse active = await connection.ListActiveQueriesAsync(sessionId);
 foreach (ActiveQueryMessage query in active.Queries)
 {
-    Console.WriteLine($"{query.QueryId}: {query.Sql} (started {query.StartedAt})");
+    Console.WriteLine($"{query.QueryId}: {query.Sql} on context {query.ContextId} (started {query.StartedAt})");
 }
 ```
 
@@ -715,6 +799,16 @@ response = stub.CreateSession(
 )
 session_id = response.session_id
 
+# Create a query context.
+ctx = stub.CreateQueryContext(
+    datum_compute_pb2.CreateQueryContextRequest(
+        session_id=session_id,
+        label="Tab 1",
+    ),
+    metadata=metadata,
+)
+context_id = ctx.context_id
+
 # Add a source.
 stub.AddSource(
     datum_compute_pb2.AddSourceRequest(
@@ -728,6 +822,7 @@ stub.AddSource(
 for result in stub.Query(
     datum_compute_pb2.QueryRequest(
         session_id=session_id,
+        context_id=context_id,
         sql="SELECT alcohol, quality FROM wine WHERE quality > $min_quality LIMIT 5",
         parameters={"min_quality": datum_compute_pb2.DataValueMessage(float32_value=6)},
     ),

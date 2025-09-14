@@ -214,8 +214,9 @@ public sealed class ComputeServiceTests : IDisposable
         TableCatalog catalog = new();
         catalog.RegisterProvider("csv", () => new CsvTableProvider());
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        string contextId = CreateTestContext(session);
 
-        ListTablesRequest request = new() { SessionId = session.SessionId.ToString() };
+        ListTablesRequest request = new() { SessionId = session.SessionId.ToString(), ContextId = contextId };
 
         ListResponse response = await _service.ListTables(request, TestCallContext.Create());
 
@@ -311,10 +312,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        string contextId = CreateTestContext(session);
 
         ExplainRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT name FROM data WHERE age > 30",
         };
 
@@ -475,41 +478,47 @@ public sealed class ComputeServiceTests : IDisposable
     // ─────────────────── CancelQuery (self-cancel) ───────────────────
 
     /// <summary>
-    /// CancelQuery cancels the caller's own active query and resets
-    /// the session for subsequent commands.
+    /// CancelQuery cancels all active queries on the specified context.
     /// </summary>
     [Fact]
-    public async Task CancelQuery_ActiveSession_CancelsAndResets()
+    public async Task CancelQuery_ActiveSession_CancelsContextQueries()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
-        CancellationToken originalToken = session.CancellationToken;
+        string contextId = CreateTestContext(session);
+        Guid contextGuid = Guid.Parse(contextId);
+        ActiveQuery active = session.RegisterQuery("SELECT 1", contextGuid);
 
         CancelQueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
         };
 
         CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
 
-        Assert.True(originalToken.IsCancellationRequested);
+        Assert.True(active.CancellationToken.IsCancellationRequested);
         Assert.NotNull(response.Message);
 
-        // Session is reusable — new token is not cancelled.
+        // Session-level token is NOT cancelled — only the context's queries.
         Assert.False(session.CancellationToken.IsCancellationRequested);
+
+        session.UnregisterQuery(active.QueryId);
     }
 
     /// <summary>
     /// CancelQuery is idempotent — calling it when no query is active
-    /// succeeds without error.
+    /// on the context succeeds without error.
     /// </summary>
     [Fact]
     public async Task CancelQuery_NoActiveQuery_Succeeds()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        string contextId = CreateTestContext(session);
 
         CancelQueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
         };
 
         CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
@@ -526,6 +535,7 @@ public sealed class ComputeServiceTests : IDisposable
         CancelQueryRequest request = new()
         {
             SessionId = Guid.NewGuid().ToString(),
+            ContextId = Guid.NewGuid().ToString(),
         };
 
         RpcException exception = await Assert.ThrowsAsync<RpcException>(
@@ -546,10 +556,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, catalog);
+        string contextId = CreateTestContext(session);
 
         QueryRequest queryRequest = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -576,9 +588,11 @@ public sealed class ComputeServiceTests : IDisposable
     public async Task Query_WithUnparsableSql_ThrowsInvalidArgumentRpcException()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
+        string contextId = CreateTestContext(session);
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "@@@@ not valid SQL @@@@",
         };
 
@@ -602,6 +616,7 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        string contextId = CreateTestContext(session);
 
         CancellationTokenSource callCancellation = new();
         callCancellation.Cancel();
@@ -609,6 +624,7 @@ public sealed class ComputeServiceTests : IDisposable
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -636,10 +652,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        string contextId = CreateTestContext(session);
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -670,10 +688,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        string contextId = CreateTestContext(session);
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -691,64 +711,77 @@ public sealed class ComputeServiceTests : IDisposable
     // ─────────────────── Targeted CancelQuery ───────────────────
 
     /// <summary>
-    /// CancelQuery with a specific query_id cancels only that query.
+    /// CancelQuery cancels only queries on the specified context,
+    /// leaving queries on other contexts unaffected.
     /// </summary>
     [Fact]
-    public async Task CancelQuery_WithQueryId_CancelsSpecificQuery()
+    public async Task CancelQuery_WithContextId_CancelsOnlyContextQueries()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
-        ActiveQuery active = session.RegisterQuery("SELECT 1");
+        string contextIdA = CreateTestContext(session);
+        string contextIdB = CreateTestContext(session);
+        Guid contextGuidA = Guid.Parse(contextIdA);
+        Guid contextGuidB = Guid.Parse(contextIdB);
+        ActiveQuery onContextA = session.RegisterQuery("SELECT 1", contextGuidA);
+        ActiveQuery onContextB = session.RegisterQuery("SELECT 2", contextGuidB);
 
         CancelQueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
-            QueryId = active.QueryId.ToString(),
+            ContextId = contextIdA,
         };
 
         CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
 
-        Assert.True(active.CancellationToken.IsCancellationRequested);
+        Assert.True(onContextA.CancellationToken.IsCancellationRequested);
         Assert.NotNull(response.Message);
 
-        // Session-level token is NOT cancelled — only the targeted query was.
+        // Query on the other context is NOT cancelled.
+        Assert.False(onContextB.CancellationToken.IsCancellationRequested);
+
+        // Session-level token is NOT cancelled.
         Assert.False(session.CancellationToken.IsCancellationRequested);
 
-        session.UnregisterQuery(active.QueryId);
+        session.UnregisterQuery(onContextA.QueryId);
+        session.UnregisterQuery(onContextB.QueryId);
     }
 
     /// <summary>
-    /// CancelQuery with an unknown query_id throws InvalidArgument.
+    /// CancelQuery with an unknown context ID throws NotFound.
     /// </summary>
     [Fact]
-    public async Task CancelQuery_UnknownQueryId_ThrowsInvalidArgument()
+    public async Task CancelQuery_UnknownContextId_ThrowsNotFound()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
 
         CancelQueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
-            QueryId = Guid.NewGuid().ToString(),
+            ContextId = Guid.NewGuid().ToString(),
         };
 
         RpcException exception = await Assert.ThrowsAsync<RpcException>(
             () => _service.CancelQuery(request, TestCallContext.Create()));
 
-        Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
+        Assert.Equal(StatusCode.NotFound, exception.StatusCode);
     }
 
     /// <summary>
-    /// CancelQuery without query_id cancels all active queries (backward compatible).
+    /// CancelQuery cancels all queries on the given context when multiple are active.
     /// </summary>
     [Fact]
-    public async Task CancelQuery_NoQueryId_CancelsAll()
+    public async Task CancelQuery_MultipleQueriesOnContext_CancelsAll()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
-        ActiveQuery first = session.RegisterQuery("SELECT 1");
-        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        string contextId = CreateTestContext(session);
+        Guid contextGuid = Guid.Parse(contextId);
+        ActiveQuery first = session.RegisterQuery("SELECT 1", contextGuid);
+        ActiveQuery second = session.RegisterQuery("SELECT 2", contextGuid);
 
         CancelQueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
         };
 
         CancelQueryResponse response = await _service.CancelQuery(request, TestCallContext.Create());
@@ -771,7 +804,7 @@ public sealed class ComputeServiceTests : IDisposable
     {
         Session adminSession = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
         Session targetSession = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
-        ActiveQuery active = targetSession.RegisterQuery("SELECT 1");
+        ActiveQuery active = targetSession.RegisterQuery("SELECT 1", Guid.NewGuid());
 
         KillQueryRequest request = new()
         {
@@ -798,7 +831,9 @@ public sealed class ComputeServiceTests : IDisposable
     public async Task ListActiveQueries_ReturnsRegisteredQueries()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
-        ActiveQuery active = session.RegisterQuery("SELECT 42");
+        string contextId = CreateTestContext(session);
+        Guid contextGuid = Guid.Parse(contextId);
+        ActiveQuery active = session.RegisterQuery("SELECT 42", contextGuid);
 
         ListActiveQueriesRequest request = new()
         {
@@ -810,6 +845,7 @@ public sealed class ComputeServiceTests : IDisposable
         Assert.Single(response.Queries);
         Assert.Equal(active.QueryId.ToString(), response.Queries[0].QueryId);
         Assert.Equal("SELECT 42", response.Queries[0].Sql);
+        Assert.Equal(contextId, response.Queries[0].ContextId);
         Assert.False(string.IsNullOrEmpty(response.Queries[0].StartedAt));
 
         session.UnregisterQuery(active.QueryId);
@@ -842,7 +878,7 @@ public sealed class ComputeServiceTests : IDisposable
     public async Task GetUsage_IncludesActiveQueryCount()
     {
         Session session = _sessionManager.CreateLocalSession(SessionRole.User, new TableCatalog());
-        ActiveQuery active = session.RegisterQuery("SELECT 1");
+        ActiveQuery active = session.RegisterQuery("SELECT 1", Guid.NewGuid());
 
         GetUsageRequest request = new()
         {
@@ -893,10 +929,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+        string contextId = CreateTestContext(session);
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -925,10 +963,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+        string contextId2 = CreateTestContext(session);
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId2,
             Sql = "SELECT * FROM data",
         };
 
@@ -951,10 +991,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+        string contextId = CreateTestContext(session);
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -1007,10 +1049,12 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+        string contextId = CreateTestContext(session);
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -1034,13 +1078,15 @@ public sealed class ComputeServiceTests : IDisposable
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "simple.csv");
         catalog.Register(new TableDescriptor("csv", "data", fixturePath, new Dictionary<string, string>()));
         Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog, governor);
+        string contextId = CreateTestContext(session);
 
         // Occupy the single slot.
-        ActiveQuery existing = session.RegisterQuery("SELECT 1");
+        ActiveQuery existing = session.RegisterQuery("SELECT 1", Guid.NewGuid());
 
         QueryRequest request = new()
         {
             SessionId = session.SessionId.ToString(),
+            ContextId = contextId,
             Sql = "SELECT * FROM data",
         };
 
@@ -1132,6 +1178,15 @@ public sealed class ComputeServiceTests : IDisposable
     public void Dispose()
     {
         // SessionManager tracks sessions but does not need explicit disposal.
+    }
+
+    /// <summary>
+    /// Creates a query context on the given session and returns its string identifier.
+    /// </summary>
+    private static string CreateTestContext(Session session)
+    {
+        QueryContext context = session.CreateQueryContext("Test");
+        return context.ContextId.ToString();
     }
 
     /// <summary>

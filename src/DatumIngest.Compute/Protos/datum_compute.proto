@@ -17,6 +17,18 @@ service DatumCompute {
   // a subsequent CreateSession call to reclaim it.
   rpc DestroySession (DestroySessionRequest) returns (DestroySessionResponse);
 
+  // Creates a query context within a session. Each context has its own
+  // isolated temp table namespace, analogous to a separate SSMS tab.
+  // Queries, explains, and schema lookups require a context_id.
+  rpc CreateQueryContext (CreateQueryContextRequest) returns (CreateQueryContextResponse);
+
+  // Destroys a query context, dropping all its temp tables and cleaning up
+  // associated storage. Active queries on the context are cancelled first.
+  rpc DestroyQueryContext (DestroyQueryContextRequest) returns (DestroyQueryContextResponse);
+
+  // Lists all query contexts on a session.
+  rpc ListQueryContexts (ListQueryContextsRequest) returns (ListQueryContextsResponse);
+
   // Executes one or more semicolon-separated SQL statements and streams
   // results back. DDL/DML statements produce a single StatementEffect each;
   // query statements produce a stream of QueryResultRow messages (the first
@@ -25,10 +37,12 @@ service DatumCompute {
   // error status and no further statements execute.
   rpc Query (QueryRequest) returns (stream QueryResult);
 
-  // Returns the schema of a registered table.
+  // Returns the schema of a registered table. For temp tables, resolves
+  // against the specified query context's overlay first.
   rpc GetSchema (GetSchemaRequest) returns (SchemaResponse);
 
-  // Lists all registered tables in the session's catalog.
+  // Lists all registered tables visible to a query context: session-wide
+  // base tables plus the context's own temp tables.
   rpc ListTables (ListTablesRequest) returns (ListResponse);
 
   // Lists all registered format providers.
@@ -49,8 +63,8 @@ service DatumCompute {
   // Cancels a running query on another session (admin only).
   rpc KillQuery (KillQueryRequest) returns (KillQueryResponse);
 
-  // Cancels one or all active queries on the caller's own session.
-  // When query_id is set, only that query is cancelled; otherwise all are cancelled.
+  // Cancels all active queries on a query context. The context_id identifies
+  // the virtual connection whose work should be stopped.
   rpc CancelQuery (CancelQueryRequest) returns (CancelQueryResponse);
 
   // Returns accumulated usage metrics for a session.
@@ -118,6 +132,45 @@ message DestroySessionRequest {
 message DestroySessionResponse {
 }
 
+// ───────────────────── Query Contexts ─────────────────────
+
+message CreateQueryContextRequest {
+  string session_id = 1;
+
+  // Human-readable label for debugging (e.g. "Tab 1", "SQL Assistant").
+  string label = 2;
+}
+
+message CreateQueryContextResponse {
+  // Unique context identifier scoped to the session.
+  string context_id = 1;
+}
+
+message DestroyQueryContextRequest {
+  string session_id = 1;
+  string context_id = 2;
+}
+
+message DestroyQueryContextResponse {
+}
+
+message ListQueryContextsRequest {
+  string session_id = 1;
+}
+
+message ListQueryContextsResponse {
+  repeated QueryContextInfoMessage contexts = 1;
+}
+
+message QueryContextInfoMessage {
+  string context_id = 1;
+  string label = 2;
+  string created_at = 3;
+
+  // Number of temp tables currently held by this context.
+  int32 temp_table_count = 4;
+}
+
 // ───────────────────── Query Execution ─────────────────────
 
 message QueryRequest {
@@ -130,6 +183,10 @@ message QueryRequest {
   // Per-request row cap. Overrides the session-level max_output_rows for this
   // query only. 0 = use the session default, positive = override, negative = disable.
   int64 max_rows = 4;
+
+  // Query context that owns temp tables for this execution.
+  // Temp table creation and resolution are scoped to this context.
+  string context_id = 5;
 }
 
 // Streamed result message. Each message is either a row from a query
@@ -180,6 +237,9 @@ message StatementEffect {
 message GetSchemaRequest {
   string session_id = 1;
   string table_name = 2;
+
+  // Query context for temp table resolution.
+  string context_id = 3;
 }
 
 message SchemaResponse {
@@ -188,6 +248,10 @@ message SchemaResponse {
 
 message ListTablesRequest {
   string session_id = 1;
+
+  // Query context whose temp tables are included in the listing
+  // alongside session-wide base tables.
+  string context_id = 2;
 }
 
 message ListProvidersRequest {
@@ -301,6 +365,9 @@ message ExplainRequest {
   // When true, the plan is executed to collect runtime metrics
   // (row counts, timings). Equivalent to prefixing the SQL with "analyze ".
   bool analyze = 3;
+
+  // Query context for temp table resolution in the plan.
+  string context_id = 4;
 }
 
 message ExplainResponse {
@@ -407,9 +474,8 @@ message KillQueryResponse {
 message CancelQueryRequest {
   string session_id = 1;
 
-  // Optional: cancel a specific query.
-  // When empty, all active queries on the session are cancelled.
-  string query_id = 2;
+  // The query context whose active queries should be cancelled.
+  string context_id = 2;
 }
 
 message CancelQueryResponse {
@@ -552,4 +618,7 @@ message ActiveQueryMessage {
   string query_id = 1;
   string sql = 2;
   string started_at = 3;
+
+  // The query context this query is executing on.
+  string context_id = 4;
 }

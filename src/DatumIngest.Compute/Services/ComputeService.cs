@@ -122,19 +122,70 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     }
 
     /// <inheritdoc />
+    public override Task<CreateQueryContextResponse> CreateQueryContext(
+        CreateQueryContextRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+        QueryContext queryContext = session.CreateQueryContext(request.Label);
+
+        return Task.FromResult(new CreateQueryContextResponse
+        {
+            ContextId = queryContext.ContextId.ToString(),
+        });
+    }
+
+    /// <inheritdoc />
+    public override Task<DestroyQueryContextResponse> DestroyQueryContext(
+        DestroyQueryContextRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+        Guid contextId = ParseContextId(request.ContextId);
+
+        if (!session.DestroyQueryContext(contextId))
+        {
+            throw new RpcException(new Status(StatusCode.NotFound,
+                $"Query context '{request.ContextId}' not found on session '{request.SessionId}'."));
+        }
+
+        return Task.FromResult(new DestroyQueryContextResponse());
+    }
+
+    /// <inheritdoc />
+    public override Task<ListQueryContextsResponse> ListQueryContexts(
+        ListQueryContextsRequest request, ServerCallContext context)
+    {
+        Session session = ResolveSession(request.SessionId);
+        ListQueryContextsResponse response = new();
+
+        foreach (QueryContext queryContext in session.GetQueryContexts())
+        {
+            response.Contexts.Add(new QueryContextInfoMessage
+            {
+                ContextId = queryContext.ContextId.ToString(),
+                Label = queryContext.Label,
+                CreatedAt = queryContext.CreatedAt.ToString("O"),
+                TempTableCount = queryContext.TempTableCount,
+            });
+        }
+
+        return Task.FromResult(response);
+    }
+
+    /// <inheritdoc />
     public override async Task Query(
         QueryRequest request,
         IServerStreamWriter<QueryResult> responseStream,
         ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
+        QueryContext queryContext = ResolveQueryContext(session, request.ContextId);
 
         // Register a per-query cancellation scope so concurrent queries
         // can be cancelled independently.
         ActiveQuery activeQuery;
         try
         {
-            activeQuery = session.RegisterQuery(request.Sql);
+            activeQuery = session.RegisterQuery(request.Sql, queryContext.ContextId);
         }
         catch (InvalidOperationException exception)
         {
@@ -203,7 +254,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     cancellationToken.ThrowIfCancellationRequested();
 
                     CommandResult result = await _dispatcher.DispatchStatementAsync(
-                        session, statements[statementIndex], cancellationToken, meter, parameters).ConfigureAwait(false);
+                        session, queryContext, statements[statementIndex], cancellationToken, meter, parameters).ConfigureAwait(false);
 
                     if (!result.IsSuccess)
                     {
@@ -336,10 +387,14 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         GetSchemaRequest request, ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
+        QueryContext? queryContext = TryResolveQueryContext(session, request.ContextId);
         CancellationToken cancellationToken = LinkedToken(context, session);
 
-        CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false);
+        CommandResult result = queryContext is not null
+            ? await _dispatcher.DispatchAsync(
+                session, queryContext, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false)
+            : await _dispatcher.DispatchAsync(
+                session, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -365,8 +420,13 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         ListTablesRequest request, ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
-        CommandResult result = await _dispatcher.DispatchAsync(
-            session, ".tables", LinkedToken(context, session)).ConfigureAwait(false);
+        QueryContext? queryContext = TryResolveQueryContext(session, request.ContextId);
+
+        CommandResult result = queryContext is not null
+            ? await _dispatcher.DispatchAsync(
+                session, queryContext, ".tables", LinkedToken(context, session)).ConfigureAwait(false)
+            : await _dispatcher.DispatchAsync(
+                session, ".tables", LinkedToken(context, session)).ConfigureAwait(false);
 
         return ToListResponse(result);
     }
@@ -432,10 +492,15 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         ExplainRequest request, ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
+        QueryContext? queryContext = TryResolveQueryContext(session, request.ContextId);
 
         string explainSql = request.Analyze ? $"analyze {request.Sql}" : request.Sql;
-        CommandResult result = await _dispatcher.DispatchAsync(
-            session, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false);
+
+        CommandResult result = queryContext is not null
+            ? await _dispatcher.DispatchAsync(
+                session, queryContext, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false)
+            : await _dispatcher.DispatchAsync(
+                session, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -594,13 +659,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         CancelQueryRequest request, ServerCallContext context)
     {
         Session session = ResolveSession(request.SessionId);
-
-        string command = string.IsNullOrEmpty(request.QueryId)
-            ? ".cancel"
-            : $".cancel {request.QueryId}";
+        QueryContext queryContext = ResolveQueryContext(session, request.ContextId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            session, command, LinkedToken(context, session)).ConfigureAwait(false);
+            session, queryContext, ".cancel", LinkedToken(context, session)).ConfigureAwait(false);
 
         if (!result.IsSuccess)
         {
@@ -642,6 +704,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 QueryId = activeQuery.QueryId.ToString(),
                 Sql = activeQuery.Sql,
                 StartedAt = activeQuery.StartedAt.ToString("O"),
+                ContextId = activeQuery.ContextId.ToString(),
             });
         }
 
@@ -728,6 +791,52 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
 
         return sessionId;
+    }
+
+    /// <summary>
+    /// Parses a context ID string into a <see cref="Guid"/>.
+    /// </summary>
+    private static Guid ParseContextId(string contextIdText)
+    {
+        if (!Guid.TryParse(contextIdText, out Guid contextId))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid context ID format."));
+        }
+
+        return contextId;
+    }
+
+    /// <summary>
+    /// Resolves a <see cref="QueryContext"/> by its string identifier within the given session.
+    /// </summary>
+    private static QueryContext ResolveQueryContext(Session session, string contextIdText)
+    {
+        Guid contextId = ParseContextId(contextIdText);
+        QueryContext? queryContext = session.GetQueryContext(contextId);
+
+        if (queryContext is null)
+        {
+            throw new RpcException(new Status(
+                StatusCode.NotFound,
+                $"Query context '{contextIdText}' not found in session '{session.SessionId}'."));
+        }
+
+        return queryContext;
+    }
+
+    /// <summary>
+    /// Optionally resolves a <see cref="QueryContext"/> when the context ID is provided.
+    /// Returns <see langword="null"/> when <paramref name="contextIdText"/> is empty,
+    /// allowing catalog RPCs to fall back to the session-level catalog.
+    /// </summary>
+    private static QueryContext? TryResolveQueryContext(Session session, string contextIdText)
+    {
+        if (string.IsNullOrEmpty(contextIdText))
+        {
+            return null;
+        }
+
+        return ResolveQueryContext(session, contextIdText);
     }
 
     /// <summary>

@@ -19,6 +19,7 @@ public sealed class StatementExecutorTests : IDisposable
     private readonly SessionManager _sessionManager;
     private readonly CommandDispatcher _dispatcher;
     private readonly Session _session;
+    private readonly QueryContext _queryContext;
 
     /// <summary>
     /// Sets up a dispatcher with a session that has no external data sources.
@@ -28,6 +29,7 @@ public sealed class StatementExecutorTests : IDisposable
         _sessionManager = new SessionManager(_functionRegistry);
         TableCatalog catalog = new();
         _session = _sessionManager.CreateLocalSession(SessionRole.Admin, catalog);
+        _queryContext = _session.CreateQueryContext("Test");
         _dispatcher = new CommandDispatcher(_sessionManager);
     }
 
@@ -36,6 +38,7 @@ public sealed class StatementExecutorTests : IDisposable
     /// </summary>
     public void Dispose()
     {
+        _queryContext.Dispose();
         _session.Dispose();
 
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"datum_session_{_session.SessionId:N}");
@@ -47,7 +50,7 @@ public sealed class StatementExecutorTests : IDisposable
 
     private async Task<CommandResult> ExecuteAsync(string sql)
     {
-        return await _dispatcher.DispatchAsync(_session, sql, CancellationToken.None).ConfigureAwait(false);
+        return await _dispatcher.DispatchAsync(_session, _queryContext, sql, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task<List<Row>> CollectRowsAsync(CommandResult result)
@@ -1163,14 +1166,14 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("INSERT INTO source VALUES (1)");
 
         TableDescriptor? descriptor = null;
-        _session.Catalog.TryResolve("source", out descriptor);
+        _queryContext.Catalog.TryResolve("source", out descriptor);
 
         // Re-register the same file as read-only to simulate a non-temp table.
         TableDescriptor readOnlyDescriptor = new(
             "datum", "readonly_data", descriptor!.FilePath,
             new Dictionary<string, string>(),
             Mutability: TableMutability.ReadOnly);
-        _session.Catalog.Register(readOnlyDescriptor);
+        _queryContext.Catalog.Register(readOnlyDescriptor);
 
         CommandResult result = await ExecuteAsync("INSERT INTO readonly_data VALUES (99)");
         Assert.Equal(CommandResultKind.Error, result.Kind);
@@ -1186,13 +1189,13 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
 
         TableDescriptor? descriptor = null;
-        _session.Catalog.TryResolve("source", out descriptor);
+        _queryContext.Catalog.TryResolve("source", out descriptor);
 
         TableDescriptor readOnlyDescriptor = new(
             "datum", "readonly_data", descriptor!.FilePath,
             new Dictionary<string, string>(),
             Mutability: TableMutability.ReadOnly);
-        _session.Catalog.Register(readOnlyDescriptor);
+        _queryContext.Catalog.Register(readOnlyDescriptor);
 
         CommandResult result = await ExecuteAsync("DROP TABLE readonly_data");
         Assert.Equal(CommandResultKind.Error, result.Kind);
@@ -1208,13 +1211,13 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
 
         TableDescriptor? descriptor = null;
-        _session.Catalog.TryResolve("source", out descriptor);
+        _queryContext.Catalog.TryResolve("source", out descriptor);
 
         TableDescriptor readOnlyDescriptor = new(
             "datum", "readonly_data", descriptor!.FilePath,
             new Dictionary<string, string>(),
             Mutability: TableMutability.ReadOnly);
-        _session.Catalog.Register(readOnlyDescriptor);
+        _queryContext.Catalog.Register(readOnlyDescriptor);
 
         CommandResult result = await ExecuteAsync("UPDATE readonly_data SET id = 1");
         Assert.Equal(CommandResultKind.Error, result.Kind);
@@ -1230,13 +1233,13 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE source (id INT)");
 
         TableDescriptor? descriptor = null;
-        _session.Catalog.TryResolve("source", out descriptor);
+        _queryContext.Catalog.TryResolve("source", out descriptor);
 
         TableDescriptor readOnlyDescriptor = new(
             "datum", "readonly_data", descriptor!.FilePath,
             new Dictionary<string, string>(),
             Mutability: TableMutability.ReadOnly);
-        _session.Catalog.Register(readOnlyDescriptor);
+        _queryContext.Catalog.Register(readOnlyDescriptor);
 
         CommandResult result = await ExecuteAsync("DELETE FROM readonly_data WHERE id = 1");
         Assert.Equal(CommandResultKind.Error, result.Kind);
@@ -1271,7 +1274,7 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
         await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
 
-        bool hasIndex = _session.Catalog.TryGetIndex("data", out SourceIndex? index);
+        bool hasIndex = _queryContext.Catalog.TryGetIndex("data", out SourceIndex? index);
         Assert.True(hasIndex, "Source index should be registered on the catalog after INSERT.");
         Assert.NotNull(index);
         Assert.Equal(2, index!.Schema.TotalRowCount);
@@ -1286,7 +1289,7 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
         await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice'), (2, 'Bob')");
 
-        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        bool hasManifest = _queryContext.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
         Assert.True(hasManifest, "Manifest should be registered on the catalog after INSERT.");
         Assert.NotNull(manifest);
         Assert.Equal(2, manifest!.RowCount);
@@ -1303,7 +1306,7 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING, score FLOAT64)");
         await ExecuteAsync("INSERT INTO data (id, name) VALUES (1, 'Alice')");
 
-        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        bool hasManifest = _queryContext.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
         Assert.True(hasManifest, "Manifest should be registered even when columns have NULLs.");
         Assert.NotNull(manifest);
         Assert.Equal(1, manifest!.RowCount);
@@ -1318,7 +1321,7 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
         await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice')");
 
-        _session.Catalog.TryResolve("data", out TableDescriptor? descriptor);
+        _queryContext.Catalog.TryResolve("data", out TableDescriptor? descriptor);
         string indexPath = Path.ChangeExtension(descriptor!.FilePath, ".datum-index");
         Assert.True(File.Exists(indexPath), "Index sidecar file should exist on disk.");
     }
@@ -1332,7 +1335,7 @@ public sealed class StatementExecutorTests : IDisposable
         await ExecuteAsync("CREATE TEMP TABLE data (id INT, name STRING)");
         await ExecuteAsync("INSERT INTO data VALUES (1, 'Alice')");
 
-        _session.Catalog.TryResolve("data", out TableDescriptor? descriptor);
+        _queryContext.Catalog.TryResolve("data", out TableDescriptor? descriptor);
         string manifestPath = Path.ChangeExtension(descriptor!.FilePath, ".datum-manifest");
         Assert.True(File.Exists(manifestPath), "Manifest sidecar file should exist on disk.");
     }
@@ -1354,7 +1357,7 @@ public sealed class StatementExecutorTests : IDisposable
         CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
         Assert.Equal(CommandResultKind.AffectedRows, analyzeResult.Kind);
 
-        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        bool hasManifest = _queryContext.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
         Assert.True(hasManifest, "Manifest should be registered after ANALYZE.");
         Assert.NotNull(manifest);
         Assert.Equal(2, manifest!.RowCount);
@@ -1373,11 +1376,11 @@ public sealed class StatementExecutorTests : IDisposable
         CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
         Assert.Equal(CommandResultKind.AffectedRows, analyzeResult.Kind);
 
-        bool hasIndex = _session.Catalog.TryGetIndex("data", out SourceIndex? index);
+        bool hasIndex = _queryContext.Catalog.TryGetIndex("data", out SourceIndex? index);
         Assert.True(hasIndex, "Index should be rebuilt after ANALYZE.");
         Assert.Equal(3, index!.Schema.TotalRowCount);
 
-        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        bool hasManifest = _queryContext.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
         Assert.True(hasManifest, "Manifest should be rebuilt after ANALYZE.");
         Assert.Equal(2, manifest!.Features.Count);
     }
@@ -1440,7 +1443,7 @@ public sealed class StatementExecutorTests : IDisposable
         CommandResult analyzeResult = await ExecuteAsync("ANALYZE data");
         Assert.Contains("Analyzed", analyzeResult.Message);
 
-        bool hasManifest = _session.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
+        bool hasManifest = _queryContext.Catalog.TryGetManifest("data", out QueryResultsManifest? manifest);
         Assert.True(hasManifest);
         Assert.Equal(2, manifest!.RowCount);
     }

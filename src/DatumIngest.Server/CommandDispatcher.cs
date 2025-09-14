@@ -40,13 +40,14 @@ public sealed class CommandDispatcher
     /// the appropriate handler.
     /// </summary>
     /// <param name="session">The session issuing the command.</param>
+    /// <param name="queryContext">The query context providing temp table isolation.</param>
     /// <param name="input">The raw command text (SQL or dot-command).</param>
     /// <param name="cancellationToken">Cancellation token for this operation.</param>
     /// <param name="queryMeter">Optional meter for accumulating Query Unit costs, or <see langword="null"/> for unmetered execution.</param>
     /// <param name="parameters">Optional named parameter bindings to substitute into the query, or <see langword="null"/> for no parameters.</param>
     /// <returns>The result of the command execution.</returns>
     public async Task<CommandResult> DispatchAsync(
-        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
+        Session session, QueryContext queryContext, string input, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
         IReadOnlyDictionary<string, DataValue>? parameters = null)
     {
         session.TouchActivity();
@@ -67,10 +68,10 @@ public sealed class CommandDispatcher
         {
             if (trimmed.StartsWith('.'))
             {
-                return await DispatchMetaCommandAsync(session, trimmed, cancellationToken).ConfigureAwait(false);
+                return await DispatchMetaCommandAsync(session, queryContext, trimmed, cancellationToken).ConfigureAwait(false);
             }
 
-            return await DispatchSqlAsync(session, trimmed, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
+            return await DispatchSqlAsync(session, queryContext, trimmed, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -90,8 +91,21 @@ public sealed class CommandDispatcher
         }
     }
 
-    private async Task<CommandResult> DispatchMetaCommandAsync(
+    /// <summary>
+    /// Dispatches a session-level meta-command that does not require temp table
+    /// isolation. An ephemeral <see cref="QueryContext"/> is created for the duration
+    /// of the call. Use this overload only for commands that never create or resolve
+    /// temp tables (e.g. <c>.providers</c>, <c>.functions</c>, <c>.sessions</c>).
+    /// </summary>
+    public async Task<CommandResult> DispatchAsync(
         Session session, string input, CancellationToken cancellationToken)
+    {
+        using QueryContext ephemeralContext = new(session.SessionId, session.Catalog, "");
+        return await DispatchAsync(session, ephemeralContext, input, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CommandResult> DispatchMetaCommandAsync(
+        Session session, QueryContext queryContext, string input, CancellationToken cancellationToken)
     {
         // Split into command name and argument.
         string[] parts = input.Split(' ', 2, StringSplitOptions.TrimEntries);
@@ -101,21 +115,21 @@ public sealed class CommandDispatcher
         return command switch
         {
             ".help" => HandleHelp(),
-            ".tables" => HandleListTables(session),
-            ".schema" or ".columns" => await HandleSchemaAsync(session, argument, cancellationToken).ConfigureAwait(false),
+            ".tables" => HandleListTables(session, queryContext),
+            ".schema" or ".columns" => await HandleSchemaAsync(session, queryContext, argument, cancellationToken).ConfigureAwait(false),
             ".providers" => HandleListProviders(session),
             ".functions" => HandleListFunctions(session),
             ".source" => await HandleAddSourceAsync(session, argument, cancellationToken).ConfigureAwait(false),
-            ".explain" => await HandleExplainAsync(session, argument, cancellationToken).ConfigureAwait(false),
+            ".explain" => await HandleExplainAsync(session, queryContext, argument, cancellationToken).ConfigureAwait(false),
             ".sessions" => HandleListSessions(session),
             ".kill" => HandleKillQuery(session, argument),
-            ".cancel" => HandleCancelQuery(session, argument),
+            ".cancel" => HandleCancelQuery(session, queryContext),
             _ => CommandResult.Error($"Unknown command: {command}. Type .help for available commands."),
         };
     }
 
     private async Task<CommandResult> DispatchSqlAsync(
-        Session session, string input, CancellationToken cancellationToken, QueryMeter? queryMeter,
+        Session session, QueryContext queryContext, string input, CancellationToken cancellationToken, QueryMeter? queryMeter,
         IReadOnlyDictionary<string, DataValue>? parameters = null)
     {
         if (!session.IsAuthorized(ServerOperation.Query))
@@ -127,7 +141,7 @@ public sealed class CommandDispatcher
 
         Statement statement = SqlParser.ParseStatement(input);
 
-        return await DispatchStatementAsync(session, statement, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
+        return await DispatchStatementAsync(session, queryContext, statement, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -135,19 +149,20 @@ public sealed class CommandDispatcher
     /// single statements and by batch execution for iterating parsed statement lists.
     /// </summary>
     /// <param name="session">The session issuing the command.</param>
+    /// <param name="queryContext">The query context providing temp table isolation.</param>
     /// <param name="statement">The parsed statement to execute.</param>
     /// <param name="cancellationToken">Cancellation token for this operation.</param>
     /// <param name="queryMeter">Optional meter for accumulating Query Unit costs.</param>
     /// <param name="parameters">Optional named parameter bindings.</param>
     /// <returns>The result of the statement execution.</returns>
     internal async Task<CommandResult> DispatchStatementAsync(
-        Session session, Statement statement, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
+        Session session, QueryContext queryContext, Statement statement, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
         IReadOnlyDictionary<string, DataValue>? parameters = null)
     {
         // DDL/DML statements are routed to the statement executor.
         if (statement is not QueryStatement queryStatement)
         {
-            StatementExecutor executor = new(session, _parallelismBudget);
+            StatementExecutor executor = new(session, queryContext, _parallelismBudget);
             return await executor.ExecuteAsync(statement, cancellationToken, queryMeter, parameters).ConfigureAwait(false);
         }
 
@@ -159,9 +174,9 @@ public sealed class CommandDispatcher
             query = ParameterBinder.Bind(query, parameters);
         }
 
-        QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
+        QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
-        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, session.Catalog, localBufferPool, queryMeter,
+        ExecutionContext context = new(cancellationToken, session.FunctionRegistry, queryContext.Catalog, localBufferPool, queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
         {
             DegreeOfParallelism = Environment.ProcessorCount,
@@ -176,15 +191,15 @@ public sealed class CommandDispatcher
 
         // We need the schema before streaming. Use the leftmost SELECT for column metadata.
         SelectStatement schemaStatement = ExtractLeftmostStatement(query);
-        Schema schema = await ResolveQuerySchemaAsync(session, schemaStatement, cancellationToken).ConfigureAwait(false);
+        Schema schema = await ResolveQuerySchemaAsync(session, queryContext, schemaStatement, cancellationToken).ConfigureAwait(false);
 
         return CommandResult.StreamingRows(rows, schema);
     }
 
     private static async Task<Schema> ResolveQuerySchemaAsync(
-        Session session, SelectStatement statement, CancellationToken cancellationToken)
+        Session session, QueryContext queryContext, SelectStatement statement, CancellationToken cancellationToken)
     {
-        QuerySchemaResolver resolver = new(session.Catalog, session.FunctionRegistry);
+        QuerySchemaResolver resolver = new(queryContext.Catalog, session.FunctionRegistry);
         ResolvedQuerySchema resolved = await resolver.ResolveAsync(statement, cancellationToken).ConfigureAwait(false);
 
         // Build a source schema for type inference on expressions.
@@ -281,6 +296,7 @@ public sealed class CommandDispatcher
             .sessions                      List all active sessions (admin only)
             .kill <session_id> [query_id]  Cancel query/queries on another session (admin only)
             .cancel [query_id]             Cancel a specific or all active queries on this session
+            .cancel                        Cancel all active queries on the current context
             
             Any other input is executed as a SQL query.
             Source definition format: provider:name=path[;key=value;...]
@@ -289,14 +305,14 @@ public sealed class CommandDispatcher
         return CommandResult.Success(helpText);
     }
 
-    private static CommandResult HandleListTables(Session session)
+    private static CommandResult HandleListTables(Session session, QueryContext queryContext)
     {
         if (!session.IsAuthorized(ServerOperation.Schema))
         {
             return CommandResult.Error("Permission denied: you are not authorized to inspect schemas.");
         }
 
-        List<string> tables = session.Catalog.TableNames
+        List<string> tables = queryContext.Catalog.TableNames
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .Select(DatumIngest.Parsing.Tokens.SqlIdentifier.QuoteIfNeeded)
             .ToList();
@@ -304,7 +320,7 @@ public sealed class CommandDispatcher
     }
 
     private static async Task<CommandResult> HandleSchemaAsync(
-        Session session, string tableName, CancellationToken cancellationToken)
+        Session session, QueryContext queryContext, string tableName, CancellationToken cancellationToken)
     {
         if (!session.IsAuthorized(ServerOperation.Schema))
         {
@@ -318,7 +334,7 @@ public sealed class CommandDispatcher
 
         // Accept bracket/quote-delimited names so users can copy from .tables output.
         string resolvedName = DatumIngest.Parsing.Tokens.SqlIdentifier.Unquote(tableName);
-        Schema schema = await session.Catalog.GetSchemaAsync(resolvedName, cancellationToken).ConfigureAwait(false);
+        Schema schema = await queryContext.Catalog.GetSchemaAsync(resolvedName, cancellationToken).ConfigureAwait(false);
         return CommandResult.SchemaResult(schema);
     }
 
@@ -412,7 +428,7 @@ public sealed class CommandDispatcher
     }
 
     private async Task<CommandResult> HandleExplainAsync(
-        Session session, string sql, CancellationToken cancellationToken)
+        Session session, QueryContext queryContext, string sql, CancellationToken cancellationToken)
     {
         if (!session.IsAuthorized(ServerOperation.Explain))
         {
@@ -429,7 +445,7 @@ public sealed class CommandDispatcher
         string actualSql = analyze ? sql["analyze ".Length..] : sql;
 
         QueryExpression query = SqlParser.Parse(actualSql);
-        QueryPlanner planner = new(session.Catalog, session.FunctionRegistry);
+        QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry);
         IQueryOperator plan = await planner.PlanAsync(query, cancellationToken).ConfigureAwait(false);
 
         ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
@@ -441,7 +457,7 @@ public sealed class CommandDispatcher
             ExecutionContext context = new(
                 cancellationToken,
                 session.FunctionRegistry,
-                session.Catalog,
+                queryContext.Catalog,
                 localBufferPool,
                 memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
             {
@@ -524,30 +540,15 @@ public sealed class CommandDispatcher
         return CommandResult.Success($"Cancelled {count} active query/queries on session '{targetId}'.");
     }
 
-    private static CommandResult HandleCancelQuery(Session session, string argument)
+    private static CommandResult HandleCancelQuery(Session session, QueryContext queryContext)
     {
         if (!session.IsAuthorized(ServerOperation.CancelQuery))
         {
             return CommandResult.Error("Permission denied: you are not authorized to cancel queries.");
         }
 
-        if (!string.IsNullOrWhiteSpace(argument))
-        {
-            if (!Guid.TryParse(argument.Trim(), out Guid queryId))
-            {
-                return CommandResult.Error("Usage: .cancel [query_id]");
-            }
-
-            if (!session.CancelQuery(queryId))
-            {
-                return CommandResult.Error($"Query '{queryId}' not found.");
-            }
-
-            return CommandResult.Success($"Cancelled query '{queryId}'.");
-        }
-
-        int count = session.CancelAllAndReset();
-        return CommandResult.Success($"Cancelled {count} active query/queries.");
+        int count = session.CancelQueriesByContext(queryContext.ContextId);
+        return CommandResult.Success($"Cancelled {count} active query/queries on context '{queryContext.ContextId}'.");
     }
 
     /// <summary>

@@ -14,10 +14,12 @@ public sealed class ActiveQuery : IDisposable
     /// Initializes a new active query with a server-assigned identifier.
     /// </summary>
     /// <param name="sql">The SQL text of the query being executed.</param>
-    internal ActiveQuery(string sql)
+    /// <param name="contextId">The identifier of the query context this query belongs to.</param>
+    internal ActiveQuery(string sql, Guid contextId)
     {
         QueryId = Guid.NewGuid();
         Sql = sql;
+        ContextId = contextId;
         StartedAt = DateTimeOffset.UtcNow;
     }
 
@@ -26,6 +28,9 @@ public sealed class ActiveQuery : IDisposable
 
     /// <summary>Gets the SQL text of the query.</summary>
     public string Sql { get; }
+
+    /// <summary>Gets the identifier of the query context this query executes on.</summary>
+    public Guid ContextId { get; }
 
     /// <summary>Gets the timestamp when the query started.</summary>
     public DateTimeOffset StartedAt { get; }

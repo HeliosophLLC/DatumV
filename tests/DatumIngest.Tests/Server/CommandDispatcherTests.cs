@@ -219,7 +219,7 @@ public sealed class CommandDispatcherTests : IDisposable
     [Fact]
     public async Task DispatchAsync_KillSpecificQuery_CancelsOnlyThatQuery()
     {
-        ActiveQuery query = _userSession.RegisterQuery("SELECT 1");
+        ActiveQuery query = _userSession.RegisterQuery("SELECT 1", Guid.NewGuid());
 
         CommandResult result = await _dispatcher.DispatchAsync(
             _adminSession, $".kill {_userSession.SessionId} {query.QueryId}", CancellationToken.None);
@@ -244,69 +244,66 @@ public sealed class CommandDispatcherTests : IDisposable
         Assert.Contains("not found", result.Message);
     }
 
-    // ─────────────────── .cancel with query ID ───────────────────
+    // ─────────────────── .cancel ───────────────────
 
     /// <summary>
-    /// .cancel with no argument cancels all active queries.
+    /// .cancel cancels all active queries on the current context.
     /// </summary>
     [Fact]
-    public async Task DispatchAsync_CancelNoArgument_CancelsAll()
+    public async Task DispatchAsync_Cancel_CancelsQueriesOnContext()
     {
-        ActiveQuery query = _adminSession.RegisterQuery("SELECT 1");
+        QueryContext queryContext = _adminSession.CreateQueryContext("test-cancel");
+        ActiveQuery query = _adminSession.RegisterQuery("SELECT 1", queryContext.ContextId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            _adminSession, ".cancel", CancellationToken.None);
+            _adminSession, queryContext, ".cancel", CancellationToken.None);
 
         Assert.Equal(CommandResultKind.Success, result.Kind);
         Assert.True(query.CancellationToken.IsCancellationRequested);
 
         _adminSession.UnregisterQuery(query.QueryId);
+        _adminSession.DestroyQueryContext(queryContext.ContextId);
     }
 
     /// <summary>
-    /// .cancel with a specific query ID cancels only that query.
+    /// .cancel only affects queries on the specified context, not other contexts.
     /// </summary>
     [Fact]
-    public async Task DispatchAsync_CancelSpecificQuery_CancelsOnlyThatQuery()
+    public async Task DispatchAsync_Cancel_DoesNotAffectOtherContexts()
     {
-        ActiveQuery first = _adminSession.RegisterQuery("SELECT 1");
-        ActiveQuery second = _adminSession.RegisterQuery("SELECT 2");
+        QueryContext contextA = _adminSession.CreateQueryContext("context-a");
+        QueryContext contextB = _adminSession.CreateQueryContext("context-b");
+        ActiveQuery onA = _adminSession.RegisterQuery("SELECT 1", contextA.ContextId);
+        ActiveQuery onB = _adminSession.RegisterQuery("SELECT 2", contextB.ContextId);
 
         CommandResult result = await _dispatcher.DispatchAsync(
-            _adminSession, $".cancel {first.QueryId}", CancellationToken.None);
+            _adminSession, contextA, ".cancel", CancellationToken.None);
 
         Assert.Equal(CommandResultKind.Success, result.Kind);
-        Assert.True(first.CancellationToken.IsCancellationRequested);
-        Assert.False(second.CancellationToken.IsCancellationRequested);
+        Assert.True(onA.CancellationToken.IsCancellationRequested);
+        Assert.False(onB.CancellationToken.IsCancellationRequested);
 
-        _adminSession.UnregisterQuery(first.QueryId);
-        _adminSession.UnregisterQuery(second.QueryId);
+        _adminSession.UnregisterQuery(onA.QueryId);
+        _adminSession.UnregisterQuery(onB.QueryId);
+        _adminSession.DestroyQueryContext(contextA.ContextId);
+        _adminSession.DestroyQueryContext(contextB.ContextId);
     }
 
     /// <summary>
-    /// .cancel with an unknown query ID returns an error.
+    /// .cancel succeeds with a zero count when no queries are active on the context.
     /// </summary>
     [Fact]
-    public async Task DispatchAsync_CancelUnknownQueryId_ReturnsError()
+    public async Task DispatchAsync_Cancel_NoActiveQueries_Succeeds()
     {
+        QueryContext queryContext = _adminSession.CreateQueryContext("empty-cancel");
+
         CommandResult result = await _dispatcher.DispatchAsync(
-            _adminSession, $".cancel {Guid.NewGuid()}", CancellationToken.None);
+            _adminSession, queryContext, ".cancel", CancellationToken.None);
 
-        Assert.Equal(CommandResultKind.Error, result.Kind);
-        Assert.Contains("not found", result.Message);
-    }
+        Assert.Equal(CommandResultKind.Success, result.Kind);
+        Assert.Contains("0", result.Message);
 
-    /// <summary>
-    /// .cancel with an invalid GUID returns a usage error.
-    /// </summary>
-    [Fact]
-    public async Task DispatchAsync_CancelInvalidGuid_ReturnsError()
-    {
-        CommandResult result = await _dispatcher.DispatchAsync(
-            _adminSession, ".cancel not-a-guid", CancellationToken.None);
-
-        Assert.Equal(CommandResultKind.Error, result.Kind);
-        Assert.Contains("Usage", result.Message);
+        _adminSession.DestroyQueryContext(queryContext.ContextId);
     }
 
     /// <summary>

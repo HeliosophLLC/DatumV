@@ -76,6 +76,13 @@ public sealed class TableCatalog : IDisposable
     }
 
     /// <summary>
+    /// Optional parent catalog consulted when a table name is not found locally.
+    /// Used by query context overlays to fall through to the session's base catalog
+    /// for non-temp tables.
+    /// </summary>
+    public TableCatalog? Parent { get; init; }
+
+    /// <summary>
     /// Registers a provider factory for a given provider identifier.
     /// </summary>
     /// <param name="providerName">Provider identifier (e.g. "csv", "json").</param>
@@ -284,6 +291,11 @@ public sealed class TableCatalog : IDisposable
             return descriptor;
         }
 
+        if (Parent is not null)
+        {
+            return Parent.Resolve(tableName);
+        }
+
         throw new KeyNotFoundException($"Table '{tableName}' is not registered in the catalog.");
     }
 
@@ -300,13 +312,28 @@ public sealed class TableCatalog : IDisposable
             return factory();
         }
 
+        if (Parent is not null)
+        {
+            return Parent.CreateProvider(descriptor);
+        }
+
         throw new KeyNotFoundException($"No provider factory registered for '{descriptor.Provider}'.");
     }
 
     /// <summary>
-    /// Returns all registered table names.
+    /// Returns all registered table names, including those from the parent catalog.
     /// </summary>
-    public IEnumerable<string> TableNames => _descriptors.Keys;
+    public IEnumerable<string> TableNames =>
+        Parent is null
+            ? _descriptors.Keys
+            : _descriptors.Keys.Concat(
+                Parent.TableNames.Where(name => !_descriptors.ContainsKey(name)));
+
+    /// <summary>
+    /// Returns the number of tables registered directly in this catalog,
+    /// excluding any tables inherited from <see cref="Parent"/>.
+    /// </summary>
+    public int LocalTableCount => _descriptors.Count;
 
     /// <summary>
     /// Returns all registered provider names.
@@ -321,7 +348,18 @@ public sealed class TableCatalog : IDisposable
     /// <returns>True if the table was found; otherwise false.</returns>
     public bool TryResolve(string tableName, out TableDescriptor? descriptor)
     {
-        return _descriptors.TryGetValue(tableName, out descriptor);
+        if (_descriptors.TryGetValue(tableName, out descriptor))
+        {
+            return true;
+        }
+
+        if (Parent is not null)
+        {
+            return Parent.TryResolve(tableName, out descriptor);
+        }
+
+        descriptor = null;
+        return false;
     }
 
     /// <summary>
@@ -337,13 +375,15 @@ public sealed class TableCatalog : IDisposable
     public async Task<Schema> GetSchemaAsync(string tableName, CancellationToken cancellationToken)
     {
         // Return cached schema from sidecar if available, avoiding provider I/O.
-        if (_schemas.TryGetValue(tableName, out Schema? cachedSchema))
+        // Uses TryGetSchema which chains to the parent catalog.
+        if (TryGetSchema(tableName, out Schema? cachedSchema) && cachedSchema is not null)
         {
             return cachedSchema;
         }
 
         // Return cached schema from index if available, avoiding provider I/O.
-        if (_indexes.TryGetValue(tableName, out SourceIndex? index))
+        // Uses TryGetIndex which chains to the parent catalog.
+        if (TryGetIndex(tableName, out SourceIndex? index) && index is not null)
         {
             return index.Schema.Schema;
         }
@@ -396,6 +436,11 @@ public sealed class TableCatalog : IDisposable
             return _indexes.TryGetValue(tableName, out index);
         }
 
+        if (Parent is not null)
+        {
+            return Parent.TryGetIndex(tableName, out index);
+        }
+
         index = null;
         return false;
     }
@@ -419,7 +464,18 @@ public sealed class TableCatalog : IDisposable
     /// <returns><c>true</c> if a manifest was found; otherwise <c>false</c>.</returns>
     public bool TryGetManifest(string tableName, out QueryResultsManifest? manifest)
     {
-        return _manifests.TryGetValue(tableName, out manifest);
+        if (_manifests.TryGetValue(tableName, out manifest))
+        {
+            return true;
+        }
+
+        if (Parent is not null)
+        {
+            return Parent.TryGetManifest(tableName, out manifest);
+        }
+
+        manifest = null;
+        return false;
     }
 
     /// <summary>
@@ -441,7 +497,18 @@ public sealed class TableCatalog : IDisposable
     /// <returns><c>true</c> if a cached schema was found; otherwise <c>false</c>.</returns>
     public bool TryGetSchema(string tableName, out Schema? schema)
     {
-        return _schemas.TryGetValue(tableName, out schema);
+        if (_schemas.TryGetValue(tableName, out schema))
+        {
+            return true;
+        }
+
+        if (Parent is not null)
+        {
+            return Parent.TryGetSchema(tableName, out schema);
+        }
+
+        schema = null;
+        return false;
     }
 
     /// <summary>

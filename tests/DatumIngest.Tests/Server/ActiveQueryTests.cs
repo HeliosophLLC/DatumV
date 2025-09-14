@@ -13,10 +13,12 @@ public sealed class ActiveQueryTests
     [Fact]
     public void Constructor_AssignsUniqueIdAndNonCancelledToken()
     {
-        using ActiveQuery query = new("SELECT 1");
+        Guid contextId = Guid.NewGuid();
+        using ActiveQuery query = new("SELECT 1", contextId);
 
         Assert.NotEqual(Guid.Empty, query.QueryId);
         Assert.Equal("SELECT 1", query.Sql);
+        Assert.Equal(contextId, query.ContextId);
         Assert.False(query.CancellationToken.IsCancellationRequested);
         Assert.True(query.StartedAt <= DateTimeOffset.UtcNow);
     }
@@ -27,8 +29,8 @@ public sealed class ActiveQueryTests
     [Fact]
     public void Constructor_GeneratesDistinctIds()
     {
-        using ActiveQuery first = new("SELECT 1");
-        using ActiveQuery second = new("SELECT 2");
+        using ActiveQuery first = new("SELECT 1", Guid.NewGuid());
+        using ActiveQuery second = new("SELECT 2", Guid.NewGuid());
 
         Assert.NotEqual(first.QueryId, second.QueryId);
     }
@@ -39,7 +41,7 @@ public sealed class ActiveQueryTests
     [Fact]
     public void Cancel_SignalsCancellationToken()
     {
-        using ActiveQuery query = new("SELECT 1");
+        using ActiveQuery query = new("SELECT 1", Guid.NewGuid());
 
         query.Cancel();
 
@@ -52,7 +54,7 @@ public sealed class ActiveQueryTests
     [Fact]
     public void Dispose_ReleasesResources()
     {
-        ActiveQuery query = new("SELECT 1");
+        ActiveQuery query = new("SELECT 1", Guid.NewGuid());
         CancellationToken token = query.CancellationToken;
 
         query.Dispose();

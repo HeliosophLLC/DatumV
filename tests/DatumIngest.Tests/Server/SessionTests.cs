@@ -98,7 +98,7 @@ public sealed class SessionTests : IDisposable
     {
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
 
-        ActiveQuery query = session.RegisterQuery("SELECT 1");
+        ActiveQuery query = session.RegisterQuery("SELECT 1", Guid.NewGuid());
 
         Assert.NotEqual(Guid.Empty, query.QueryId);
         Assert.Equal("SELECT 1", query.Sql);
@@ -113,7 +113,7 @@ public sealed class SessionTests : IDisposable
     public void UnregisterQuery_RemovesAndDisposesQuery()
     {
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
-        ActiveQuery query = session.RegisterQuery("SELECT 1");
+        ActiveQuery query = session.RegisterQuery("SELECT 1", Guid.NewGuid());
         CancellationToken token = query.CancellationToken;
 
         session.UnregisterQuery(query.QueryId);
@@ -142,8 +142,8 @@ public sealed class SessionTests : IDisposable
     public void CancelQuery_CancelsOnlyTargetedQuery()
     {
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
-        ActiveQuery first = session.RegisterQuery("SELECT 1");
-        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        ActiveQuery first = session.RegisterQuery("SELECT 1", Guid.NewGuid());
+        ActiveQuery second = session.RegisterQuery("SELECT 2", Guid.NewGuid());
 
         bool found = session.CancelQuery(first.QueryId);
 
@@ -166,6 +166,53 @@ public sealed class SessionTests : IDisposable
         Assert.False(session.CancelQuery(Guid.NewGuid()));
     }
 
+    // ─────────────────── Context-Based Cancellation ───────────────────
+
+    /// <summary>
+    /// CancelQueriesByContext cancels only queries belonging to the specified context.
+    /// </summary>
+    [Fact]
+    public void CancelQueriesByContext_CancelsOnlyMatchingContext()
+    {
+        using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
+        Guid contextA = Guid.NewGuid();
+        Guid contextB = Guid.NewGuid();
+        ActiveQuery first = session.RegisterQuery("SELECT 1", contextA);
+        ActiveQuery second = session.RegisterQuery("SELECT 2", contextA);
+        ActiveQuery third = session.RegisterQuery("SELECT 3", contextB);
+
+        int count = session.CancelQueriesByContext(contextA);
+
+        Assert.Equal(2, count);
+        Assert.True(first.CancellationToken.IsCancellationRequested);
+        Assert.True(second.CancellationToken.IsCancellationRequested);
+        Assert.False(third.CancellationToken.IsCancellationRequested);
+
+        // Session-level token is NOT affected.
+        Assert.False(session.CancellationToken.IsCancellationRequested);
+
+        session.UnregisterQuery(first.QueryId);
+        session.UnregisterQuery(second.QueryId);
+        session.UnregisterQuery(third.QueryId);
+    }
+
+    /// <summary>
+    /// CancelQueriesByContext with no matching queries returns zero.
+    /// </summary>
+    [Fact]
+    public void CancelQueriesByContext_NoMatchingQueries_ReturnsZero()
+    {
+        using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
+        ActiveQuery query = session.RegisterQuery("SELECT 1", Guid.NewGuid());
+
+        int count = session.CancelQueriesByContext(Guid.NewGuid());
+
+        Assert.Equal(0, count);
+        Assert.False(query.CancellationToken.IsCancellationRequested);
+
+        session.UnregisterQuery(query.QueryId);
+    }
+
     /// <summary>
     /// CancelAllAndReset cancels all active queries and resets the session token.
     /// </summary>
@@ -173,8 +220,8 @@ public sealed class SessionTests : IDisposable
     public void CancelAllAndReset_CancelsAllActiveQueries()
     {
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
-        ActiveQuery first = session.RegisterQuery("SELECT 1");
-        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        ActiveQuery first = session.RegisterQuery("SELECT 1", Guid.NewGuid());
+        ActiveQuery second = session.RegisterQuery("SELECT 2", Guid.NewGuid());
         CancellationToken sessionToken = session.CancellationToken;
 
         int count = session.CancelAllAndReset();
@@ -196,7 +243,7 @@ public sealed class SessionTests : IDisposable
     public void GetActiveQueries_ReturnsSnapshot()
     {
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog());
-        ActiveQuery query = session.RegisterQuery("SELECT 1");
+        ActiveQuery query = session.RegisterQuery("SELECT 1", Guid.NewGuid());
 
         IReadOnlyList<ActiveQuery> snapshot = session.GetActiveQueries();
 
@@ -216,7 +263,7 @@ public sealed class SessionTests : IDisposable
 
         Parallel.For(0, 100, _ =>
         {
-            ActiveQuery query = session.RegisterQuery("SELECT 1");
+            ActiveQuery query = session.RegisterQuery("SELECT 1", Guid.NewGuid());
             session.UnregisterQuery(query.QueryId);
         });
 
@@ -234,11 +281,11 @@ public sealed class SessionTests : IDisposable
         QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 2);
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog(), governor);
 
-        ActiveQuery first = session.RegisterQuery("SELECT 1");
-        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        ActiveQuery first = session.RegisterQuery("SELECT 1", Guid.NewGuid());
+        ActiveQuery second = session.RegisterQuery("SELECT 2", Guid.NewGuid());
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => session.RegisterQuery("SELECT 3"));
+            () => session.RegisterQuery("SELECT 3", Guid.NewGuid()));
 
         Assert.Contains("Concurrent query limit reached", exception.Message);
         Assert.Contains("2", exception.Message);
@@ -256,9 +303,9 @@ public sealed class SessionTests : IDisposable
         QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 3);
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog(), governor);
 
-        ActiveQuery first = session.RegisterQuery("SELECT 1");
-        ActiveQuery second = session.RegisterQuery("SELECT 2");
-        ActiveQuery third = session.RegisterQuery("SELECT 3");
+        ActiveQuery first = session.RegisterQuery("SELECT 1", Guid.NewGuid());
+        ActiveQuery second = session.RegisterQuery("SELECT 2", Guid.NewGuid());
+        ActiveQuery third = session.RegisterQuery("SELECT 3", Guid.NewGuid());
 
         Assert.Equal(3, session.GetActiveQueries().Count);
 
@@ -276,10 +323,10 @@ public sealed class SessionTests : IDisposable
         QueryGovernor governor = new(null, null, null, MaxConcurrentQueries: 1);
         using Session session = _sessionManager.CreateLocalSession(SessionRole.Admin, new TableCatalog(), governor);
 
-        ActiveQuery first = session.RegisterQuery("SELECT 1");
+        ActiveQuery first = session.RegisterQuery("SELECT 1", Guid.NewGuid());
         session.UnregisterQuery(first.QueryId);
 
-        ActiveQuery second = session.RegisterQuery("SELECT 2");
+        ActiveQuery second = session.RegisterQuery("SELECT 2", Guid.NewGuid());
         Assert.Single(session.GetActiveQueries());
 
         session.UnregisterQuery(second.QueryId);
@@ -296,7 +343,7 @@ public sealed class SessionTests : IDisposable
 
         for (int i = 0; i < 50; i++)
         {
-            queries.Add(session.RegisterQuery($"SELECT {i}"));
+            queries.Add(session.RegisterQuery($"SELECT {i}", Guid.NewGuid()));
         }
 
         Assert.Equal(50, session.GetActiveQueries().Count);
