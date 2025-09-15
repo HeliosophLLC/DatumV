@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, HAVING, window functions (OVER/PARTITION BY), QUALIFY, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, GROUP BY ALL, HAVING, window functions (OVER/PARTITION BY), QUALIFY, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
 
 ## Comments
 
@@ -27,7 +27,42 @@ SELECT col1, col2, col3
 SELECT a.col1, b.col2
 SELECT col1 AS alias, normalize(col2) AS norm_col
 SELECT table_alias.*
+SELECT * EXCEPT (col1, col2)
+SELECT * REPLACE (upper(name) AS name)
+SELECT t.* EXCEPT (id) REPLACE (score * 100 AS score)
 ```
+
+### SELECT * EXCEPT
+
+Exclude specific columns from wildcard expansion. Applies to both `*` and `table.*`:
+
+```sql
+-- All columns except the raw image blob
+SELECT * EXCEPT (image_bytes) FROM training_data
+
+-- Exclude from a specific table in a join
+SELECT a.* EXCEPT (id), b.label
+FROM features a JOIN labels b ON a.id = b.id
+```
+
+Column names in the EXCEPT list must exist in the expanded column set; unknown names produce a planner error.
+
+### SELECT * REPLACE
+
+Replace specific columns in wildcard expansion with new expressions. The alias must match an existing column name — the replacement takes the original column's position:
+
+```sql
+-- Normalize a column in-place
+SELECT * REPLACE (normalize(score, 0, 100) AS score) FROM data
+
+-- Replace multiple columns
+SELECT * REPLACE (upper(name) AS name, round(price) AS price) FROM products
+
+-- Combine EXCEPT and REPLACE on the same wildcard
+SELECT * EXCEPT (raw_data) REPLACE (trim(name) AS name) FROM records
+```
+
+EXCEPT is applied before REPLACE — you cannot replace a column that has been excluded. REPLACE aliases that do not match any column in the expansion produce a planner error.
 
 ### SELECT DISTINCT
 
@@ -291,6 +326,32 @@ GROUP BY department, status
 SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 ```
 
+### GROUP BY ALL
+
+`GROUP BY ALL` automatically infers grouping keys from the SELECT list. Every non-aggregate expression in the column list becomes a grouping key, eliminating the need to repeat column names:
+
+```sql
+-- Equivalent to: GROUP BY category, region
+SELECT category, region, SUM(amount) AS total, COUNT(*) AS orders
+FROM sales
+GROUP BY ALL
+
+-- Works with single keys
+SELECT department, AVG(salary) AS avg_salary
+FROM employees
+GROUP BY ALL
+
+-- Works with HAVING, ORDER BY, and LIMIT
+SELECT category, SUM(revenue) AS total_revenue
+FROM products
+GROUP BY ALL
+HAVING SUM(revenue) > 1000
+ORDER BY total_revenue DESC
+LIMIT 10
+```
+
+LET bindings that reference non-aggregate expressions and have an output alias (via `AS`) are also included as grouping keys. Expressions that contain aggregate function calls (`COUNT`, `SUM`, `AVG`, etc.) are excluded automatically.
+
 ### Aggregate Functions
 
 | Function | Description |
@@ -324,6 +385,8 @@ SELECT COUNT(*), SUM(price), AVG(quantity), MIN(price), MAX(price) FROM orders
 | `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile via reservoir sampling. O(1) memory, ~1–5% error. |
 | `STRING_AGG(expr, separator [ORDER BY expr [ASC|DESC]])` | Concatenates non-null strings with a separator. Supports intra-aggregate ORDER BY. |
 | `ARRAY_AGG(expr [ORDER BY expr [ASC|DESC]])` | Collects non-null values into a typed Array. Accepts any data kind. Supports intra-aggregate ORDER BY and DISTINCT. Returns null if all inputs are null. |
+| `ARG_MAX(value, key)` | Returns the `value` from the row where `key` is at its maximum. Null keys are skipped. Ties broken by first-encountered row. Supports intra-aggregate ORDER BY for deterministic tie-breaking. |
+| `ARG_MIN(value, key)` | Returns the `value` from the row where `key` is at its minimum. Null keys are skipped. Ties broken by first-encountered row. Supports intra-aggregate ORDER BY for deterministic tie-breaking. |
 
 The `DISTINCT` modifier deduplicates argument values before accumulation. It is supported on all aggregate functions. Note that `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead. DISTINCT in window function aggregates (`COUNT(DISTINCT x) OVER (...)`) is not currently supported.
 
@@ -374,6 +437,21 @@ GROUP BY category
 
 -- Collect values into arrays per group
 SELECT category, ARRAY_AGG(name ORDER BY name ASC) AS names
+FROM products
+GROUP BY category
+
+-- Return product name with highest score per category
+SELECT category, ARG_MAX(name, score) AS best_product
+FROM products
+GROUP BY category
+
+-- Return cheapest product per department
+SELECT department, ARG_MIN(name, price) AS cheapest_product
+FROM products
+GROUP BY department
+
+-- Deterministic tie-breaking with ORDER BY
+SELECT category, ARG_MAX(name, score ORDER BY id ASC) AS best_product
 FROM products
 GROUP BY category
 
@@ -506,7 +584,7 @@ Value functions support two optional modifiers between the closing `)` and `OVER
 
 ### Aggregate Functions over Windows
 
-All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP), STRING_AGG, and ARRAY_AGG are not supported as window functions.
+All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, and their variants) can be used with OVER to compute running or partitioned aggregates. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP, ARG_MAX, ARG_MIN), STRING_AGG, and ARRAY_AGG are not supported as window functions.
 
 ```sql
 -- Running total
@@ -558,7 +636,7 @@ SUM(val) OVER (PARTITION BY group_col ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOU
 | `FIRST_VALUE(expr)` | `FIRST_VALUE(expr) [IGNORE NULLS] OVER (...)` | First value in the window frame. |
 | `LAST_VALUE(expr)` | `LAST_VALUE(expr) [IGNORE NULLS] OVER (...)` | Last value in the window frame. |
 | `NTH_VALUE(expr, n)` | `NTH_VALUE(expr, n) [FROM FIRST \| FROM LAST] [IGNORE NULLS] OVER (...)` | Nth value (1-based) in the window frame. |
-| `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, and variants | `agg(...) OVER (...)` | Any single-argument aggregate function used with OVER becomes a window aggregate. Includes VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, and APPROX_ variants. |
+| `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, and variants | `agg(...) OVER (...)` | Any single-argument aggregate function used with OVER becomes a window aggregate. Includes VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, and APPROX_ variants. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP, ARG_MAX, ARG_MIN), STRING_AGG, and ARRAY_AGG are excluded. |
 
 ### Execution model
 

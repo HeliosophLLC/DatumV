@@ -58,6 +58,7 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 - ~~**IN / NOT IN / EXISTS / NOT EXISTS subqueries**: `SemiJoinRewriter` → LEFT SEMI / LEFT ANTI-SEMI hash joins; NOT IN with three-valued NULL semantics~~ ✅
 - ~~**UNION / INTERSECT / EXCEPT**: All six variants with SQL-standard precedence; spill-to-disk for UNION DISTINCT~~ ✅
 - ~~**Window functions**: ROW_NUMBER, RANK, LAG, LEAD with OVER/PARTITION BY~~ ✅
+- ~~**GROUP BY ALL**: Projection-derived grouping — infers group keys from non-aggregate columns in the SELECT list~~ ✅
 - ~~**Dataset splitting**: `hash_split(key, seed)` for reproducible train/val/test splits~~ ✅
 - ~~**Top-N bounded sort**: Bounded priority queue in `OrderByOperator` for ORDER BY + LIMIT~~ ✅
 - ~~**WHERE index seek**: Point lookups via `ISeekableTableProvider`~~ ✅
@@ -84,6 +85,7 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 - ~~**Time-of-day type** (`DataKind.Time`)~~ ✅
 - ~~**Duration type** (`DataKind.Duration`)~~ ✅
 - ~~**Schema Matching**: Star-schema hub detection from manifest statistics~~ ✅
+- ~~**Virtual schemas**: `information_schema` (tables/columns/schemata) and `datum_catalog` (providers/functions/statistics) queryable via `schema.table` SQL syntax; language server integration (diagnostics, completions, hover)~~ ✅
 - ~~**P1 — Merge Join**: Streaming two-pointer join for sorted equi-joins~~ ✅
 - ~~**P2 — Streaming Aggregate + LIMIT Short-Circuit**: `GroupByOperator` dual-mode hash/streaming~~ ✅
 

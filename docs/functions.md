@@ -23,7 +23,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Conversion** | Explicit type conversion between data kinds. |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
-| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, CORR, COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG, ARRAY_AGG). |
+| **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, CORR, COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG, ARRAY_AGG, ARG_MAX, ARG_MIN). |
 | **Window** | Window functions that compute per-row results over a partition (ROW_NUMBER, RANK, DENSE_RANK, NTILE, LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE, plus aggregates with OVER). |
 
 > **Function costs (QU):** Each function has a Query Unit cost reflecting its computational weight. Tier 1 (QU 1) — trivial O(1) operations; Tier 2 (QU 2) — O(n) vector traversals and memory-intensive aggregates (MEDIAN, PERCENTILE, MODE, STRING_AGG — functions that buffer all rows per group or sort at finalization); Tier 3 (QU 5) — JSON document parsing; Tier 4 (QU 10 + ⌊px/100K⌋) — full-image pixel scans; Tier 5 (QU 50 + ⌊px/100K⌋) — image decode + transform + re-encode. px = width × height. QU costs are tracked per query and accumulated per session — see [Compute Backend — Resource Governance](compute.md#resource-governance) for budget enforcement and the `GetUsage` RPC.
@@ -420,6 +420,8 @@ Aggregate functions reduce multiple rows into a single result per group. Used wi
 | `APPROX_PERCENTILE` | `APPROX_PERCENTILE(expr, fraction)` | Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error. | 2 |
 | `STRING_AGG` | `STRING_AGG(expr, separator [ORDER BY ...])` | Concatenates non-null string values with a separator. Supports intra-aggregate ORDER BY. | 2 |
 | `ARRAY_AGG` | `ARRAY_AGG(expr [ORDER BY ...])` | Collects non-null values into a typed `Array`. Accepts any data kind. Supports intra-aggregate ORDER BY and DISTINCT. Returns null if all inputs are null. | 1 |
+| `ARG_MAX` | `ARG_MAX(value, key)` | Returns the `value` from the row where `key` is at its maximum. Null keys are skipped. Ties broken by first-encountered row. Supports intra-aggregate ORDER BY for deterministic tie-breaking. Key must be a comparable type. | 1 |
+| `ARG_MIN` | `ARG_MIN(value, key)` | Returns the `value` from the row where `key` is at its minimum. Null keys are skipped. Ties broken by first-encountered row. Supports intra-aggregate ORDER BY for deterministic tie-breaking. Key must be a comparable type. | 1 |
 
 All aggregate functions support the `DISTINCT` modifier (e.g. `COUNT(DISTINCT expr)`, `SUM(DISTINCT expr)`), which deduplicates argument values before accumulation. The DISTINCT deduplication adds no additional Query Units. `COUNT(DISTINCT *)` is not supported — use `COUNT(DISTINCT column)` instead.
 
@@ -443,7 +445,7 @@ Window functions compute a value for each row based on a window of related rows 
 
 ### Aggregates as Window Functions
 
-All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, VAR_SAMP, VAR_POP, STDDEV, STDDEV_SAMP, STDDEV_POP, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, APPROX_MEDIAN, APPROX_PERCENTILE) can also be used with an OVER clause to produce windowed results instead of grouped results. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP), STRING_AGG, and ARRAY_AGG are not supported as window functions.
+All single-argument aggregate functions (COUNT, SUM, AVG, MIN, MAX, VARIANCE, VAR_SAMP, VAR_POP, STDDEV, STDDEV_SAMP, STDDEV_POP, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, APPROX_MEDIAN, APPROX_PERCENTILE) can also be used with an OVER clause to produce windowed results instead of grouped results. Two-argument aggregates (CORR, COVAR_POP, COVAR_SAMP, ARG_MAX, ARG_MIN), STRING_AGG, and ARRAY_AGG are not supported as window functions.
 
 ```sql
 -- Running sum
