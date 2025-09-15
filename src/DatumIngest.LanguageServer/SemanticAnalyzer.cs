@@ -410,11 +410,10 @@ internal sealed class SemanticAnalyzer
                         $"Unknown function '{functionSource.FunctionName}'.");
                 }
 
-                // Function sources are opaque — we cannot know their output columns.
-                if (functionSource.Alias is not null)
-                {
-                    opaqueAliases.Add(functionSource.Alias);
-                }
+                // Function sources are opaque — we cannot know their output columns
+                // statically. Mark the alias (or the function name as a sentinel)
+                // so that column validation suppresses unknown-column warnings.
+                opaqueAliases.Add(functionSource.Alias ?? functionSource.FunctionName);
 
                 // Analyze the function's argument expressions.
                 foreach (Expression argument in functionSource.Arguments)

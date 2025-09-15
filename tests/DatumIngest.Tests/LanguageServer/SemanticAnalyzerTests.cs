@@ -351,6 +351,23 @@ public sealed class SemanticAnalyzerTests
             diagnostic.Message.Contains("Unknown column"));
     }
 
+    /// <summary>
+    /// An unaliased function source (e.g. <c>FROM RANGE(0, 100)</c>) must also
+    /// suppress unknown-column warnings for its output columns.
+    /// </summary>
+    [Fact]
+    public void Analyze_UnaliasedFunctionSource_SkipsColumnValidation()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            functions: [Function("range", "start", "stop")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT Value FROM range(0, 100)", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Unknown column"));
+    }
+
     // ───────────────────── SELECT * / table.* ─────────────────────
 
     [Fact]
