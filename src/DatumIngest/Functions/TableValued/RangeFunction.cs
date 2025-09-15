@@ -15,7 +15,7 @@ namespace DatumIngest.Functions.TableValued;
 public sealed class RangeFunction : ISchemaAwareTableFunction
 {
     private static readonly Schema OutputSchema = new(
-        [new ColumnInfo("Value", DataKind.Float32, nullable: false)]);
+        [new ColumnInfo("Value", DataKind.Float64, nullable: false)]);
 
     /// <summary>
     /// Number of rows accumulated before yielding a batch.
@@ -41,11 +41,11 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
             throw new ArgumentException("range() requires 2 or 3 arguments: range(start, end[, step]).");
         }
 
-        float start = arguments[0].AsFloat32();
-        float end = arguments[1].AsFloat32();
-        float step = arguments.Length == 3 ? arguments[2].AsFloat32() : 1.0f;
+        double start = arguments[0].CoerceToKind(DataKind.Float64).AsFloat64();
+        double end = arguments[1].CoerceToKind(DataKind.Float64).AsFloat64();
+        double step = arguments.Length == 3 ? arguments[2].CoerceToKind(DataKind.Float64).AsFloat64() : 1.0;
 
-        if (step == 0.0f)
+        if (step == 0.0)
         {
             throw new ArgumentException("range() step cannot be zero.");
         }
@@ -71,15 +71,15 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
         {
             for (int i = 0; ; i++)
             {
-                float current = start + i * step;
-                if (current > end + MathF.Abs(step) * 1e-5f)
+                double current = start + i * step;
+                if (current > end + System.Math.Abs(step) * 1e-9)
                 {
                     break;
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(new Row(names, [DataValue.FromFloat32(current)], nameIndex));
+                batch.Add(new Row(names, [DataValue.FromFloat64(current)], nameIndex));
                 if (batch.IsFull)
                 {
                     yield return batch;
@@ -91,15 +91,15 @@ public sealed class RangeFunction : ISchemaAwareTableFunction
         {
             for (int i = 0; ; i++)
             {
-                float current = start + i * step;
-                if (current < end - MathF.Abs(step) * 1e-5f)
+                double current = start + i * step;
+                if (current < end - System.Math.Abs(step) * 1e-9)
                 {
                     break;
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
                 batch ??= RowBatch.Rent(DefaultBatchSize);
-                batch.Add(new Row(names, [DataValue.FromFloat32(current)], nameIndex));
+                batch.Add(new Row(names, [DataValue.FromFloat64(current)], nameIndex));
                 if (batch.IsFull)
                 {
                     yield return batch;

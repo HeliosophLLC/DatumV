@@ -217,7 +217,7 @@ public sealed class QuerySchemaResolverTests
 
         Assert.Single(schema.Columns);
         Assert.Equal("Value", schema.Columns[0].ColumnName);
-        Assert.Equal(DataKind.Float32, schema.Columns[0].Kind);
+        Assert.Equal(DataKind.Float64, schema.Columns[0].Kind);
         Assert.Equal("r", schema.Columns[0].SourceTableOrAlias);
     }
 
