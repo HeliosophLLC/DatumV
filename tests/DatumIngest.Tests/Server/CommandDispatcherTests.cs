@@ -539,6 +539,33 @@ public sealed class CommandDispatcherTests : IDisposable
         session.Dispose();
     }
 
+    /// <summary>
+    /// A SELECT without a FROM clause (literal-only projection) returns a streaming
+    /// result with the correct schema and a single row of literal values.
+    /// </summary>
+    [Fact]
+    public async Task DispatchAsync_SelectWithoutFrom_ReturnsLiteralRow()
+    {
+        CommandResult result = await _dispatcher.DispatchAsync(
+            _adminSession, "SELECT 123, 'adf'", CancellationToken.None);
+
+        Assert.Equal(CommandResultKind.StreamingRows, result.Kind);
+        Assert.NotNull(result.Schema);
+        Assert.Equal(2, result.Schema!.Columns.Count);
+
+        List<Row> rows = new();
+        await foreach (RowBatch batch in result.Rows!)
+        {
+            for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
+            {
+                rows.Add(batch[rowIndex]);
+            }
+        }
+
+        Assert.Single(rows);
+        Assert.Equal(2, rows[0].FieldCount);
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {

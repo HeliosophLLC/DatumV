@@ -226,7 +226,12 @@ public sealed class CommandDispatcher
             }
         }
 
-        Schema sourceSchema = new(sourceColumns);
+        // When there are no source columns (SELECT without FROM), use a
+        // placeholder schema so ExpressionTypeResolver can still resolve
+        // literal and function-based expressions.
+        Schema sourceSchema = sourceColumns.Count > 0
+            ? new Schema(sourceColumns)
+            : new Schema([new ColumnInfo("_placeholder", DataKind.Float32, nullable: false)]);
 
         // Apply the SELECT clause projection to produce only the output columns.
         List<ColumnInfo> outputColumns = new();
