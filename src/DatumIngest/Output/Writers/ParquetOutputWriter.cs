@@ -101,7 +101,10 @@ public sealed class ParquetOutputWriter : IOutputWriter
             for (int columnIndex = 0; columnIndex < _schema.Columns.Count; columnIndex++)
             {
                 ColumnInfo column = _schema.Columns[columnIndex];
-                DataColumn dataColumn = BuildDataColumn(parquetSchema.DataFields[columnIndex], column, isStreamMode);
+                DataField dataField = parquetSchema.DataFields[columnIndex];
+                DataColumn dataColumn = column.Kind == DataKind.Array && column.ArrayElementKind is not null
+                    ? BuildArrayColumn(dataField, column)
+                    : BuildDataColumn(dataField, column, isStreamMode);
                 await rowGroup.WriteColumnAsync(dataColumn);
             }
         }
@@ -247,7 +250,7 @@ public sealed class ParquetOutputWriter : IOutputWriter
 
     private static ParquetSchema BuildParquetSchema(Schema schema, bool embedBinary)
     {
-        DataField[] fields = new DataField[schema.Columns.Count];
+        Field[] fields = new Field[schema.Columns.Count];
 
         for (int i = 0; i < schema.Columns.Count; i++)
         {
@@ -274,6 +277,8 @@ public sealed class ParquetOutputWriter : IOutputWriter
                 DataKind.Boolean => new DataField<bool>(column.Name),
                 DataKind.Time => new DataField<string>(column.Name),
                 DataKind.Duration => new DataField<double>(column.Name),
+                DataKind.Array when column.ArrayElementKind is not null
+                    => new ListField(column.Name, CreateElementDataField(column.ArrayElementKind.Value)),
                 DataKind.Array => new DataField<string>(column.Name),
                 _ => new DataField<string>(column.Name)
             };
@@ -561,5 +566,146 @@ public sealed class ParquetOutputWriter : IOutputWriter
         }
 
         return new DataColumn(field, data);
+    }
+
+    /// <summary>
+    /// Creates a typed element <see cref="DataField"/> for use inside a <see cref="ListField"/>,
+    /// mapping the engine <see cref="DataKind"/> to the corresponding Parquet CLR element type.
+    /// </summary>
+    private static DataField CreateElementDataField(DataKind elementKind)
+    {
+        return elementKind switch
+        {
+            DataKind.Float32 => new DataField<float>(ListField.ElementName),
+            DataKind.Float64 => new DataField<double>(ListField.ElementName),
+            DataKind.Int8 or DataKind.UInt8 or DataKind.Int16 or DataKind.UInt16 or DataKind.Int32
+                => new DataField<int>(ListField.ElementName),
+            DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+                => new DataField<long>(ListField.ElementName),
+            DataKind.String => new DataField<string>(ListField.ElementName),
+            DataKind.Boolean => new DataField<bool>(ListField.ElementName),
+            _ => new DataField<string>(ListField.ElementName),
+        };
+    }
+
+    /// <summary>
+    /// Builds a <see cref="DataColumn"/> for a typed array column using Parquet list encoding
+    /// with repetition and definition levels instead of JSON string fallback.
+    /// </summary>
+    private DataColumn BuildArrayColumn(DataField elementField, ColumnInfo column)
+    {
+        int rowCount = _rows.Count;
+        DataKind elementKind = column.ArrayElementKind!.Value;
+        int maxDefinitionLevel = elementField.MaxDefinitionLevel;
+
+        // Count total entries (elements + null/empty list markers) and defined elements.
+        int totalEntries = 0;
+        int totalDefinedElements = 0;
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            DataValue value = _rows[rowIndex][column.Name];
+            if (value.IsNull)
+            {
+                totalEntries++;
+            }
+            else
+            {
+                DataValue[] elements = value.AsArray();
+                if (elements.Length == 0)
+                {
+                    totalEntries++;
+                }
+                else
+                {
+                    totalEntries += elements.Length;
+                    totalDefinedElements += elements.Length;
+                }
+            }
+        }
+
+        int[] definitionLevels = new int[totalEntries];
+        int[] repetitionLevels = new int[totalEntries];
+
+        return elementKind switch
+        {
+            DataKind.Float32 => BuildTypedArrayColumn<float>(
+                elementField, column.Name, totalDefinedElements,
+                definitionLevels, repetitionLevels, maxDefinitionLevel, static v => v.AsFloat32()),
+            DataKind.Float64 => BuildTypedArrayColumn<double>(
+                elementField, column.Name, totalDefinedElements,
+                definitionLevels, repetitionLevels, maxDefinitionLevel, static v => v.AsFloat64()),
+            DataKind.Int8 or DataKind.UInt8 or DataKind.Int16 or DataKind.UInt16 or DataKind.Int32
+                => BuildTypedArrayColumn<int>(
+                    elementField, column.Name, totalDefinedElements,
+                    definitionLevels, repetitionLevels, maxDefinitionLevel, v => (int)ToFloat(v)),
+            DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
+                => BuildTypedArrayColumn<long>(
+                    elementField, column.Name, totalDefinedElements,
+                    definitionLevels, repetitionLevels, maxDefinitionLevel, v => (long)ToDouble(v)),
+            DataKind.String => BuildTypedArrayColumn<string>(
+                elementField, column.Name, totalDefinedElements,
+                definitionLevels, repetitionLevels, maxDefinitionLevel,
+                static v => v.IsNull ? "" : v.AsString()),
+            DataKind.Boolean => BuildTypedArrayColumn<bool>(
+                elementField, column.Name, totalDefinedElements,
+                definitionLevels, repetitionLevels, maxDefinitionLevel,
+                static v => !v.IsNull && v.AsBoolean()),
+            _ => BuildTypedArrayColumn<string>(
+                elementField, column.Name, totalDefinedElements,
+                definitionLevels, repetitionLevels, maxDefinitionLevel,
+                static v => v.IsNull ? "" : (v.ToString() ?? "")),
+        };
+    }
+
+    /// <summary>
+    /// Populates a flat typed array and repetition/definition levels for a list column,
+    /// then wraps them in a <see cref="DataColumn"/>.
+    /// </summary>
+    private DataColumn BuildTypedArrayColumn<T>(
+        DataField elementField,
+        string columnName,
+        int totalDefinedElements,
+        int[] definitionLevels,
+        int[] repetitionLevels,
+        int maxDefinitionLevel,
+        Func<DataValue, T> converter)
+    {
+        T[] definedData = new T[totalDefinedElements];
+        int entryIndex = 0;
+        int dataIndex = 0;
+
+        for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
+        {
+            DataValue value = _rows[rowIndex][columnName];
+            if (value.IsNull)
+            {
+                definitionLevels[entryIndex] = 0;
+                repetitionLevels[entryIndex] = 0;
+                entryIndex++;
+            }
+            else
+            {
+                DataValue[] elements = value.AsArray();
+                if (elements.Length == 0)
+                {
+                    definitionLevels[entryIndex] = maxDefinitionLevel - 1;
+                    repetitionLevels[entryIndex] = 0;
+                    entryIndex++;
+                }
+                else
+                {
+                    for (int elemIndex = 0; elemIndex < elements.Length; elemIndex++)
+                    {
+                        definitionLevels[entryIndex] = maxDefinitionLevel;
+                        repetitionLevels[entryIndex] = elemIndex == 0 ? 0 : 1;
+                        definedData[dataIndex] = converter(elements[elemIndex]);
+                        entryIndex++;
+                        dataIndex++;
+                    }
+                }
+            }
+        }
+
+        return new DataColumn(elementField, definedData, definitionLevels, repetitionLevels);
     }
 }

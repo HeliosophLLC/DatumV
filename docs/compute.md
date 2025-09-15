@@ -430,7 +430,7 @@ Returns the column schema of a registered table. When a `context_id` is provided
 | `table_name` | `string` | Name of the table. |
 | `context_id` | `string` | *(Optional)* Query context for temp table resolution. When empty, resolves against the session's base catalog only. |
 
-**Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, and `nullable`.
+**Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, `nullable`, and (for `Array` columns) `array_element_kind`.
 
 #### ListTables
 
@@ -603,18 +603,47 @@ The `DataValueMessage` uses a `oneof` discriminated union to carry typed values:
 | DataKind | Proto field | Wire type | Notes |
 |----------|-------------|-----------|-------|
 | `UInt8` | `uint8_value` | `uint32` | Single byte (0–255) |
+| `Int8` | `int8_value` | `int32` | Signed 8-bit integer (widened to int32) |
+| `Int16` | `int16_value` | `int32` | Signed 16-bit integer (widened to int32) |
+| `UInt16` | `uint16_value` | `uint32` | Unsigned 16-bit integer (widened to uint32) |
+| `Int32` | `int32_value` | `int32` | 32-bit signed integer |
+| `UInt32` | `uint32_value` | `uint32` | 32-bit unsigned integer |
+| `Int64` | `int64_value` | `int64` | 64-bit signed integer |
+| `UInt64` | `uint64_value` | `uint64` | 64-bit unsigned integer |
 | `Float32` | `float32_value` | `float` | 32-bit float |
+| `Float64` | `float64_value` | `double` | 64-bit float |
+| `Boolean` | `boolean_value` | `bool` | Boolean |
 | `String` | `string_value` | `string` | UTF-8 text |
 | `Date` | `date_value` | `string` | ISO 8601 date (`2024-06-15`) |
 | `DateTime` | `date_time_value` | `string` | ISO 8601 round-trip (`O` format) |
+| `Time` | `time_value` | `string` | `HH:mm:ss.FFFFFFF` time string |
+| `Duration` | `duration_value` | `double` | Total seconds as double |
+| `Uuid` | `uuid_value` | `string` | UUID string (RFC 9562) |
 | `JsonValue` | `json_value` | `string` | Raw JSON string |
 | `UInt8Array` | `uint8_array_value` | `bytes` | Binary data |
 | `Image` | `image_value` | `bytes` | Encoded image bytes |
 | `Vector` | `vector_value` | `VectorMessage` | `repeated float values` |
 | `Matrix` | `matrix_value` | `MatrixMessage` | `rows`, `columns`, `repeated float values` |
 | `Tensor` | `tensor_value` | `TensorMessage` | `repeated int32 shape`, `repeated float values` |
+| `Array` | `array_value` | `ArrayMessage` | `element_kind` + `repeated DataValueMessage elements` |
 
 Null values set `is_null = true` with no `oneof` field populated.
+
+**`ArrayMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `element_kind` | `DataKindValue` | Element type shared by all values in the array (e.g. `DATA_KIND_FLOAT64`). |
+| `elements` | `repeated DataValueMessage` | One entry per element, each set according to `element_kind`. |
+
+**`ColumnInfoMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Column name. |
+| `kind` | `DataKindValue` | Column data kind. |
+| `nullable` | `bool` | Whether the column is nullable. |
+| `array_element_kind` | `optional DataKindValue` | For `Array` columns: the element type. Absent for non-array columns. |
 
 ## .NET Client Package
 

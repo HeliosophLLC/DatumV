@@ -83,7 +83,7 @@ Implements `ISeekableTableProvider` for random-access row reads using PureHDF's 
 
 Reads Parquet files via Parquet.Net low-level API.
 
-Maps Parquet types to DataKind: INT32/INT64 → Float32, FLOAT/DOUBLE → Float32, BYTE_ARRAY (UTF8) → String, BYTE_ARRAY → UInt8Array.
+Maps Parquet types to DataKind: INT32/INT64 → Float32, FLOAT/DOUBLE → Float32, BYTE_ARRAY (UTF8) → String, BYTE_ARRAY → UInt8Array. Parquet `LIST` (nested list) columns are read as typed `Array` columns — the element kind is inferred from the inner field type. Arrays written via `ParquetOutputWriter` use native Parquet nested list encoding with explicit definition/repetition levels, preserving element types across round-trips.
 
 Supports statistics-based row group pruning: when a WHERE predicate is pushed down, the provider reads each row group's min/max column statistics from the Parquet footer metadata and skips row groups that cannot contain matching rows. This avoids reading column data for pruned groups entirely. Use EXPLAIN to see which filter is applied (`statistics filter:` annotation on the scan node) and EXPLAIN ANALYZE to see how many row groups were pruned.
 

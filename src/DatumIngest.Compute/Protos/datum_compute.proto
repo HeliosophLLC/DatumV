@@ -505,6 +505,10 @@ message ColumnInfoMessage {
   string name = 1;
   DataKindValue kind = 2;
   bool nullable = 3;
+
+  // For Array columns: the element type. Unset (DATA_KIND_UINT8 = 0) for
+  // non-array columns; use has_array_element_kind to distinguish.
+  optional DataKindValue array_element_kind = 4;
 }
 
 // Mirrors DatumIngest.Model.DataKind enum values.
@@ -556,7 +560,7 @@ message DataValueMessage {
     bool boolean_value = 14;
     string time_value = 15;      // HH:mm:ss.FFFFFFF time string
     double duration_value = 16;  // Total seconds as double
-    string array_value = 17;     // JSON-serialized array
+    ArrayMessage array_value = 17;  // Typed array with element kind + values
     int32 int8_value = 18;       // Signed 8-bit integer (widened to int32)
     int32 int16_value = 19;      // Signed 16-bit integer (widened to int32)
     uint32 uint16_value = 20;    // Unsigned 16-bit integer (widened to uint32)
@@ -566,6 +570,15 @@ message DataValueMessage {
     uint64 uint64_value = 24;
     double float64_value = 25;
   }
+}
+
+// Typed array carrying element kind and individually-typed values.
+message ArrayMessage {
+  // Element type for all values in this array.
+  DataKindValue element_kind = 1;
+
+  // One entry per element, each set according to element_kind.
+  repeated DataValueMessage elements = 2;
 }
 
 message VectorMessage {

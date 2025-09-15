@@ -317,4 +317,194 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         Assert.Single(binaryData);
         Assert.Equal(rawBytes, binaryData[0]);
     }
+
+    [Fact]
+    public async Task FinalizeAsync_IntArrayColumn_WritesAsParquetList()
+    {
+        string path = Path.Combine(_tempDir, "int_array.parquet");
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Int32, false),
+            new ColumnInfo("scores", DataKind.Array, false, arrayElementKind: DataKind.Int32)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(1)),
+            ("scores", DataValue.FromArray(DataKind.Int32, [
+                DataValue.FromInt32(10), DataValue.FromInt32(20), DataValue.FromInt32(30)
+            ]))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(2)),
+            ("scores", DataValue.FromArray(DataKind.Int32, [DataValue.FromInt32(99)]))));
+        OutputSummary summary = await writer.FinalizeAsync();
+
+        Assert.Equal(2, summary.RowsWritten);
+
+        // Verify the Parquet schema uses a ListField.
+        using FileStream stream = File.OpenRead(path);
+        using ParquetReader reader = await ParquetReader.CreateAsync(stream);
+
+        Assert.Equal(2, reader.Schema.Fields.Count);
+        Assert.IsType<Parquet.Schema.DataField>(reader.Schema.Fields[0]);
+        Assert.IsType<Parquet.Schema.ListField>(reader.Schema.Fields[1]);
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_IntArrayColumn_RoundTripThroughProvider()
+    {
+        string path = Path.Combine(_tempDir, "int_array_rt.parquet");
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Int32, false),
+            new ColumnInfo("values", DataKind.Array, false, arrayElementKind: DataKind.Int32)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(1)),
+            ("values", DataValue.FromArray(DataKind.Int32, [
+                DataValue.FromInt32(10), DataValue.FromInt32(20), DataValue.FromInt32(30)
+            ]))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(2)),
+            ("values", DataValue.FromArray(DataKind.Int32, [DataValue.FromInt32(99)]))));
+        await writer.FinalizeAsync();
+
+        DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
+        DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
+
+        // Verify schema detection.
+        Schema readSchema = await provider.GetSchemaAsync(descriptor, CancellationToken.None);
+        ColumnInfo arrayColumn = readSchema.Columns.First(c => c.Name == "values");
+        Assert.Equal(DataKind.Array, arrayColumn.Kind);
+        Assert.Equal(DataKind.Int32, arrayColumn.ArrayElementKind);
+
+        // Verify row values.
+        List<Row> rows = new();
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        {
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
+        }
+
+        Assert.Equal(2, rows.Count);
+
+        DataValue[] firstArray = rows[0]["values"].AsArray();
+        Assert.Equal(3, firstArray.Length);
+        Assert.Equal(10, firstArray[0].AsInt32());
+        Assert.Equal(20, firstArray[1].AsInt32());
+        Assert.Equal(30, firstArray[2].AsInt32());
+
+        DataValue[] secondArray = rows[1]["values"].AsArray();
+        Assert.Single(secondArray);
+        Assert.Equal(99, secondArray[0].AsInt32());
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_NullAndEmptyArrays_RoundTrip()
+    {
+        string path = Path.Combine(_tempDir, "null_array_rt.parquet");
+        Schema schema = new([
+            new ColumnInfo("id", DataKind.Int32, false),
+            new ColumnInfo("tags", DataKind.Array, true, arrayElementKind: DataKind.String)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(1)),
+            ("tags", DataValue.FromArray(DataKind.String, [
+                DataValue.FromString("a"), DataValue.FromString("b")
+            ]))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(2)),
+            ("tags", DataValue.NullArray(DataKind.String))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(3)),
+            ("tags", DataValue.FromArray(DataKind.String, []))));
+        await writer.WriteRowAsync(CreateRow(
+            ("id", DataValue.FromInt32(4)),
+            ("tags", DataValue.FromArray(DataKind.String, [DataValue.FromString("z")]))));
+        await writer.FinalizeAsync();
+
+        DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
+        DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
+
+        List<Row> rows = new();
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        {
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
+        }
+
+        Assert.Equal(4, rows.Count);
+
+        // Row 1: ["a", "b"]
+        DataValue[] firstArray = rows[0]["tags"].AsArray();
+        Assert.Equal(2, firstArray.Length);
+        Assert.Equal("a", firstArray[0].AsString());
+        Assert.Equal("b", firstArray[1].AsString());
+
+        // Row 2: null array — reads back as null.
+        Assert.True(rows[1]["tags"].IsNull);
+
+        // Row 3: empty array — reads back as null (empty and null are equivalent in Parquet lists).
+        Assert.True(rows[2]["tags"].IsNull);
+
+        // Row 4: ["z"]
+        DataValue[] fourthArray = rows[3]["tags"].AsArray();
+        Assert.Single(fourthArray);
+        Assert.Equal("z", fourthArray[0].AsString());
+    }
+
+    [Fact]
+    public async Task FinalizeAsync_FloatArrayColumn_RoundTrip()
+    {
+        string path = Path.Combine(_tempDir, "float_array_rt.parquet");
+        Schema schema = new([
+            new ColumnInfo("embeddings", DataKind.Array, false, arrayElementKind: DataKind.Float32)
+        ]);
+
+        await using ParquetOutputWriter writer = new(path);
+        await writer.InitializeAsync(schema);
+        await writer.WriteRowAsync(CreateRow(
+            ("embeddings", DataValue.FromArray(DataKind.Float32, [
+                DataValue.FromFloat32(0.1f), DataValue.FromFloat32(0.2f), DataValue.FromFloat32(0.3f)
+            ]))));
+        await writer.WriteRowAsync(CreateRow(
+            ("embeddings", DataValue.FromArray(DataKind.Float32, [
+                DataValue.FromFloat32(1.0f), DataValue.FromFloat32(2.0f)
+            ]))));
+        await writer.FinalizeAsync();
+
+        DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
+        DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
+
+        List<Row> rows = new();
+        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
+        {
+            for (int index = 0; index < batch.Count; index++)
+            {
+                rows.Add(batch[index]);
+            }
+        }
+
+        Assert.Equal(2, rows.Count);
+
+        DataValue[] first = rows[0]["embeddings"].AsArray();
+        Assert.Equal(3, first.Length);
+        Assert.Equal(0.1f, first[0].AsFloat32(), 0.001f);
+        Assert.Equal(0.2f, first[1].AsFloat32(), 0.001f);
+        Assert.Equal(0.3f, first[2].AsFloat32(), 0.001f);
+
+        DataValue[] second = rows[1]["embeddings"].AsArray();
+        Assert.Equal(2, second.Length);
+        Assert.Equal(1.0f, second[0].AsFloat32(), 0.001f);
+        Assert.Equal(2.0f, second[1].AsFloat32(), 0.001f);
+    }
 }

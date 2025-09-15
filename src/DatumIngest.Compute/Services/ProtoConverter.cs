@@ -16,12 +16,19 @@ internal static class ProtoConverter
     /// <returns>The Protobuf column info message.</returns>
     public static ColumnInfoMessage ToProto(ColumnInfo column)
     {
-        return new ColumnInfoMessage
+        ColumnInfoMessage message = new()
         {
             Name = column.Name,
             Kind = ToProtoKind(column.Kind),
             Nullable = column.Nullable,
         };
+
+        if (column.ArrayElementKind is not null)
+        {
+            message.ArrayElementKind = ToProtoKind(column.ArrayElementKind.Value);
+        }
+
+        return message;
     }
 
     /// <summary>
@@ -127,7 +134,15 @@ internal static class ProtoConverter
                 break;
 
             case DataKind.Array:
-                message.ArrayValue = value.ToString() ?? "[]";
+                ArrayMessage arrayMessage = new()
+                {
+                    ElementKind = ToProtoKind(value.ArrayElementKind),
+                };
+                foreach (DataValue element in value.AsArray())
+                {
+                    arrayMessage.Elements.Add(ToProto(element));
+                }
+                message.ArrayValue = arrayMessage;
                 break;
 
             case DataKind.Int8:
@@ -226,7 +241,7 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.DurationValue => DataValue.FromDuration(TimeSpan.FromSeconds(message.DurationValue)),
             DataValueMessage.ValueOneofCase.UuidValue => DataValue.FromUuid(Guid.Parse(message.UuidValue)),
             DataValueMessage.ValueOneofCase.JsonValue => DataValue.FromJsonValue(message.JsonValue),
-            DataValueMessage.ValueOneofCase.ArrayValue => DataValue.FromJsonValue(message.ArrayValue),
+            DataValueMessage.ValueOneofCase.ArrayValue => FromProtoArray(message.ArrayValue),
             DataValueMessage.ValueOneofCase.Int8Value => DataValue.FromInt8((sbyte)message.Int8Value),
             DataValueMessage.ValueOneofCase.Int16Value => DataValue.FromInt16((short)message.Int16Value),
             DataValueMessage.ValueOneofCase.Uint16Value => DataValue.FromUInt16((ushort)message.Uint16Value),
@@ -236,6 +251,56 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.Uint64Value => DataValue.FromUInt64(message.Uint64Value),
             DataValueMessage.ValueOneofCase.Float64Value => DataValue.FromFloat64(message.Float64Value),
             _ => DataValue.UnknownNull(),
+        };
+    }
+
+    /// <summary>
+    /// Converts a Protobuf <see cref="ArrayMessage"/> to a typed <see cref="DataValue"/> array.
+    /// </summary>
+    private static DataValue FromProtoArray(ArrayMessage arrayMessage)
+    {
+        DataKind elementKind = FromProtoKind(arrayMessage.ElementKind);
+        DataValue[] elements = new DataValue[arrayMessage.Elements.Count];
+        for (int i = 0; i < elements.Length; i++)
+        {
+            elements[i] = FromProto(arrayMessage.Elements[i]);
+        }
+
+        return DataValue.FromArray(elementKind, elements);
+    }
+
+    /// <summary>
+    /// Maps the Protobuf <see cref="DataKindValue"/> enum to the domain <see cref="DataKind"/>.
+    /// </summary>
+    private static DataKind FromProtoKind(DataKindValue kind)
+    {
+        return kind switch
+        {
+            DataKindValue.DataKindUint8 => DataKind.UInt8,
+            DataKindValue.DataKindFloat32 => DataKind.Float32,
+            DataKindValue.DataKindVector => DataKind.Vector,
+            DataKindValue.DataKindMatrix => DataKind.Matrix,
+            DataKindValue.DataKindTensor => DataKind.Tensor,
+            DataKindValue.DataKindUint8Array => DataKind.UInt8Array,
+            DataKindValue.DataKindImage => DataKind.Image,
+            DataKindValue.DataKindString => DataKind.String,
+            DataKindValue.DataKindDate => DataKind.Date,
+            DataKindValue.DataKindDateTime => DataKind.DateTime,
+            DataKindValue.DataKindJsonValue => DataKind.JsonValue,
+            DataKindValue.DataKindUuid => DataKind.Uuid,
+            DataKindValue.DataKindBoolean => DataKind.Boolean,
+            DataKindValue.DataKindTime => DataKind.Time,
+            DataKindValue.DataKindDuration => DataKind.Duration,
+            DataKindValue.DataKindArray => DataKind.Array,
+            DataKindValue.DataKindInt8 => DataKind.Int8,
+            DataKindValue.DataKindInt16 => DataKind.Int16,
+            DataKindValue.DataKindUint16 => DataKind.UInt16,
+            DataKindValue.DataKindInt32 => DataKind.Int32,
+            DataKindValue.DataKindUint32 => DataKind.UInt32,
+            DataKindValue.DataKindInt64 => DataKind.Int64,
+            DataKindValue.DataKindUint64 => DataKind.UInt64,
+            DataKindValue.DataKindFloat64 => DataKind.Float64,
+            _ => DataKind.String,
         };
     }
 }

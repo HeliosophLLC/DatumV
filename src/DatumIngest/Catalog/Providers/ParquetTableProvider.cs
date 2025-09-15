@@ -31,13 +31,20 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         using FileStream stream = File.OpenRead(descriptor.FilePath);
         using ParquetReader reader = await ParquetReader.CreateAsync(stream);
 
-        DataField[] dataFields = reader.Schema.GetDataFields();
-        List<ColumnInfo> columns = new(dataFields.Length);
+        List<ColumnInfo> columns = new();
 
-        foreach (DataField field in dataFields)
+        foreach (Field field in reader.Schema.Fields)
         {
-            DataKind kind = MapClrTypeToDataKind(field.ClrType);
-            columns.Add(new ColumnInfo(field.Name, kind, nullable: field.IsNullable));
+            if (field is ListField listField && listField.Item is DataField itemField)
+            {
+                DataKind elementKind = MapClrTypeToDataKind(itemField.ClrType);
+                columns.Add(new ColumnInfo(field.Name, DataKind.Array, nullable: true, arrayElementKind: elementKind));
+            }
+            else if (field is DataField dataField)
+            {
+                DataKind kind = MapClrTypeToDataKind(dataField.ClrType);
+                columns.Add(new ColumnInfo(field.Name, kind, nullable: dataField.IsNullable));
+            }
         }
 
         return new Schema(columns);
@@ -52,31 +59,12 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         using FileStream stream = File.OpenRead(descriptor.FilePath);
         using ParquetReader reader = await ParquetReader.CreateAsync(stream);
 
-        DataField[] allFields = reader.Schema.GetDataFields();
-
-        // Apply projection pushdown
-        DataField[] projectedFields;
-        if (requiredColumns is not null)
-        {
-            projectedFields = Array.FindAll(allFields, field => requiredColumns.Contains(field.Name));
-        }
-        else
-        {
-            projectedFields = allFields;
-        }
+        (DataField[] projectedFields, string[] columnNames, DataKind[] columnKinds,
+            bool[] isListColumn, DataKind[] elementKinds) = BuildProjectedColumns(reader, requiredColumns);
 
         if (projectedFields.Length == 0)
         {
             yield break;
-        }
-
-        // Build column names array once
-        string[] columnNames = new string[projectedFields.Length];
-        DataKind[] columnKinds = new DataKind[projectedFields.Length];
-        for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
-        {
-            columnNames[fieldIndex] = projectedFields[fieldIndex].Name;
-            columnKinds[fieldIndex] = MapClrTypeToDataKind(projectedFields[fieldIndex].ClrType);
         }
 
         Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
@@ -102,6 +90,18 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 dataColumns[fieldIndex] = await rowGroupReader.ReadColumnAsync(projectedFields[fieldIndex]);
             }
 
+            // Pre-process list columns into per-row array values.
+            DataValue[]?[]? listColumnValues = null;
+            for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+            {
+                if (isListColumn[fieldIndex])
+                {
+                    listColumnValues ??= new DataValue[projectedFields.Length][];
+                    listColumnValues[fieldIndex] = ReconstructArrayValues(
+                        dataColumns[fieldIndex], elementKinds[fieldIndex], rowCount);
+                }
+            }
+
             // Yield row-by-row
             for (long rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
@@ -110,10 +110,17 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
-                    values[fieldIndex] = ExtractValue(
-                        dataColumns[fieldIndex],
-                        columnKinds[fieldIndex],
-                        rowIndex);
+                    if (isListColumn[fieldIndex] && listColumnValues is not null)
+                    {
+                        values[fieldIndex] = listColumnValues[fieldIndex]![(int)rowIndex];
+                    }
+                    else
+                    {
+                        values[fieldIndex] = ExtractValue(
+                            dataColumns[fieldIndex],
+                            columnKinds[fieldIndex],
+                            rowIndex);
+                    }
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
@@ -151,31 +158,12 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         using FileStream stream = File.OpenRead(descriptor.FilePath);
         using ParquetReader reader = await ParquetReader.CreateAsync(stream);
 
-        DataField[] allFields = reader.Schema.GetDataFields();
-
-        // Apply projection pushdown
-        DataField[] projectedFields;
-        if (requiredColumns is not null)
-        {
-            projectedFields = Array.FindAll(allFields, field => requiredColumns.Contains(field.Name));
-        }
-        else
-        {
-            projectedFields = allFields;
-        }
+        (DataField[] projectedFields, string[] columnNames, DataKind[] columnKinds,
+            bool[] isListColumn, DataKind[] elementKinds) = BuildProjectedColumns(reader, requiredColumns);
 
         if (projectedFields.Length == 0)
         {
             yield break;
-        }
-
-        // Build column names array once
-        string[] columnNames = new string[projectedFields.Length];
-        DataKind[] columnKinds = new DataKind[projectedFields.Length];
-        for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
-        {
-            columnNames[fieldIndex] = projectedFields[fieldIndex].Name;
-            columnKinds[fieldIndex] = MapClrTypeToDataKind(projectedFields[fieldIndex].ClrType);
         }
 
         Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
@@ -192,10 +180,14 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         }
 
         // Build a lookup from column name to DataField for statistics queries.
-        Dictionary<string, DataField> fieldsByName = new(allFields.Length, StringComparer.OrdinalIgnoreCase);
-        foreach (DataField field in allFields)
+        // Only scalar (non-list) columns have meaningful statistics.
+        Dictionary<string, DataField> fieldsByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Field field in reader.Schema.Fields)
         {
-            fieldsByName[field.Name] = field;
+            if (field is DataField dataField)
+            {
+                fieldsByName[field.Name] = dataField;
+            }
         }
 
         TotalRowGroups = reader.RowGroupCount;
@@ -227,6 +219,18 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 dataColumns[fieldIndex] = await rowGroupReader.ReadColumnAsync(projectedFields[fieldIndex]);
             }
 
+            // Pre-process list columns into per-row array values.
+            DataValue[]?[]? listColumnValues = null;
+            for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+            {
+                if (isListColumn[fieldIndex])
+                {
+                    listColumnValues ??= new DataValue[projectedFields.Length][];
+                    listColumnValues[fieldIndex] = ReconstructArrayValues(
+                        dataColumns[fieldIndex], elementKinds[fieldIndex], rowCount);
+                }
+            }
+
             // Yield row-by-row
             for (long rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
@@ -235,10 +239,17 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
-                    values[fieldIndex] = ExtractValue(
-                        dataColumns[fieldIndex],
-                        columnKinds[fieldIndex],
-                        rowIndex);
+                    if (isListColumn[fieldIndex] && listColumnValues is not null)
+                    {
+                        values[fieldIndex] = listColumnValues[fieldIndex]![(int)rowIndex];
+                    }
+                    else
+                    {
+                        values[fieldIndex] = ExtractValue(
+                            dataColumns[fieldIndex],
+                            columnKinds[fieldIndex],
+                            rowIndex);
+                    }
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
@@ -364,29 +375,12 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         using FileStream stream = File.OpenRead(descriptor.FilePath);
         using ParquetReader reader = await ParquetReader.CreateAsync(stream);
 
-        DataField[] allFields = reader.Schema.GetDataFields();
-
-        DataField[] projectedFields;
-        if (requiredColumns is not null)
-        {
-            projectedFields = Array.FindAll(allFields, field => requiredColumns.Contains(field.Name));
-        }
-        else
-        {
-            projectedFields = allFields;
-        }
+        (DataField[] projectedFields, string[] columnNames, DataKind[] columnKinds,
+            bool[] isListColumn, DataKind[] elementKinds) = BuildProjectedColumns(reader, requiredColumns);
 
         if (projectedFields.Length == 0)
         {
             yield break;
-        }
-
-        string[] columnNames = new string[projectedFields.Length];
-        DataKind[] columnKinds = new DataKind[projectedFields.Length];
-        for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
-        {
-            columnNames[fieldIndex] = projectedFields[fieldIndex].Name;
-            columnKinds[fieldIndex] = MapClrTypeToDataKind(projectedFields[fieldIndex].ClrType);
         }
 
         Dictionary<string, int> nameIndex = new(columnNames.Length, StringComparer.OrdinalIgnoreCase);
@@ -427,6 +421,18 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 dataColumns[fieldIndex] = await rowGroupReader.ReadColumnAsync(projectedFields[fieldIndex]);
             }
 
+            // Pre-process list columns into per-row array values.
+            DataValue[]?[]? listColumnValues = null;
+            for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
+            {
+                if (isListColumn[fieldIndex])
+                {
+                    listColumnValues ??= new DataValue[projectedFields.Length][];
+                    listColumnValues[fieldIndex] = ReconstructArrayValues(
+                        dataColumns[fieldIndex], elementKinds[fieldIndex], rowGroupRowCount);
+                }
+            }
+
             for (long rowIndex = localStart; rowIndex < localEnd && remaining > 0; rowIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -434,10 +440,17 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
                 DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
-                    values[fieldIndex] = ExtractValue(
-                        dataColumns[fieldIndex],
-                        columnKinds[fieldIndex],
-                        rowIndex);
+                    if (isListColumn[fieldIndex] && listColumnValues is not null)
+                    {
+                        values[fieldIndex] = listColumnValues[fieldIndex]![(int)rowIndex];
+                    }
+                    else
+                    {
+                        values[fieldIndex] = ExtractValue(
+                            dataColumns[fieldIndex],
+                            columnKinds[fieldIndex],
+                            rowIndex);
+                    }
                 }
 
                 batch ??= RowBatch.Rent(DefaultBatchSize);
@@ -597,6 +610,140 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             DateTimeOffset dto => dto,
             DateTime dt => new DateTimeOffset(dt, TimeSpan.Zero),
             _ => new DateTimeOffset(Convert.ToDateTime(value), TimeSpan.Zero),
+        };
+    }
+
+    // ───────────────────── List (array) column support ─────────────────────
+
+    /// <summary>
+    /// Builds projection metadata from the Parquet schema, handling both flat <see cref="DataField"/>
+    /// columns and <see cref="ListField"/> (array) columns. Returns parallel arrays describing
+    /// the projected columns.
+    /// </summary>
+    private static (DataField[] DataFields, string[] ColumnNames, DataKind[] ColumnKinds,
+        bool[] IsListColumn, DataKind[] ElementKinds)
+        BuildProjectedColumns(ParquetReader reader, IReadOnlySet<string>? requiredColumns)
+    {
+        List<DataField> dataFields = new();
+        List<string> names = new();
+        List<DataKind> kinds = new();
+        List<bool> isList = new();
+        List<DataKind> elementKinds = new();
+
+        foreach (Field field in reader.Schema.Fields)
+        {
+            if (requiredColumns is not null && !requiredColumns.Contains(field.Name))
+            {
+                continue;
+            }
+
+            if (field is ListField listField && listField.Item is DataField itemField)
+            {
+                DataKind elementKind = MapClrTypeToDataKind(itemField.ClrType);
+                dataFields.Add(itemField);
+                names.Add(field.Name);
+                kinds.Add(DataKind.Array);
+                isList.Add(true);
+                elementKinds.Add(elementKind);
+            }
+            else if (field is DataField dataField)
+            {
+                dataFields.Add(dataField);
+                names.Add(field.Name);
+                kinds.Add(MapClrTypeToDataKind(dataField.ClrType));
+                isList.Add(false);
+                elementKinds.Add(default);
+            }
+        }
+
+        return (dataFields.ToArray(), names.ToArray(), kinds.ToArray(), isList.ToArray(), elementKinds.ToArray());
+    }
+
+    /// <summary>
+    /// Reconstructs per-row <see cref="DataValue"/> array values from a flat Parquet list column
+    /// using its repetition levels to determine list boundaries.
+    /// </summary>
+    private static DataValue[] ReconstructArrayValues(DataColumn column, DataKind elementKind, long rowCount)
+    {
+        DataValue[] result = new DataValue[rowCount];
+        int[]? repetitionLevels = column.RepetitionLevels;
+        Array data = column.Data;
+
+        if (repetitionLevels is null || data.Length == 0)
+        {
+            for (long i = 0; i < rowCount; i++)
+            {
+                result[i] = DataValue.NullArray(elementKind);
+            }
+
+            return result;
+        }
+
+        int rowIndex = -1;
+        List<DataValue> currentElements = new();
+
+        for (int i = 0; i < repetitionLevels.Length; i++)
+        {
+            if (repetitionLevels[i] == 0)
+            {
+                // New list starts — emit the previous list.
+                if (rowIndex >= 0)
+                {
+                    result[rowIndex] = currentElements.Count > 0
+                        ? DataValue.FromArray(elementKind, currentElements.ToArray())
+                        : DataValue.NullArray(elementKind);
+                    currentElements.Clear();
+                }
+
+                rowIndex++;
+            }
+
+            object? element = data.GetValue(i);
+            if (element is not null)
+            {
+                currentElements.Add(ExtractElementValue(element, elementKind));
+            }
+        }
+
+        // Emit the last list.
+        if (rowIndex >= 0 && rowIndex < rowCount)
+        {
+            result[rowIndex] = currentElements.Count > 0
+                ? DataValue.FromArray(elementKind, currentElements.ToArray())
+                : DataValue.NullArray(elementKind);
+            rowIndex++;
+        }
+
+        // Fill remaining rows if any (e.g. trailing null lists with no RL entries).
+        while (rowIndex < rowCount)
+        {
+            result[rowIndex] = DataValue.NullArray(elementKind);
+            rowIndex++;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Converts a single CLR element value from a Parquet list column to a <see cref="DataValue"/>.
+    /// </summary>
+    private static DataValue ExtractElementValue(object element, DataKind kind)
+    {
+        return kind switch
+        {
+            DataKind.Float32 => DataValue.FromFloat32(Convert.ToSingle(element)),
+            DataKind.Float64 => DataValue.FromFloat64(Convert.ToDouble(element)),
+            DataKind.Int8 => DataValue.FromInt8(Convert.ToSByte(element)),
+            DataKind.Int16 => DataValue.FromInt16(Convert.ToInt16(element)),
+            DataKind.Int32 => DataValue.FromInt32(Convert.ToInt32(element)),
+            DataKind.Int64 => DataValue.FromInt64(Convert.ToInt64(element)),
+            DataKind.UInt8 => DataValue.FromUInt8(Convert.ToByte(element)),
+            DataKind.UInt16 => DataValue.FromUInt16(Convert.ToUInt16(element)),
+            DataKind.UInt32 => DataValue.FromUInt32(Convert.ToUInt32(element)),
+            DataKind.UInt64 => DataValue.FromUInt64(Convert.ToUInt64(element)),
+            DataKind.String => DataValue.FromString(element.ToString() ?? string.Empty),
+            DataKind.Boolean => DataValue.FromBoolean(Convert.ToBoolean(element)),
+            _ => DataValue.FromString(element.ToString() ?? string.Empty),
         };
     }
 
