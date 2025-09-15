@@ -706,6 +706,45 @@ public sealed class SemanticAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_DatumCatalogFunctionParameters_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT parameter_name FROM datum_catalog.function_parameters", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
+
+    [Fact]
+    public void Analyze_DatumCatalogIndexes_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT index_type FROM datum_catalog.indexes", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
+
+    [Fact]
+    public void Analyze_DatumCatalogInteractions_NoWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest();
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT pearson FROM datum_catalog.interactions", manifest);
+
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Warning &&
+            diagnostic.Message.Contains("Unknown table"));
+    }
+
+    [Fact]
     public void Analyze_UnknownVirtualSchemaTable_ReturnsWarning()
     {
         LanguageServerManifest manifest = CreateManifest();

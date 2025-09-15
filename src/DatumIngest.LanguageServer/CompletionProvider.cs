@@ -167,7 +167,7 @@ public sealed class CompletionProvider
     private static readonly (string SchemaName, string[] TableNames)[] VirtualSchemaTables =
     [
         ("information_schema", ["tables", "columns", "schemata"]),
-        ("datum_catalog", ["providers", "functions", "statistics"]),
+        ("datum_catalog", ["providers", "functions", "function_parameters", "statistics", "indexes", "interactions"]),
     ];
 
     private void AddColumns(List<CompletionItem> items, bool allTables)

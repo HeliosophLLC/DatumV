@@ -109,14 +109,17 @@ public sealed class VirtualSchemaTests
     }
 
     [Fact]
-    public void DatumCatalog_ExposesProvidersFunctionsAndStatistics()
+    public void DatumCatalog_ExposesAllSixTables()
     {
         IVirtualSchema? schema = DefaultRegistry.TryResolve("datum_catalog");
         Assert.NotNull(schema);
 
         Assert.NotNull(schema!.TryResolve("providers"));
         Assert.NotNull(schema.TryResolve("functions"));
+        Assert.NotNull(schema.TryResolve("function_parameters"));
         Assert.NotNull(schema.TryResolve("statistics"));
+        Assert.NotNull(schema.TryResolve("indexes"));
+        Assert.NotNull(schema.TryResolve("interactions"));
         Assert.Null(schema.TryResolve("nonexistent"));
     }
 
@@ -215,6 +218,61 @@ public sealed class VirtualSchemaTests
         List<string> types = results.Select(row => row["function_type"].AsString()).ToList();
         Assert.Contains("SCALAR", types);
         Assert.Contains("AGGREGATE", types);
+    }
+
+    [Fact]
+    public async Task DatumCatalog_Functions_IncludesEnrichedColumns()
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT function_name, function_type, category, return_type, parameter_count, query_unit_cost FROM datum_catalog.functions WHERE function_name = 'abs' LIMIT 1",
+            catalog);
+
+        Assert.Single(results);
+        Assert.Equal("abs", results[0]["function_name"].AsString());
+        Assert.Equal("SCALAR", results[0]["function_type"].AsString());
+        Assert.False(results[0]["category"].IsNull);
+        Assert.False(results[0]["parameter_count"].IsNull);
+    }
+
+    [Fact]
+    public async Task DatumCatalog_FunctionParameters_ReturnsParameterDetails()
+    {
+        TableCatalog catalog = CreateCatalog();
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT function_name, ordinal_position, parameter_name, data_type, is_optional FROM datum_catalog.function_parameters WHERE function_name = 'substring' ORDER BY ordinal_position",
+            catalog);
+
+        Assert.NotEmpty(results);
+        Assert.Equal("substring", results[0]["function_name"].AsString());
+        Assert.Equal(1, results[0]["ordinal_position"].AsInt32());
+        Assert.Contains("NO", results[0]["is_optional"].AsString());
+    }
+
+    [Fact]
+    public async Task DatumCatalog_Interactions_ReturnsEmptyWhenNoManifest()
+    {
+        TableCatalog catalog = CreateCatalog(("items", MakeRows(1)));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT table_name, column_a, column_b FROM datum_catalog.interactions",
+            catalog);
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task DatumCatalog_Indexes_ReturnsEmptyWhenNoIndex()
+    {
+        TableCatalog catalog = CreateCatalog(("items", MakeRows(1)));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT table_name, column_name, index_type FROM datum_catalog.indexes",
+            catalog);
+
+        Assert.Empty(results);
     }
 
     // ─────────────────── Error cases ───────────────────

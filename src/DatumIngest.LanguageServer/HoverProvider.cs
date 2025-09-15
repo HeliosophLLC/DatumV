@@ -365,7 +365,7 @@ public sealed class HoverProvider
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["information_schema"] = "PostgreSQL-compatible metadata schema exposing tables, columns, and schemata.",
-            ["datum_catalog"] = "DatumIngest-specific metadata schema exposing providers, functions, and statistics.",
+            ["datum_catalog"] = "DatumIngest-specific metadata schema exposing providers, functions, statistics, indexes, and interactions.",
         };
 
     private static readonly Dictionary<string, Dictionary<string, string>> VirtualTableDescriptions =
@@ -380,8 +380,11 @@ public sealed class HoverProvider
             ["datum_catalog"] = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["providers"] = "Lists all registered data providers.",
-                ["functions"] = "Lists all available functions with their type (SCALAR, AGGREGATE, TABLE_VALUED, WINDOW).",
-                ["statistics"] = "Lists column-level statistics from feature manifests.",
+                ["functions"] = "Lists all available functions with type, category, return type, description, parameter count, and query-unit cost.",
+                ["function_parameters"] = "Lists all documented function parameters with ordinal position, name, data type, and optionality.",
+                ["statistics"] = "Lists column-level statistics from feature manifests including distribution shape, quantiles, and type-specific metrics.",
+                ["indexes"] = "Lists per-column index metadata (sorted, B+Tree, bitmap, bloom, mapped) with entry counts.",
+                ["interactions"] = "Lists pairwise column interaction statistics (Pearson, Spearman, Cramér's V, mutual information, etc.).",
             },
         };
 
