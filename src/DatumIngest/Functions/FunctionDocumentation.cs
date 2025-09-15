@@ -1602,8 +1602,8 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "range",
-            Parameters = [Parameter("start", "Float32"), Parameter("stop", "Float32"), Parameter("step", "Float32", isOptional: true)],
-            ReturnType = "Float32",
+            Parameters = [Parameter("start", "Float64"), Parameter("stop", "Float64"), Parameter("step", "Float64", isOptional: true)],
+            ReturnType = "Float64",
             Description = "Generates rows with a Value column from start to stop (inclusive) with an optional step.",
             IsTableValued = true,
             Category = FunctionCategory.Table,
