@@ -311,6 +311,153 @@ public class DistinctTests
         Assert.Equal(1f, groupB["COUNT(DISTINCT item)"].AsFloat32());
     }
 
+    // ─────────────── DistinctAccumulatorDecorator spill-to-disk ───────────────
+
+    [Fact]
+    public void DistinctAccumulator_SpillToDisk_CountDistinct_ProducesCorrectResult()
+    {
+        CountFunction countFunction = new();
+        IAggregateAccumulator inner = countFunction.CreateAccumulator();
+
+        // Tiny budget forces spill after just a few entries.
+        DistinctAccumulatorDecorator decorator = new(
+            inner,
+            argumentCount: 1,
+            memoryBudgetBytes: 256,
+            accumulatorFactory: countFunction.CreateAccumulator);
+
+        // Accumulate 200 distinct values plus 200 duplicates (400 total calls).
+        for (int index = 0; index < 200; index++)
+        {
+            decorator.Accumulate([DataValue.FromInt64(index)]);
+            decorator.Accumulate([DataValue.FromInt64(index)]); // duplicate
+        }
+
+        // COUNT(DISTINCT) of {0, 1, 2, ..., 199} = 200.
+        Assert.Equal(200f, decorator.Result.AsFloat32());
+        decorator.Dispose();
+    }
+
+    [Fact]
+    public void DistinctAccumulator_SpillToDisk_SumDistinct_ProducesCorrectResult()
+    {
+        SumFunction sumFunction = new();
+        IAggregateAccumulator inner = sumFunction.CreateAccumulator();
+
+        DistinctAccumulatorDecorator decorator = new(
+            inner,
+            argumentCount: 1,
+            memoryBudgetBytes: 256,
+            accumulatorFactory: sumFunction.CreateAccumulator);
+
+        // Accumulate values 1..100 with duplicates.
+        for (int index = 1; index <= 100; index++)
+        {
+            decorator.Accumulate([DataValue.FromFloat32(index)]);
+            decorator.Accumulate([DataValue.FromFloat32(index)]);
+        }
+
+        // SUM(DISTINCT) of {1, 2, ..., 100} = 5050.
+        Assert.Equal(5050f, decorator.Result.AsFloat32());
+        decorator.Dispose();
+    }
+
+    [Fact]
+    public void DistinctAccumulator_SpillToDisk_Reset_CleansUpAndReuses()
+    {
+        CountFunction countFunction = new();
+        IAggregateAccumulator inner = countFunction.CreateAccumulator();
+
+        DistinctAccumulatorDecorator decorator = new(
+            inner,
+            argumentCount: 1,
+            memoryBudgetBytes: 256,
+            accumulatorFactory: countFunction.CreateAccumulator);
+
+        // First pass: accumulate enough to trigger spill.
+        for (int index = 0; index < 100; index++)
+        {
+            decorator.Accumulate([DataValue.FromInt64(index)]);
+        }
+
+        Assert.Equal(100f, decorator.Result.AsFloat32());
+
+        // Reset and reuse with different data.
+        decorator.Reset();
+
+        for (int index = 0; index < 5; index++)
+        {
+            decorator.Accumulate([DataValue.FromInt64(index)]);
+        }
+
+        Assert.Equal(5f, decorator.Result.AsFloat32());
+        decorator.Dispose();
+    }
+
+    [Fact]
+    public void DistinctAccumulator_SpillToDisk_StringValues_ProducesCorrectResult()
+    {
+        CountFunction countFunction = new();
+        IAggregateAccumulator inner = countFunction.CreateAccumulator();
+
+        DistinctAccumulatorDecorator decorator = new(
+            inner,
+            argumentCount: 1,
+            memoryBudgetBytes: 512,
+            accumulatorFactory: countFunction.CreateAccumulator);
+
+        // Accumulate 150 distinct strings with duplicates.
+        for (int index = 0; index < 150; index++)
+        {
+            decorator.Accumulate([DataValue.FromString($"value_{index}")]);
+            decorator.Accumulate([DataValue.FromString($"value_{index}")]);
+        }
+
+        Assert.Equal(150f, decorator.Result.AsFloat32());
+        decorator.Dispose();
+    }
+
+    [Fact]
+    public async Task GroupBy_GlobalCountDistinct_WithMemoryBudget_SpillsAndProducesCorrectResult()
+    {
+        // Build enough rows to exceed a tiny budget with DISTINCT values.
+        Row[] rows = new Row[300];
+
+        for (int index = 0; index < 300; index++)
+        {
+            rows[index] = MakeRow(
+                ("id", DataValue.FromInt64(index % 150)),    // 150 distinct values
+                ("value", DataValue.FromFloat32(index)));
+        }
+
+        MockOperator source = new(rows);
+
+        GroupByOperator groupBy = new(
+            source,
+            groupByExpressions: [],
+            aggregateColumns:
+            [
+                new AggregateColumn(
+                    new CountFunction(),
+                    [],
+                    "total_count",
+                    IsCountStar: true),
+                new AggregateColumn(
+                    new CountFunction(),
+                    [new ColumnReference("id")],
+                    "distinct_id_count",
+                    Distinct: true),
+            ]);
+
+        // Tiny budget forces the DISTINCT decorator to spill.
+        ExecutionContext context = CreateContext(memoryBudgetBytes: 512);
+        List<Row> results = await CollectAsync(groupBy, context);
+
+        Assert.Single(results);
+        Assert.Equal(300f, results[0]["total_count"].AsFloat32());
+        Assert.Equal(150f, results[0]["distinct_id_count"].AsFloat32());
+    }
+
     // ─────────────── Validation ───────────────
 
     [Fact]

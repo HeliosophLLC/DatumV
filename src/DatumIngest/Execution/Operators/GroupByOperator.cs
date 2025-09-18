@@ -145,12 +145,22 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         // for its own hash table lookup — doubling key evaluation cost. Combined with
         // bounded-channel overhead and a single-threaded feeder bottleneck, the
         // parallel keyed path is consistently slower than the serial path.
+        //
+        // The parallel path is also skipped when DISTINCT aggregates are present and
+        // a memory budget is configured: spilled DISTINCT sets cannot be correctly
+        // deduplicated across parallel workers during merge.
         if (context.DegreeOfParallelism > 1 && _groupByExpressions.Count == 0)
         {
-            long? estimatedRows = GetEstimatedSourceRowCount();
-            if (estimatedRows is null or >= 100_000)
+            bool hasDistinctWithBudget = context.MemoryBudgetBytes.HasValue
+                && _aggregateColumns.Any(column => column.Distinct);
+
+            if (!hasDistinctWithBudget)
             {
-                return ExecuteParallelHashAsync(context);
+                long? estimatedRows = GetEstimatedSourceRowCount();
+                if (estimatedRows is null or >= 100_000)
+                {
+                    return ExecuteParallelHashAsync(context);
+                }
             }
         }
 
@@ -308,9 +318,6 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         CompositeKeyHashMap<GroupState>? compositeKeyGroups =
             !useSingleKey && !isGlobalAggregation ? new(initialCapacity) : null;
 
-        // For global aggregation (no GROUP BY), use a single group.
-        GroupState? globalGroup = isGlobalAggregation ? CreateGroupState() : null;
-
         // Shared column schema for output rows (built on first output).
         string[]? outputNames = null;
         Dictionary<string, int>? outputNameIndex = null;
@@ -319,6 +326,28 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue && !isGlobalAggregation
             ? new MemoryEstimator() : null;
+
+        // For global aggregation with DISTINCT aggregates, compute a per-accumulator
+        // memory budget so the decorator can spill to disk when the hash set grows
+        // beyond the budget. For keyed aggregation the GROUP BY spill mechanism
+        // bounds overall memory; per-group DISTINCT sets are typically small.
+        long? distinctMemoryBudgetBytes = null;
+
+        if (isGlobalAggregation && memoryBudget.HasValue)
+        {
+            int distinctAggregateCount = _aggregateColumns.Count(column => column.Distinct);
+
+            if (distinctAggregateCount > 0)
+            {
+                distinctMemoryBudgetBytes = memoryBudget.Value / distinctAggregateCount;
+            }
+        }
+
+        // For global aggregation (no GROUP BY), use a single group.
+        GroupState? globalGroup = isGlobalAggregation
+            ? CreateGroupState(distinctMemoryBudgetBytes)
+            : null;
+
         BinaryWriter?[]? spillWriters = null;
         bool[]? spillSchemaWritten = null;
         string[]? spillPaths = null;
@@ -1316,7 +1345,16 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         }
     }
 
-    private GroupState CreateGroupState()
+    /// <summary>
+    /// Creates a new <see cref="GroupState"/> for a single aggregation group,
+    /// optionally passing a memory budget to DISTINCT accumulator decorators.
+    /// </summary>
+    /// <param name="distinctMemoryBudgetBytes">
+    /// Per-accumulator memory budget for DISTINCT hash sets. When set, the
+    /// <see cref="DistinctAccumulatorDecorator"/> spills to disk if its hash set
+    /// exceeds this limit. <c>null</c> disables spill-to-disk.
+    /// </param>
+    private GroupState CreateGroupState(long? distinctMemoryBudgetBytes = null)
     {
         int count = _aggregateColumns.Count;
         GroupState state = GlobalBufferPool.RentGroupState(count);
@@ -1331,6 +1369,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // Try to reuse the accumulator left in the pooled array from the
             // previous owner. A type-handle comparison avoids creating fresh
             // objects for the overwhelmingly common same-operator-shape case.
+            // Pooled decorators are not reused when a memory budget is active
+            // because the budget is context-specific and the pooled instance
+            // may carry stale spill state.
             if (innerTypes is not null && existing is not null)
             {
                 if (!column.Distinct
@@ -1341,6 +1382,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     accumulator = existing;
                 }
                 else if (column.Distinct
+                         && distinctMemoryBudgetBytes is null
                          && existing is DistinctAccumulatorDecorator decorator
                          && decorator.InnerAccumulator.GetType().TypeHandle.Equals(innerTypes[index]))
                 {
@@ -1356,7 +1398,12 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 if (column.Distinct)
                 {
                     accumulator = new DistinctAccumulatorDecorator(
-                        accumulator, column.ArgumentExpressions.Count);
+                        accumulator,
+                        column.ArgumentExpressions.Count,
+                        distinctMemoryBudgetBytes,
+                        distinctMemoryBudgetBytes.HasValue
+                            ? column.Function.CreateAccumulator
+                            : null);
                 }
             }
 
