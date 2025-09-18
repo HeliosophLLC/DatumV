@@ -589,6 +589,19 @@ internal sealed class SemanticAnalyzer
             case ParameterExpression:
                 break;
 
+            // Lambda expressions: validate the body with lambda parameter names
+            // added as opaque aliases so they are treated as valid column-like
+            // references (same conservative logic used for CTE sources).
+            case LambdaExpression lambda:
+                HashSet<string> lambdaOpaqueAliases = new(opaqueAliases, StringComparer.OrdinalIgnoreCase);
+                foreach (string parameter in lambda.Parameters)
+                {
+                    lambdaOpaqueAliases.Add(parameter);
+                }
+
+                AnalyzeExpression(lambda.Body, aliasToTable, lambdaOpaqueAliases, diagnostics);
+                break;
+
             // LiteralExpression — nothing to validate.
         }
     }

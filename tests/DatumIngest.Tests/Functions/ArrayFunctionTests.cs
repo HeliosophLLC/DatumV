@@ -394,11 +394,14 @@ public class ArrayFunctionTests
     }
 
     [Fact]
-    public void ArrayConstructor_NoArguments_Throws()
+    public void ArrayConstructor_NoArguments_ReturnsEmptyArray()
     {
         ArrayConstructorFunction function = new();
-        Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments(ReadOnlySpan<DataKind>.Empty));
+        Assert.Equal(DataKind.Array, function.ValidateArguments(ReadOnlySpan<DataKind>.Empty));
+
+        DataValue result = function.Execute(ReadOnlySpan<DataValue>.Empty);
+        Assert.Equal(DataKind.Array, result.Kind);
+        Assert.Empty(result.AsArray());
     }
 
     [Fact]

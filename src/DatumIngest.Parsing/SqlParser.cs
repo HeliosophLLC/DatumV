@@ -396,6 +396,19 @@ public static class SqlParser
         select (Expression)new ExistsExpression(query, Negated: notKw.HasValue);
 
     /// <summary>
+    /// Array literal: <c>[expr, expr, ...]</c> desugars to <c>array(expr, expr, ...)</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> ArrayLiteral =
+        from open in Token.EqualTo(SqlToken.LeftBracket)
+        from elements in SP.Ref(() => ExpressionParser!)
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightBracket)
+        select (Expression)new FunctionCallExpression(
+            "array",
+            elements,
+            Span: ToSpan(open, close));
+
+    /// <summary>
     /// Primary expression: the atomic unit in the precedence hierarchy.
     /// Order matters: function call must be tried before column reference
     /// because both start with an Identifier token.
@@ -413,7 +426,8 @@ public static class SqlParser
             .Or(FalseLiteral)
             .Or(ParameterReference)
             .Or(NegationExpression)
-            .Or(ParenExpression);
+            .Or(ParenExpression)
+            .Or(ArrayLiteral);
 
     // ───────────────────── Operator precedence layers ─────────────────────
     // Precedence (lowest to highest):
@@ -594,9 +608,42 @@ public static class SqlParser
             AndExpression,
             (op, left, right) => new BinaryExpression(left, op, right));
 
+    // ───────────────────── Lambda expressions ─────────────────────
+
+    /// <summary>
+    /// Bare single-parameter lambda: <c>x -&gt; expr</c>.
+    /// Must be tried before the normal expression chain because both start with an Identifier token.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> SingleParameterLambda =
+        from parameter in Token.EqualTo(SqlToken.Identifier)
+        from arrow in Token.EqualTo(SqlToken.Arrow)
+        from body in SP.Ref(() => OrExpression!)
+        select (Expression)new LambdaExpression(
+            [GetTokenText(parameter)],
+            body,
+            ToSpan(arrow));
+
+    /// <summary>
+    /// Parenthesized multi-parameter lambda: <c>(x, y) -&gt; expr</c>.
+    /// Also supports single-parameter parenthesized form: <c>(x) -&gt; expr</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> MultiParameterLambda =
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from parameters in Token.EqualTo(SqlToken.Identifier)
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from arrow in Token.EqualTo(SqlToken.Arrow)
+        from body in SP.Ref(() => OrExpression!)
+        select (Expression)new LambdaExpression(
+            parameters.Select(GetTokenText).ToArray(),
+            body,
+            ToSpan(arrow));
+
     /// <summary>The top-level expression parser, exposed as the entry point.</summary>
     private static readonly TokenListParser<SqlToken, Expression> ExpressionParser =
-        OrExpression;
+        SingleParameterLambda.Try()
+            .Or(MultiParameterLambda.Try())
+            .Or(OrExpression);
 
     // ───────────────────── SELECT columns ─────────────────────
 

@@ -99,8 +99,11 @@ public sealed class ExpressionEvaluator
                 "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
             ParameterExpression parameter => throw new InvalidOperationException(
                 $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
+            LambdaExpression => throw new InvalidOperationException(
+                "Lambda expressions cannot be evaluated as standalone values. " +
+                "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
             _ => throw new InvalidOperationException(
-                $"Unsupported expression type: {expression.GetType().Name}."),
+                $"Unsupported expression type: {expression.GetType().Name}.")
         };
     }
 
@@ -302,6 +305,12 @@ public sealed class ExpressionEvaluator
                 $"Unknown function: '{function.FunctionName}'.");
         }
 
+        // Higher-order function path: detect lambda arguments and route accordingly.
+        if (scalarFunction is IHigherOrderFunction higherOrder)
+        {
+            return EvaluateHigherOrderFunction(higherOrder, function, row);
+        }
+
         int argumentCount = function.Arguments.Count;
         DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(argumentCount);
         try
@@ -331,6 +340,116 @@ public sealed class ExpressionEvaluator
             arguments.AsSpan(0, argumentCount).Clear();
             ArrayPool<DataValue>.Shared.Return(arguments);
         }
+    }
+
+    /// <summary>
+    /// Evaluates a higher-order function call by separating lambda arguments from
+    /// eagerly-evaluated arguments. Lambda arguments are passed as AST nodes; the
+    /// function receives a <see cref="LambdaEvaluator"/> callback to invoke them.
+    /// </summary>
+    private DataValue EvaluateHigherOrderFunction(
+        IHigherOrderFunction higherOrder,
+        FunctionCallExpression function,
+        Row row)
+    {
+        int argumentCount = function.Arguments.Count;
+        IReadOnlySet<int> lambdaIndices = higherOrder.GetLambdaParameterIndices(argumentCount);
+
+        DataValue[] arguments = ArrayPool<DataValue>.Shared.Rent(argumentCount);
+        Dictionary<int, LambdaExpression> lambdaArguments = new(lambdaIndices.Count);
+        try
+        {
+            for (int index = 0; index < argumentCount; index++)
+            {
+                if (lambdaIndices.Contains(index))
+                {
+                    if (function.Arguments[index] is not LambdaExpression lambda)
+                    {
+                        throw new InvalidOperationException(
+                            $"Argument {index + 1} of '{function.FunctionName}' must be a lambda expression (x -> expr).");
+                    }
+
+                    lambdaArguments[index] = lambda;
+                    arguments[index] = DataValue.UnknownNull();
+                }
+                else
+                {
+                    arguments[index] = Evaluate(function.Arguments[index], row);
+                }
+            }
+
+            // Capture the current row for closure semantics — lambda body references
+            // to columns resolve against this row after lambda parameter bindings.
+            Row capturedRow = row;
+            LambdaEvaluator evaluator = (LambdaExpression lambda, ReadOnlySpan<DataValue> parameterValues) =>
+            {
+                return EvaluateLambdaBody(lambda, parameterValues, capturedRow);
+            };
+
+            DataValue result = higherOrder.ExecuteHigherOrder(
+                arguments.AsSpan(0, argumentCount),
+                lambdaArguments,
+                evaluator);
+
+            _meter?.Add(higherOrder.QueryUnitCost);
+            if (_meter is not null && higherOrder is ICostAwareFunction costAware)
+            {
+                _meter.Add(costAware.ComputeSupplementalCost(arguments.AsSpan(0, argumentCount), result));
+            }
+
+            DisposeConsumedImageHandles(arguments.AsSpan(0, argumentCount), result, row);
+
+            return result;
+        }
+        finally
+        {
+            arguments.AsSpan(0, argumentCount).Clear();
+            ArrayPool<DataValue>.Shared.Return(arguments);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates a lambda body by creating an augmented row where lambda parameter
+    /// names shadow any existing column names. Unmatched column references in the
+    /// lambda body fall through to the enclosing row (closure semantics).
+    /// </summary>
+    private DataValue EvaluateLambdaBody(
+        LambdaExpression lambda,
+        ReadOnlySpan<DataValue> parameterValues,
+        Row enclosingRow)
+    {
+        int parameterCount = lambda.Parameters.Count;
+        if (parameterValues.Length != parameterCount)
+        {
+            throw new InvalidOperationException(
+                $"Lambda expects {parameterCount} parameter(s) but received {parameterValues.Length}.");
+        }
+
+        // Build an augmented row: original columns + lambda parameter bindings.
+        // Lambda parameters shadow columns with the same name.
+        int originalFieldCount = enclosingRow.FieldCount;
+        int augmentedFieldCount = originalFieldCount + parameterCount;
+        string[] augmentedNames = new string[augmentedFieldCount];
+        DataValue[] augmentedValues = new DataValue[augmentedFieldCount];
+
+        for (int index = 0; index < originalFieldCount; index++)
+        {
+            augmentedNames[index] = enclosingRow.ColumnNames[index];
+            augmentedValues[index] = enclosingRow[index];
+        }
+
+        for (int index = 0; index < parameterCount; index++)
+        {
+            augmentedNames[originalFieldCount + index] = lambda.Parameters[index];
+            augmentedValues[originalFieldCount + index] = parameterValues[index];
+        }
+
+        // The Row constructor builds a name-index dictionary where later entries
+        // overwrite earlier ones for the same key (case-insensitive), giving lambda
+        // parameters priority over enclosing columns — correct closure semantics.
+        Row augmentedRow = new(augmentedNames, augmentedValues);
+
+        return Evaluate(lambda.Body, augmentedRow);
     }
 
     /// <summary>

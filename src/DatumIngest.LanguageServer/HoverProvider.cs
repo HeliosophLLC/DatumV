@@ -46,6 +46,9 @@ public sealed class HoverProvider
         string? markdown = hit.Kind switch
         {
             SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit),
+            SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
+                "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
+                "such as `array_transform` and `array_filter`.",
             _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text),
             _ => null,
         };

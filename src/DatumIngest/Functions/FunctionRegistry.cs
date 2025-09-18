@@ -254,6 +254,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.ArrayMaxFunction());
         registry.RegisterScalar(new Scalar.ArraySumFunction());
         registry.RegisterScalar(new Scalar.ArrayAvgFunction());
+        registry.RegisterScalar(new Scalar.ArrayTransformFunction());
+        registry.RegisterScalar(new Scalar.ArrayFilterFunction());
 
         // Byte Array
         registry.RegisterScalar(new Scalar.BytesConcatFunction());

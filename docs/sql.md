@@ -998,6 +998,59 @@ Coercible String targets include: `Float32`, `UInt8`, `Boolean`, `Date`,
 `DateTime`, `Time`, `Duration`, `Uuid`, and `JsonValue`. Types like `Vector`,
 `Matrix`, `Tensor`, `Image`, and `UInt8Array` cannot be coerced from String.
 
+## Lambda Expressions
+
+Lambda expressions define inline anonymous functions for use with higher-order functions such as `array_transform` and `array_filter`. They are not first-class values — they can only appear as arguments to functions that expect them.
+
+### Syntax
+
+A single parameter needs no parentheses:
+
+```sql
+SELECT array_transform(prices, p -> p * 1.1) FROM products
+```
+
+Parentheses are optional for a single parameter and required for multiple parameters:
+
+```sql
+SELECT array_filter(scores, (s) -> s > 0.5) FROM students
+```
+
+The arrow operator is `->` (thin arrow). The body is any scalar expression.
+
+### Closure capture
+
+Lambda bodies can reference columns from the enclosing row:
+
+```sql
+SELECT array_transform(prices, p -> p * discount) FROM products
+```
+
+Here `discount` is a column on the `products` table, captured by the lambda at evaluation time.
+
+### Restrictions
+
+- Lambdas cannot appear outside a higher-order function argument list.
+- Lambdas cannot be aliased, stored, or passed between queries.
+- Lambda parameter names shadow column names of the same name within the body.
+
+## Array Literals
+
+Bracket syntax constructs arrays inline. `[a, b, c]` is syntactic sugar for `array(a, b, c)`.
+
+```sql
+SELECT [1, 2, 3]                          -- array of numbers
+SELECT ['hello', 'world']                  -- array of strings
+SELECT []                                  -- empty array
+SELECT array_filter([10, 20, 30], x -> x > 15)  -- combined with lambdas
+```
+
+Nested array literals are supported:
+
+```sql
+SELECT [[1, 2], [3, 4]]
+```
+
 ## Common Table Expressions (WITH)
 
 CTEs define named temporary result sets scoped to a single statement. They can simplify complex queries by breaking them into readable, composable stages.

@@ -1302,6 +1302,210 @@ public class SqlParserTests
         Assert.NotNull(inner.ElseResult);
     }
 
+    // ───────────────────── Lambda expressions ─────────────────────
+
+    [Fact]
+    public void SingleParameterLambda_InFunctionArgument()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_transform(arr, x -> x * 2) FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array_transform", function.FunctionName);
+        Assert.Equal(2, function.Arguments.Count);
+
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(function.Arguments[1]);
+        Assert.Single(lambda.Parameters);
+        Assert.Equal("x", lambda.Parameters[0]);
+        Assert.IsType<BinaryExpression>(lambda.Body);
+    }
+
+    [Fact]
+    public void ParenthesizedSingleParameterLambda()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_filter(arr, (x) -> x > 0) FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(function.Arguments[1]);
+        Assert.Single(lambda.Parameters);
+        Assert.Equal("x", lambda.Parameters[0]);
+    }
+
+    [Fact]
+    public void MultiParameterLambda()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_reduce(arr, (acc, x) -> acc + x, 0) FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal(3, function.Arguments.Count);
+
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(function.Arguments[1]);
+        Assert.Equal(2, lambda.Parameters.Count);
+        Assert.Equal("acc", lambda.Parameters[0]);
+        Assert.Equal("x", lambda.Parameters[1]);
+        Assert.IsType<BinaryExpression>(lambda.Body);
+    }
+
+    [Fact]
+    public void LambdaWithFunctionCallBody()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_transform(tags, t -> upper(t)) FROM t");
+
+        FunctionCallExpression outer = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(outer.Arguments[1]);
+        FunctionCallExpression body = Assert.IsType<FunctionCallExpression>(lambda.Body);
+        Assert.Equal("upper", body.FunctionName);
+    }
+
+    [Fact]
+    public void LambdaWithComparisonBody()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_filter(scores, s -> s > 0.5) FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(function.Arguments[1]);
+        BinaryExpression body = Assert.IsType<BinaryExpression>(lambda.Body);
+        Assert.Equal(BinaryOperator.GreaterThan, body.Operator);
+    }
+
+    [Fact]
+    public void LambdaWithComplexBody()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_transform(arr, x -> (x - 10) / 5) FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(function.Arguments[1]);
+        Assert.IsType<BinaryExpression>(lambda.Body);
+    }
+
+    [Fact]
+    public void LambdaHasSourceSpan()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_transform(arr, x -> x) FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        LambdaExpression lambda = Assert.IsType<LambdaExpression>(function.Arguments[1]);
+        Assert.NotNull(lambda.Span);
+    }
+
+    [Fact]
+    public void NonLambdaColumnReference_StillWorks()
+    {
+        SelectStatement result = Parse("SELECT x FROM t");
+
+        ColumnReference column = Assert.IsType<ColumnReference>(result.Columns[0].Expression);
+        Assert.Equal("x", column.ColumnName);
+    }
+
+    // ───────────────────── Array literal sugar ─────────────────────
+
+    [Fact]
+    public void ArrayLiteral_DesugarsToArrayFunction()
+    {
+        SelectStatement result = Parse("SELECT [1, 2, 3] FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array", function.FunctionName);
+        Assert.Equal(3, function.Arguments.Count);
+        Assert.Equal(1.0, Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
+        Assert.Equal(2.0, Assert.IsType<LiteralExpression>(function.Arguments[1]).Value);
+        Assert.Equal(3.0, Assert.IsType<LiteralExpression>(function.Arguments[2]).Value);
+    }
+
+    [Fact]
+    public void ArrayLiteral_SingleElement()
+    {
+        SelectStatement result = Parse("SELECT [42] FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array", function.FunctionName);
+        Assert.Single(function.Arguments);
+        Assert.Equal(42.0, Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
+    }
+
+    [Fact]
+    public void ArrayLiteral_Empty()
+    {
+        SelectStatement result = Parse("SELECT [] FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array", function.FunctionName);
+        Assert.Empty(function.Arguments);
+    }
+
+    [Fact]
+    public void ArrayLiteral_WithExpressions()
+    {
+        SelectStatement result = Parse("SELECT [a + 1, b * 2] FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array", function.FunctionName);
+        Assert.Equal(2, function.Arguments.Count);
+        Assert.IsType<BinaryExpression>(function.Arguments[0]);
+        Assert.IsType<BinaryExpression>(function.Arguments[1]);
+    }
+
+    [Fact]
+    public void ArrayLiteral_WithStringElements()
+    {
+        SelectStatement result = Parse("SELECT ['hello', 'world'] FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array", function.FunctionName);
+        Assert.Equal(2, function.Arguments.Count);
+        Assert.Equal("hello", Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
+        Assert.Equal("world", Assert.IsType<LiteralExpression>(function.Arguments[1]).Value);
+    }
+
+    [Fact]
+    public void ArrayLiteral_Nested()
+    {
+        SelectStatement result = Parse("SELECT [[1, 2], [3, 4]] FROM t");
+
+        FunctionCallExpression outer = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array", outer.FunctionName);
+        Assert.Equal(2, outer.Arguments.Count);
+
+        FunctionCallExpression inner1 = Assert.IsType<FunctionCallExpression>(outer.Arguments[0]);
+        Assert.Equal("array", inner1.FunctionName);
+        Assert.Equal(2, inner1.Arguments.Count);
+
+        FunctionCallExpression inner2 = Assert.IsType<FunctionCallExpression>(outer.Arguments[1]);
+        Assert.Equal("array", inner2.FunctionName);
+        Assert.Equal(2, inner2.Arguments.Count);
+    }
+
+    [Fact]
+    public void ArrayLiteral_HasSourceSpan()
+    {
+        SelectStatement result = Parse("SELECT [1, 2] FROM t");
+
+        FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.NotNull(function.Span);
+    }
+
+    [Fact]
+    public void ArrayLiteral_WithLambda()
+    {
+        SelectStatement result = Parse(
+            "SELECT array_transform([10, 20, 30], x -> x * 2) FROM t");
+
+        FunctionCallExpression outer = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
+        Assert.Equal("array_transform", outer.FunctionName);
+
+        FunctionCallExpression arrayArg = Assert.IsType<FunctionCallExpression>(outer.Arguments[0]);
+        Assert.Equal("array", arrayArg.FunctionName);
+        Assert.Equal(3, arrayArg.Arguments.Count);
+
+        Assert.IsType<LambdaExpression>(outer.Arguments[1]);
+    }
+
     // ───────────────────── Window functions ─────────────────────
 
     [Fact]

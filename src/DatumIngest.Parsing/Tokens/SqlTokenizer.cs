@@ -108,6 +108,7 @@ public static class SqlTokenizer
             .Ignore(BlockCommentToken)
 
             // Multi-character symbols must come before their single-char prefixes
+            .Match(Span.EqualTo("->"), SqlToken.Arrow)
             .Match(Span.EqualTo("<="), SqlToken.LessOrEqual)
             .Match(Span.EqualTo(">="), SqlToken.GreaterOrEqual)
             .Match(Span.EqualTo("!="), SqlToken.NotEquals)
@@ -128,6 +129,8 @@ public static class SqlTokenizer
             .Match(Character.EqualTo('/'), SqlToken.Slash)
             .Match(Character.EqualTo('%'), SqlToken.Percent)
             .Match(Character.EqualTo('^'), SqlToken.Caret)
+            .Match(Character.EqualTo('['), SqlToken.LeftBracket)
+            .Match(Character.EqualTo(']'), SqlToken.RightBracket)
 
             // String literals (before keywords and identifiers)
             .Match(StringLiteralToken, SqlToken.StringLiteral)

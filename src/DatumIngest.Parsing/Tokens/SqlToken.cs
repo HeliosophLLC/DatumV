@@ -352,4 +352,13 @@ public enum SqlToken
 
     /// <summary>The ; (semicolon) statement terminator.</summary>
     Semicolon,
+
+    /// <summary>The -&gt; (arrow) operator for lambda expressions.</summary>
+    Arrow,
+
+    /// <summary>The [ (left bracket) delimiter for array literals.</summary>
+    LeftBracket,
+
+    /// <summary>The ] (right bracket) delimiter for array literals.</summary>
+    RightBracket,
 }

@@ -1235,6 +1235,22 @@ public static class FunctionDocumentation
             Description = "Returns the arithmetic mean of numeric values in an array.",
             Category = FunctionCategory.Utility,
         });
+        Register(new FunctionSignature
+        {
+            Name = "array_transform",
+            Parameters = [Parameter("array", "Array"), Parameter("lambda", "(element) -> result")],
+            ReturnType = "Array",
+            Description = "Applies a lambda to each element, returning a new array of transformed values. Usage: array_transform(arr, x -> x * 2).",
+            Category = FunctionCategory.Utility,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "array_filter",
+            Parameters = [Parameter("array", "Array"), Parameter("lambda", "(element) -> Boolean")],
+            ReturnType = "Array",
+            Description = "Filters an array, keeping elements where the lambda predicate returns true. Usage: array_filter(arr, x -> x > 0).",
+            Category = FunctionCategory.Utility,
+        });
 
         // ── Bytes ──
 

@@ -105,8 +105,12 @@ Every function belongs to a single **category** that describes its operational d
 | `array_max` | `array_max(arr)` | Maximum element, skipping nulls. Returns null for an empty or all-null array. Return type matches the array's element kind. | 1 |
 | `array_sum` | `array_sum(arr)` | Sum of numeric (Float32 or UInt8) elements, skipping nulls. Returns null for an empty or all-null array. Always returns Float32. | 1 |
 | `array_avg` | `array_avg(arr)` | Average (mean) of numeric elements, skipping nulls. Returns null for an empty or all-null array. Always returns Float32. | 1 |
+| `array_transform` | `array_transform(arr, element -> expr)` | Applies a lambda to each element, returning a new array of transformed values. | 1 |
+| `array_filter` | `array_filter(arr, element -> Boolean)` | Filters an array, keeping only elements where the lambda predicate returns true. | 1 |
 
 > **Tip:** `len(arr)` also works as an alias for `array_length(arr)` since `len()` supports Array inputs.
+
+> **Tip:** Arrays can be constructed with bracket syntax: `[1, 2, 3]` is equivalent to `array(1, 2, 3)`.
 
 ## Type Conversion
 

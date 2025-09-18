@@ -35,6 +35,23 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 | **SCAN expression** (ordered fold) | L | First-class stateful fold over ordered rows: `SCAN acc = acc + price INIT 0 OVER (PARTITION BY ... ORDER BY ...) AS running_total`. Covers sessionization, streaks, and sequential state machines — patterns where the current row's result depends on the *derived output* of the previous row, which window functions cannot express. Reuses existing OVER clause syntax. Scalar accumulator only (no structured state); requires injecting feedback state into `ExpressionEvaluator` context and a new `ScanOperator` that buffers per partition. Inherently sequential within a partition — precludes intra-partition parallelism |
 | **Enum / Categorical type** (`DataKind.Categorical`) | L | `label_encode` and `hash_encode` cover most ML use cases today; a first-class type adds automatic encoding and domain validation but requires a `DataKind` extension — see Type System Extensions |
 | **Index encoding strategies** (dictionary B+Tree, RLE sorted, Roaring bitmaps, FOR/bit-packing) | XL | Breaking `.datum-index` format changes with major payoff for high-cardinality string and low-cardinality numeric columns at scale; no V1 blocker — see Index Encoding Strategies |
+| ~~**Lambda expressions** (arrow functions)~~ | M | ✅ `(params) -> expression` syntax for higher-order array/vector operations: `array_transform(tags, t -> upper(t))`, `array_filter(scores, s -> s > 0.5)`, `array_reduce(prices, (acc, p) -> acc + p, 0)`. Closes DuckDB `list_transform`/`list_filter` gap; BigQuery has no lambdas. New `LambdaExpression` AST node in parser + closure capture in `ExpressionEvaluator`. Combine with LET for named reusable lambdas: `LET normalize = (x) -> (x - min_val) / (max_val - min_val)`. Direct pandas `.apply(lambda x: ...)` equivalent. Foundational for making arrays and vectors truly programmable — see SQL Dialect Extensions |
+| **Tuple destructuring in LET** | S–M | `LET (sin_val, cos_val) = cyclical_encode(month, 12)` — unpack multi-valued returns (vectors, structs) into named bindings. Parser change to `LetBinding` + element-index extraction in expression evaluator. Eliminates awkward `vec_slice(cyclical_encode(...), 0, 1)` patterns. No SQL engine has this — brings Python/Rust/F# tuple unpacking to SQL. Natural extension of existing LET memoization: destructured names participate in the same augmented-row cache — see SQL Dialect Extensions |
+| **ASSERT clause** (row-level invariants) | S | `ASSERT expression MESSAGE message_expression ON FAIL SKIP|WARN|ABORT` — declarative row-level validation in the query pipeline. New clause parsed between QUALIFY and ORDER BY → `FilterOperator` variant with diagnostic accumulator (counts skipped/warned rows, collects messages). Can reference LET bindings for complex checks without recomputing. BigQuery has statement-level `ASSERT`; row-level is unique. Complements the planned `CHECK`/`VALIDATE` feature (schema-level vs. query-level) — see SQL Dialect Extensions |
+| **DEFINE block** (multi-statement row scope) | M | Block syntax for complex per-row pipelines: `DEFINE { LET raw = load_image(path); LET resized = resize(raw, 224, 224); LET tensor = image_to_tensor_chw(resized); ASSERT width(raw) > 0; }`. Sequential evaluation already exists via LET memoization; this adds block delimiters and semicolons for readability when a row requires 5+ intermediate computations. Parser change (block tokens, semicolon-delimited LET/ASSERT sequences). Row-as-mini-program paradigm — natural evolution of LET for image/tensor processing pipelines — see SQL Dialect Extensions |
+| **IMPUTE clause** (declarative missing value handling) | L | `IMPUTE (col WITH MEDIAN|MODE|FORWARD_FILL|INTERPOLATE|CONSTANT value)` — first-class null imputation strategies. Requires two-phase execution: pre-scan for aggregate strategies (MEDIAN, MODE) to collect fill values, then main pass applies them. FORWARD_FILL and INTERPOLATE require ordered-window semantics with `OVER (ORDER BY ...)` sub-clause. No SQL engine has this; replaces verbose `COALESCE(col, (SELECT MEDIAN(col) FROM ...))` patterns. Direct pandas `df.fillna()` / `df.interpolate()` / `df.ffill()` equivalent. ML data cleaning killer feature — see notes below |
+| **GROUPBY TRANSFORM** (group-relative row operations) | M–L | Apply group-level statistics back to individual rows without collapsing: `col TRANSFORM OVER (PARTITION BY ...) USING ZSCORE|NORMALIZE|RANK_PERCENT|CUMULATIVE_SUM`. Desugars to window function expressions with pre-built transform strategies — ZSCORE = `(col - AVG(col) OVER (...)) / STDDEV(col) OVER (...)`, NORMALIZE = `(col - MIN(col) OVER (...)) / (MAX(col) OVER (...) - MIN(col) OVER (...))`. No SQL engine has this; verbose subqueries currently required. Direct pandas `groupby().transform()` equivalent — one of pandas' most powerful operations — see notes below |
+| **EXPLODE clause** (array row multiplication) | S–M | `EXPLODE array_col AS element_alias` as a first-class clause. Paired/aligned explosion of multiple arrays: `EXPLODE tags AS tag, scores AS score` — elements at matching indices expand together. Syntactic sugar over existing `CROSS JOIN LATERAL UNNEST(...)` infrastructure. DuckDB has `UNNEST` as a clause; paired explosion is unique. Pandas equivalent: `df.explode(['tags', 'scores'])` |
+| **Stratified sampling** (`TABLESAMPLE STRATIFIED|BALANCED`) | M | `TABLESAMPLE STRATIFIED(fraction) ON column` for proportional sampling per group; `TABLESAMPLE BALANCED(count) ON column` for fixed count per class. Extends existing `TABLESAMPLE` parser/operator with group-aware reservoir sampling — hash-partition rows by stratification column, apply per-group sample limit. No SQL engine supports this. Fundamental ML training-set construction operation. Pandas equivalent: `df.groupby('label').sample()` |
+| **SPLIT INTO** (multi-output routing) | M | `SPLIT INTO ('train.parquet' WHERE predicate, 'val.parquet' WHERE predicate, 'test.parquet' WHERE predicate)` — single-pass row demultiplexing to N output writers. New `SplitRouterOperator` evaluates predicates per row and routes to the matching output. Extends INTO/SHARD ON infrastructure. Eliminates running 3 identical queries for train/val/test splits. Naturally combines with `hash_split` and SHARD ON — see notes below |
+| **FEATURE pipeline** (declarative feature engineering) | M | `FEATURE col USING transform_chain AS alias` in SELECT — pre-built transform chains: `LOG_TRANSFORM`, `NORMALIZE`, `ONE_HOT`, `CYCLICAL(period)`, `ZSCORE`, `WORD_COUNT`, `CHAR_COUNT`. Desugars to LET + function composition, inheriting memoization. scikit-learn `ColumnTransformer`/`Pipeline` brought into SQL. Combinable: `FEATURE price USING LOG_TRANSFORM THEN NORMALIZE AS log_norm_price`. No database has this — see SQL Dialect Extensions |
+| **CROSS VALIDATE** (fold assignment) | S | `CROSS VALIDATE(k=5, stratify_on=label, seed=42) AS fold` — appends a 0-based fold index column. Computable from `hash_split` semantics + modular arithmetic: `CAST(FLOOR(hash_split(key, seed) * k) AS INT)`. Optional `stratify_on` ensures balanced folds per class. ML-native operation with no SQL engine equivalent |
+| **DESCRIBE query modifier** | S–M | `DESCRIBE SELECT ... FROM ... WHERE ...` returns per-column statistics (kind, null count, approximate distinct count, min, max, mean, stddev, top values) for the *filtered* result, not just the raw table. Extends existing `StatisticsCollector` infrastructure — wraps the inner query as a data source, runs single-pass accumulation. DuckDB has `SUMMARIZE` on tables only; DESCRIBE on arbitrary query results (including filtered, joined, transformed data) is unique. Pandas equivalent: `df.query('...').describe()` |
+| **SHOW shorthand** (interactive exploration) | S | `SHOW n FROM table` (first N rows), `SHOW RANDOM n FROM table` (random sample), `SHOW DISTINCT col FROM table` (distinct values with frequencies), `SHOW NULLS FROM table` (null count per column). Syntactic sugar over existing operations — desugars to `SELECT ... LIMIT`, `SELECT ... TABLESAMPLE`, `SELECT col, COUNT(*) ... GROUP BY col`, and null-counting aggregation. Quick exploration without writing full queries |
+| **Multi-target INTO** (DAG fan-out) | L | Shared CTE materialized once, multiple INTO targets in a single execution: `WITH cte AS (...) INTO 'a.parquet' SELECT cols FROM cte; INTO 'b.parquet' SELECT other_cols FROM cte`. Requires multi-statement execution with CTE result sharing across statements — `CommonTableExpressionOperator` gains reference counting to keep materialized results alive across consumers. True computation DAG: shared intermediate → multiple typed sinks in one pass — see notes below |
+| **CREATE FEATURE TABLE** (persistent feature definitions) | XL | Named, versioned, reusable feature definitions with dependency tracking: `CREATE FEATURE TABLE user_features AS (FEATURE user_id AS KEY, FEATURE total_orders = COUNT(*) FROM orders GROUP BY user_id, ...)`. Requires catalog persistence (`.datum-features` sidecar), dependency graph between feature tables, incremental refresh scheduling. Feature store concepts (Feast, Tecton) brought into the query language. Long-term vision item |
+| **WITH PARAMETERS** (typed parameter defaults) | S | `WITH PARAMETERS ($threshold FLOAT32 DEFAULT 0.5, $target_size INT32 DEFAULT 224) SELECT ...` — extends existing `$parameter` syntax with type declarations and default values. Parser change to accept optional `type DEFAULT literal` after parameter name. Query templates become self-documenting; unbound parameters fall back to defaults instead of failing |
+| **Lineage analysis and visualization** | M–L | AST-derived column-level lineage: `LineageAnalyzer` walks the resolved AST to produce a `LineageGraph` (nodes: source columns, derived expressions, aggregations; edges: data flow with transformation kind). Tiered rendering: Mermaid/DOT text output (CLI `--lineage` flag, docs), LSP custom request (`datumingest/lineage`) with JSON graph for editor webview panel (ELK.js layout), CodeLens/hover annotations showing upstream dependencies. Lambdas, LET bindings, CTEs, and subqueries are transparent — lineage walks into expression bodies. Lineage breaks at temp table / multi-statement boundaries (metadata-level tracking needed there). Structurally parallel to `SemanticAnalyzer` (same recursive expression walk with scope tracking) — see notes below |
 
 ---
 
@@ -45,6 +62,25 @@ Complexity: **S** = days · **M** ≈ 1 week · **L** = 2–4 weeks · **XL** = 
 **`DataKind.Decimal` type**: `System.Decimal` is exactly 16 bytes and fits inline in the existing `DataValue` struct (`_numericBits` + `_bits1`) with no GC cost or layout change. Natural Parquet mapping via the `DECIMAL` logical type (fixed-length byte array with precision/scale annotations). Primary use case: exact-arithmetic aggregation (SUM on financial columns where `Float64` precision loss is unacceptable) and ingesting Parquet sources that carry `DECIMAL` columns today. `BigInteger` is explicitly out of scope — variable-length, heap-allocated, GC pressure in tight loops.
 
 **Primary key persistence**: PRIMARY KEY column metadata is currently session-only (`TableDescriptor`) and not persisted in the `.datum` file footer — acceptable for V1 temp tables, which are session-scoped. In a future durable ingestion model, clients send batches (shards) with externally-derived composite keys; the engine writes each batch, creates tombstone records for superseded rows, and later runs compaction. PK metadata in the footer enables compaction to validate uniqueness across shards without external coordination. Phases: (1) extend `DatumFileSchema`/footer with `PrimaryKeyColumns`; (2) read PK metadata on file open; (3) shard-aware INSERT validating PK across existing row groups; (4) compaction operator merging row groups, applying tombstones, re-validating uniqueness.
+
+**IMPUTE clause**: Two-phase execution model. Phase 1 (pre-scan): for aggregate strategies (MEDIAN, MODE), execute a statistics-collection pass over the target columns — piggyback on existing `StatisticsCollector` or share with manifest generation if available. Phase 2 (main pass): replace nulls using collected values. FORWARD_FILL requires per-partition ordered state: track the last non-null value per column within each partition, emit it for null rows. INTERPOLATE requires buffering null runs and their bounding non-null values, then linearly interpolating. Both FORWARD_FILL and INTERPOLATE accept an `OVER (PARTITION BY ... ORDER BY ...)` sub-clause — reuse existing OVER parsing. Execution position: IMPUTE runs after FROM/JOIN/WHERE but before SELECT/LET, so downstream computations see clean data. New `ImputeOperator` wraps the source operator and applies strategies per column. CONSTANT strategy requires no pre-scan.
+
+**GROUPBY TRANSFORM**: Desugaring rules for built-in strategies. ZSCORE: `(col - AVG(col) OVER (PARTITION BY ...)) / NULLIF(STDDEV(col) OVER (PARTITION BY ...), 0)`. NORMALIZE: `(col - MIN(col) OVER (PARTITION BY ...)) / NULLIF(MAX(col) OVER (PARTITION BY ...) - MIN(col) OVER (PARTITION BY ...), 0)`. RANK_PERCENT: `(RANK() OVER (PARTITION BY ... ORDER BY col) - 1.0) / NULLIF(COUNT(*) OVER (PARTITION BY ...) - 1, 0)`. CUMULATIVE_SUM: `SUM(col) OVER (PARTITION BY ... ORDER BY col ROWS UNBOUNDED PRECEDING)`. Implementation: parser emits a `TransformExpression` AST node; planner desugars to the corresponding window function expressions before building the operator tree. The window function infrastructure handles execution — no new operator needed. User-defined strategies (via lambda expressions, when available) would extend this to `col TRANSFORM OVER (...) USING (x, group_mean, group_std) -> ...`.
+
+**SPLIT INTO**: New `SplitRouterOperator` sits after the final projection. For each row, evaluates the N predicates in declaration order and routes the row to the first matching output writer. Rows matching no predicate are discarded (or routed to a default output if `ELSE` clause is present). Each output branch has its own `IOutputWriter` instance — reuses existing CSV/Parquet/HDF5/JSON writers. Shard-compatible: each branch independently respects `SHARD ON` directives. Natural integration with `hash_split`: `SPLIT INTO ('train.parquet' WHERE hash_split(id, 42) < 0.7, ...)`. Accounting: `QueryMeter` tracks total rows across all branches; QU cost = single scan + N × write cost.
+
+**Multi-target INTO**: Requires extending the execution model from single-statement to multi-statement with shared CTE materialization. Today `CommonTableExpressionOperator` materializes a CTE's result into a `List<Row>` and replays it for the single consumer. For multi-target, the CTE operator gains reference counting: the planner detects shared CTE references across statements, materializes once, and each downstream statement replays from the shared buffer. Execution order: statements execute sequentially (not in parallel) to bound memory — the shared CTE buffer is freed after the last consumer completes. Parser change: accept multiple `INTO ... SELECT ...` statements after a WITH block, delimited by semicolons.
+
+**Lineage analysis and visualization**: `LineageAnalyzer` walks a resolved `SelectStatement` AST and produces a `LineageGraph` — a DAG of `LineageNode` (source column, derived expression, aggregation, window, lambda body) and `LineageEdge` (direct, aggregation, window, filter, join). The walk is structurally identical to `SemanticAnalyzer`: recursive expression visitor with a scope stack that pushes/pops at CTE, subquery, and lambda boundaries. LET bindings are transparent — the analyzer follows through to the bound expression. Lambdas in higher-order functions (e.g., `array_transform(arr, x -> x * 2)`) produce an edge from the input array to the output with the lambda body as the transformation descriptor.
+
+*Rendering tiers*:
+- **Tier 1 — Mermaid/DOT text**: String interpolation over the graph. CLI `--lineage` flag emits Mermaid (pasteable into GitHub PRs, docs site). Trivial cost.
+- **Tier 2 — LSP custom request** (`datumingest/lineage`): Language server serializes `LineageGraph` as JSON. Editor renders in a side panel using ELK.js (layered DAG layout). Click a node → cursor jumps to the source span. Live update on keystroke (debounced). Medium cost — requires JS renderer in `DatumIngest.Editor`.
+- **Tier 3 — Editor inline annotations**: CodeLens above each output column showing upstream dependencies ("← orders.quantity, products.price"). Highlight all upstream sources when clicking an output column. Complementary to the panel view.
+
+*Lineage boundary*: Within a single statement (including CTEs, subqueries, LET chains, lambdas), lineage is exact — mechanically derived from the AST. Across statements (temp tables, multi-statement batches), lineage degrades to metadata-level tracking (table-to-table, not column-to-column). This is an inherent boundary, not a bug.
+
+*Architecture*: `LineageAnalyzer` and `LineageGraph` live in `src/DatumIngest/` alongside `SemanticAnalyzer`. Mermaid/DOT serializers are trivial string builders in the same location. The LSP handler goes in `DatumIngest.LanguageServer`. The JS panel renderer goes in `DatumIngest.Editor`.
 
 ---
 
@@ -281,6 +317,134 @@ For integer columns where the key range is narrow relative to the full type rang
 ML-relevant for one-hot and label encoding. Could be represented as String with a fixed domain constraint (known set of valid values). Natural fit with the planned data validation feature (CHECK constraints / VALIDATE clause). Would enable: automatic one-hot encoding, label encoding with stable integer mapping, domain validation on ingest. DuckDB and Polars both support this pattern.
 
 **V1 status**: Explicit-domain encoding functions (`one_hot`, `label_encode`, variants) and stateless feature hashing (`hash_encode`) shipped without a dedicated `DataKind.Categorical`. These cover low-to-high cardinality encoding via SQL functions operating on String columns. A first-class Categorical type remains under consideration for automatic encoding and validation scenarios.
+
+---
+
+## SQL Dialect Extensions (Under Consideration)
+
+**Status**: Under consideration. These extensions push DatumIngest from "SQL database with ML functions" toward "ML computation engine that speaks SQL." The unifying theme: LET made each row a computation node; these features make it programmable, validated, and ML-native. None are V1 blockers.
+
+### Lambda expressions (arrow functions)
+
+First-class `(params) -> expression` syntax enabling higher-order operations on arrays and vectors:
+
+```sql
+SELECT
+  array_transform(tags, t -> upper(t)) AS upper_tags,
+  array_filter(scores, s -> s > 0.5) AS passing,
+  array_reduce(prices, (acc, p) -> acc + p, 0) AS total
+FROM data
+```
+
+**Higher-order functions to add**: `array_transform(array, lambda)` — map. `array_filter(array, lambda)` — filter. `array_reduce(array, lambda, init)` — fold. `array_any(array, lambda)` / `array_all(array, lambda)` — predicates. `vec_transform(vector, lambda)` — element-wise map returning vector. Existing `array_sort` could gain an optional comparator lambda.
+
+**Named lambdas via LET**: Combine with LET for reuse across columns:
+
+```sql
+SELECT
+  LET normalize = (x) -> (x - $min) / ($max - $min),
+  array_transform(prices, normalize) AS norm_prices,
+  array_transform(costs, normalize) AS norm_costs
+FROM data
+```
+
+The LET binding stores a `LambdaExpression` value; the higher-order function invokes it per element. This is not a closure over mutable state — the lambda captures LET binding values (immutable within a row), not variables.
+
+**Implementation**: New `LambdaExpression` AST node with parameter list and body expression. `ExpressionEvaluator` gains a `LambdaValue` that captures the evaluation context (current row's augmented schema including LET bindings). Higher-order functions receive the `LambdaValue` and invoke it per element via `ExpressionEvaluator.Evaluate(lambdaBody, elementContext)`. No new operator — evaluation is purely within the expression layer.
+
+**Scope constraint**: Lambdas are *expression-level* only — no statement lambdas, no side effects, no multi-expression bodies. A lambda with multiple steps should use a LET chain instead: `LET step1 = ..., LET step2 = ..., array_transform(arr, x -> step1(step2(x)))`. This keeps the lambda implementation simple (single expression evaluation) and avoids introducing a closure/scope model.
+
+### Tuple destructuring in LET
+
+Unpack multi-valued returns into named bindings:
+
+```sql
+SELECT
+  LET (sin_val, cos_val) = cyclical_encode(month, 12),
+  LET (width, height, channels) = dimensions(image),
+  sin_val AS month_sin,
+  cos_val AS month_cos,
+  width * height AS pixel_count
+FROM data
+```
+
+**Semantics**: The right-hand expression is evaluated once (memoized, same as regular LET). The result must be a Vector, Array, or Struct. Each name in the tuple binds to the element at that positional index (0-based). Arity mismatch (more names than elements) is a semantic error reported by the language server.
+
+**Implementation**: Parser change to `LetBindingParser` — accept `(name1, name2, ...)` before `=`. Planner emits a single LET evaluation followed by N extraction expressions (`vec_slice(result, i, 1)` for Vector, `array_get(result, i+1)` for Array, `field(result, name)` for Struct). The extraction expressions are synthetic — not user-visible in EXPLAIN. Each destructured name participates in the augmented row schema normally.
+
+### ASSERT clause
+
+Row-level invariant checking within the query pipeline:
+
+```sql
+SELECT * FROM images
+ASSERT width(load_image(path)) > 0 MESSAGE 'corrupt: ' || path ON FAIL SKIP
+
+-- Multiple assertions with different failure modes:
+SELECT
+  LET img = load_image(path),
+  LET tensor = image_to_tensor_chw(img)
+FROM images
+ASSERT width(img) >= 224 AND height(img) >= 224
+  MESSAGE 'undersized: ' || width(img) || 'x' || height(img)
+  ON FAIL SKIP
+ASSERT rank(tensor) = 3
+  MESSAGE 'unexpected rank: ' || CAST(rank(tensor) AS STRING)
+  ON FAIL ABORT
+```
+
+**Failure modes**: `SKIP` — discard the row, increment skip counter. `WARN` — emit the row, log the message, increment warn counter. `ABORT` — terminate execution with an error containing the message. Default is `ABORT` if `ON FAIL` is omitted.
+
+**Execution position**: After QUALIFY, before projection output. ASSERT can reference LET bindings (memoized) and window function results. The `AssertOperator` wraps the projection output and applies assertion predicates per row.
+
+**Diagnostics**: Assertion statistics (skip count, warn count, sample of messages) are reported in `QueryMeter` usage and surfaced via `GetUsage` RPC. EXPLAIN shows assertion predicates as a plan node.
+
+**Relationship to Data Validation**: The planned `CHECK`/`VALIDATE` feature (Open Items) is *schema-level* — constraints attached to table definitions. ASSERT is *query-level* — inline validation within a specific transformation pipeline. Both can coexist: CHECK enforces invariants on INSERT/UPDATE, ASSERT enforces invariants during SELECT/INTO.
+
+### DEFINE block
+
+Syntactic grouping for complex per-row computation pipelines:
+
+```sql
+SELECT
+  DEFINE {
+    LET raw = load_image(path);
+    LET resized = resize(raw, 224, 224);
+    LET tensor = image_to_tensor_chw(resized);
+    LET mean = vec(0.485, 0.456, 0.406);
+    LET std = vec(0.229, 0.224, 0.225);
+    LET normalized = (tensor - mean) / std;
+    ASSERT width(raw) >= 1 MESSAGE 'corrupt' ON FAIL SKIP;
+  }
+  normalized AS features,
+  width(raw) AS original_width
+FROM images
+```
+
+**Semantics**: DEFINE is purely syntactic — it groups LET bindings and ASSERT clauses into a visually distinct block. The block delimiters `{ }` and semicolons `;` are new tokens but do not change evaluation order: bindings are still sequential left-to-right, assertions evaluate after all bindings. DEFINE blocks must appear before regular output columns (same rule as standalone LET bindings).
+
+**Motivation**: When a row requires 5+ intermediate computations (common in image and tensor processing), the comma-separated LET syntax becomes hard to read. DEFINE provides visual structure without semantic complexity. The block can be collapsed in editors, making the output column list visible.
+
+**Implementation**: Parser recognizes `DEFINE { ... }` as a sequence of LET bindings and ASSERT clauses. The AST flattens them into the same `LetBinding[]` and `AssertClause[]` arrays used by standalone LET/ASSERT. No changes to the planner or evaluator.
+
+### FEATURE pipeline
+
+Declarative feature engineering with pre-built transform chains:
+
+```sql
+SELECT
+  FEATURE price USING LOG_TRANSFORM THEN NORMALIZE AS log_norm_price,
+  FEATURE category USING ONE_HOT('cat', 'dog', 'bird') AS category_vec,
+  FEATURE month USING CYCLICAL(12) AS month_enc,
+  FEATURE description USING WORD_COUNT AS desc_words
+FROM data
+```
+
+**Built-in transforms**: `LOG_TRANSFORM` → `ln(col + 1)`. `NORMALIZE` → `normalize(col, min, max)` (requires manifest statistics). `ZSCORE` → `(col - mean) / stddev` (requires manifest statistics). `ONE_HOT(categories...)` → `one_hot(col, categories...)`. `CYCLICAL(period)` → `cyclical_encode(col, period)`. `WORD_COUNT` → `word_count(col)`. `CHAR_COUNT` → `len(col)`. `HASH(buckets)` → `hash_encode(col, buckets)`. `LABEL_ENCODE(categories...)` → `label_encode(col, categories...)`.
+
+**Chaining**: `THEN` keyword composes transforms left-to-right: `LOG_TRANSFORM THEN NORMALIZE` = `normalize(ln(col + 1), min, max)`.
+
+**Implementation**: Parser emits `FeatureExpression` AST node with column reference, transform chain, and alias. Planner desugars to LET + function composition — the feature expression becomes one or more LET bindings (memoized) feeding into the output column. Transforms requiring statistics (NORMALIZE, ZSCORE) resolve min/max/mean/stddev from the input manifest at plan time; if no manifest is available, the planner reports an error suggesting manifest generation first.
 
 ---
 

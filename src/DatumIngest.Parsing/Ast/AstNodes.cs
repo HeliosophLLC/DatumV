@@ -546,6 +546,20 @@ public sealed record CastExpression(Expression Expression, string TargetType, So
 public sealed record ErrorExpression(SourceSpan? Span = null) : Expression;
 
 /// <summary>
+/// A lambda (arrow function) expression: <c>x -&gt; x * 2</c> or <c>(a, b) -&gt; a + b</c>.
+/// Used as arguments to higher-order functions such as <c>array_transform</c> and <c>array_filter</c>.
+/// Lambda expressions are not first-class values — they cannot appear in projections,
+/// GROUP BY, ORDER BY, or any context that requires a concrete data kind.
+/// </summary>
+/// <param name="Parameters">The lambda parameter names (1 or 2).</param>
+/// <param name="Body">The expression to evaluate for each invocation.</param>
+/// <param name="Span">Source location of the arrow token for diagnostic reporting.</param>
+public sealed record LambdaExpression(
+    IReadOnlyList<string> Parameters,
+    Expression Body,
+    SourceSpan? Span = null) : Expression;
+
+/// <summary>
 /// A single WHEN ... THEN branch within a <see cref="CaseExpression"/>.
 /// </summary>
 /// <param name="Condition">

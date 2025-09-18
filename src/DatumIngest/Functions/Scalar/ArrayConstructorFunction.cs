@@ -17,9 +17,9 @@ public sealed class ArrayConstructorFunction : IScalarFunction
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length < 1)
+        if (argumentKinds.Length == 0)
         {
-            throw new ArgumentException("array() requires at least 1 argument.");
+            return DataKind.Array;
         }
 
         DataKind elementKind = argumentKinds[0];
@@ -39,6 +39,11 @@ public sealed class ArrayConstructorFunction : IScalarFunction
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
+        if (arguments.Length == 0)
+        {
+            return DataValue.FromArray(DataKind.String, []);
+        }
+
         DataKind elementKind = arguments[0].Kind;
 
         DataValue[] elements = new DataValue[arguments.Length];

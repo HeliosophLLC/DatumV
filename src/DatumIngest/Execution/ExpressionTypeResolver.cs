@@ -37,6 +37,7 @@ public static class ExpressionTypeResolver
             CastExpression cast => ResolveCast(cast),
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
+            LambdaExpression => null, // Not a value — only valid as an argument to IHigherOrderFunction.
             ParameterExpression => null,
             _ => null,
         };
@@ -187,12 +188,27 @@ public static class ExpressionTypeResolver
             return ResolveAggregate(function, sourceSchema, functions);
         }
 
+        // Higher-order functions accept lambda arguments that have no DataKind.
+        // Determine which argument positions expect lambdas so we can skip them
+        // during argument kind resolution and still type-check the non-lambda args.
+        IReadOnlySet<int>? lambdaIndices = scalarFunction is IHigherOrderFunction higherOrder
+            ? higherOrder.GetLambdaParameterIndices(function.Arguments.Count)
+            : null;
+
         // Resolve argument kinds so we can call ValidateArguments.
         DataKind[] argumentKinds = new DataKind[function.Arguments.Count];
         bool allResolved = true;
 
         for (int index = 0; index < function.Arguments.Count; index++)
         {
+            // Lambda arguments are AST-only — they don't resolve to a DataKind.
+            // The placeholder value is never inspected; ValidateArguments implementations
+            // for higher-order functions already know which positions are lambdas.
+            if (lambdaIndices is not null && lambdaIndices.Contains(index))
+            {
+                continue;
+            }
+
             DataKind? kind = ResolveType(function.Arguments[index], sourceSchema, functions);
             if (kind is null)
             {
