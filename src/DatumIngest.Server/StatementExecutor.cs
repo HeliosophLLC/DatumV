@@ -624,7 +624,7 @@ internal sealed class StatementExecutor
         {
             using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
             DatumFileEditor.ReplaceColumns(stream, replacements);
-            _queryContext.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.InvalidateAnalysis(tableName);
         }
 
         return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
@@ -836,7 +836,7 @@ internal sealed class StatementExecutor
         {
             using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
             DatumFileEditor.ReplaceColumns(stream, replacements);
-            _queryContext.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.InvalidateAnalysis(tableName);
         }
 
         return CommandResult.AffectedRows(updatedRows, $"Updated {updatedRows} rows in '{tableName}'.");
@@ -900,7 +900,7 @@ internal sealed class StatementExecutor
             {
                 using FileStream stream = new(descriptor.FilePath, FileMode.Open, FileAccess.ReadWrite);
                 DatumFileEditor.MarkDeleted(stream, tombstoneUpdates);
-                _queryContext.Catalog.MarkAnalysisPending(tableName);
+                _queryContext.Catalog.InvalidateAnalysis(tableName);
             }
 
             return CommandResult.AffectedRows(totalDeleted, $"Deleted {totalDeleted} rows from '{tableName}'.");
@@ -912,7 +912,7 @@ internal sealed class StatementExecutor
 
         if (deletedRows > 0)
         {
-            _queryContext.Catalog.MarkAnalysisPending(tableName);
+            _queryContext.Catalog.InvalidateAnalysis(tableName);
         }
 
         return CommandResult.AffectedRows(deletedRows, $"Deleted {deletedRows} rows from '{tableName}'.");
@@ -1074,7 +1074,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.AddColumn(stream, newColumn, pages);
         }
 
-        _queryContext.Catalog.MarkAnalysisPending(tableName);
+        _queryContext.Catalog.InvalidateAnalysis(tableName);
         return CommandResult.AffectedRows(0, $"Added column '{statement.ColumnName}' to '{tableName}'.");
     }
 
@@ -1155,7 +1155,7 @@ internal sealed class StatementExecutor
             DatumFileEditor.AddColumn(stream, newColumn, pages);
         }
 
-        _queryContext.Catalog.MarkAnalysisPending(descriptor.Name);
+        _queryContext.Catalog.InvalidateAnalysis(descriptor.Name);
         return CommandResult.AffectedRows(0, $"Added computed column '{statement.ColumnName}' to '{descriptor.Name}'.");
     }
 

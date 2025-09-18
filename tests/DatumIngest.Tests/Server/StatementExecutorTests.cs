@@ -1044,6 +1044,57 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(CommandResultKind.AffectedRows, dropResult.Kind);
     }
 
+    /// <summary>
+    /// ALTER TABLE ADD COLUMN invalidates the stale sidecar index so the query
+    /// planner does not use an index with the pre-ALTER column count. Regression
+    /// test for stale <see cref="Indexing.SourceIndex"/> after schema-changing DDL.
+    /// </summary>
+    [Fact]
+    public async Task AlterAddColumn_InvalidatesStaleIndex()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE products (name STRING, price FLOAT64)");
+        await ExecuteAsync("INSERT INTO products VALUES ('A', 1.0), ('B', 2.0)");
+
+        // INSERT rebuilds sidecars — a 2-column index is now registered.
+        // ALTER should invalidate that index so SELECT sees the 3-column schema.
+        await ExecuteAsync("ALTER TABLE products ADD COLUMN category STRING DEFAULT 'General'");
+
+        CommandResult selectResult = await ExecuteAsync(
+            "SELECT name, price, category FROM products");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, row =>
+        {
+            Assert.Equal("General", row["category"].AsString());
+        });
+    }
+
+    /// <summary>
+    /// UPDATE followed by ALTER TABLE ADD COLUMN followed by a WHERE query
+    /// correctly reflects both the updated values and the new column, verifying
+    /// that stale index invalidation does not break predicate evaluation.
+    /// </summary>
+    [Fact]
+    public async Task UpdateThenAlter_QueryWithWhere_ReturnsCorrectResults()
+    {
+        await ExecuteAsync("CREATE TEMP TABLE orders (id INT, status STRING)");
+        await ExecuteAsync("INSERT INTO orders VALUES (1, 'pending'), (2, 'shipped'), (3, 'pending')");
+        await ExecuteAsync("UPDATE orders SET status = 'confirmed' WHERE status = 'pending'");
+        await ExecuteAsync("ALTER TABLE orders ADD COLUMN priority INT DEFAULT 5");
+
+        CommandResult selectResult = await ExecuteAsync(
+            "SELECT id, status, priority FROM orders WHERE status = 'confirmed'");
+        List<Row> rows = await CollectRowsAsync(selectResult);
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, row =>
+        {
+            Assert.Equal("confirmed", row["status"].AsString());
+            Assert.Equal(5, row["priority"].AsInt32());
+        });
+    }
+
     // ──────────────────── DELETE ────────────────────
 
     /// <summary>

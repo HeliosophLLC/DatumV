@@ -124,6 +124,20 @@ public sealed class TableCatalog : IDisposable
     }
 
     /// <summary>
+    /// Marks a table as having been modified since its last analysis and removes
+    /// any cached index, manifest, and schema so that stale metadata is never
+    /// served to the query planner before a sidecar rebuild occurs.
+    /// </summary>
+    /// <param name="tableName">The logical table name.</param>
+    public void InvalidateAnalysis(string tableName)
+    {
+        _analysisPending.Add(tableName);
+        _indexes.Remove(tableName);
+        _manifests.Remove(tableName);
+        _schemas.Remove(tableName);
+    }
+
+    /// <summary>
     /// Marks a table as having been modified since its last analysis.
     /// A subsequent ANALYZE will rebuild sidecars; without this flag, ANALYZE is a no-op.
     /// </summary>
