@@ -35,6 +35,22 @@ public sealed record ColumnInfo
         ArrayElementKind = arrayElementKind;
     }
 
+    /// <summary>
+    /// Creates a column descriptor for a <see cref="DataKind.Struct"/> column.
+    /// Field metadata is provided as an ordered list of child <see cref="ColumnInfo"/>
+    /// descriptors, shared across all rows — no per-value allocation.
+    /// </summary>
+    /// <param name="name">The column name as it appears in query expressions.</param>
+    /// <param name="nullable">Whether the column may contain null values.</param>
+    /// <param name="fields">Ordered field descriptors for the struct's named fields.</param>
+    public ColumnInfo(string name, bool nullable, IReadOnlyList<ColumnInfo> fields)
+    {
+        Name = name;
+        Kind = DataKind.Struct;
+        Nullable = nullable;
+        Fields = fields;
+    }
+
     /// <summary>The column name as it appears in query expressions.</summary>
     public string Name { get; }
 
@@ -52,4 +68,12 @@ public sealed record ColumnInfo
     /// <c>ARRAY_MIN</c>, <c>ARRAY_MAX</c>) and correct <c>UNNEST</c> output schemas.
     /// </summary>
     public DataKind? ArrayElementKind { get; }
+
+    /// <summary>
+    /// For <see cref="DataKind.Struct"/> columns, the ordered list of named field descriptors.
+    /// <c>null</c> when <see cref="Kind"/> is not <see cref="DataKind.Struct"/> or when
+    /// the struct schema is not known at plan time.
+    /// Shared across all rows — field metadata is never allocated per-value.
+    /// </summary>
+    public IReadOnlyList<ColumnInfo>? Fields { get; }
 }

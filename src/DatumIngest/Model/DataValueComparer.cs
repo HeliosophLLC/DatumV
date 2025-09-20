@@ -22,9 +22,19 @@ internal static class DataValueComparer
     /// Compares two non-null values of the same kind.
     /// When <paramref name="arena"/> is supplied, arena-backed strings are compared
     /// via their raw UTF-8 byte spans for maximum throughput.
+    /// When the two values have <em>different</em> kinds (cross-kind numeric comparison,
+    /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
+    /// are widened to <see cref="double"/> before comparison.
     /// </summary>
     internal static int Compare(DataValue left, DataValue right, StringArena? arena = null)
     {
+        // Cross-kind: widen both to double. This mirrors the ToFloat-based fallback in the
+        // original per-class implementations and handles cases like INT column vs FLOAT literal.
+        if (left.Kind != right.Kind)
+        {
+            return ToDouble(left).CompareTo(ToDouble(right));
+        }
+
         return left.Kind switch
         {
             DataKind.Float32  => left.AsFloat32().CompareTo(right.AsFloat32()),
@@ -49,6 +59,21 @@ internal static class DataValueComparer
             _ => 0,
         };
     }
+
+    private static double ToDouble(DataValue value) => value.Kind switch
+    {
+        DataKind.Float32  => value.AsFloat32(),
+        DataKind.Float64  => value.AsFloat64(),
+        DataKind.UInt8    => value.AsUInt8(),
+        DataKind.Int8     => value.AsInt8(),
+        DataKind.Int16    => value.AsInt16(),
+        DataKind.UInt16   => value.AsUInt16(),
+        DataKind.Int32    => value.AsInt32(),
+        DataKind.UInt32   => value.AsUInt32(),
+        DataKind.Int64    => value.AsInt64(),
+        DataKind.UInt64   => (double)value.AsUInt64(),
+        _ => 0.0,
+    };
 
     private static int CompareStrings(DataValue left, DataValue right, StringArena arena)
     {

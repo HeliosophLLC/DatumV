@@ -83,4 +83,11 @@ public enum DataKind : byte
 
     /// <summary>A 64-bit double-precision floating-point number.</summary>
     Float64 = 23,
+
+    /// <summary>
+    /// A named-field composite value. Field names and kinds are stored once in the
+    /// enclosing <see cref="ColumnInfo.Fields"/> descriptor; each value holds a
+    /// positional <see cref="DataValue"/>[] in the <see cref="ReferenceStore"/>.
+    /// </summary>
+    Struct = 24,
 }

@@ -120,7 +120,7 @@ internal sealed class MemoryEstimator
             DataKind kind = row[index].Kind;
             if (kind is DataKind.String or DataKind.Vector or DataKind.Matrix
                 or DataKind.Tensor or DataKind.Image or DataKind.UInt8Array
-                or DataKind.JsonValue or DataKind.Array)
+                or DataKind.JsonValue or DataKind.Array or DataKind.Struct)
             {
                 return false;
             }

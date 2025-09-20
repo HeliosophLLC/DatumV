@@ -133,7 +133,7 @@ public sealed class StatisticsCollector
         // TopK is only meaningful for discrete, representable values.
         // Binary blobs (Image, UInt8Array) and multi-dimensional data (Vector, Matrix, Tensor)
         // have no useful string representation for frequency counting.
-        if (kind is not (DataKind.Image or DataKind.UInt8Array or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array))
+        if (kind is not (DataKind.Image or DataKind.UInt8Array or DataKind.Vector or DataKind.Matrix or DataKind.Tensor or DataKind.Array or DataKind.Struct))
         {
             accumulators.Add(new TopKAccumulator(_topK, kind));
         }

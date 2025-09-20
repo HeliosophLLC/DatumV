@@ -303,6 +303,24 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue NullArray(DataKind elementKind) =>
         new(DataKind.Array, numericBits: 0L, bits1: 0L, flags: FlagIsNull, meta: (short)elementKind);
 
+    /// <summary>
+    /// Creates a struct value from a positional array of field values.
+    /// The field names and kinds are not stored per-value — they live in the
+    /// <see cref="ColumnInfo.Fields"/> descriptor that is shared across all rows.
+    /// </summary>
+    /// <param name="fieldCount">The number of fields, stored in <c>_meta</c> for fast validation.</param>
+    /// <param name="fields">Positional field values, one entry per field in declaration order.</param>
+    public static DataValue FromStruct(short fieldCount, DataValue[] fields)
+    {
+        int index = ReferenceStore.CurrentOrCreate().Add(fields);
+        return new(DataKind.Struct, numericBits: 0L, bits1: 0L, flags: FlagHasReference,
+                   meta: fieldCount, referenceIndex: index);
+    }
+
+    /// <summary>Creates a typed null struct with the given field count.</summary>
+    public static DataValue NullStruct(short fieldCount) =>
+        new(DataKind.Struct, numericBits: 0L, bits1: 0L, flags: FlagIsNull, meta: fieldCount);
+
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
     {
@@ -744,6 +762,33 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
     }
 
+    /// <summary>Returns the positional field-value array for a struct value.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public DataValue[] AsStruct()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Struct);
+        return ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex);
+    }
+
+    /// <summary>
+    /// Returns the declared field count for a <see cref="DataKind.Struct"/> value.
+    /// Available on both null and non-null struct values.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Called on a non-struct value.</exception>
+    public short StructFieldCount
+    {
+        get
+        {
+            if (_kind != DataKind.Struct)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot read StructFieldCount on a {_kind} value.");
+            }
+
+            return _meta;
+        }
+    }
+
     // ───────────────────── Zero-copy conversions ──────────────────────
 
     /// <summary>
@@ -859,6 +904,10 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _meta == other._meta
                    && ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex).AsSpan()
                           .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<DataValue[]>(other._referenceIndex)),
+            DataKind.Struct
+                => _meta == other._meta
+                   && ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex).AsSpan()
+                          .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<DataValue[]>(other._referenceIndex)),
             _ => false,
         };
     }
@@ -902,6 +951,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Image
                 => CombineByteArrayHash(_kind, AsImage()),
             DataKind.Array
+                => CombineArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex), _meta),
+            DataKind.Struct
                 => CombineArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex), _meta),
             _ => HashCode.Combine(_kind),
         };
@@ -975,6 +1026,11 @@ public readonly struct DataValue : IEquatable<DataValue>
             throw new InvalidOperationException(
                 $"Cannot read {_kind} as {expected}.");
         }
+    }
+
+    private static string FormatStructFields(DataValue[] fields)
+    {
+        return string.Join(", ", (IEnumerable<DataValue>)fields);
     }
 
     private static int CombineFloatArrayHash(DataKind kind, float[] data)
@@ -1091,6 +1147,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt8Array => $"UInt8Array[{ReferenceStore.CurrentOrCreate().Get<byte[]>(_referenceIndex).Length}]",
             DataKind.Image => $"Image[{AsImage().Length} bytes]",
             DataKind.Array => $"Array<{(DataKind)_meta}>[{ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex).Length}]",
+            DataKind.Struct => $"Struct({_meta}){{{FormatStructFields(ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex))}}}",
             _ => _kind.ToString(),
         };
     }
