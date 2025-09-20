@@ -199,7 +199,10 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
                                     continue;
                                 Expression? replacement = ProjectOperator.FindReplacement(
                                     columnName, tableColumns.ReplacedColumns, prefix);
-                                names.Add(columnName);
+                                string outputName = !tableColumns.QualifyOutput
+                                    ? columnName[prefix.Length..]
+                                    : columnName;
+                                names.Add(outputName);
                                 slots.Add(replacement is not null
                                     ? ColumnarProjectionSlot.Evaluate(replacement)
                                     : ColumnarProjectionSlot.CopyOrdinal(index));

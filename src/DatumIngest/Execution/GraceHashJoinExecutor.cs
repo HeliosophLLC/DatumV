@@ -148,8 +148,13 @@ internal sealed class GraceHashJoinExecutor
             bool hasNullKey = false;
             long inMemoryRowCount = 0;
 
+            ExecutionTracer.Write($"JOIN Phase1a iterating buildOperator type={buildOperator.GetType().Name}");
             await foreach (RowBatch buildBatch in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
             {
+                if (buildRowCount == 0)
+                {
+                    ExecutionTracer.Write($"JOIN Phase1a first build batch  count={buildBatch.Count}");
+                }
                 for (int buildBatchIndex = 0; buildBatchIndex < buildBatch.Count; buildBatchIndex++)
                 {
                 Row buildRow = buildBatch[buildBatchIndex];
@@ -212,7 +217,9 @@ internal sealed class GraceHashJoinExecutor
             {
                 int spilledPartitions = 0;
                 foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
-                ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  estimated_total={ExecutionTracer.FormatBytes(buildEstimator.EstimateTotalBytes())}  estimated_inmem={ExecutionTracer.FormatBytes(buildEstimator.EstimateBytesForRowCount(inMemoryRowCount))}  spilled={spilledPartitions}/{partitionCount}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
+                long processMemory = GC.GetTotalMemory(forceFullCollection: false);
+                int refStoreCount = ReferenceStore.CurrentOrCreate().Count;
+                ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  estimated_total={ExecutionTracer.FormatBytes(buildEstimator.EstimateTotalBytes())}  estimated_inmem={ExecutionTracer.FormatBytes(buildEstimator.EstimateBytesForRowCount(inMemoryRowCount))}  spilled={spilledPartitions}/{partitionCount}  process_mem={ExecutionTracer.FormatBytes(processMemory)}  refstore={refStoreCount:N0}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
             }
 
             // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
@@ -343,7 +350,9 @@ internal sealed class GraceHashJoinExecutor
 
             if (ExecutionTracer.IsEnabled)
             {
-                ExecutionTracer.Write($"JOIN Phase1b done   probe_rows={phase1bProbeCount:N0}  elapsed={Stopwatch.GetElapsedTime(ph1bStart).TotalMilliseconds:F0}ms");
+                long probeProcessMemory = GC.GetTotalMemory(forceFullCollection: false);
+                int probeRefStoreCount = ReferenceStore.CurrentOrCreate().Count;
+                ExecutionTracer.Write($"JOIN Phase1b done   probe_rows={phase1bProbeCount:N0}  process_mem={ExecutionTracer.FormatBytes(probeProcessMemory)}  refstore={probeRefStoreCount:N0}  elapsed={Stopwatch.GetElapsedTime(ph1bStart).TotalMilliseconds:F0}ms");
             }
 
             long ph2Start = Stopwatch.GetTimestamp();
@@ -401,6 +410,9 @@ internal sealed class GraceHashJoinExecutor
         internal readonly CompositeKeyHashMap<List<(int Index, Row Row)>>? CompositeKeyTable;
         internal CombinedRowSchema? JoinSchema;
         internal Row? CachedNullBuild;
+        /// <summary>Reusable scratch buffer for residual evaluation — allocated once on first use.</summary>
+        internal DataValue[]? ResidualScratch;
+        internal Row ResidualScratchRow;
 
         internal PartitionBuildTable(List<Row> buildRows, bool useSingleKey, int estimatedCapacity = 0)
         {
@@ -509,9 +521,14 @@ internal sealed class GraceHashJoinExecutor
                 if (_extraction.Residual is not null)
                 {
                     table.JoinSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    Row combinedRow = table.JoinSchema.Combine(leftRow, rightRow);
+                    if (table.ResidualScratch is null)
+                    {
+                        (table.ResidualScratchRow, table.ResidualScratch) = table.JoinSchema.CreateReusableRow();
+                    }
 
-                    if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
+                    table.JoinSchema.CombineInto(leftRow, rightRow, table.ResidualScratch);
+
+                    if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, table.ResidualScratchRow))
                     {
                         continue;
                     }
@@ -615,14 +632,25 @@ internal sealed class GraceHashJoinExecutor
                 ? partition.TotalBuildRowCount
                 : partition.InMemoryBuildRowCount;
             List<Row> buildRowList = new(Math.Max(buildRowEstimate, 4));
+            // Cap the initial hash-map capacity to avoid >64 MB Entry[] pre-allocations
+            // when buildRowEstimate is large due to hash skew. Both maps grow dynamically
+            // via Resize() as rows are inserted, so this is only an initial hint.
+            int initialHashCapacity = Math.Min(buildRowEstimate, 1 << 16);
             DataValueHashMap<List<(int Index, Row Row)>>? singleKeyTable =
-                useSingleKey ? new(buildRowEstimate) : null;
+                useSingleKey ? new(initialHashCapacity) : null;
             CompositeKeyHashMap<List<(int Index, Row Row)>>? compositeKeyTable =
-                useSingleKey ? null : new(buildRowEstimate);
+                useSingleKey ? null : new(initialHashCapacity);
 
             long buildSizeEstimate = 0;
             MemoryEstimator partitionEstimator = new();
+            bool partitionBudgetExceeded = false;
 
+            // Load build rows and build the hash table simultaneously.
+            // Once the memory estimate crosses the budget, hash-table construction is
+            // skipped for remaining rows — they are appended to buildRowList only.
+            // This avoids doubling the partition footprint with a hash table that
+            // would immediately be discarded on re-partition, cutting peak memory
+            // roughly in half compared to the previous post-loop check.
             foreach (Row buildRow in buildRows)
             {
                 int buildIndex = buildRowList.Count;
@@ -635,6 +663,24 @@ internal sealed class GraceHashJoinExecutor
 
                 partitionEstimator.IncrementRowCount();
                 buildSizeEstimate = partitionEstimator.EstimateTotalBytes();
+
+                if (partitionBudgetExceeded)
+                {
+                    // Already over budget — drain remaining rows into the list without
+                    // building hash table entries; they will be passed to re-partitioning.
+                    continue;
+                }
+
+                if (buildSizeEstimate > _memoryBudgetBytes && recursionDepth < MaxRecursionDepth)
+                {
+                    partitionBudgetExceeded = true;
+                    continue;
+                }
+
+                if (buildSizeEstimate > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
+                {
+                    partitionEstimator.EscalateToEveryRow();
+                }
 
                 if (useSingleKey)
                 {
@@ -667,9 +713,14 @@ internal sealed class GraceHashJoinExecutor
                 }
             }
 
-            // If partition is still too large after initial partitioning, recursively re-partition.
-            if (buildSizeEstimate > _memoryBudgetBytes && recursionDepth < MaxRecursionDepth)
+            // If partition exceeded budget during load, re-partition recursively.
+            // Null the partial hash tables before recursing so they can be collected
+            // during re-partitioning rather than pinned in the async state machine.
+            if (partitionBudgetExceeded)
             {
+                singleKeyTable = null;
+                compositeKeyTable = null;
+
                 if (outputBatch is not null) { yield return outputBatch; outputBatch = null; }
 
                 await foreach (RowBatch recursionBatch in RecursivelyRepartitionAsync(
@@ -691,6 +742,8 @@ internal sealed class GraceHashJoinExecutor
             BitArray? buildMatched = needBuildUnmatched ? new BitArray(buildRowList.Count) : null;
             CombinedRowSchema? schema = null;
             Row? cachedNullBuild = null;
+            DataValue[]? residualScratch = null;
+            Row residualScratchRow = default;
 
             foreach (Row probeRow in probeRows)
             {
@@ -726,8 +779,13 @@ internal sealed class GraceHashJoinExecutor
                         if (_extraction.Residual is not null)
                         {
                             schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                            Row combinedRow = schema.Combine(leftRow, rightRow);
-                            if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, combinedRow))
+                            if (residualScratch is null)
+                            {
+                                (residualScratchRow, residualScratch) = schema.CreateReusableRow();
+                            }
+
+                            schema.CombineInto(leftRow, rightRow, residualScratch);
+                            if (!_evaluator.EvaluateAsBoolean(_extraction.Residual, residualScratchRow))
                             {
                                 continue;
                             }
@@ -962,9 +1020,18 @@ internal sealed class GraceHashJoinExecutor
             hash = compositeKey.GetHashCode();
         }
 
-        // Shift bits based on recursion depth to get different partition assignments.
-        int shifted = (int)((uint)hash >> (16 + recursionDepth * 4));
-        return Math.Abs(shifted) % partitionCount;
+        // Mix the hash before extracting partition bits. Without mixing, small
+        // sequential integers (e.g. order_id = 1..65535) have hash == value,
+        // so (uint)hash >> 16 == 0 for all of them, routing every row to partition 0.
+        // The multiplier 0x45d9f3b (Wang's integer hash) avalanches all input
+        // bits into the full 32-bit output, giving uniform partition assignments.
+        uint mixed = (uint)hash;
+        mixed ^= mixed >> 16;
+        mixed *= 0x45d9f3b;
+        mixed ^= mixed >> 16;
+        // Use a different 8-bit window at each recursion depth so that rows
+        // which collide at depth N are spread across sub-partitions at depth N+1.
+        return (int)((mixed >> (recursionDepth * 8)) % (uint)partitionCount);
     }
 
     private int ComputeInitialPartitionCount()

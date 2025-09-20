@@ -132,9 +132,21 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from a text string.</summary>
     public static DataValue FromString(string value)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(value);
+        int index = ReferenceStore.CurrentOrCreate().InternString(value);
         return new(DataKind.String, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
+
+    /// <summary>
+    /// Creates a value from a reference index that has already been interned in the
+    /// current <see cref="ReferenceStore"/>. Used by decoders that call
+    /// <see cref="ReferenceStore.InternStringFromUtf8"/> directly to avoid a
+    /// redundant dictionary lookup.
+    /// </summary>
+    /// <param name="kind">The data kind (must be a reference-backed kind such as
+    /// <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>).</param>
+    /// <param name="referenceIndex">Index returned by a prior intern call.</param>
+    internal static DataValue FromInternedReference(DataKind kind, int referenceIndex) =>
+        new(kind, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: referenceIndex);
 
     /// <summary>
     /// Creates an arena-backed string value from an offset and length within a
@@ -222,7 +234,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from a raw JSON string.</summary>
     public static DataValue FromJsonValue(string value)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(value);
+        int index = ReferenceStore.CurrentOrCreate().InternString(value);
         return new(DataKind.JsonValue, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 

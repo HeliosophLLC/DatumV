@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace DatumIngest.Diagnostics;
@@ -10,8 +11,16 @@ namespace DatumIngest.Diagnostics;
 /// no overhead on hot paths.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Usage: set <c>DATUM_TRACE_FILE=C:\temp\datum-trace.txt</c> then run the query.
 /// The trace is written to that file, one timestamped line per event.
+/// </para>
+/// <para>
+/// All <c>Write</c> overloads accept interpolated strings via
+/// <see cref="TraceInterpolatedStringHandler"/> so that formatting is deferred
+/// and zero-cost when tracing is disabled. This makes the trace calls safe to
+/// leave in production code permanently.
+/// </para>
 /// </remarks>
 internal static class ExecutionTracer
 {
@@ -35,14 +44,27 @@ internal static class ExecutionTracer
         if (_writer is not null) return;
 
         string? path = Environment.GetEnvironmentVariable("DATUM_TRACE_FILE");
-        if (path is null) return;
+        if (path is not null)
+        {
+            Initialize(path);
+        }
+    }
+
+    /// <summary>
+    /// Opens the trace file at the specified <paramref name="filePath"/>.
+    /// Safe to call multiple times — only the first call opens the file.
+    /// </summary>
+    /// <param name="filePath">Absolute path to the trace output file.</param>
+    public static void Initialize(string filePath)
+    {
+        if (_writer is not null) return;
 
         lock (_writeLock)
         {
             if (_writer is not null) return;
 
             _watch.Restart();
-            _writer = new StreamWriter(path, append: false, Encoding.UTF8) { AutoFlush = true };
+            _writer = new StreamWriter(filePath, append: false, Encoding.UTF8) { AutoFlush = true };
             Write("=== DatumIngest Execution Trace ===");
             Write($"PID {Environment.ProcessId}  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             Write(new string('-', 72));
@@ -59,6 +81,18 @@ internal static class ExecutionTracer
         {
             w.WriteLine($"[{_watch.Elapsed.TotalSeconds,8:F3}s] {message}");
         }
+    }
+
+    /// <summary>
+    /// Writes a single timestamped trace line using a deferred interpolated string.
+    /// When tracing is disabled the interpolated string handler short-circuits and
+    /// no formatting or allocation occurs.
+    /// </summary>
+    internal static void Write(ref TraceInterpolatedStringHandler handler)
+    {
+        if (!handler.IsEnabled) return;
+
+        Write(handler.ToStringAndClear());
     }
 
     /// <summary>
@@ -79,4 +113,65 @@ internal static class ExecutionTracer
             _ => $"{bytes} B",
         };
     }
+}
+
+/// <summary>
+/// Custom interpolated string handler that defers all formatting until
+/// <see cref="ExecutionTracer.Write(ref TraceInterpolatedStringHandler)"/>
+/// confirms tracing is enabled. When tracing is off, the constructor sets
+/// <see cref="IsEnabled"/> to <c>false</c> and all <c>Append*</c> calls
+/// are no-ops — zero allocation, zero formatting.
+/// </summary>
+[InterpolatedStringHandler]
+internal ref struct TraceInterpolatedStringHandler
+{
+    private DefaultInterpolatedStringHandler _inner;
+
+    internal bool IsEnabled { get; }
+
+    public TraceInterpolatedStringHandler(int literalLength, int formattedCount)
+    {
+        IsEnabled = ExecutionTracer.IsEnabled;
+        if (IsEnabled)
+        {
+            _inner = new DefaultInterpolatedStringHandler(literalLength, formattedCount);
+        }
+    }
+
+    public void AppendLiteral(string value)
+    {
+        if (IsEnabled) _inner.AppendLiteral(value);
+    }
+
+    public void AppendFormatted<T>(T value)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value);
+    }
+
+    public void AppendFormatted<T>(T value, string? format)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value, format);
+    }
+
+    public void AppendFormatted<T>(T value, int alignment)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value, alignment);
+    }
+
+    public void AppendFormatted<T>(T value, int alignment, string? format)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value, alignment, format);
+    }
+
+    public void AppendFormatted(ReadOnlySpan<char> value)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value);
+    }
+
+    public void AppendFormatted(string? value)
+    {
+        if (IsEnabled) _inner.AppendFormatted(value);
+    }
+
+    internal string ToStringAndClear() => _inner.ToStringAndClear();
 }

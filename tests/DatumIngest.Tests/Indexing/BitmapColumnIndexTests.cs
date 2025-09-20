@@ -203,6 +203,81 @@ public sealed class BitmapColumnIndexTests
         Assert.True(retrieved.IsSet(7));
     }
 
+    // ───────────────────── Cross-scope resilience ─────────────────────
+
+    [Fact]
+    public void GetChunkBitmap_StringKey_SurvivesScopeChange()
+    {
+        // Build the index in the global (unscoped) ReferenceStore — this is what
+        // happens when the catalog loads an index during GetSchemaAsync.
+        BitmapColumnIndex index = BuildTwoValueIndex();
+
+        // Simulate what happens when a query starts: a fresh, empty scope is
+        // installed. DataValue.FromString("red") now writes into the new scope,
+        // so the reference index won't match the one stored in the dictionary keys.
+        ReferenceStore.BeginQueryScope();
+        try
+        {
+            DataValue red = DataValue.FromString("red");
+
+            ChunkBitmap bitmap = index.GetChunkBitmap(red, chunkIndex: 0);
+
+            Assert.Equal(10, bitmap.RowCount);
+            Assert.True(bitmap.IsSet(0));
+            Assert.True(bitmap.IsSet(5));
+            Assert.False(bitmap.IsSet(1));
+        }
+        finally
+        {
+            ReferenceStore.EndQueryScope();
+        }
+    }
+
+    [Fact]
+    public void ChunkContainsValue_StringKey_SurvivesScopeChange()
+    {
+        BitmapColumnIndex index = BuildTwoValueIndex();
+
+        ReferenceStore.BeginQueryScope();
+        try
+        {
+            Assert.True(index.ChunkContainsValue(DataValue.FromString("red"), chunkIndex: 0));
+            Assert.False(index.ChunkContainsValue(DataValue.FromString("green"), chunkIndex: 0));
+            Assert.False(index.ChunkContainsValue(DataValue.FromString("blue"), chunkIndex: 0));
+            Assert.True(index.ChunkContainsValue(DataValue.FromString("blue"), chunkIndex: 1));
+        }
+        finally
+        {
+            ReferenceStore.EndQueryScope();
+        }
+    }
+
+    [Fact]
+    public void FindChunksContaining_StringKey_SurvivesScopeChange()
+    {
+        BitmapColumnIndex index = BuildTwoValueIndex();
+
+        ReferenceStore.BeginQueryScope();
+        try
+        {
+            IReadOnlySet<int> redChunks = index.FindChunksContaining(DataValue.FromString("red"));
+            Assert.Equal(2, redChunks.Count);
+            Assert.Contains(0, redChunks);
+            Assert.Contains(1, redChunks);
+
+            IReadOnlySet<int> blueChunks = index.FindChunksContaining(DataValue.FromString("blue"));
+            Assert.Single(blueChunks);
+            Assert.Contains(1, blueChunks);
+
+            IReadOnlySet<int> greenChunks = index.FindChunksContaining(DataValue.FromString("green"));
+            Assert.Empty(greenChunks);
+        }
+        finally
+        {
+            ReferenceStore.EndQueryScope();
+        }
+    }
+
     // ───────────────────────── Helpers ─────────────────────────
 
     /// <summary>

@@ -152,11 +152,18 @@ public sealed record SelectAllColumns(
 /// <param name="Span">Source location span for diagnostic reporting.</param>
 /// <param name="ExcludedColumns">Column names to exclude from the table wildcard expansion, or <see langword="null"/> for an unfiltered <c>SELECT table.*</c>.</param>
 /// <param name="ReplacedColumns">Columns whose values are replaced by expressions, or <see langword="null"/> when no replacements are specified.</param>
+/// <param name="QualifyOutput">
+/// When <see langword="true"/>, the table alias qualifier is preserved in output column names
+/// (e.g. <c>t.id</c> instead of <c>id</c>). Used by the query planner when expanding
+/// <c>SELECT *</c> in multi-join contexts where qualified names are required for disambiguation.
+/// User-written <c>SELECT t.*</c> leaves this <see langword="false"/> so output names are unqualified.
+/// </param>
 public sealed record SelectTableColumns(
     string TableName,
     SourceSpan? Span = null,
     IReadOnlyList<string>? ExcludedColumns = null,
-    IReadOnlyList<ColumnReplacement>? ReplacedColumns = null) : SelectColumn(
+    IReadOnlyList<ColumnReplacement>? ReplacedColumns = null,
+    bool QualifyOutput = false) : SelectColumn(
     new ColumnReference(TableName, "*"),
     null);
 

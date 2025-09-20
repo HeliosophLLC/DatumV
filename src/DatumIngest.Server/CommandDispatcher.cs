@@ -1,4 +1,5 @@
 using DatumIngest.Catalog;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
@@ -184,7 +185,9 @@ public sealed class CommandDispatcher
             ParallelismBudget = _parallelismBudget,
             AssertionDiagnostics = assertionDiagnostics,
         };
+        ExecutionTracer.Write("DISPATCH planning...");
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
+        ExecutionTracer.Write("DISPATCH plan done, creating deferred stream...");
 
         // Wrap the deferred execution so the pool is disposed after the stream
         // is fully consumed (or abandoned). The pool cannot be scoped with `using`
@@ -192,8 +195,10 @@ public sealed class CommandDispatcher
         IAsyncEnumerable<RowBatch> rows = StreamWithDisposal(plan.ExecuteAsync(context), localBufferPool);
 
         // We need the schema before streaming. Use the leftmost SELECT for column metadata.
+        ExecutionTracer.Write("DISPATCH resolving schema...");
         SelectStatement schemaStatement = ExtractLeftmostStatement(query);
         Schema schema = await ResolveQuerySchemaAsync(session, queryContext, schemaStatement, cancellationToken).ConfigureAwait(false);
+        ExecutionTracer.Write($"DISPATCH schema resolved  columns={schema.Columns.Count}, returning streaming rows");
 
         return CommandResult.StreamingRows(rows, schema, assertionDiagnostics);
     }
@@ -676,15 +681,26 @@ public sealed class CommandDispatcher
     private static async IAsyncEnumerable<RowBatch> StreamWithDisposal(
         IAsyncEnumerable<RowBatch> source, LocalBufferPool pool)
     {
+        ExecutionTracer.Write("STREAM iteration starting");
+        long batchCount = 0;
+        long totalRows = 0;
         try
         {
             await foreach (RowBatch batch in source.ConfigureAwait(false))
             {
+                batchCount++;
+                totalRows += batch.Count;
+                if (batchCount <= 5 || batchCount % 100 == 0)
+                {
+                    ExecutionTracer.Write($"STREAM yielding batch #{batchCount}  batchSize={batch.Count}  totalRows={totalRows}");
+                }
                 yield return batch;
             }
+            ExecutionTracer.Write($"STREAM iteration complete  batches={batchCount}  totalRows={totalRows}");
         }
         finally
         {
+            ExecutionTracer.Write($"STREAM disposed  batches={batchCount}  totalRows={totalRows}");
             pool.Dispose();
         }
     }

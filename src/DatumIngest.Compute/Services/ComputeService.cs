@@ -1,4 +1,5 @@
 using DatumIngest.Compute.Grpc;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -253,8 +254,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
+                    ExecutionTracer.Write($"GRPC dispatching statement #{statementIndex}  sql={request.Sql[..Math.Min(request.Sql.Length, 120)]}");
                     CommandResult result = await _dispatcher.DispatchStatementAsync(
                         session, queryContext, statements[statementIndex], cancellationToken, meter, parameters).ConfigureAwait(false);
+                    ExecutionTracer.Write($"GRPC dispatch returned  kind={result.Kind}  success={result.IsSuccess}");
 
                     if (!result.IsSuccess)
                     {
@@ -281,6 +284,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                     {
                         // Query — stream rows with schema on the first row.
                         bool schemaWritten = false;
+                        ExecutionTracer.Write("GRPC entering row streaming loop");
 
                         await foreach (RowBatch batch in result.Rows.WithCancellation(cancellationToken).ConfigureAwait(false))
                         {

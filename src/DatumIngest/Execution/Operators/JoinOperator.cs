@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.Collections;
+using System.Diagnostics;
 using System.Threading.Channels;
 using DatumIngest.Catalog;
+using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
 using DatumIngest.Parsing.Ast;
@@ -181,12 +183,18 @@ public sealed class JoinOperator : IQueryOperator
             // join column. This is optimal under LIMIT with few probe rows.
             IndexNestedLoopJoinExecutor? indexNlj = TryCreateIndexNestedLoopExecutor(extraction, context);
 
+            ExecutionTracer.Write($"JOIN execute  INLJ={indexNlj is not null}  budget={context.MemoryBudgetBytes}  rowLimit={context.RowLimit}  flipped={_flipped}");
+
             if (indexNlj is not null)
             {
+                ExecutionTracer.Write("JOIN INLJ trial starting");
                 await foreach (RowBatch batch in indexNlj.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
                 {
+                    ExecutionTracer.Write($"JOIN INLJ yielded batch count={batch.Count}");
                     yield return batch;
                 }
+
+                ExecutionTracer.Write($"JOIN INLJ done  circuitBreaker={indexNlj.CircuitBreakerTripped}");
 
                 if (!indexNlj.CircuitBreakerTripped)
                 {
@@ -203,6 +211,7 @@ public sealed class JoinOperator : IQueryOperator
                 ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
                 IQueryOperator buildSide = _flipped ? _left : _right;
                 long? estimatedBuildRows = GetEstimatedRowCount(buildSide);
+                ExecutionTracer.Write($"JOIN GraceHash starting  build={GetOperatorLabel(buildSide)}  estimatedBuild={estimatedBuildRows}");
                 GraceHashJoinExecutor graceExecutor = new(_joinType, extraction, memoryBudget, evaluator, _nullSensitiveAntiSemi, _flipped, label: GetOperatorLabel(buildSide), estimatedBuildRows: estimatedBuildRows);
 
                 await foreach (RowBatch batch in graceExecutor.ExecuteAsync(_left, _right, context).ConfigureAwait(false))
@@ -212,6 +221,7 @@ public sealed class JoinOperator : IQueryOperator
             }
             else
             {
+                ExecutionTracer.Write("JOIN InMemoryHash starting");
                 await foreach (RowBatch batch in ExecuteHashJoinAsync(context, extraction).ConfigureAwait(false))
                 {
                     yield return batch;
@@ -373,6 +383,9 @@ public sealed class JoinOperator : IQueryOperator
         List<Row> buildRows = new();
         bool hasNullKey = false;
 
+        ExecutionTracer.Write($"HASH BUILD start  buildSide={GetOperatorLabel(buildSource)}  probeSide={GetOperatorLabel(probeSource)}");
+        long buildStartTicks = Stopwatch.GetTimestamp();
+
         await foreach (RowBatch buildBatch in buildSource.ExecuteAsync(context).ConfigureAwait(false))
         {
             for (int batchIndex = 0; batchIndex < buildBatch.Count; batchIndex++)
@@ -421,6 +434,8 @@ public sealed class JoinOperator : IQueryOperator
             buildBatch.Return();
         }
 
+        ExecutionTracer.Write($"HASH BUILD done  rows={buildRows.Count}  keys={singleKeyTable?.Count ?? compositeKeyTable?.Count ?? 0}  elapsed={Stopwatch.GetElapsedTime(buildStartTicks).TotalMilliseconds:F0}ms");
+
         // NOT IN null semantics: if any build-side key is NULL, the entire result is empty.
         if (_nullSensitiveAntiSemi && hasNullKey)
         {
@@ -450,6 +465,7 @@ public sealed class JoinOperator : IQueryOperator
             long? estimatedProbeRows = GetEstimatedRowCount(probeSource);
             if (estimatedProbeRows is null or >= 100_000)
             {
+                ExecutionTracer.Write($"HASH PROBE parallel  workers={context.DegreeOfParallelism}  estimatedProbe={estimatedProbeRows}");
                 await foreach (RowBatch batch in ExecuteParallelProbeAsync(
                     context, extraction, probeSource, singleKeyTable, compositeKeyTable,
                     buildRows, useSingleKey, isSemiJoin, needProbeUnmatched).ConfigureAwait(false))

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace DatumIngest.Model;
 
@@ -32,6 +33,7 @@ internal sealed class ReferenceStore
     private volatile object?[] _items;
     private int _count;
     private readonly Lock _growLock = new();
+    private Dictionary<string, int>? _stringIntern;
 
     /// <summary>
     /// Creates a new reference store with the given initial capacity.
@@ -75,16 +77,7 @@ internal sealed class ReferenceStore
     {
         lock (_growLock)
         {
-            int index = _count++;
-            object?[] items = _items;
-
-            if ((uint)index >= (uint)items.Length)
-            {
-                items = GrowLocked(index);
-            }
-
-            items[index] = value;
-            return index;
+            return AddCoreLocked(value);
         }
     }
 
@@ -138,6 +131,101 @@ internal sealed class ReferenceStore
     }
 
     /// <summary>
+    /// Returns the index for <paramref name="value"/>, reusing an existing slot
+    /// when the same string has been interned before in this store. This avoids
+    /// unbounded growth of the backing array when low-cardinality string columns
+    /// (e.g. <c>eval_set</c> with 3 distinct values) are scanned across millions
+    /// of rows.
+    /// </summary>
+    /// <param name="value">The string to intern.</param>
+    /// <returns>A stable index that can be passed to <see cref="Get{T}"/>.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal int InternString(string value)
+    {
+        lock (_growLock)
+        {
+            _stringIntern ??= new(StringComparer.Ordinal);
+            if (_stringIntern.TryGetValue(value, out int existing))
+            {
+                return existing;
+            }
+
+            int index = AddCoreLocked(value);
+            _stringIntern[value] = index;
+            return index;
+        }
+    }
+
+    /// <summary>
+    /// Interns a string from raw UTF-8 bytes without allocating a managed
+    /// <see cref="string"/> when the value has been seen before. On a cache hit
+    /// the span is hashed and compared directly against existing dictionary keys
+    /// via <see cref="Dictionary{TKey,TValue}.GetAlternateLookup{TAlternate}"/>,
+    /// which <see cref="StringComparer.Ordinal"/> supports for
+    /// <see cref="ReadOnlySpan{T}"/> of <see langword="char"/> in .NET 9+.
+    /// </summary>
+    /// <param name="utf8Bytes">The UTF-8 encoded bytes of the string.</param>
+    /// <returns>A stable index that can be passed to <see cref="Get{T}"/>.</returns>
+    internal int InternStringFromUtf8(ReadOnlySpan<byte> utf8Bytes)
+    {
+        // Decode to chars on the stack for short strings, ArrayPool for long ones.
+        int maxCharCount = Encoding.UTF8.GetMaxCharCount(utf8Bytes.Length);
+        char[]? rented = null;
+        Span<char> charBuffer = maxCharCount <= 256
+            ? stackalloc char[maxCharCount]
+            : (rented = System.Buffers.ArrayPool<char>.Shared.Rent(maxCharCount));
+
+        int charCount = Encoding.UTF8.GetChars(utf8Bytes, charBuffer);
+        ReadOnlySpan<char> chars = charBuffer[..charCount];
+
+        try
+        {
+            lock (_growLock)
+            {
+                _stringIntern ??= new(StringComparer.Ordinal);
+                var lookup = _stringIntern.GetAlternateLookup<ReadOnlySpan<char>>();
+
+                if (lookup.TryGetValue(chars, out int existing))
+                {
+                    return existing;
+                }
+
+                // Cache miss — allocate the string and store it.
+                string value = new(chars);
+                int index = AddCoreLocked(value);
+                lookup[chars] = index;
+                return index;
+            }
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(rented);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Appends a value to the backing array without acquiring the lock (caller
+    /// must already hold <see cref="_growLock"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int AddCoreLocked(object value)
+    {
+        int index = _count++;
+        object?[] items = _items;
+
+        if ((uint)index >= (uint)items.Length)
+        {
+            items = GrowLocked(index);
+        }
+
+        items[index] = value;
+        return index;
+    }
+
+    /// <summary>
     /// Clears all stored references, allowing the garbage collector to reclaim them.
     /// Indices issued before this call become invalid.  Only safe to call when no
     /// concurrent readers or writers exist.
@@ -148,6 +236,7 @@ internal sealed class ReferenceStore
         if (count == 0) return;
         Array.Clear(_items, 0, Math.Min(count, _items.Length));
         _count = 0;
+        _stringIntern?.Clear();
     }
 
     /// <summary>

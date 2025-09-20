@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DatumIngest.Catalog;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution.Operators;
 using DatumIngest.Indexing;
 using DatumIngest.Model;
@@ -122,6 +123,11 @@ internal sealed class IndexNestedLoopJoinExecutor
         BuildAliasSchema? buildAliasSchema = null;
 
         RowBatch? outputBatch = null;
+        LocalBufferPool bufferPool = context.LocalBufferPool;
+
+        // Reusable scratch buffer for residual evaluation — allocated once, filled by CombineInto.
+        DataValue[]? residualScratchBuffer = null;
+        Row residualScratchRow = default;
 
         // Trial budget: buffer NLJ output for at most this many probe rows.
         // If the probe side exceeds this budget, the circuit breaker trips and
@@ -131,7 +137,17 @@ internal sealed class IndexNestedLoopJoinExecutor
         int trialBudget = Math.Min((context.RowLimit ?? 500) * 10, MaxTrialProbeRows);
         List<RowBatch> trialBuffer = new();
         long probeRowsProcessed = 0;
+        long totalMatches = 0;
 
+        ExecutionTracer.Write($"INLJ start  trialBudget={trialBudget}  buildTable={_buildDescriptor.Name}  buildAlias={_buildAlias}  joinType={_joinType}");
+
+        // Wrap the entire execution in try/finally so the provider is always disposed.
+        // Without this, DatumFileTableProvider's cached column buffers (LOH DataValue[]
+        // arrays) and rented byte buffers accumulate in Gen2 across repeated executions.
+        try
+        {
+
+        ExecutionTracer.Write("INLJ probing probe side");
         await foreach (RowBatch probeBatch in probeOperator.ExecuteAsync(context).ConfigureAwait(false))
         {
             for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
@@ -143,6 +159,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // Too many probe rows — NLJ is not benefiting from
                 // LIMIT short-circuit. Discard buffered output and signal
                 // the caller to fall back to hash join.
+                ExecutionTracer.Write($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
                 probeBatch.Return();
                 outputBatch?.Return();
                 foreach (RowBatch buffered in trialBuffer) { buffered.Return(); }
@@ -181,24 +198,32 @@ internal sealed class IndexNestedLoopJoinExecutor
                     continue;
                 }
 
-                // Fetch one build row to evaluate residual.
+                // Fetch build rows to evaluate residual.
                 bool semiMatch = false;
 
                 foreach (ValueIndexEntry entry in matches)
                 {
-                    Row? buildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
+                    Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
                         .ConfigureAwait(false);
 
-                    if (buildRow is null)
+                    if (rawBuildRow is null)
                     {
                         continue;
                     }
 
-                    buildRow = ApplyBuildAlias(buildRow.Value, ref buildAliasSchema);
-                    combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow.Value);
-                    Row combined = combinedSchema.Combine(probeRow, buildRow.Value);
+                    Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, bufferPool);
+                    if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
 
-                    if (EvaluateResidual(residual, combined))
+                    combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
+                    if (residualScratchBuffer is null)
+                    {
+                        (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
+                    }
+
+                    combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
+                    bufferPool.Return(buildRow.RawValues);
+
+                    if (EvaluateResidual(residual, residualScratchRow))
                     {
                         semiMatch = true;
                         break;
@@ -218,22 +243,38 @@ internal sealed class IndexNestedLoopJoinExecutor
             // INNER join: fetch each matching build row and yield combined rows.
             foreach (ValueIndexEntry entry in matches)
             {
-                Row? buildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
+                Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
                     .ConfigureAwait(false);
 
-                if (buildRow is null)
+                if (rawBuildRow is null)
                 {
                     continue;
                 }
 
-                buildRow = ApplyBuildAlias(buildRow.Value, ref buildAliasSchema);
-                combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow.Value);
-                Row combined = combinedSchema.Combine(probeRow, buildRow.Value);
+                Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, bufferPool);
+                if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
 
-                if (residual is not null && !EvaluateResidual(residual, combined))
+                combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
+
+                if (residual is not null)
                 {
-                    continue;
+                    if (residualScratchBuffer is null)
+                    {
+                        (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
+                    }
+
+                    combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
+
+                    if (!EvaluateResidual(residual, residualScratchRow))
+                    {
+                        bufferPool.Return(buildRow.RawValues);
+                        continue;
+                    }
                 }
+
+                Row combined = combinedSchema.CombinePooled(probeRow, buildRow, bufferPool);
+                bufferPool.Return(buildRow.RawValues);
+                totalMatches++;
 
                 outputBatch ??= RowBatch.Rent(context.BatchSize);
                 outputBatch.Add(combined);
@@ -242,6 +283,8 @@ internal sealed class IndexNestedLoopJoinExecutor
             }
             probeBatch.Return();
         }
+
+        ExecutionTracer.Write($"INLJ trial complete  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
 
         // Trial completed — NLJ processed all probe rows within budget.
         // Yield the buffered output batches.
@@ -253,6 +296,12 @@ internal sealed class IndexNestedLoopJoinExecutor
         if (outputBatch is not null)
         {
             yield return outputBatch;
+        }
+
+        } // end try
+        finally
+        {
+            (provider as IDisposable)?.Dispose();
         }
     }
 
@@ -273,7 +322,9 @@ internal sealed class IndexNestedLoopJoinExecutor
         {
             if (batch.Count > 0)
             {
-                return batch[0];
+                Row row = batch[0];
+                batch.Return();
+                return row;
             }
         }
 
@@ -285,7 +336,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     /// provider, producing a row with qualified column names (e.g. <c>table.column</c>).
     /// The schema is built once from the first row and reused for all subsequent rows.
     /// </summary>
-    private Row ApplyBuildAlias(Row row, ref BuildAliasSchema? schema)
+    private Row ApplyBuildAlias(Row row, ref BuildAliasSchema? schema, LocalBufferPool bufferPool)
     {
         if (_buildAlias is null)
         {
@@ -293,7 +344,7 @@ internal sealed class IndexNestedLoopJoinExecutor
         }
 
         schema ??= BuildAliasSchema.Create(_buildAlias, row);
-        return schema.Apply(row);
+        return schema.Apply(row, bufferPool);
     }
 
     /// <summary>
@@ -342,11 +393,14 @@ internal sealed class IndexNestedLoopJoinExecutor
         }
 
         /// <summary>
-        /// Applies the alias schema to a raw build-side row.
+        /// Applies the alias schema to a raw build-side row, renting the backing
+        /// <see cref="DataValue"/> array from <paramref name="bufferPool"/> rather
+        /// than allocating. The caller must return the array via
+        /// <see cref="LocalBufferPool.Return(DataValue[])"/> when the row is no longer needed.
         /// </summary>
-        internal Row Apply(Row sourceRow)
+        internal Row Apply(Row sourceRow, LocalBufferPool bufferPool)
         {
-            DataValue[] values = new DataValue[_fieldCount];
+            DataValue[] values = bufferPool.Rent(_fieldCount);
 
             for (int index = 0; index < _fieldCount; index++)
             {

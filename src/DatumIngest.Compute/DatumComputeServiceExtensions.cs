@@ -1,4 +1,5 @@
 using DatumIngest.Compute.Services;
+using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Server;
@@ -53,6 +54,17 @@ public static class DatumComputeServiceExtensions
     {
         DatumComputeOptions options = new();
         configure?.Invoke(options);
+
+        // Activate the execution tracer if a trace file path is configured.
+        // Falls back to the DATUM_TRACE_FILE environment variable when not set.
+        if (options.TraceFilePath is not null)
+        {
+            ExecutionTracer.Initialize(options.TraceFilePath);
+        }
+        else
+        {
+            ExecutionTracer.Initialize();
+        }
 
         // Register the server-default governor built from configuration.
         services.TryAddSingleton(new QueryGovernor(

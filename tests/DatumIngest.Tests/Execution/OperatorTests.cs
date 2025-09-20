@@ -238,8 +238,8 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(project);
         Assert.Single(rows);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal(1f, rows[0]["t.a"].AsFloat32());
-        Assert.Equal(3f, rows[0]["t.c"].AsFloat32());
+        Assert.Equal(1f, rows[0]["a"].AsFloat32());
+        Assert.Equal(3f, rows[0]["c"].AsFloat32());
     }
 
     // ─────────────── SELECT * REPLACE tests ───────────────
@@ -349,8 +349,8 @@ public class OperatorTests
         List<Row> rows = await CollectAsync(project);
         Assert.Single(rows);
         Assert.Equal(2, rows[0].FieldCount);
-        Assert.Equal(100f, rows[0]["t.x"].AsFloat32());
-        Assert.Equal(250f, rows[0]["t.y"].AsFloat32());
+        Assert.Equal(100f, rows[0]["x"].AsFloat32());
+        Assert.Equal(250f, rows[0]["y"].AsFloat32());
     }
 
     [Fact]

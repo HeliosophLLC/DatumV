@@ -262,7 +262,15 @@ public sealed class ProjectOperator : IQueryOperator
                                     continue;
                                 Expression? replacement = FindReplacement(
                                     columnName, tableColumns.ReplacedColumns, prefix);
-                                names.Add(columnName);
+                                // User-written SELECT t.* strips the qualifier so output names are
+                                // unqualified (standard SQL semantics). QualifyOutput is set by
+                                // the query planner when expanding SELECT * in multi-join contexts
+                                // where qualified names are required for disambiguation.
+                                string outputName = !tableColumns.QualifyOutput
+                                    && columnName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                                    ? columnName[prefix.Length..]
+                                    : columnName;
+                                names.Add(outputName);
                                 slots.Add(replacement is not null
                                     ? ProjectionSlot.Evaluate(replacement)
                                     : ProjectionSlot.CopyOrdinal(index));

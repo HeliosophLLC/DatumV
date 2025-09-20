@@ -28,7 +28,49 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context)
     {
-        byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
+        DataValue[] result = new DataValue[rowCount];
+        DecodeCore(payload, payload.Length, compression, uncompressedByteLength, rowCount, descriptor, result, decompressedBuffer: null);
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public override void DecodeInto(
+        byte[] payload,
+        DatumEncoding encoding,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
+        DataValue[] target,
+        int payloadLength = -1,
+        byte[]? decompressedBuffer = null)
+    {
+        int effectiveLength = payloadLength >= 0 ? payloadLength : payload.Length;
+        DecodeCore(payload, effectiveLength, compression, uncompressedByteLength, rowCount, descriptor, target, decompressedBuffer);
+    }
+
+    private void DecodeCore(
+        byte[] payload,
+        int payloadLength,
+        DatumCompression compression,
+        int uncompressedByteLength,
+        int rowCount,
+        DatumColumnDescriptor descriptor,
+        DataValue[] target,
+        byte[]? decompressedBuffer)
+    {
+        byte[] raw;
+        if (decompressedBuffer is not null)
+        {
+            DecompressPayloadInto(payload, payloadLength, decompressedBuffer, uncompressedByteLength, compression);
+            raw = decompressedBuffer;
+        }
+        else
+        {
+            raw = DecompressPayload(payload, payloadLength, uncompressedByteLength, compression);
+        }
+
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
 
@@ -37,8 +79,9 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
         int poolStart = offsetsStart + (rowCount + 1) * 4;
 
         bool isJson = descriptor.Kind == DataKind.JsonValue;
+        DataKind nullKind = isJson ? DataKind.JsonValue : DataKind.String;
+        ReferenceStore store = ReferenceStore.CurrentOrCreate();
 
-        DataValue[] result = new DataValue[rowCount];
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             uint start = BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(offsetsStart + rowIndex * 4));
@@ -46,16 +89,15 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
 
             if (nullBitmap.IsNull(rowIndex))
             {
-                result[rowIndex] = DataValue.Null(isJson ? DataKind.JsonValue : DataKind.String);
+                target[rowIndex] = DataValue.Null(nullKind);
             }
             else
             {
-                string text = System.Text.Encoding.UTF8.GetString(raw, poolStart + (int)start, (int)(end - start));
-                result[rowIndex] = isJson ? DataValue.FromJsonValue(text) : DataValue.FromString(text);
+                ReadOnlySpan<byte> utf8Bytes = raw.AsSpan(poolStart + (int)start, (int)(end - start));
+                int index = store.InternStringFromUtf8(utf8Bytes);
+                target[rowIndex] = DataValue.FromInternedReference(isJson ? DataKind.JsonValue : DataKind.String, index);
             }
         }
-
-        return result;
     }
 
     /// <inheritdoc/>

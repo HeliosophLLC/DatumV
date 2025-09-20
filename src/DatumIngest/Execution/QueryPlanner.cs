@@ -541,12 +541,13 @@ public sealed class QueryPlanner
                     {
                         // Build-side flip: when the right (build) side has 2x+ more estimated
                         // rows than the left (probe) side, flip them so the smaller side is
-                        // materialized into the hash table. Only applied to LEFT/RIGHT JOINs
-                        // because INNER joins are handled by TryReorderJoins and semi-joins
-                        // have asymmetric semantics that do not benefit from flipping.
+                        // materialized into the hash table. Applied to INNER, LEFT, and RIGHT
+                        // joins. For INNER joins this acts as a fallback when TryReorderJoins
+                        // did not fire (e.g. missing row-count estimates on one source).
+                        // Semi-joins have asymmetric semantics and are not flipped.
                         bool flipped = false;
 
-                        if (join.Type is JoinType.Left or JoinType.Right)
+                        if (join.Type is JoinType.Inner or JoinType.Left or JoinType.Right)
                         {
                             long? leftRowCount = GetEstimatedRowCount(source);
                             long? rightRowCount = GetEstimatedRowCount(currentRight);
@@ -981,7 +982,7 @@ public sealed class QueryPlanner
                 string? fromAlias = GetSourceAlias(statement.From.Source);
                 if (fromAlias is not null)
                 {
-                    expanded.Add(new SelectTableColumns(fromAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns));
+                    expanded.Add(new SelectTableColumns(fromAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns, QualifyOutput: true));
                 }
             }
 
@@ -990,7 +991,7 @@ public sealed class QueryPlanner
                 string? joinAlias = GetSourceAlias(join.Source);
                 if (joinAlias is not null)
                 {
-                    expanded.Add(new SelectTableColumns(joinAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns));
+                    expanded.Add(new SelectTableColumns(joinAlias, ExcludedColumns: selectAll.ExcludedColumns, ReplacedColumns: selectAll.ReplacedColumns, QualifyOutput: true));
                 }
             }
 

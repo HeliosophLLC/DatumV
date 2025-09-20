@@ -208,22 +208,81 @@ public sealed class QuerySchemaResolver
         // Pass the outer CTE scope so the body can reference sibling CTEs.
         SelectStatement leftmostStatement = ExtractLeftmostStatement(commonTableExpression.Body);
 
-        ResolvedQuerySchema innerSchema = await ResolveAsyncCore(
+        // Resolve the FROM/JOIN source schema so SELECT expressions can reference columns.
+        ResolvedQuerySchema sourceSchema = await ResolveAsyncCore(
             leftmostStatement, outerCommonTableExpressions, cancellationToken).ConfigureAwait(false);
 
         string sourceIdentifier = tableAlias ?? commonTableExpression.Name;
 
-        // If explicit column names were provided, they rename the output columns positionally.
+        // Build a flat Schema for type inference on SELECT expressions.
+        Schema flatSourceSchema = ToSchema(sourceSchema);
+
+        // Project the CTE body's SELECT clause to compute the actual output columns.
+        // This mirrors ResolveSubqueryAsync so that a CTE with a narrowing projection
+        // (e.g. SELECT a, b FROM wide_table) exposes only those columns to the outer query.
+        List<ResolvedColumn> outputColumns = new();
+        HashSet<int> aliasedPositions = new();
+
+        foreach (SelectColumn selectColumn in leftmostStatement.Columns)
+        {
+            switch (selectColumn)
+            {
+                case SelectAllColumns:
+                    foreach (ResolvedColumn inner in sourceSchema.Columns)
+                    {
+                        outputColumns.Add(inner with { SourceTableOrAlias = sourceIdentifier });
+                    }
+                    break;
+
+                case SelectTableColumns tableColumns:
+                    foreach (ResolvedColumn inner in sourceSchema.FindColumns(tableColumns.TableName))
+                    {
+                        outputColumns.Add(inner with { SourceTableOrAlias = sourceIdentifier });
+                    }
+                    break;
+
+                default:
+                    string outputName = selectColumn.Alias
+                        ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
+
+                    DataKind? kind = ExpressionTypeResolver.ResolveType(
+                        selectColumn.Expression, flatSourceSchema, _functionRegistry);
+
+                    outputColumns.Add(new ResolvedColumn(
+                        outputName,
+                        kind ?? DataKind.String,
+                        Nullable: true,
+                        sourceIdentifier));
+
+                    if (selectColumn.Alias is not null)
+                    {
+                        aliasedPositions.Add(outputColumns.Count - 1);
+                    }
+                    break;
+            }
+        }
+
+        // Deduplicate auto-generated column names (same as ResolveSubqueryAsync).
+        string[] names = outputColumns.Select(column => column.ColumnName).ToArray();
+        ColumnNameResolver.DeduplicateNames(names, aliasedPositions);
+        List<ResolvedColumn> deduplicatedColumns = new(outputColumns.Count);
+        for (int index = 0; index < outputColumns.Count; index++)
+        {
+            deduplicatedColumns.Add(outputColumns[index] with { ColumnName = names[index] });
+        }
+
+        // If explicit column names were provided in the CTE definition (e.g. WITH cte(a, b) AS (...)),
+        // rename the output columns positionally, overriding whatever the SELECT clause produced.
         if (commonTableExpression.ColumnNames is not null && commonTableExpression.ColumnNames.Count > 0)
         {
-            List<ResolvedColumn> renamedColumns = new(innerSchema.Columns.Count);
-            for (int index = 0; index < innerSchema.Columns.Count; index++)
+            List<ResolvedColumn> renamedColumns = new(deduplicatedColumns.Count);
+            for (int index = 0; index < deduplicatedColumns.Count; index++)
             {
                 string columnName = index < commonTableExpression.ColumnNames.Count
                     ? commonTableExpression.ColumnNames[index]
-                    : innerSchema.Columns[index].ColumnName;
+                    : deduplicatedColumns[index].ColumnName;
 
-                renamedColumns.Add(innerSchema.Columns[index] with
+                renamedColumns.Add(deduplicatedColumns[index] with
                 {
                     ColumnName = columnName,
                     SourceTableOrAlias = sourceIdentifier,
@@ -233,14 +292,7 @@ public sealed class QuerySchemaResolver
             return renamedColumns;
         }
 
-        // Re-tag all columns with the CTE alias.
-        List<ResolvedColumn> retaggedColumns = new(innerSchema.Columns.Count);
-        foreach (ResolvedColumn column in innerSchema.Columns)
-        {
-            retaggedColumns.Add(column with { SourceTableOrAlias = sourceIdentifier });
-        }
-
-        return retaggedColumns;
+        return deduplicatedColumns;
     }
 
     /// <summary>

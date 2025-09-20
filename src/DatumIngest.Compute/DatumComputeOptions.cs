@@ -79,6 +79,17 @@ public sealed class DatumComputeOptions
     public int? MaxConcurrentQueries { get; set; } = 3;
 
     /// <summary>
+    /// Gets or sets the file path for the execution trace log. When set,
+    /// <see cref="DatumIngest.Diagnostics.ExecutionTracer"/> writes timestamped
+    /// diagnostic events (join strategy decisions, build/probe phases, batch
+    /// streaming) to this file. The trace is invaluable for diagnosing slow
+    /// or hanging queries. Set to <see langword="null"/> (the default) to
+    /// disable tracing. The <c>DATUM_TRACE_FILE</c> environment variable is
+    /// still honoured as a fallback when this property is not set.
+    /// </summary>
+    public string? TraceFilePath { get; set; }
+
+    /// <summary>
     /// Gets or sets the maximum number of parallel operator workers allowed
     /// across all concurrent queries. Parallel operators (e.g. parallel hash
     /// join probe, parallel hash aggregate) acquire slots from a shared

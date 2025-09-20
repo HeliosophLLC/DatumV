@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using DatumIngest.Catalog;
 using DatumIngest.Catalog.Providers;
+using DatumIngest.Diagnostics;
 using DatumIngest.Indexing;
 using DatumIngest.Indexing.Bitmap;
 using DatumIngest.Manifest;
@@ -250,6 +251,8 @@ public sealed class ScanOperator : IQueryOperator
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
 
+        ExecutionTracer.Write($"SCAN start  table={_descriptor.Name}  provider={provider.GetType().Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  estimated={EstimatedRowCount}");
+
         try
         {
 
@@ -263,6 +266,8 @@ public sealed class ScanOperator : IQueryOperator
                 || _sourceIndex.MappedSortedIndexes is not null
                 || _sourceIndex.BPlusTreeIndexes is not null
                 || _sourceIndex.BitmapIndexes is not null);
+
+        ExecutionTracer.Write($"SCAN path  table={_descriptor.Name}  indexPruning={hasIndexPruning}");
 
         if (hasIndexPruning)
         {
@@ -376,6 +381,10 @@ public sealed class ScanOperator : IQueryOperator
 
                 if (StatisticsPredicateEvaluator.CanSkipPartition(_filterHint, statistics))
                 {
+                    if (chunkIndex == 0)
+                    {
+                        ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=zonemap  table={_descriptor.Name}  statsKeys=[{string.Join(",", statistics.Keys)}]");
+                    }
                     pruned = true;
                 }
             }
@@ -400,6 +409,7 @@ public sealed class ScanOperator : IQueryOperator
 
                         if (!anyMayMatch)
                         {
+                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bloom  table={_descriptor.Name}");
                             pruned = true;
                             break;
                         }
@@ -429,6 +439,7 @@ public sealed class ScanOperator : IQueryOperator
 
                         if (!anyPresent)
                         {
+                            if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=sorted_join_key  table={_descriptor.Name}");
                             pruned = true;
                             break;
                         }
@@ -440,14 +451,22 @@ public sealed class ScanOperator : IQueryOperator
             // a column index exists, check whether the chunk contains the key.
             if (!pruned && _filterHint is not null)
             {
-                pruned = ShouldPruneWithColumnIndexes(_filterHint, _sourceIndex, chunkIndex);
+                if (ShouldPruneWithColumnIndexes(_filterHint, _sourceIndex, chunkIndex))
+                {
+                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=column_index  table={_descriptor.Name}");
+                    pruned = true;
+                }
             }
 
             // Bitmap-index-based pruning: for equality predicates on columns with
             // bitmap indexes, check whether the value appears in this chunk.
             if (!pruned && _filterHint is not null && _sourceIndex.BitmapIndexes is not null)
             {
-                pruned = ShouldPruneWithBitmapIndexes(_filterHint, _sourceIndex.BitmapIndexes, chunkIndex);
+                if (ShouldPruneWithBitmapIndexes(_filterHint, _sourceIndex.BitmapIndexes, chunkIndex))
+                {
+                    if (chunkIndex == 0) ExecutionTracer.Write($"SCAN PRUNE chunk=0  reason=bitmap  table={_descriptor.Name}");
+                    pruned = true;
+                }
             }
 
             if (pruned)
@@ -461,6 +480,8 @@ public sealed class ScanOperator : IQueryOperator
             }
         }
 
+        ExecutionTracer.Write($"SCAN index pruning  table={_descriptor.Name}  totalChunks={chunks.Count}  pruned={PrunedIndexChunks}  active={activeRanges.Count}");
+
         // When the provider supports seeking and equality predicates have
         // index hits, seek directly to matching rows rather than reading entire chunks.
         if (provider is ISeekableTableProvider seekable
@@ -471,6 +492,7 @@ public sealed class ScanOperator : IQueryOperator
 
             if (exactPositions is not null)
             {
+                ExecutionTracer.Write($"SCAN exact seek  table={_descriptor.Name}  positions={exactPositions.Count}");
                 ExactSeekRowsFetched = exactPositions.Count;
                 RowBatch? outputBatch = null;
 

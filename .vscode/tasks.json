@@ -142,6 +142,20 @@
 			}
 		},
 		{
+			"label": "Debug: Build CLI",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"src/DatumIngest.Cli",
+				"-c", "Debug"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"hide": true
+		},
+		{
 			"label": "Shell: Build & Launch",
 			"type": "shell",
 			"command": "dotnet",

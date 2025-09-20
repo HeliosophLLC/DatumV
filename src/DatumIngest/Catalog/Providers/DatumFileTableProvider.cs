@@ -21,6 +21,17 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
     // amortising that cost over the full index traversal is critical for B+Tree scans.
     private DatumFileReader? _cachedReader;
     private string? _cachedReaderPath;
+
+    // Pre-allocated column buffers for ReadRowRangeAsync — mirrors the optimization
+    // in OpenCoreAsync that eliminates LOH DataValue[] allocations per row group.
+    // Rebuilt when the file or projected column set changes.
+    private DataValue[][]? _seekColumnBuffers;
+    private byte[]? _seekCompressedBuffer;
+    private byte[]? _seekDecompressedBuffer;
+    private int[]? _seekProjectedIndices;
+    private string[]? _seekProjectedNames;
+    private Dictionary<string, int>? _seekNameIndex;
+
     /// <summary>Total number of row groups examined in the most recent read.</summary>
     public int TotalRowGroups { get; private set; }
 
@@ -310,14 +321,28 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
             _cachedReader?.Dispose();
             _cachedReader = DatumFileReader.Open(descriptor.FilePath);
             _cachedReaderPath = descriptor.FilePath;
+            // Invalidate seek buffers — they are sized to the previous file's row groups.
+            InvalidateSeekBuffers();
         }
 
         DatumFileReader reader = _cachedReader;
         Schema schema = reader.Schema;
 
         int[] projectedIndices = ResolveProjection(schema, requiredColumns);
-        string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
-        Dictionary<string, int> nameIndex = BuildNameIndex(projectedNames);
+
+        // Rebuild seek buffers when the projected column set changes.
+        // In the common case (INLJ probes the same join column each call) the
+        // projection is stable and the buffers are reused across all seeks.
+        if (!IndicesEqual(projectedIndices, _seekProjectedIndices))
+        {
+            RebuildSeekBuffers(reader, projectedIndices, schema);
+        }
+
+        string[] projectedNames = _seekProjectedNames!;
+        Dictionary<string, int> nameIndex = _seekNameIndex!;
+        DataValue[][] columns = _seekColumnBuffers!;
+        byte[] compressedBuffer = _seekCompressedBuffer!;
+        byte[] decompressedBuffer = _seekDecompressedBuffer!;
 
         long endRow = startRow + count;
         long cumulativeRow = 0;
@@ -346,7 +371,8 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                 break;
             }
 
-            DataValue[][] columns = reader.ReadColumns(rgIndex, projectedIndices);
+            // Decode directly into pre-allocated column buffers — no LOH allocation.
+            reader.ReadColumnsInto(rgIndex, projectedIndices, columns, compressedBuffer, decompressedBuffer);
 
             // Calculate the slice within this row group.
             int sliceStart = (int)Math.Max(startRow - cumulativeRow, 0);
@@ -368,7 +394,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                     values[colPos] = columns[colPos][rowIndex];
                 }
 
-                batch ??= RowBatch.Rent(DefaultBatchSize);
+                batch ??= RowBatch.Rent(Math.Min(count, DefaultBatchSize));
                 batch.Add(new Row(projectedNames, values, nameIndex));
                 emitted++;
 
@@ -390,11 +416,105 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         await Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Allocates the per-call-reusable buffers for <see cref="ReadRowRangeAsync"/>:
+    /// one <see cref="DataValue"/> array per projected column (sized to the largest
+    /// row group), plus byte buffers for compressed/decompressed page data.
+    /// These replace the per-call <c>ReadColumns</c> allocations that previously
+    /// produced LOH objects (~1.57 MB each) on every INLJ point-seek.
+    /// </summary>
+    private void RebuildSeekBuffers(DatumFileReader reader, int[] projectedIndices, Schema schema)
+    {
+        InvalidateSeekBuffers();
+
+        int maxRowGroupSize = 0;
+        int maxCompressed = 0;
+        int maxUncompressed = 0;
+
+        for (int rg = 0; rg < reader.RowGroupCount; rg++)
+        {
+            DatumRowGroupDescriptor rgd = reader.GetRowGroupDescriptor(rg);
+            int rgRows = (int)rgd.RowCount;
+            if (rgRows > maxRowGroupSize) maxRowGroupSize = rgRows;
+
+            for (int ci = 0; ci < projectedIndices.Length; ci++)
+            {
+                DatumColumnChunkDescriptor chunk = rgd.ColumnChunks[projectedIndices[ci]];
+                int compressed = (int)chunk.CompressedByteLength;
+                int uncompressed = (int)chunk.UncompressedByteLength;
+                if (compressed > maxCompressed) maxCompressed = compressed;
+                if (uncompressed > maxUncompressed) maxUncompressed = uncompressed;
+            }
+        }
+
+        // Rent from GlobalBufferPool so these LOH arrays survive across executions
+        // without triggering repeated Gen2 collections. Returned in InvalidateSeekBuffers.
+        DataValue[][] columnBuffers = new DataValue[projectedIndices.Length][];
+        for (int ci = 0; ci < projectedIndices.Length; ci++)
+        {
+            columnBuffers[ci] = maxRowGroupSize > 0
+                ? GlobalBufferPool.Rent(maxRowGroupSize)
+                : [];
+        }
+
+        string[] projectedNames = Array.ConvertAll(projectedIndices, i => schema.Columns[i].Name);
+
+        _seekProjectedIndices = projectedIndices;
+        _seekProjectedNames = projectedNames;
+        _seekNameIndex = BuildNameIndex(projectedNames);
+        _seekColumnBuffers = columnBuffers;
+        _seekCompressedBuffer = maxCompressed > 0
+            ? ArrayPool<byte>.Shared.Rent(maxCompressed)
+            : [];
+        _seekDecompressedBuffer = maxUncompressed > 0
+            ? ArrayPool<byte>.Shared.Rent(maxUncompressed)
+            : [];
+    }
+
+    private void InvalidateSeekBuffers()
+    {
+        if (_seekColumnBuffers is not null)
+        {
+            foreach (DataValue[] buffer in _seekColumnBuffers)
+            {
+                if (buffer.Length > 0) GlobalBufferPool.Return(buffer);
+            }
+        }
+
+        if (_seekCompressedBuffer is { Length: > 0 })
+        {
+            ArrayPool<byte>.Shared.Return(_seekCompressedBuffer);
+        }
+
+        if (_seekDecompressedBuffer is { Length: > 0 })
+        {
+            ArrayPool<byte>.Shared.Return(_seekDecompressedBuffer);
+        }
+
+        _seekColumnBuffers = null;
+        _seekCompressedBuffer = null;
+        _seekDecompressedBuffer = null;
+        _seekProjectedIndices = null;
+        _seekProjectedNames = null;
+        _seekNameIndex = null;
+    }
+
+    private static bool IndicesEqual(int[] a, int[]? b)
+    {
+        if (b is null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {
         _cachedReader?.Dispose();
         _cachedReader = null;
+        InvalidateSeekBuffers();
     }
 
     private static int[] ResolveProjection(Schema schema, IReadOnlySet<string>? requiredColumns)

@@ -255,6 +255,45 @@ public sealed class CommonTableExpressionTests
         Assert.Equal("alice", results[0]["name"].AsString());
     }
 
+    /// <summary>
+    /// <see cref="QuerySchemaResolver"/> should return only the columns projected by the
+    /// CTE's SELECT clause, not all columns from the underlying table. This matches what
+    /// execution actually emits and what the shell header should display.
+    /// </summary>
+    [Fact]
+    public async Task SchemaResolver_CteWithNarrowProjection_ReturnsOnlyCteColumns()
+    {
+        Row[] orders =
+        [
+            MakeRow(
+                ("order_id", DataValue.FromFloat32(1f)),
+                ("user_id", DataValue.FromFloat32(1f)),
+                ("eval_set", DataValue.FromString("train")),
+                ("order_number", DataValue.FromFloat32(11f)),
+                ("order_dow", DataValue.FromFloat32(1f))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("orders_csv", orders));
+        QuerySchemaResolver resolver = new(catalog, DefaultFunctions);
+
+        SelectStatement statement = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH train_orders AS (" +
+            "  SELECT order_id, user_id, order_number" +
+            "  FROM orders_csv" +
+            "  WHERE eval_set = 'train'" +
+            ") " +
+            "SELECT * FROM train_orders")).Statement;
+
+        ResolvedQuerySchema schema = await resolver.ResolveAsync(statement, CancellationToken.None);
+
+        Assert.Equal(3, schema.Columns.Count);
+        Assert.Contains(schema.Columns, c => c.ColumnName == "order_id");
+        Assert.Contains(schema.Columns, c => c.ColumnName == "user_id");
+        Assert.Contains(schema.Columns, c => c.ColumnName == "order_number");
+        Assert.DoesNotContain(schema.Columns, c => c.ColumnName == "eval_set");
+        Assert.DoesNotContain(schema.Columns, c => c.ColumnName == "order_dow");
+    }
+
     // ─────────────── Recursive CTE execution tests ───────────────
 
     /// <summary>
@@ -464,6 +503,53 @@ public sealed class CommonTableExpressionTests
             catalog);
 
         Assert.Equal(2, results.Count);
+    }
+
+    /// <summary>
+    /// A CTE that uses SELECT alias.* in a join context should output unqualified column names
+    /// so downstream CTEs can reference them by unqualified name. Regression for the bug where
+    /// SELECT pw.* produced column names like "pw.user_id" instead of "user_id".
+    /// </summary>
+    [Fact]
+    public async Task Execute_CteWithQualifiedWildcardJoin_AggregatesWithUnqualifiedColumnNames()
+    {
+        Row[] orderProducts =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(10f))),
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("product_id", DataValue.FromFloat32(20f))),
+            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("product_id", DataValue.FromFloat32(10f))),
+        ];
+
+        Row[] orders =
+        [
+            MakeRow(("order_id", DataValue.FromFloat32(1f)), ("user_id", DataValue.FromFloat32(100f))),
+            MakeRow(("order_id", DataValue.FromFloat32(2f)), ("user_id", DataValue.FromFloat32(200f))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("order_products", orderProducts), ("orders", orders));
+
+        // items_with_user joins order_products with orders to add user_id.
+        // product_events selects pw.* (all columns from items_with_user aliased as pw) via a join.
+        // The aggregation references user_id and product_id by unqualified name.
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH items_with_user AS (" +
+            "  SELECT p.order_id, p.product_id, o.user_id" +
+            "  FROM order_products p JOIN orders o ON p.order_id = o.order_id" +
+            ")," +
+            "product_events AS (" +
+            "  SELECT pw.*" +
+            "  FROM items_with_user pw" +
+            "  JOIN orders o ON pw.user_id = o.user_id" +
+            ") " +
+            "SELECT user_id, product_id, COUNT(*) AS cnt " +
+            "FROM product_events " +
+            "GROUP BY user_id, product_id",
+            catalog);
+
+        Assert.NotEmpty(results);
+        // All rows should have accessible user_id and product_id columns.
+        Assert.All(results, row => Assert.True(row["user_id"].AsFloat32() is 100f or 200f));
+        Assert.All(results, row => Assert.True(row["product_id"].AsFloat32() is 10f or 20f));
     }
 
     // ─────────────── Non-recursive CTE with set operations ───────────────
