@@ -296,6 +296,54 @@ public sealed class AllocationTests : IDisposable
         AssertAllocations("EXCEPT multi-col", bytes, gen2, maxBytes: 34_000_000);
     }
 
+    // ──────────────── GroupByOperator .ToArray() hot paths ────────────────
+
+    [Fact]
+    public async Task GroupByOrderedAggregate_AllocationsBounded()
+    {
+        // Exercises AccumulateRow line 1459: allArguments[i].ToArray() and
+        // sortKeys.ToArray() per input row for ordered aggregates
+        // (STRING_AGG(... ORDER BY ...)).
+        // Before fix: ~X MB (per-row array allocation).
+        // After fix: pooled arrays returned during flush.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, STRING_AGG(name, ',' ORDER BY name) AS names FROM data GROUP BY category",
+            BuildCatalog());
+
+        // Baseline: ~8.7 MB — flat buffer eliminates 40K small per-row DataValue[]
+        // allocations from .ToArray() (reduces GC object count, not total bytes).
+        AssertAllocations("GROUP BY ordered agg", bytes, gen2, maxBytes: 18_000_000);
+    }
+
+    [Fact]
+    public async Task GroupBySpillCompositeKey_AllocationsBounded()
+    {
+        // Exercises WriteSpillRow: compositeKeyScratch passed as ReadOnlySpan
+        // instead of .ToArray(), and reaggregation uses scratch buffers
+        // instead of per-row new DataValue[argCount].
+        // Memory budget set very low to force spilling.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, name, COUNT(*) AS cnt, AVG(value) AS avg_val FROM data GROUP BY category, name",
+            BuildCatalog(),
+            memoryBudgetBytes: 32 * 1024);
+
+        // Baseline: ~26 MB (spill path dominates with serialization overhead).
+        AssertAllocations("GROUP BY spill composite", bytes, gen2, maxBytes: 34_000_000, maxGen2: 1);
+    }
+
+    [Fact]
+    public async Task GroupByStreamingSortedCompositeKey_AllocationsBounded()
+    {
+        // Exercises streaming sorted path line 258:
+        // compositeKeyScratch.AsSpan(...).ToArray() per group boundary.
+        // Uses ORDER BY on group keys to trigger the streaming sorted path.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, COUNT(*) AS cnt FROM data GROUP BY category ORDER BY category",
+            BuildCatalog());
+
+        AssertAllocations("GROUP BY streaming sorted", bytes, gen2, maxBytes: 6_000_000);
+    }
+
     // ──────────────── Assertion helper ────────────────
 
     private static void AssertAllocations(

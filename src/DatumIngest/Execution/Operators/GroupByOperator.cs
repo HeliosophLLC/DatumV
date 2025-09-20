@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using DatumIngest.Diagnostics;
 using DatumIngest.Functions;
@@ -513,9 +514,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             : CompositeKeyHashMap<GroupState>.ComputeHash(
                                 compositeKeyScratch!.AsSpan(0, keyCount));
 
+                        ReadOnlySpan<DataValue> spillKeySpan = useSingleKey
+                            ? MemoryMarshal.CreateReadOnlySpan(ref singleKey, 1)
+                            : compositeKeyScratch!.AsSpan(0, keyCount);
                         WriteSpillRow(
-                            hashCode,
-                            useSingleKey ? [singleKey] : compositeKeyScratch!.AsSpan(0, keyCount).ToArray(),
+                            hashCode, spillKeySpan,
                             argumentScratch, sortKeyScratch, spillWriters!, spillSchemaWritten!, spillPaths!,
                             spillSchema, _spillDirectory!);
 
@@ -1124,8 +1127,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                 ? singleKeyValue.GetHashCode()
                                 : new CompositeKey(keyValues!).GetHashCode();
 
+                            ReadOnlySpan<DataValue> workerSpillKeySpan = useSingleKey
+                                ? MemoryMarshal.CreateReadOnlySpan(ref singleKeyValue, 1)
+                                : keyValues!;
                             WriteSpillRow(
-                                hashCode, useSingleKey ? [singleKeyValue] : keyValues!,
+                                hashCode, workerSpillKeySpan,
                                 workerArgScratch, workerSortScratch,
                                 workerSpillWriters![wi]!, workerSchemaWritten[wi]!,
                                 workerLocalSpillPaths[wi]!, workerSchemaStates[wi],
@@ -1411,8 +1417,9 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             if (column.OrderBy is not null)
             {
-                state.OrderedBuffers ??= new List<(DataValue[], DataValue[])>?[count];
-                state.OrderedBuffers[index] = [];
+                state.OrderedBuffers ??= new OrderedAggregateBuffer?[count];
+                state.OrderedBuffers[index] = new OrderedAggregateBuffer(
+                    column.ArgumentExpressions.Count, column.OrderBy.Count);
             }
         }
 
@@ -1453,10 +1460,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
             if (aggregateColumn.OrderBy is not null && allSortKeys?[aggregateIndex] is DataValue[] sortKeys)
             {
-                // Ordered aggregate buffers retain tuples until flush — copy the
-                // scratch arrays so the next row doesn't overwrite buffered data.
+                // Ordered aggregate: append argument and sort-key values into the
+                // flat buffer. No per-row array allocation — the buffer stores
+                // values contiguously with stride-based access.
                 group.OrderedBuffers![aggregateIndex]!.Add(
-                    (allArguments[aggregateIndex].ToArray(), sortKeys.ToArray()));
+                    allArguments[aggregateIndex], sortKeys);
             }
             else
             {
@@ -1488,17 +1496,18 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             AggregateColumn aggregateColumn = _aggregateColumns[aggregateIndex];
             if (aggregateColumn.OrderBy is null) continue;
 
-            List<(DataValue[] Arguments, DataValue[] SortKeys)> buffer =
-                groupState.OrderedBuffers![aggregateIndex]!;
+            OrderedAggregateBuffer buffer = groupState.OrderedBuffers![aggregateIndex]!;
 
             IReadOnlyList<OrderByItem> orderByItems = aggregateColumn.OrderBy;
 
             buffer.Sort((a, b) =>
             {
+                ReadOnlySpan<DataValue> sortA = buffer.GetSortKeys(a);
+                ReadOnlySpan<DataValue> sortB = buffer.GetSortKeys(b);
                 for (int sortIndex = 0; sortIndex < orderByItems.Count; sortIndex++)
                 {
                     int comparison = OrderByOperator.CompareDataValues(
-                        a.SortKeys[sortIndex], b.SortKeys[sortIndex]);
+                        sortA[sortIndex], sortB[sortIndex]);
 
                     if (orderByItems[sortIndex].Direction == SortDirection.Descending)
                     {
@@ -1510,11 +1519,14 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 return 0;
             });
 
-            foreach ((DataValue[] arguments, _) in buffer)
+            int rowCount = buffer.Count;
+            for (int row = 0; row < rowCount; row++)
             {
-                groupState.Accumulators[aggregateIndex].Accumulate(arguments);
+                groupState.Accumulators[aggregateIndex].Accumulate(buffer.GetArguments(row));
                 context.QueryMeter?.Add(aggregateColumn.Function.QueryUnitCost);
             }
+
+            buffer.Clear();
         }
     }
 
@@ -1666,7 +1678,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// </summary>
     private void WriteSpillRow(
         int hashCode,
-        DataValue[] keyValues,
+        ReadOnlySpan<DataValue> keyValues,
         DataValue[][] allArguments,
         DataValue[]?[]? allSortKeys,
         BinaryWriter?[] writers,
@@ -1828,6 +1840,20 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
         RowSerializer.ReadSchema(reader, out string[] schemaNames, out Dictionary<string, int> schemaNameIndex);
 
+        // Pre-allocate scratch buffers for aggregate arguments and sort keys during
+        // reaggregation, sized to the maximum counts across all aggregates.
+        int maxArgCount = 0;
+        int maxSortCount = 0;
+        for (int i = 0; i < _aggregateColumns.Count; i++)
+        {
+            if (!_aggregateColumns[i].IsCountStar)
+                maxArgCount = Math.Max(maxArgCount, _aggregateColumns[i].ArgumentExpressions.Count);
+            if (_aggregateColumns[i].OrderBy is not null)
+                maxSortCount = Math.Max(maxSortCount, _aggregateColumns[i].OrderBy!.Count);
+        }
+        DataValue[]? spillArgScratch = maxArgCount > 0 ? new DataValue[maxArgCount] : null;
+        DataValue[]? spillSortScratch = maxSortCount > 0 ? new DataValue[maxSortCount] : null;
+
         while (fileStream.Position < fileStream.Length)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
@@ -1885,26 +1911,37 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 else
                 {
                     int argCount = aggregateColumn.ArgumentExpressions.Count;
-                    DataValue[] arguments = new DataValue[argCount];
-                    for (int argIndex = 0; argIndex < argCount; argIndex++)
-                    {
-                        arguments[argIndex] = spillRow[offset++];
-                    }
 
                     if (aggregateColumn.OrderBy is not null)
                     {
-                        int sortCount = aggregateColumn.OrderBy.Count;
-                        DataValue[] sortKeys = new DataValue[sortCount];
-                        for (int sortIndex = 0; sortIndex < sortCount; sortIndex++)
+                        // Ordered aggregate: read arguments and sort keys into
+                        // pre-allocated scratch buffers, then append to the flat buffer.
+                        for (int argIndex = 0; argIndex < argCount; argIndex++)
                         {
-                            sortKeys[sortIndex] = spillRow[offset++];
+                            spillArgScratch![argIndex] = spillRow[offset++];
                         }
 
-                        group.OrderedBuffers![aggregateIndex]!.Add((arguments, sortKeys));
+                        int sortCount = aggregateColumn.OrderBy.Count;
+                        for (int sortIndex = 0; sortIndex < sortCount; sortIndex++)
+                        {
+                            spillSortScratch![sortIndex] = spillRow[offset++];
+                        }
+
+                        group.OrderedBuffers![aggregateIndex]!.Add(
+                            spillArgScratch!, spillSortScratch!);
                     }
                     else
                     {
-                        group.Accumulators[aggregateIndex].Accumulate(arguments);
+                        // Non-ordered aggregate: reuse the pre-allocated scratch
+                        // buffer — Accumulate reads the span synchronously and
+                        // does not retain a reference.
+                        for (int argIndex = 0; argIndex < argCount; argIndex++)
+                        {
+                            spillArgScratch![argIndex] = spillRow[offset++];
+                        }
+
+                        group.Accumulators[aggregateIndex].Accumulate(
+                            spillArgScratch!.AsSpan(0, argCount));
                     }
                 }
             }
