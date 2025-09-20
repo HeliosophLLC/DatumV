@@ -286,4 +286,95 @@ public sealed class CompletionProviderTests
         Assert.NotNull(usersItem);
         Assert.Null(usersItem.InsertText);
     }
+
+    // ───────────────────── DDL completions ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterCreate_OffersTempAndTable()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("CREATE ", 7);
+
+        Assert.Contains(items, item => item.Label == "TEMP");
+        Assert.Contains(items, item => item.Label == "TABLE");
+    }
+
+    [Fact]
+    public void GetCompletions_InsideCreateTableColumns_OffersTypes()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("CREATE TABLE #t (col1 ", 22);
+
+        Assert.Contains(items, item => item.Label == "Int32");
+        Assert.Contains(items, item => item.Label == "Float32");
+        Assert.Contains(items, item => item.Label == "String");
+        Assert.Contains(items, item => item.Label == "PRIMARY KEY");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterDrop_OffersTableAndIndex()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("DROP ", 5);
+
+        Assert.Contains(items, item => item.Label == "TABLE");
+        Assert.Contains(items, item => item.Label == "INDEX");
+    }
+
+    // ───────────────────── DML completions ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterInsertInto_OffersTables()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("INSERT INTO ", 12);
+
+        Assert.Contains(items, item => item.Label == "users" && item.Kind == CompletionItemKind.Table);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterUpdate_OffersTables()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("UPDATE ", 7);
+
+        Assert.Contains(items, item => item.Label == "users" && item.Kind == CompletionItemKind.Table);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterUpdateSet_OffersColumnsAndKeywords()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("UPDATE #t SET ", 14);
+
+        Assert.Contains(items, item => item.Label == "id" && item.Kind == CompletionItemKind.Column);
+        Assert.Contains(items, item => item.Label == "WHERE" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterDeleteFrom_OffersTables()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("DELETE FROM ", 12);
+
+        Assert.Contains(items, item => item.Label == "users" && item.Kind == CompletionItemKind.Table);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterAlterTable_OffersTablesAndAdd()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("ALTER TABLE ", 12);
+
+        Assert.Contains(items, item => item.Label == "users" && item.Kind == CompletionItemKind.Table);
+        Assert.Contains(items, item => item.Label == "ADD" && item.Kind == CompletionItemKind.Keyword);
+    }
 }

@@ -288,6 +288,17 @@ public sealed class HoverProvider
             SqlToken.Delete => "**DELETE FROM** — Removes rows from a temporary table: `DELETE FROM name [WHERE condition]`.",
             SqlToken.Analyze => "**ANALYZE** — Rebuilds column statistics and chunk indexes for a table. Run after large INSERT/UPDATE/DELETE operations to keep query planner cost estimates accurate.",
             SqlToken.Alter => "**ALTER TABLE** — Modifies a temporary table's schema: `ALTER TABLE name ADD COLUMN col type [DEFAULT value]`.",
+            SqlToken.Table => "**TABLE** — Specifies a table in DDL statements: `CREATE [TEMP] TABLE name (…)`, `DROP TABLE name`, `ALTER TABLE name ADD …`.",
+            SqlToken.Temp => "**TEMP** — Marks a table as session-scoped (temporary). Equivalent to `TEMPORARY`. The table is automatically dropped when the session ends.",
+            SqlToken.Temporary => "**TEMPORARY** — Marks a table as session-scoped (temporary). Equivalent to `TEMP`. The table is automatically dropped when the session ends.",
+            SqlToken.Values => "**VALUES** — Supplies literal row data for INSERT: `INSERT INTO name VALUES (v1, v2), (v3, v4)`.",
+            SqlToken.Set => "**SET** — Introduces column assignments in UPDATE: `UPDATE name SET col1 = expr1, col2 = expr2`.",
+            SqlToken.Add => "**ADD** — Adds a new column in ALTER TABLE: `ALTER TABLE name ADD [COLUMN] col type [NOT NULL] [DEFAULT expr]`.",
+            SqlToken.Column => "**COLUMN** — Optional keyword in ALTER TABLE ADD: `ALTER TABLE name ADD COLUMN col type`.",
+            SqlToken.Default => "**DEFAULT** — Specifies a default value for a column: `col type DEFAULT expr`. Used in CREATE TABLE and ALTER TABLE ADD.",
+            SqlToken.Primary => "**PRIMARY** — Used with KEY to define the primary key constraint: `PRIMARY KEY (col1, col2)`.",
+            SqlToken.Key => "**KEY** — Used with PRIMARY to define the primary key constraint: `PRIMARY KEY (col1, col2)`.",
+            SqlToken.If => "**IF** — Conditional guard for DDL: `CREATE TABLE IF NOT EXISTS name …` or `DROP TABLE IF EXISTS name`.",
             _ => null,
         };
     }

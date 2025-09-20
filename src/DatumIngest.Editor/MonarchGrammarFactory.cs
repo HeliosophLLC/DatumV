@@ -137,5 +137,13 @@ internal static class MonarchGrammarFactory
 
         // ASSERT / DEFINE clause keywords
         "ASSERT", "DEFINE", "MESSAGE", "FAIL", "WARN", "SKIP", "ABORT",
+
+        // DDL keywords
+        "CREATE", "TABLE", "TEMP", "TEMPORARY", "DROP", "ALTER", "ADD",
+        "COLUMN", "DEFAULT", "PRIMARY", "KEY", "IF", "INDEX",
+        "ANALYZE",
+
+        // DML keywords
+        "INSERT", "VALUES", "UPDATE", "SET", "DELETE",
     ];
 }

@@ -208,4 +208,88 @@ public sealed class CompletionContextTests
 
         Assert.Equal("col", zone.Prefix);
     }
+
+    // ───────────────────── DDL zones ─────────────────────
+
+    [Fact]
+    public void Classify_AfterCreate_ReturnsAfterCreate()
+    {
+        CompletionZone zone = CompletionContext.Classify("CREATE ", 7);
+
+        Assert.Equal(CompletionZoneKind.AfterCreate, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterDrop_ReturnsAfterDrop()
+    {
+        CompletionZone zone = CompletionContext.Classify("DROP ", 5);
+
+        Assert.Equal(CompletionZoneKind.AfterDrop, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateTableColumnList_ReturnsAfterCreateTableColumns()
+    {
+        CompletionZone zone = CompletionContext.Classify("CREATE TABLE #temp (col1 ", 25);
+
+        Assert.Equal(CompletionZoneKind.AfterCreateTableColumns, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideCreateTempTableColumnList_ReturnsAfterCreateTableColumns()
+    {
+        CompletionZone zone = CompletionContext.Classify("CREATE TEMP TABLE #temp (", 25);
+
+        Assert.Equal(CompletionZoneKind.AfterCreateTableColumns, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterAlterTable_ReturnsAfterAlterTable()
+    {
+        CompletionZone zone = CompletionContext.Classify("ALTER TABLE ", 12);
+
+        Assert.Equal(CompletionZoneKind.AfterAlterTable, zone.Kind);
+    }
+
+    // ───────────────────── DML zones ─────────────────────
+
+    [Fact]
+    public void Classify_AfterInsertInto_ReturnsAfterInsertInto()
+    {
+        CompletionZone zone = CompletionContext.Classify("INSERT INTO ", 12);
+
+        Assert.Equal(CompletionZoneKind.AfterInsertInto, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideInsertColumnList_ReturnsAfterInsertTable()
+    {
+        CompletionZone zone = CompletionContext.Classify("INSERT INTO #temp (", 19);
+
+        Assert.Equal(CompletionZoneKind.AfterInsertTable, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterUpdate_ReturnsAfterUpdate()
+    {
+        CompletionZone zone = CompletionContext.Classify("UPDATE ", 7);
+
+        Assert.Equal(CompletionZoneKind.AfterUpdate, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterUpdateSet_ReturnsAfterUpdateSet()
+    {
+        CompletionZone zone = CompletionContext.Classify("UPDATE #temp SET ", 17);
+
+        Assert.Equal(CompletionZoneKind.AfterUpdateSet, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterDeleteFrom_ReturnsAfterDeleteFrom()
+    {
+        CompletionZone zone = CompletionContext.Classify("DELETE FROM ", 12);
+
+        Assert.Equal(CompletionZoneKind.AfterDeleteFrom, zone.Kind);
+    }
 }

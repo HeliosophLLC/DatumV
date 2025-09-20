@@ -149,4 +149,72 @@ public sealed class HoverProviderTests
         Assert.True(result.StartColumn >= 0);
         Assert.True(result.EndColumn > result.StartColumn || result.EndLine > result.StartLine);
     }
+
+    // ───────────────────── DDL / DML keyword hover ─────────────────────
+
+    [Fact]
+    public void GetHover_CreateKeyword_ReturnsDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("CREATE TEMP TABLE #t (id Int32)", 0);
+
+        Assert.NotNull(result);
+        Assert.Contains("CREATE TEMP TABLE", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_TableKeyword_ReturnsDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("CREATE TEMP TABLE #t (id Int32)", 12);
+
+        Assert.NotNull(result);
+        Assert.Contains("TABLE", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_InsertKeyword_ReturnsDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("INSERT INTO #t VALUES (1)", 0);
+
+        Assert.NotNull(result);
+        Assert.Contains("INSERT INTO", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_ValuesKeyword_ReturnsDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("INSERT INTO #t VALUES (1)", 15);
+
+        Assert.NotNull(result);
+        Assert.Contains("VALUES", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_UpdateKeyword_ReturnsDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("UPDATE #t SET col = 1", 0);
+
+        Assert.NotNull(result);
+        Assert.Contains("UPDATE", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_SetKeyword_ReturnsDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("UPDATE #t SET col = 1", 10);
+
+        Assert.NotNull(result);
+        Assert.Contains("SET", result.Contents);
+    }
 }

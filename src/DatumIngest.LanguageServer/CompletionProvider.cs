@@ -115,6 +115,53 @@ public sealed class CompletionProvider
                 AddKeywords(items, ["ALL", "SELECT"]);
                 break;
 
+            case CompletionZoneKind.AfterCreate:
+                AddKeywords(items, ["TEMP", "TEMPORARY", "TABLE", "INDEX"]);
+                break;
+
+            case CompletionZoneKind.AfterDrop:
+                AddKeywords(items, ["TABLE", "INDEX", "IF EXISTS"]);
+                break;
+
+            case CompletionZoneKind.AfterCreateTableColumns:
+                AddKeywords(items, ColumnTypeKeywords);
+                AddKeywords(items, ["PRIMARY KEY", "NOT NULL", "DEFAULT"]);
+                break;
+
+            case CompletionZoneKind.AfterInsertInto:
+                AddTables(items);
+                break;
+
+            case CompletionZoneKind.AfterInsertTable:
+                AddColumns(items, allTables: true);
+                AddKeywords(items, ["VALUES", "SELECT"]);
+                break;
+
+            case CompletionZoneKind.AfterUpdate:
+                AddTables(items);
+                break;
+
+            case CompletionZoneKind.AfterUpdateSet:
+                AddColumns(items, allTables: true);
+                AddScalarFunctions(items);
+                AddKeywords(items, ["WHERE", "FROM"]);
+                break;
+
+            case CompletionZoneKind.AfterDeleteFrom:
+                AddTables(items);
+                break;
+
+            case CompletionZoneKind.AfterAlterTable:
+                AddTables(items);
+                AddKeywords(items, ["ADD"]);
+                break;
+
+            case CompletionZoneKind.AfterAlterTableAdd:
+                AddKeywords(items, ["COLUMN"]);
+                AddKeywords(items, ColumnTypeKeywords);
+                AddKeywords(items, ["NOT NULL", "DEFAULT"]);
+                break;
+
             case CompletionZoneKind.AfterInto:
             case CompletionZoneKind.AfterAs:
                 // No schema-based completions for file paths or alias names.
@@ -345,5 +392,15 @@ public sealed class CompletionProvider
     [
         "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
         "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT",
+    ];
+
+    private static readonly string[] ColumnTypeKeywords =
+    [
+        "Boolean", "Int8", "Int16", "Int32", "Int64",
+        "UInt8", "UInt16", "UInt32", "UInt64",
+        "Float32", "Float64",
+        "String", "Date", "DateTime", "Time", "Duration",
+        "Uuid", "JsonValue", "Vector", "Matrix", "Tensor",
+        "Array", "Struct", "Image", "UInt8Array",
     ];
 }

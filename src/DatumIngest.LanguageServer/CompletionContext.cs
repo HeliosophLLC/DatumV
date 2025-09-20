@@ -168,6 +168,19 @@ public static class CompletionContext
                     return CompletionZoneKind.InsideOver;
                 }
 
+                // Check if this is a CREATE TABLE paren — walk back past the table name
+                // to find TABLE [TEMP/TEMPORARY] CREATE.
+                if (index > 0 && IsCreateTableParen(tokens, index))
+                {
+                    return CompletionZoneKind.AfterCreateTableColumns;
+                }
+
+                // Check if this is an INSERT INTO table (...) column list.
+                if (index > 0 && IsInsertColumnListParen(tokens, index))
+                {
+                    return CompletionZoneKind.AfterInsertTable;
+                }
+
                 // We're inside a function call or subquery — check what precedes the paren.
                 if (index > 0 && tokens[index - 1].Kind == SqlToken.Identifier)
                 {
@@ -190,6 +203,11 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterSelect;
 
                 case SqlToken.From:
+                    // Check if preceded by DELETE — offer table names for deletion target.
+                    if (index > 0 && tokens[index - 1].Kind == SqlToken.Delete)
+                    {
+                        return CompletionZoneKind.AfterDeleteFrom;
+                    }
                     return CompletionZoneKind.AfterFrom;
 
                 case SqlToken.Join:
@@ -245,6 +263,11 @@ public static class CompletionContext
                     return CompletionZoneKind.Expression;
 
                 case SqlToken.Into:
+                    // Check if preceded by INSERT — offer table names.
+                    if (index > 0 && tokens[index - 1].Kind == SqlToken.Insert)
+                    {
+                        return CompletionZoneKind.AfterInsertInto;
+                    }
                     return CompletionZoneKind.AfterInto;
 
                 case SqlToken.Union:
@@ -280,8 +303,55 @@ public static class CompletionContext
                     return CompletionZoneKind.AfterAs;
 
                 case SqlToken.Set:
-                    // After UPDATE ... SET — user is typing assignment expressions.
+                    // After UPDATE ... SET — offer columns for assignment.
+                    return CompletionZoneKind.AfterUpdateSet;
+
+                // ───────────────────── DDL / DML keywords ─────────────────────
+
+                case SqlToken.Create:
+                    return CompletionZoneKind.AfterCreate;
+
+                case SqlToken.Drop:
+                    return CompletionZoneKind.AfterDrop;
+
+                case SqlToken.Table:
+                    // Walk back to see if preceded by CREATE [TEMP/TEMPORARY] or DROP or ALTER.
+                    for (int back = index - 1; back >= 0; back--)
+                    {
+                        SqlToken prior = tokens[back].Kind;
+                        if (prior is SqlToken.Temp or SqlToken.Temporary)
+                            continue;
+                        if (prior == SqlToken.Create)
+                            return CompletionZoneKind.AfterCreateTableColumns;
+                        if (prior == SqlToken.Drop)
+                            return CompletionZoneKind.AfterDrop;
+                        if (prior == SqlToken.Alter)
+                            return CompletionZoneKind.AfterAlterTable;
+                        break;
+                    }
+                    continue;
+
+                case SqlToken.Insert:
+                    return CompletionZoneKind.AfterInsertInto;
+
+                case SqlToken.Values:
                     return CompletionZoneKind.Expression;
+
+                case SqlToken.Update:
+                    return CompletionZoneKind.AfterUpdate;
+
+                case SqlToken.Delete:
+                    return CompletionZoneKind.AfterDeleteFrom;
+
+                case SqlToken.Alter:
+                    return CompletionZoneKind.AfterAlterTable;
+
+                case SqlToken.Add:
+                    return CompletionZoneKind.AfterAlterTableAdd;
+
+                case SqlToken.Analyze:
+                    // After ANALYZE — offer table names.
+                    return CompletionZoneKind.AfterFrom;
 
                 case SqlToken.Let:
                     // After LET — user may be typing a binding name or expression.
@@ -296,6 +366,60 @@ public static class CompletionContext
 
         // No governing keyword found — we're at the start of a statement.
         return CompletionZoneKind.StatementStart;
+    }
+
+    /// <summary>
+    /// Checks whether the left-paren at <paramref name="parenIndex"/> belongs to a
+    /// CREATE [TEMP|TEMPORARY] TABLE name (...) column definition list.
+    /// </summary>
+    private static bool IsCreateTableParen(List<TokenInfo> tokens, int parenIndex)
+    {
+        // Pattern: CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] name (
+        // Walk back from the paren: identifier (table name), then optionally
+        // EXISTS/NOT/IF, then TABLE, then optionally TEMP/TEMPORARY, then CREATE.
+        int cursor = parenIndex - 1;
+
+        // Skip the table name identifier.
+        if (cursor < 0 || (tokens[cursor].Kind != SqlToken.Identifier && !IsKeywordToken(tokens[cursor].Kind)))
+            return false;
+        cursor--;
+
+        // Skip optional IF NOT EXISTS.
+        if (cursor >= 0 && tokens[cursor].Kind == SqlToken.Exists) cursor--;
+        if (cursor >= 0 && tokens[cursor].Kind == SqlToken.Not) cursor--;
+        if (cursor >= 0 && tokens[cursor].Kind == SqlToken.If) cursor--;
+
+        // Expect TABLE.
+        if (cursor < 0 || tokens[cursor].Kind != SqlToken.Table) return false;
+        cursor--;
+
+        // Skip optional TEMP/TEMPORARY.
+        if (cursor >= 0 && tokens[cursor].Kind is SqlToken.Temp or SqlToken.Temporary) cursor--;
+
+        // Expect CREATE.
+        return cursor >= 0 && tokens[cursor].Kind == SqlToken.Create;
+    }
+
+    /// <summary>
+    /// Checks whether the left-paren at <paramref name="parenIndex"/> belongs to an
+    /// INSERT INTO name (...) column list.
+    /// </summary>
+    private static bool IsInsertColumnListParen(List<TokenInfo> tokens, int parenIndex)
+    {
+        // Pattern: INSERT INTO name (
+        int cursor = parenIndex - 1;
+
+        // Skip the table name identifier.
+        if (cursor < 0 || (tokens[cursor].Kind != SqlToken.Identifier && !IsKeywordToken(tokens[cursor].Kind)))
+            return false;
+        cursor--;
+
+        // Expect INTO.
+        if (cursor < 0 || tokens[cursor].Kind != SqlToken.Into) return false;
+        cursor--;
+
+        // Expect INSERT.
+        return cursor >= 0 && tokens[cursor].Kind == SqlToken.Insert;
     }
 
     private static bool IsKeywordToken(SqlToken kind)
@@ -379,4 +503,36 @@ public enum CompletionZoneKind
 
     /// <summary>After UNION, INTERSECT, or EXCEPT — offer ALL and SELECT.</summary>
     AfterSetOperation,
+
+    // ───────────────────── DDL / DML zones ─────────────────────
+
+    /// <summary>After CREATE — offer TEMP, TEMPORARY, TABLE, INDEX.</summary>
+    AfterCreate,
+
+    /// <summary>After DROP — offer TABLE, INDEX, IF EXISTS.</summary>
+    AfterDrop,
+
+    /// <summary>After CREATE [TEMP] TABLE name ( — offer column type names.</summary>
+    AfterCreateTableColumns,
+
+    /// <summary>After INSERT INTO — offer table names.</summary>
+    AfterInsertInto,
+
+    /// <summary>After INSERT INTO name — offer column list or VALUES/SELECT.</summary>
+    AfterInsertTable,
+
+    /// <summary>After UPDATE — offer table names.</summary>
+    AfterUpdate,
+
+    /// <summary>After UPDATE name SET — offer columns for assignment.</summary>
+    AfterUpdateSet,
+
+    /// <summary>After DELETE FROM — offer table names.</summary>
+    AfterDeleteFrom,
+
+    /// <summary>After ALTER TABLE — offer table names.</summary>
+    AfterAlterTable,
+
+    /// <summary>After ALTER TABLE name ADD — offer COLUMN keyword and column type context.</summary>
+    AfterAlterTableAdd,
 }
