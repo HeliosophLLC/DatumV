@@ -310,6 +310,7 @@ public sealed class QueryPlanner
         if (statement.LetBindings is { Count: > 0 }) return false;
         if (statement.Having is not null) return false;
         if (statement.Qualify is not null) return false;
+        if (statement.Assertions is { Count: > 0 }) return false;
         if (sourceTransform is not null) return false;
         if (deferredColumns is { Count: > 0 }) return false;
 
@@ -630,6 +631,7 @@ public sealed class QueryPlanner
             || HasLetAggregateFunction(statement.LetBindings, _functionRegistry);
         IReadOnlyList<SelectColumn> projectionColumns = statement.Columns;
         IReadOnlyList<LetBinding>? letBindings = statement.LetBindings;
+        IReadOnlyList<AssertClause>? assertions = statement.Assertions;
 
         if (hasGroupBy || hasAggregates)
         {
@@ -698,6 +700,27 @@ public sealed class QueryPlanner
                 letBindings = rewrittenLetBindings;
             }
 
+            // Rewrite aggregate expressions inside ASSERT clause predicates and messages.
+            if (assertions is not null)
+            {
+                List<AssertClause> rewrittenAssertions = new(assertions.Count);
+                foreach (AssertClause assertClause in assertions)
+                {
+                    Expression rewrittenPredicate = RewriteAggregateExpression(
+                        assertClause.Predicate, _functionRegistry, aggregateColumns);
+                    Expression? rewrittenMessage = assertClause.Message is not null
+                        ? RewriteAggregateExpression(
+                            assertClause.Message, _functionRegistry, aggregateColumns)
+                        : null;
+                    rewrittenAssertions.Add(assertClause with
+                    {
+                        Predicate = rewrittenPredicate,
+                        Message = rewrittenMessage,
+                    });
+                }
+                assertions = rewrittenAssertions;
+            }
+
             if (hasGroupBy && aggregateColumns.Count == 0 && statement.Having is null)
             {
                 // GROUP BY without aggregates or HAVING is equivalent to DISTINCT
@@ -756,9 +779,10 @@ public sealed class QueryPlanner
             || HasLetWindowFunction(letBindings);
         bool qualifyHasWindowFunctions = statement.Qualify is not null
             && ExpressionContainsWindowFunction(statement.Qualify);
+        bool assertionsHaveWindowFunctions = HasAssertWindowFunction(assertions);
         Expression? qualifyExpression = statement.Qualify;
 
-        if (hasWindowFunctions || qualifyHasWindowFunctions)
+        if (hasWindowFunctions || qualifyHasWindowFunctions || assertionsHaveWindowFunctions)
         {
             List<WindowColumn> windowColumns = new();
             List<SelectColumn> windowRewrittenColumns = new();
@@ -797,6 +821,27 @@ public sealed class QueryPlanner
                     qualifyExpression!, _functionRegistry, windowColumns);
             }
 
+            // Rewrite window function calls inside ASSERT clause predicates and messages.
+            if (assertionsHaveWindowFunctions && assertions is not null)
+            {
+                List<AssertClause> windowRewrittenAssertions = new(assertions.Count);
+                foreach (AssertClause assertClause in assertions)
+                {
+                    Expression rewrittenPredicate = RewriteWindowExpression(
+                        assertClause.Predicate, _functionRegistry, windowColumns);
+                    Expression? rewrittenMessage = assertClause.Message is not null
+                        ? RewriteWindowExpression(
+                            assertClause.Message, _functionRegistry, windowColumns)
+                        : null;
+                    windowRewrittenAssertions.Add(assertClause with
+                    {
+                        Predicate = rewrittenPredicate,
+                        Message = rewrittenMessage,
+                    });
+                }
+                assertions = windowRewrittenAssertions;
+            }
+
             source = new WindowOperator(source, windowColumns);
             projectionColumns = windowRewrittenColumns;
         }
@@ -811,7 +856,31 @@ public sealed class QueryPlanner
             source = new FilterOperator(source, qualifyExpression);
         }
 
-        // 3f. PIVOT — reshape wide data by rotating a column's distinct values into columns.
+        // 3f. ASSERT — resolve predicate and message expressions against SELECT aliases
+        // and LET binding names before they reach the ProjectOperator evaluator.
+        if (assertions is not null)
+        {
+            List<AssertClause> resolvedAssertions = new(assertions.Count);
+            foreach (AssertClause assertClause in assertions)
+            {
+                Expression resolvedPredicate = ResolveSelectAliases(
+                    assertClause.Predicate, projectionColumns);
+                resolvedPredicate = ResolveLetBindingReferences(resolvedPredicate, letBindings);
+                Expression? resolvedMessage = assertClause.Message is not null
+                    ? ResolveLetBindingReferences(
+                        ResolveSelectAliases(assertClause.Message, projectionColumns),
+                        letBindings)
+                    : null;
+                resolvedAssertions.Add(assertClause with
+                {
+                    Predicate = resolvedPredicate,
+                    Message = resolvedMessage,
+                });
+            }
+            assertions = resolvedAssertions;
+        }
+
+        // 3g. PIVOT — reshape wide data by rotating a column's distinct values into columns.
         // PIVOT replaces the SELECT projection entirely; the projectionColumns are discarded.
         if (statement.Pivot is not null)
         {
@@ -929,10 +998,11 @@ public sealed class QueryPlanner
         {
         bool hasStarOnly = projectionColumns.Count == 1
             && projectionColumns[0] is SelectAllColumns { ExcludedColumns: null, ReplacedColumns: null }
-            && letBindings is null;
+            && letBindings is null
+            && assertions is null;
         if (!hasStarOnly)
         {
-            source = new ProjectOperator(source, projectionColumns, letBindings);
+            source = new ProjectOperator(source, projectionColumns, letBindings, assertions);
         }
         }
 
@@ -1105,6 +1175,7 @@ public sealed class QueryPlanner
             statement.GroupBy,
             rewrittenHaving,
             statement.Qualify,
+            statement.Assertions,
             statement.Pivot,
             statement.Unpivot,
             statement.OrderBy,
@@ -3241,6 +3312,35 @@ public sealed class QueryPlanner
         foreach (LetBinding binding in letBindings)
         {
             if (ExpressionContainsWindowFunction(binding.Expression))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> if any <see cref="AssertClause"/> predicate or
+    /// message expression contains a window function call, requiring the window function
+    /// rewriting path to be active so assertion columns are available.
+    /// </summary>
+    private static bool HasAssertWindowFunction(IReadOnlyList<AssertClause>? assertions)
+    {
+        if (assertions is null)
+        {
+            return false;
+        }
+
+        foreach (AssertClause assertClause in assertions)
+        {
+            if (ExpressionContainsWindowFunction(assertClause.Predicate))
+            {
+                return true;
+            }
+
+            if (assertClause.Message is not null
+                && ExpressionContainsWindowFunction(assertClause.Message))
             {
                 return true;
             }

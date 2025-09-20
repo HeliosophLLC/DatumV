@@ -41,7 +41,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET", "DISTINCT", "WITHIN GROUP"]);
+                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET", "ASSERT", "DEFINE", "DISTINCT", "WITHIN GROUP"]);
                 break;
 
             case CompletionZoneKind.AfterFrom:
@@ -80,6 +80,18 @@ public sealed class CompletionProvider
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
                 AddKeywords(items, ExpressionKeywords);
+                break;
+
+            case CompletionZoneKind.AfterAssert:
+                AddColumns(items, allTables: true);
+                AddScalarFunctions(items);
+                AddAggregateFunctions(items);
+                AddWindowFunctions(items);
+                AddKeywords(items, [.. ExpressionKeywords, "MESSAGE", "ON FAIL"]);
+                break;
+
+            case CompletionZoneKind.InsideDefineBlock:
+                AddKeywords(items, ["LET", "ASSERT", "}"]);
                 break;
 
             case CompletionZoneKind.InFunctionArguments:

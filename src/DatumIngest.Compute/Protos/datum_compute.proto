@@ -189,6 +189,20 @@ message QueryRequest {
   string context_id = 5;
 }
 
+// Assertion diagnostic summary for a query statement that contained ASSERT … ON FAIL WARN
+// or SKIP clauses. Emitted as the terminal QueryResult for the statement when at least one
+// assertion fired in WARN or SKIP mode.
+message AssertionDiagnosticsMessage {
+  // Number of rows that triggered ON FAIL WARN.
+  int64 warned_row_count = 1;
+
+  // Number of rows excluded from the result by ON FAIL SKIP.
+  int64 skipped_row_count = 2;
+
+  // Up to 10 sample failure messages from assertion expressions.
+  repeated string sample_messages = 3;
+}
+
 // Streamed result message. Each message is either a row from a query
 // statement or an effect summary from a DDL/DML statement, tagged with
 // the originating statement's index in the batch.
@@ -210,6 +224,11 @@ message QueryResult {
 
     // Effect summary from a DDL/DML statement.
     StatementEffect effect = 5;
+
+    // Assertion diagnostic summary emitted after all rows of a query statement
+    // have been streamed. Present only when warned_row_count or skipped_row_count
+    // is non-zero.
+    AssertionDiagnosticsMessage diagnostics = 6;
   }
 }
 

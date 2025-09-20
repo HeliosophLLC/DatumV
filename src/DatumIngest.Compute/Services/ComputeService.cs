@@ -333,6 +333,28 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                             }
                             batch.Return();
                         }
+
+                        // Emit assertion diagnostics if any WARN or SKIP conditions fired during execution.
+                        AssertionDiagnostics? assertionDiagnostics = result.AssertionDiagnostics;
+                        if (assertionDiagnostics is not null
+                            && (assertionDiagnostics.WarnedRowCount > 0 || assertionDiagnostics.SkippedRowCount > 0))
+                        {
+                            AssertionDiagnosticsMessage diagnosticsMessage = new()
+                            {
+                                WarnedRowCount = assertionDiagnostics.WarnedRowCount,
+                                SkippedRowCount = assertionDiagnostics.SkippedRowCount,
+                            };
+                            diagnosticsMessage.SampleMessages.AddRange(assertionDiagnostics.SampleMessages);
+
+                            QueryResult diagnosticsResult = new()
+                            {
+                                StatementIndex = statementIndex,
+                                QueryUnits = meter.QueryUnits,
+                                QueryId = queryIdString,
+                                Diagnostics = diagnosticsMessage,
+                            };
+                            await responseStream.WriteAsync(diagnosticsResult, cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
             }

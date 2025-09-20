@@ -134,3 +134,146 @@ SELECT {x: 10, y: 20}['y']             -- inline struct: returns 20
 ```
 
 Accessing an array index out of bounds or a struct field that does not exist returns null.
+
+---
+
+## LET Bindings
+
+`LET` declares a named intermediate expression inside a SELECT list. The expression is evaluated once per row, cached, and can be referenced by subsequent LET bindings and output columns. LET bindings are not emitted as output columns unless given an `AS alias`.
+
+### Syntax
+
+```sql
+SELECT LET name = expression [AS alias], ... columns ... FROM table
+```
+
+LET bindings appear before the first output column, separated from it and from each other by commas.
+
+### Examples
+
+```sql
+-- Compute once, reference twice
+SELECT LET total = price * qty, id, price, qty, total FROM line_items
+
+-- Bind without emitting (no AS alias — not in output)
+SELECT LET tax = amount * 0.1, id, amount FROM orders
+
+-- Chain: later bindings may reference earlier ones
+SELECT LET subtotal = price * qty,
+       LET tax      = subtotal * 0.1,
+       subtotal, tax
+FROM line_items
+```
+
+### Evaluation order and scope
+
+- LET bindings evaluate left-to-right; each may reference any binding declared before it.
+- A binding is in scope for all subsequent LET expressions and for all output columns.
+- LET is scoped to a single SELECT — bindings are not visible in subqueries or CTEs.
+- LET expressions may reference window functions; the window result is computed before the binding is evaluated.
+
+---
+
+## ASSERT Clause
+
+`ASSERT` validates a predicate against every projected (post-LET) row. It runs after SELECT projection, so it can reference both source columns and LET bindings. Multiple ASSERT clauses may appear after the column list; they are evaluated left-to-right.
+
+### Syntax
+
+```sql
+SELECT columns FROM table
+ASSERT predicate [MESSAGE expression] [ON FAIL ABORT | SKIP | WARN]
+ASSERT ...
+```
+
+### Failure modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `ABORT` (default) | Throws immediately. No further rows are produced. |
+| `SKIP` | Omits the failing row from the output silently. |
+| `WARN` | Keeps the row and records a diagnostic (accessible via `AssertionDiagnostics`). |
+
+### MESSAGE
+
+`MESSAGE` accepts any scalar expression evaluated against the projected row and produces a human-readable failure description. It may reference LET bindings.
+
+### Examples
+
+```sql
+-- Abort on any negative amount
+SELECT id, amount FROM orders
+ASSERT amount > 0
+
+-- Skip bad rows and attach a dynamic message
+SELECT id, amount FROM orders
+ASSERT amount > 0
+    MESSAGE CONCAT('order ', CAST(id AS VARCHAR), ' has non-positive amount')
+    ON FAIL SKIP
+
+-- Reference a LET binding in the predicate
+SELECT LET total = price * qty, id, total FROM line_items
+ASSERT total >= 0 MESSAGE 'negative total' ON FAIL WARN
+```
+
+### Pipeline position
+
+ASSERT runs after projection and before DISTINCT/ORDER BY/LIMIT:
+
+```
+FROM → JOIN → WHERE → GROUP BY → HAVING → Window → QUALIFY → SELECT (LET) → ASSERT → DISTINCT → ORDER BY → LIMIT
+```
+
+---
+
+## DEFINE Block
+
+`DEFINE` groups LET bindings and ASSERT clauses inside a brace-delimited block placed immediately after `SELECT`. It is purely syntactic sugar — at parse time the block is flattened into the query's LET bindings and ASSERT list. All LET bindings evaluate before any ASSERT regardless of declaration order within the block.
+
+### Syntax
+
+```sql
+SELECT DEFINE {
+    LET name = expression [AS alias];
+    ASSERT predicate [MESSAGE expression] [ON FAIL ABORT | SKIP | WARN];
+} columns
+FROM table
+```
+
+Declarations are separated by semicolons; a trailing semicolon before `}` is optional. LET and ASSERT may appear in any order inside the block.
+
+### Equivalence
+
+These two queries are identical:
+
+```sql
+-- DEFINE form
+SELECT DEFINE {
+    LET total = price * qty;
+    ASSERT total >= 0 ON FAIL SKIP;
+} total
+FROM line_items
+
+-- Inline equivalent
+SELECT LET total = price * qty, total
+FROM line_items
+ASSERT total >= 0 ON FAIL SKIP
+```
+
+### Combining with trailing ASSERTs
+
+ASSERT clauses from the DEFINE block and trailing ASSERT clauses after the column list are all collected and evaluated together, with block-sourced assertions applied first.
+
+```sql
+SELECT DEFINE {
+    LET tax = amount * 0.1;
+    ASSERT amount > 0 ON FAIL SKIP;
+} id, amount, tax
+FROM orders
+ASSERT tax < 1000 ON FAIL WARN    -- evaluated after the DEFINE block's assertion
+```
+
+### Constraints
+
+- At most one DEFINE block per SELECT.
+- Cannot be combined with inline LET bindings in the same SELECT.

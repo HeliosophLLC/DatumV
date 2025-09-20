@@ -23,6 +23,7 @@ public sealed class ExecutionContext
         QueryMeter = context.QueryMeter;
         MemoryBudgetBytes = context.MemoryBudgetBytes;
         BatchSize = context.BatchSize;
+        AssertionDiagnostics = context.AssertionDiagnostics;
     }
 
     /// <summary>
@@ -160,6 +161,14 @@ public sealed class ExecutionContext
             DegreeOfParallelism = DegreeOfParallelism,
             ParallelismBudget = ParallelismBudget,
             BatchSize = BatchSize,
+            AssertionDiagnostics = AssertionDiagnostics,
         };
     }
+
+    /// <summary>
+    /// Accumulates skip/warn counts and sample messages for <c>ASSERT</c> clauses evaluated
+    /// during this query. <see langword="null"/> when no ASSERT clauses are present or when
+    /// diagnostics collection has not been requested.
+    /// </summary>
+    public AssertionDiagnostics? AssertionDiagnostics { get; init; }
 }

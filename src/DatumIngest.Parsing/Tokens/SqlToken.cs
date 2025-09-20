@@ -370,4 +370,13 @@ public enum SqlToken
 
     /// <summary>The : (colon) separator for struct field key–value pairs.</summary>
     Colon,
+
+    /// <summary>The <c>ASSERT</c> keyword for row-level invariant checks.</summary>
+    Assert,
+
+    /// <summary>The <c>MESSAGE</c> keyword for providing a custom assertion failure message.</summary>
+    Message,
+
+    /// <summary>The <c>DEFINE</c> keyword for grouping LET bindings and ASSERT clauses into a block.</summary>
+    Define,
 }

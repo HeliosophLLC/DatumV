@@ -321,6 +321,33 @@ internal sealed class SemanticAnalyzer
             AnalyzeExpression(statement.Qualify, aliasToTable, opaqueAliases, diagnostics);
         }
 
+        if (statement.Assertions is not null)
+        {
+            // LET binding names are virtual columns that exist only in the augmented row at
+            // runtime — they are not in any underlying table schema, so the regular column
+            // resolver would emit false 'Unknown column' squiggles for them. Adding them as
+            // opaque pseudo-aliases suppresses unqualified-column warnings inside ASSERT
+            // predicates, which is the same conservative approach used for lambda parameters.
+            HashSet<string> assertOpaqueAliases = opaqueAliases;
+            if (statement.LetBindings is { Count: > 0 })
+            {
+                assertOpaqueAliases = new(opaqueAliases, StringComparer.OrdinalIgnoreCase);
+                foreach (LetBinding letBinding in statement.LetBindings)
+                {
+                    assertOpaqueAliases.Add(letBinding.Name);
+                }
+            }
+
+            foreach (AssertClause assertClause in statement.Assertions)
+            {
+                AnalyzeExpression(assertClause.Predicate, aliasToTable, assertOpaqueAliases, diagnostics);
+                if (assertClause.Message is not null)
+                {
+                    AnalyzeExpression(assertClause.Message, aliasToTable, assertOpaqueAliases, diagnostics);
+                }
+            }
+        }
+
         if (statement.Pivot is not null)
         {
             foreach (FunctionCallExpression aggregate in statement.Pivot.Aggregates)

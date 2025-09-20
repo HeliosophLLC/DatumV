@@ -134,5 +134,8 @@ internal static class MonarchGrammarFactory
 
         // DatumIngest extensions
         "LET", "PIVOT", "UNPIVOT", "FOR", "INCLUDE",
+
+        // ASSERT / DEFINE clause keywords
+        "ASSERT", "DEFINE", "MESSAGE", "FAIL", "WARN", "SKIP", "ABORT",
     ];
 }

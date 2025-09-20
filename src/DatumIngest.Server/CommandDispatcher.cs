@@ -176,11 +176,13 @@ public sealed class CommandDispatcher
 
         QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        AssertionDiagnostics assertionDiagnostics = new();
         ExecutionContext context = new(cancellationToken, session.FunctionRegistry, queryContext.Catalog, localBufferPool, queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
         {
             DegreeOfParallelism = Environment.ProcessorCount,
             ParallelismBudget = _parallelismBudget,
+            AssertionDiagnostics = assertionDiagnostics,
         };
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
 
@@ -193,7 +195,7 @@ public sealed class CommandDispatcher
         SelectStatement schemaStatement = ExtractLeftmostStatement(query);
         Schema schema = await ResolveQuerySchemaAsync(session, queryContext, schemaStatement, cancellationToken).ConfigureAwait(false);
 
-        return CommandResult.StreamingRows(rows, schema);
+        return CommandResult.StreamingRows(rows, schema, assertionDiagnostics);
     }
 
     private static async Task<Schema> ResolveQuerySchemaAsync(

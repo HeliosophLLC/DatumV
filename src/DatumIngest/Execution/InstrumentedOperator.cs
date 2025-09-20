@@ -101,7 +101,7 @@ public sealed class InstrumentedOperator : IQueryOperator
             Operators.FilterOperator filter => new Operators.FilterOperator(
                 InstrumentRecursive(filter.Source), filter.Predicate),
             Operators.ProjectOperator project => new Operators.ProjectOperator(
-                InstrumentRecursive(project.Source), project.Columns),
+                InstrumentRecursive(project.Source), project.Columns, project.LetBindings, project.Assertions),
             Operators.JoinOperator join => new Operators.JoinOperator(
                 InstrumentRecursive(join.Left),
                 InstrumentRecursive(join.Right),

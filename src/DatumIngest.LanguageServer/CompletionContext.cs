@@ -217,6 +217,13 @@ public static class CompletionContext
                 case SqlToken.Qualify:
                     return CompletionZoneKind.AfterQualify;
 
+                case SqlToken.Define:
+                    return CompletionZoneKind.InsideDefineBlock;
+
+                case SqlToken.Assert:
+                case SqlToken.Message:
+                    return CompletionZoneKind.AfterAssert;
+
                 case SqlToken.Order:
                     // "ORDER BY" — check for BY token following.
                     if (index + 1 < tokens.Count && tokens[index + 1].Kind == SqlToken.By)
@@ -345,6 +352,12 @@ public enum CompletionZoneKind
 
     /// <summary>After QUALIFY — offer columns, window functions, aggregate functions, operators.</summary>
     AfterQualify,
+
+    /// <summary>After ASSERT — offer columns, functions, and operators for a predicate expression.</summary>
+    AfterAssert,
+
+    /// <summary>Inside a DEFINE block — offer LET and ASSERT declarations.</summary>
+    InsideDefineBlock,
 
     /// <summary>After INTO — offer file path (no schema completions).</summary>
     AfterInto,

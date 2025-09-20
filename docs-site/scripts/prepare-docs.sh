@@ -29,6 +29,7 @@ DOC_TITLES=(
   ["compute.md"]="Compute Service"
   ["indexes.md"]="Source Indexes"
   ["functions.md"]="Functions Reference"
+  ["special-functions.md"]="Special Functions"
   ["language-server.md"]="Language Server"
   ["statistics.md"]="Statistics & Manifests"
 )
@@ -42,8 +43,9 @@ DOC_NAV_ORDER=(
   ["compute.md"]="5"
   ["indexes.md"]="6"
   ["functions.md"]="7"
-  ["language-server.md"]="8"
-  ["statistics.md"]="9"
+  ["special-functions.md"]="8"
+  ["language-server.md"]="9"
+  ["statistics.md"]="10"
 )
 
 declare -A DOC_PERMALINKS
@@ -55,6 +57,7 @@ DOC_PERMALINKS=(
   ["compute.md"]="/docs/compute-service/"
   ["indexes.md"]="/docs/source-indexes/"
   ["functions.md"]="/docs/functions-reference/"
+  ["special-functions.md"]="/docs/special-functions/"
   ["language-server.md"]="/docs/language-server/"
   ["statistics.md"]="/docs/statistics-and-manifests/"
 )
@@ -92,6 +95,7 @@ for docfile in "${!DOC_TITLES[@]}"; do
       | sed 's|(compute.md)|(/docs/compute-service/)|g' \
       | sed 's|(indexes.md)|(/docs/source-indexes/)|g' \
       | sed 's|(functions.md)|(/docs/functions-reference/)|g' \
+      | sed 's|(special-functions.md)|(/docs/special-functions/)|g' \
       | sed 's|(language-server.md)|(/docs/language-server/)|g' \
       | sed 's|(statistics.md)|(/docs/statistics-and-manifests/)|g'
   } > "$dest"

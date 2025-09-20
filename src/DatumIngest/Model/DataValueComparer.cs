@@ -62,6 +62,7 @@ internal static class DataValueComparer
 
     private static double ToDouble(DataValue value) => value.Kind switch
     {
+        DataKind.Boolean  => value.AsBoolean() ? 1.0 : 0.0,
         DataKind.Float32  => value.AsFloat32(),
         DataKind.Float64  => value.AsFloat64(),
         DataKind.UInt8    => value.AsUInt8(),

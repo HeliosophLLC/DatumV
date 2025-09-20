@@ -195,6 +195,7 @@ public static class ParameterBinder
             groupBy,
             having,
             qualify,
+            statement.Assertions,
             statement.Pivot,
             statement.Unpivot,
             orderBy,

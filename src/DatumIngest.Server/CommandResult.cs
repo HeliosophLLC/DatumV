@@ -45,6 +45,9 @@ public sealed class CommandResult
     /// <summary>Gets the structured explain plan tree for <see cref="CommandResultKind.Success"/> explain results.</summary>
     public ExplainPlanNode? ExplainPlan { get; private init; }
 
+    /// <summary>Gets assertion diagnostics accumulated during row streaming, or <c>null</c> when no assertions were active.</summary>
+    public AssertionDiagnostics? AssertionDiagnostics { get; private init; }
+
     /// <summary>Creates a success result with a message.</summary>
     /// <param name="message">Human-readable success message.</param>
     /// <returns>A success result.</returns>
@@ -61,6 +64,14 @@ public sealed class CommandResult
     /// <returns>A streaming rows result.</returns>
     public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema) =>
         new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema };
+
+    /// <summary>Creates a streaming rows result with assertion diagnostics pre-wired.</summary>
+    /// <param name="rows">The async enumerable of result rows.</param>
+    /// <param name="schema">The schema describing the row columns.</param>
+    /// <param name="assertionDiagnostics">The diagnostics instance that will be populated as rows are consumed.</param>
+    /// <returns>A streaming rows result.</returns>
+    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema, AssertionDiagnostics assertionDiagnostics) =>
+        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema, AssertionDiagnostics = assertionDiagnostics };
 
     /// <summary>Creates a schema inspection result.</summary>
     /// <param name="schema">The schema of the inspected table.</param>

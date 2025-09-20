@@ -214,6 +214,7 @@ internal sealed class InteractiveShell
         {
             case CommandResultKind.StreamingRows:
                 await formatter.FormatAsync(result.Rows!, result.Schema!, Console.Out).ConfigureAwait(false);
+                RenderAssertionDiagnostics(result.AssertionDiagnostics);
                 break;
 
             case CommandResultKind.SchemaResult:
@@ -277,6 +278,26 @@ internal sealed class InteractiveShell
         }
 
         AnsiConsole.MarkupLine($"\n[grey]({items.Count} item(s))[/]");
+    }
+
+    private static void RenderAssertionDiagnostics(AssertionDiagnostics? diagnostics)
+    {
+        if (diagnostics is null) return;
+        if (diagnostics.WarnedRowCount == 0 && diagnostics.SkippedRowCount == 0) return;
+
+        if (diagnostics.WarnedRowCount > 0)
+            AnsiConsole.MarkupLine($"[yellow]WARN: {diagnostics.WarnedRowCount} row(s) failed assertion (ON FAIL WARN)[/]");
+
+        if (diagnostics.SkippedRowCount > 0)
+            AnsiConsole.MarkupLine($"[yellow]WARN: {diagnostics.SkippedRowCount} row(s) excluded by assertion (ON FAIL SKIP)[/]");
+
+        IReadOnlyList<string> samples = diagnostics.SampleMessages;
+        if (samples.Count > 0)
+        {
+            AnsiConsole.MarkupLine("[grey]Sample messages:[/]");
+            foreach (string message in samples)
+                AnsiConsole.MarkupLine($"[grey]  {Markup.Escape(message)}[/]");
+        }
     }
 
     private static void RenderFunctions(IReadOnlyList<FunctionSignature> functions)

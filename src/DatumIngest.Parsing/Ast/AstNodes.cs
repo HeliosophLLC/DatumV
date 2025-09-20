@@ -22,6 +22,7 @@ public sealed record SelectStatement(
     GroupByClause? GroupBy = null,
     Expression? Having = null,
     Expression? Qualify = null,
+    IReadOnlyList<AssertClause>? Assertions = null,
     PivotClause? Pivot = null,
     UnpivotClause? Unpivot = null,
     OrderByClause? OrderBy = null,
@@ -894,6 +895,42 @@ public sealed record AlterTableAddColumnStatement(
 /// </summary>
 /// <param name="TableName">The target table name.</param>
 public sealed record AnalyzeTableStatement(string TableName) : Statement;
+
+// ───────────────────── ASSERT clause ─────────────────────
+
+/// <summary>
+/// Controls what happens when an <see cref="AssertClause"/> predicate evaluates to false or null.
+/// </summary>
+public enum AssertFailureMode
+{
+    /// <summary>Abort execution immediately and throw an <c>AssertionAbortException</c>.</summary>
+    Abort,
+
+    /// <summary>Silently discard the failing row; continue producing output for other rows.</summary>
+    Skip,
+
+    /// <summary>Record the failure in <c>AssertionDiagnostics</c> but still emit the row.</summary>
+    Warn,
+}
+
+/// <summary>
+/// A single <c>ASSERT</c> clause attached to a SELECT statement.
+/// Evaluated per row against the augmented row (source columns plus memoized LET values)
+/// after QUALIFY but before output projection.
+/// </summary>
+/// <param name="Predicate">The boolean expression that must hold for every row.</param>
+/// <param name="Message">
+/// Optional expression evaluated when the assertion fails; its string representation
+/// is included in the <c>AssertionDiagnostics</c> sample or the abort exception.
+/// When <see langword="null"/>, a generic "Assertion failed" message is used.
+/// </param>
+/// <param name="FailureMode">What to do when the predicate is false or null. Defaults to <see cref="AssertFailureMode.Abort"/>.</param>
+/// <param name="Span">Source location of the <c>ASSERT</c> keyword for diagnostic reporting.</param>
+public sealed record AssertClause(
+    Expression Predicate,
+    Expression? Message = null,
+    AssertFailureMode FailureMode = AssertFailureMode.Abort,
+    SourceSpan? Span = null);
 
 // ───────────────────── Struct expressions ─────────────────────
 

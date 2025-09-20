@@ -14,6 +14,7 @@ public sealed class ProjectOperator : IQueryOperator
     private readonly IQueryOperator _source;
     private readonly IReadOnlyList<SelectColumn> _columns;
     private readonly IReadOnlyList<LetBinding>? _letBindings;
+    private readonly IReadOnlyList<AssertClause>? _assertions;
     private readonly Schema? _sourceSchema;
 
     /// <summary>
@@ -22,16 +23,19 @@ public sealed class ProjectOperator : IQueryOperator
     /// <param name="source">The child operator producing rows.</param>
     /// <param name="columns">The SELECT columns to project.</param>
     /// <param name="letBindings">Optional LET bindings to evaluate before projection.</param>
+    /// <param name="assertions">Optional ASSERT clauses to evaluate after LET bindings.</param>
     /// <param name="sourceSchema">Optional source schema for star expansion.</param>
     public ProjectOperator(
         IQueryOperator source,
         IReadOnlyList<SelectColumn> columns,
         IReadOnlyList<LetBinding>? letBindings = null,
+        IReadOnlyList<AssertClause>? assertions = null,
         Schema? sourceSchema = null)
     {
         _source = source;
         _columns = columns;
         _letBindings = letBindings;
+        _assertions = assertions;
         _sourceSchema = sourceSchema;
     }
 
@@ -43,6 +47,9 @@ public sealed class ProjectOperator : IQueryOperator
 
     /// <summary>The LET bindings evaluated before projection, or null if none.</summary>
     public IReadOnlyList<LetBinding>? LetBindings => _letBindings;
+
+    /// <summary>The ASSERT clauses evaluated after LET bindings, or null if none.</summary>
+    public IReadOnlyList<AssertClause>? Assertions => _assertions;
 
     /// <inheritdoc/>
     public OperatorPlanDescription DescribeForExplain()
@@ -66,6 +73,11 @@ public sealed class ProjectOperator : IQueryOperator
             properties["let"] = string.Join(", ", _letBindings.Select(binding => binding.Name));
         }
 
+        if (_assertions is { Count: > 0 })
+        {
+            properties["assert"] = _assertions.Count.ToString();
+        }
+
         return new OperatorPlanDescription("Project")
         {
             Properties = properties,
@@ -79,6 +91,7 @@ public sealed class ProjectOperator : IQueryOperator
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
         ProjectionSchema? schema = null;
         LocalBufferPool pool = context.LocalBufferPool;
+        AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
@@ -87,8 +100,12 @@ public sealed class ProjectOperator : IQueryOperator
             for (int index = 0; index < inputBatch.Count; index++)
             {
                 Row row = inputBatch[index];
-                schema ??= ProjectionSchema.Build(_columns, _letBindings, row);
-                outputBatch.Add(schema.Project(row, evaluator, pool));
+                schema ??= ProjectionSchema.Build(_columns, _letBindings, _assertions, row);
+                Row? projected = schema.Project(row, evaluator, pool, assertionDiagnostics);
+                if (projected.HasValue)
+                {
+                    outputBatch.Add(projected.Value);
+                }
             }
 
             inputBatch.Return();
@@ -117,6 +134,9 @@ public sealed class ProjectOperator : IQueryOperator
         private readonly Expression[]? _letExpressions;
         private readonly int _sourceFieldCount;
 
+        // ASSERT clause support: extracted from AssertClause records at build time.
+        private readonly IReadOnlyList<AssertClause>? _assertions;
+
         private ProjectionSchema(
             string[] names,
             Dictionary<string, int> nameIndex,
@@ -124,7 +144,8 @@ public sealed class ProjectOperator : IQueryOperator
             string[]? augmentedNames = null,
             Dictionary<string, int>? augmentedNameIndex = null,
             Expression[]? letExpressions = null,
-            int sourceFieldCount = 0)
+            int sourceFieldCount = 0,
+            IReadOnlyList<AssertClause>? assertions = null)
         {
             _names = names;
             _nameIndex = nameIndex;
@@ -133,18 +154,20 @@ public sealed class ProjectOperator : IQueryOperator
             _augmentedNameIndex = augmentedNameIndex;
             _letExpressions = letExpressions;
             _sourceFieldCount = sourceFieldCount;
+            _assertions = assertions;
         }
 
         /// <summary>
         /// Builds the projection schema from the column list, optional LET bindings,
-        /// and the first source row. Star and table-star columns are expanded using
-        /// the source row's schema; named expressions record their expression for
-        /// per-row evaluation. LET bindings produce an augmented row layout so their
-        /// values are memoized and accessible by name during projection.
+        /// optional ASSERT clauses, and the first source row. Star and table-star columns
+        /// are expanded using the source row's schema; named expressions record their
+        /// expression for per-row evaluation. LET bindings produce an augmented row layout
+        /// so their values are memoized and accessible by name during projection.
         /// </summary>
         internal static ProjectionSchema Build(
             IReadOnlyList<SelectColumn> columns,
             IReadOnlyList<LetBinding>? letBindings,
+            IReadOnlyList<AssertClause>? assertions,
             Row firstRow)
         {
             int letCount = letBindings?.Count ?? 0;
@@ -257,7 +280,8 @@ public sealed class ProjectOperator : IQueryOperator
 
             return new ProjectionSchema(
                 nameArray, nameIndex, slots.ToArray(),
-                augmentedNames, augmentedNameIndex, letExpressions, firstRow.FieldCount);
+                augmentedNames, augmentedNameIndex, letExpressions, firstRow.FieldCount,
+                assertions);
         }
 
         /// <summary>
@@ -266,12 +290,14 @@ public sealed class ProjectOperator : IQueryOperator
         /// evaluating projection expressions. The output <see cref="DataValue"/>
         /// array is rented from <paramref name="pool"/> and owned for the query
         /// lifetime — the row can be safely held across iterations.
+        /// Returns <see langword="null"/> when an <c>ASSERT … ON FAIL SKIP</c>
+        /// clause fails, signalling the caller to discard the row.
         /// </summary>
-        internal Row Project(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool)
+        internal Row? Project(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
         {
             if (_letExpressions is not null && _letExpressions.Length > 0)
             {
-                return ProjectWithLetBindings(sourceRow, evaluator, pool);
+                return ProjectWithLetBindings(sourceRow, evaluator, pool, diagnostics);
             }
 
             DataValue[] values = pool.RentOwned(_slots.Length);
@@ -284,6 +310,31 @@ public sealed class ProjectOperator : IQueryOperator
                     : evaluator.Evaluate(slot.Expression!, sourceRow);
             }
 
+            if (_assertions is not null)
+            {
+                foreach (AssertClause assertClause in _assertions)
+                {
+                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, sourceRow);
+                    if (!passed)
+                    {
+                        string? message = assertClause.Message is not null
+                            ? evaluator.Evaluate(assertClause.Message, sourceRow).ToString()
+                            : null;
+                        switch (assertClause.FailureMode)
+                        {
+                            case AssertFailureMode.Skip:
+                                diagnostics?.RecordSkip(message);
+                                return null;
+                            case AssertFailureMode.Warn:
+                                diagnostics?.RecordWarn(message);
+                                break;
+                            default:
+                                throw new AssertionAbortException(message, assertClause.Span);
+                        }
+                    }
+                }
+            }
+
             return new Row(_names, values, _nameIndex);
         }
 
@@ -291,9 +342,11 @@ public sealed class ProjectOperator : IQueryOperator
         /// Projects a source row with LET bindings. Builds a temporary augmented
         /// row containing source columns plus LET binding values, evaluates each
         /// LET expression sequentially (so later bindings can reference earlier
-        /// ones), then evaluates projection expressions against the augmented row.
+        /// ones), then evaluates ASSERT clauses and projection expressions against
+        /// the augmented row. Returns <see langword="null"/> when a SKIP assertion
+        /// fails, signalling the caller to discard the row.
         /// </summary>
-        private Row ProjectWithLetBindings(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool)
+        private Row? ProjectWithLetBindings(Row sourceRow, ExpressionEvaluator evaluator, LocalBufferPool pool, AssertionDiagnostics? diagnostics)
         {
             // Build augmented values: source columns + LET binding slots.
             DataValue[] augmentedValues = new DataValue[_sourceFieldCount + _letExpressions!.Length];
@@ -313,6 +366,32 @@ public sealed class ProjectOperator : IQueryOperator
             {
                 augmentedValues[_sourceFieldCount + index] =
                     evaluator.Evaluate(_letExpressions[index], augmentedRow);
+            }
+
+            // Evaluate ASSERT clauses against the augmented row (source + LET values).
+            if (_assertions is not null)
+            {
+                foreach (AssertClause assertClause in _assertions)
+                {
+                    bool passed = evaluator.EvaluateAsBoolean(assertClause.Predicate, augmentedRow);
+                    if (!passed)
+                    {
+                        string? message = assertClause.Message is not null
+                            ? evaluator.Evaluate(assertClause.Message, augmentedRow).ToString()
+                            : null;
+                        switch (assertClause.FailureMode)
+                        {
+                            case AssertFailureMode.Skip:
+                                diagnostics?.RecordSkip(message);
+                                return null;
+                            case AssertFailureMode.Warn:
+                                diagnostics?.RecordWarn(message);
+                                break;
+                            default:
+                                throw new AssertionAbortException(message, assertClause.Span);
+                        }
+                    }
+                }
             }
 
             // Evaluate output slots against the augmented row.

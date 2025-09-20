@@ -218,6 +218,11 @@ public static class SqlTokenizer
             // LET binding keyword
             .Match(Span.EqualToIgnoreCase("LET"), SqlToken.Let, requireDelimiters: true)
 
+            // ASSERT / MESSAGE / DEFINE keywords
+            .Match(Span.EqualToIgnoreCase("ASSERT"), SqlToken.Assert, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("MESSAGE"), SqlToken.Message, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("DEFINE"), SqlToken.Define, requireDelimiters: true)
+
             // PIVOT / UNPIVOT keywords
             .Match(Span.EqualToIgnoreCase("PIVOT"), SqlToken.Pivot, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("UNPIVOT"), SqlToken.Unpivot, requireDelimiters: true)

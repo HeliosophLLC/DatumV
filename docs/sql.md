@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, GROUP BY ALL, HAVING, window functions (OVER/PARTITION BY), QUALIFY, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, GROUP BY ALL, HAVING, window functions (OVER/PARTITION BY), QUALIFY, ASSERT, DEFINE, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
 
 ## Comments
 
@@ -149,6 +149,7 @@ FROM data
 | GROUP BY | — | LET expressions follow the same rules as SELECT expressions: must be aggregates or grouping keys |
 | HAVING | No | Evaluated before SELECT |
 | QUALIFY | Yes | LET references are resolved via expression substitution |
+| ASSERT | Yes | Evaluated after SELECT projection against the projected row |
 | ORDER BY | Yes | Can reference aliased LET output column names |
 
 ## FROM
@@ -720,6 +721,116 @@ QUALIFY rn <= 5
 ### Execution model
 
 QUALIFY is a streaming filter (0 query units) — it applies a FilterOperator to each row after window function computation. The window function itself remains a blocking operator, but the QUALIFY predicate adds zero additional memory or cost.
+
+## ASSERT
+
+ASSERT validates a predicate against every projected row. Unlike WHERE (which filters silently before projection), ASSERT runs after projection and can abort the query, skip failing rows, or emit diagnostic warnings depending on the configured failure mode.
+
+### Syntax
+
+```sql
+SELECT columns
+FROM table
+ASSERT predicate [MESSAGE expression] [ON FAIL ABORT | SKIP | WARN]
+```
+
+Multiple ASSERT clauses may follow a single SELECT; they are evaluated left-to-right and all must pass (or be configured to skip/warn):
+
+```sql
+SELECT id, amount, name FROM orders
+ASSERT amount > 0     MESSAGE 'amount must be positive'   ON FAIL SKIP
+ASSERT name IS NOT NULL                                   ON FAIL WARN
+```
+
+### Failure modes
+
+| Mode | Behavior |
+|------|----------|
+| `ABORT` (default) | Throws immediately. No further rows are produced. |
+| `SKIP` | Omits the failing row from the output silently. |
+| `WARN` | Keeps the row in the output and records a diagnostic. |
+
+### MESSAGE
+
+The optional `MESSAGE` expression provides a human-readable failure description. It may reference any column in the projected row, including LET bindings:
+
+```sql
+SELECT id, amount FROM orders
+ASSERT amount > 0 MESSAGE CONCAT('bad amount on order ', CAST(id AS VARCHAR))
+```
+
+### Interaction with LET and QUALIFY
+
+ASSERT runs after SELECT projection (including LET evaluation). This means ASSERT predicates may reference computed LET bindings directly:
+
+```sql
+SELECT LET total = price * qty, id, price, qty, total FROM line_items
+ASSERT total >= 0 MESSAGE 'negative total'
+```
+
+QUALIFY is a pre-projection window filter; ASSERT is a post-projection row validator. The pipeline order is:
+
+```
+FROM → JOIN → WHERE → GROUP BY → HAVING → Window → QUALIFY → SELECT (LET) → ASSERT → DISTINCT → ORDER BY → LIMIT
+```
+
+### Execution model
+
+ASSERT is a streaming pass (0 query units). Each row is checked individually; no buffering occurs. ABORT mode short-circuits the entire pipeline on the first failure.
+
+## DEFINE
+
+DEFINE is syntactic sugar that groups LET bindings and ASSERT clauses inside a brace-delimited block placed directly after SELECT. It is purely a readability aid — at parse time the block is flattened into the query's LET bindings and ASSERT clauses.
+
+### Syntax
+
+```sql
+SELECT DEFINE {
+    LET name = expression [AS alias];
+    ASSERT predicate [MESSAGE expression] [ON FAIL ABORT | SKIP | WARN];
+} columns
+FROM table
+```
+
+Declarations inside the block are separated by semicolons (trailing semicolon before `}` is optional). LET and ASSERT declarations may appear in any order inside the block; all LET bindings are evaluated before any ASSERT is checked, regardless of declaration order.
+
+### Examples
+
+```sql
+-- All definitions grouped at the top for readability
+SELECT DEFINE {
+    LET tax      = amount * 0.1;
+    LET subtotal = amount - discount;
+    ASSERT amount > 0    MESSAGE 'amount must be positive'  ON FAIL SKIP;
+    ASSERT discount >= 0 MESSAGE 'discount cannot be negative';
+} id, amount, discount, subtotal, tax
+FROM orders
+```
+
+### Equivalence to inline LET + trailing ASSERT
+
+These two queries are identical:
+
+```sql
+-- DEFINE block form
+SELECT DEFINE {
+    LET total = price * qty;
+    ASSERT total > 0 ON FAIL SKIP;
+} total
+FROM line_items
+
+-- Equivalent inline form
+SELECT LET total = price * qty, total
+FROM line_items
+ASSERT total > 0 ON FAIL SKIP
+```
+
+DEFINE assertions from the block and any trailing ASSERT clauses written after the column list are all collected into the same assertion list, with block-sourced assertions applied first.
+
+### Constraints
+
+- A SELECT may have at most one DEFINE block.
+- DEFINE cannot be combined with inline LET bindings in the same SELECT.
 
 ## PIVOT
 

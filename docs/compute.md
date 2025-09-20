@@ -346,7 +346,7 @@ Executes one or more semicolon-separated SQL statements and streams results back
 | `statement_index` | `int32` | Zero-based index of the statement in the parsed batch that produced this result. Always `0` for single-statement SQL. |
 | `query_units` | `int64` | Running total of Query Units consumed across all statements so far. The value on the last message is the definitive cost for the batch. |
 | `query_id` | `string` | Server-assigned identifier (GUID) for the entire batch execution. Present on every message so clients can correlate responses when running concurrent queries on the same session. |
-| `result` | `oneof` | Either a `QueryResultRow` or a `StatementEffect` (see below). |
+| `result` | `oneof` | A `QueryResultRow`, `StatementEffect`, or `AssertionDiagnosticsMessage` (see below). |
 
 **`QueryResultRow`** (for `SELECT` statements):
 
@@ -361,6 +361,18 @@ Executes one or more semicolon-separated SQL statements and streams results back
 |-------|------|-------------|
 | `affected_rows` | `int64` | Number of rows affected by the statement (`0` for DDL). |
 | `message` | `string` | Human-readable summary of the operation. |
+
+**`AssertionDiagnosticsMessage`** (terminal message for `SELECT` statements with `ASSERT … ON FAIL WARN/SKIP`):
+
+Emitted as the last `QueryResult` for a statement after all rows have been streamed, but only when at least one `ASSERT … ON FAIL WARN` or `ON FAIL SKIP` condition fired during execution. Clients that do not read assertion diagnostics receive correct row data — the message is purely informational.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `warned_row_count` | `int64` | Number of rows that triggered `ON FAIL WARN`. These rows were included in the result set. |
+| `skipped_row_count` | `int64` | Number of rows excluded from the result by `ON FAIL SKIP`. |
+| `sample_messages` | `repeated string` | Up to 10 sample failure messages from the assertion expression. Useful for diagnosing which rows failed. |
+
+`ASSERT … ON FAIL ABORT` is not represented here — an abort throws immediately and causes the stream to end with `StatusCode.Internal` carrying the assertion message.
 
 **Errors:** `InvalidArgument` on syntax errors or statement failures; `NotFound` if the session does not exist.
 
@@ -728,6 +740,16 @@ await foreach (QueryResult result in stream.ResponseStream.ReadAllAsync())
     {
         Console.WriteLine($"[Statement {result.StatementIndex}] {result.Effect.Message}");
     }
+    else if (result.Diagnostics is not null)
+    {
+        AssertionDiagnosticsMessage d = result.Diagnostics;
+        if (d.WarnedRowCount > 0)
+            Console.WriteLine($"WARN: {d.WarnedRowCount} row(s) failed assertion (ON FAIL WARN)");
+        if (d.SkippedRowCount > 0)
+            Console.WriteLine($"WARN: {d.SkippedRowCount} row(s) excluded by assertion (ON FAIL SKIP)");
+        foreach (string message in d.SampleMessages)
+            Console.WriteLine($"  {message}");
+    }
 }
 
 // Clean up.
@@ -871,6 +893,14 @@ for result in stub.Query(
         print([v.float32_value if v.HasField("float32_value") else str(v) for v in result.row.values])
     elif result.HasField("effect"):
         print(f"[Statement {result.statement_index}] {result.effect.message}")
+    elif result.HasField("diagnostics"):
+        d = result.diagnostics
+        if d.warned_row_count:
+            print(f"WARN: {d.warned_row_count} row(s) failed assertion (ON FAIL WARN)")
+        if d.skipped_row_count:
+            print(f"WARN: {d.skipped_row_count} row(s) excluded by assertion (ON FAIL SKIP)")
+        for msg in d.sample_messages:
+            print(f"  {msg}")
 
 # Clean up.
 stub.DestroySession(

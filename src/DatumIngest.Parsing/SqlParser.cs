@@ -1002,6 +1002,113 @@ public static class SqlParser
         from condition in ExpressionParser
         select condition;
 
+    // ───────────────────── ASSERT clause ─────────────────────
+
+    /// <summary>
+    /// Optional <c>ON FAIL SKIP | WARN | ABORT ["message"]</c> suffix for ASSERT.
+    /// Parsed contextually using <c>ON</c> + identifier text to avoid reserving
+    /// SKIP, WARN, and ABORT as keywords. An optional string literal immediately
+    /// after the mode keyword is captured as an inline message.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (AssertFailureMode Mode, Expression? InlineMessage)> AssertFailureModeParser =
+        from onKw in Token.EqualTo(SqlToken.On)
+        from failKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => string.Equals(t.ToStringValue(), "FAIL", StringComparison.OrdinalIgnoreCase))
+        from modeKw in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => string.Equals(t.ToStringValue(), "SKIP", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(t.ToStringValue(), "WARN", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(t.ToStringValue(), "ABORT", StringComparison.OrdinalIgnoreCase))
+        from inlineMessage in StringLiteral.AsNullable().Try().OptionalOrDefault()
+        select (
+            Mode: string.Equals(modeKw.ToStringValue(), "SKIP", StringComparison.OrdinalIgnoreCase)
+                ? AssertFailureMode.Skip
+                : string.Equals(modeKw.ToStringValue(), "WARN", StringComparison.OrdinalIgnoreCase)
+                    ? AssertFailureMode.Warn
+                    : AssertFailureMode.Abort,
+            InlineMessage: inlineMessage);
+
+    /// <summary>
+    /// A single ASSERT clause: <c>ASSERT predicate [MESSAGE expr] [ON FAIL SKIP | WARN | ABORT ["message"]]</c>.
+    /// The <c>MESSAGE</c> keyword form takes precedence over an inline string after the mode keyword
+    /// when both are present.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, AssertClause> AssertClauseParser =
+        from assertKw in Token.EqualTo(SqlToken.Assert)
+        from predicate in ExpressionParser
+        from message in (
+            from msgKw in Token.EqualTo(SqlToken.Message)
+            from msgExpr in ExpressionParser
+            select msgExpr
+        ).AsNullable().Try().OptionalOrDefault()
+        from failureModeResult in AssertFailureModeParser.Try().OptionalOrDefault((Mode: AssertFailureMode.Abort, InlineMessage: default(Expression?)))
+        select new AssertClause(predicate, message ?? failureModeResult.InlineMessage, failureModeResult.Mode, ToSpan(assertKw));
+
+    /// <summary>Zero or more ASSERT clauses following QUALIFY.</summary>
+    private static readonly TokenListParser<SqlToken, AssertClause[]> AssertClausesParser =
+        AssertClauseParser.Many();
+
+    // ───────────────────── DEFINE block ─────────────────────
+
+    /// <summary>
+    /// A single declaration inside a DEFINE block: either an inline LET binding
+    /// or an ASSERT clause. The first element is non-null for LET declarations;
+    /// the second element is non-null for ASSERT declarations.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (LetBinding? Let, AssertClause? Assert)>
+        DefineDeclarationParser =
+        LetBindingParser
+            .Select(let => (Let: (LetBinding?)let, Assert: (AssertClause?)null))
+            .Or(AssertClauseParser
+            .Select(assert => (Let: (LetBinding?)null, Assert: (AssertClause?)assert)));
+
+    /// <summary>
+    /// Parses a DEFINE block: <c>DEFINE { declaration [;] ... }</c>.
+    /// Each declaration is either a LET binding or an ASSERT clause; semicolons
+    /// are optional separators. Returns embedded LET bindings and ASSERT clauses
+    /// as separate arrays so the SELECT parsers can merge them with their own bindings.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (LetBinding[] LetBindings, AssertClause[] Assertions)>
+        DefineBlockParser =
+        from defineKw in Token.EqualTo(SqlToken.Define)
+        from openBrace in Token.EqualTo(SqlToken.LeftBrace)
+        from declarations in (
+            from decl in DefineDeclarationParser
+            from semi in Token.EqualTo(SqlToken.Semicolon).OptionalOrDefault()
+            select decl
+        ).Many()
+        from closeBrace in Token.EqualTo(SqlToken.RightBrace)
+        select (
+            declarations.Where(d => d.Let is not null).Select(d => d.Let!).ToArray(),
+            declarations.Where(d => d.Assert is not null).Select(d => d.Assert!).ToArray()
+        );
+
+    /// <summary>
+    /// Tries to parse a DEFINE block first; if absent, falls back to zero or more inline
+    /// LET bindings followed by commas. Returns the same <c>(LetBinding[], AssertClause[])</c>
+    /// tuple in both cases, enabling a single binding site in the SELECT parsers.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (LetBinding[] LetBindings, AssertClause[] Assertions)>
+        LetOrDefineParser =
+        DefineBlockParser.Try()
+            .Or(LetBindingsParser
+            .Select(bindings => (LetBindings: bindings, Assertions: Array.Empty<AssertClause>())));
+
+    /// <summary>
+    /// Combines ASSERT clauses sourced from a DEFINE block with ASSERT clauses
+    /// written as trailing clauses after the column list. Returns <see langword="null"/>
+    /// when both inputs are empty so the <see cref="SelectStatement"/> field stays null.
+    /// </summary>
+    private static IReadOnlyList<AssertClause>? MergeAssertions(AssertClause[] fromDefine, AssertClause[] fromClauses)
+    {
+        if (fromDefine.Length == 0 && fromClauses.Length == 0)
+            return null;
+        if (fromDefine.Length == 0)
+            return fromClauses;
+        if (fromClauses.Length == 0)
+            return fromDefine;
+        return fromDefine.Concat(fromClauses).ToArray();
+    }
+
     // ───────────────────── PIVOT clause ─────────────────────
 
     /// <summary>
@@ -1205,7 +1312,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, SelectStatement> SelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
-        from letBindings in LetBindingsParser
+        from letOrDefine in LetOrDefineParser
         from columns in ColumnList
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
@@ -1213,6 +1320,7 @@ public static class SqlParser
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
         from qualifyClause in QualifyClauseParser.OptionalOrDefault()
+        from assertions in AssertClausesParser
         from pivotClause in PivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from unpivotClause in UnpivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
@@ -1228,13 +1336,14 @@ public static class SqlParser
             groupByClause,
             havingClause,
             qualifyClause,
+            MergeAssertions(letOrDefine.Assertions, assertions),
             pivotClause,
             unpivotClause,
             orderByClause,
             limitValue,
             offsetValue,
             Distinct: distinct.HasValue,
-            LetBindings: letBindings.Length > 0 ? letBindings : null);
+            LetBindings: letOrDefine.LetBindings.Length > 0 ? letOrDefine.LetBindings : null);
 
     /// <summary>
     /// Bare SELECT parser: same as <see cref="SelectStatementParser"/> but stops
@@ -1247,7 +1356,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, SelectStatement> BareSelectStatementParser =
         from selectKw in Token.EqualTo(SqlToken.Select)
         from distinct in Token.EqualTo(SqlToken.Distinct).OptionalOrDefault()
-        from letBindings in LetBindingsParser
+        from letOrDefine in LetOrDefineParser
         from columns in ColumnList
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
@@ -1255,6 +1364,7 @@ public static class SqlParser
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
         from qualifyClause in QualifyClauseParser.OptionalOrDefault()
+        from assertions in AssertClausesParser
         from pivotClause in PivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from unpivotClause in UnpivotClauseParser.AsNullable().Try().OptionalOrDefault()
         from intoClause in IntoClauseParser.OptionalOrDefault()
@@ -1267,13 +1377,14 @@ public static class SqlParser
             groupByClause,
             havingClause,
             qualifyClause,
+            MergeAssertions(letOrDefine.Assertions, assertions),
             pivotClause,
             unpivotClause,
             OrderBy: null,
             Limit: null,
             Offset: null,
             Distinct: distinct.HasValue,
-            LetBindings: letBindings.Length > 0 ? letBindings : null);
+            LetBindings: letOrDefine.LetBindings.Length > 0 ? letOrDefine.LetBindings : null);
 
     /// <summary>
     /// Top-level statement parser: optional WITH clause followed by SELECT.
@@ -1673,6 +1784,8 @@ public static class SqlParser
         SqlToken.Group,
         SqlToken.Having,
         SqlToken.Qualify,
+        SqlToken.Assert,
+        SqlToken.Define,
         SqlToken.Pivot,
         SqlToken.Unpivot,
         SqlToken.Into,
@@ -1825,6 +1938,8 @@ public static class SqlParser
 
         // ── SELECT columns ──
         SelectColumn[]? columns = null;
+        LetBinding[]? recoveryLetBindings = null;
+        List<AssertClause> recoveryDefineAssertions = new();
         if (position < tokenArray.Length)
         {
             TokenList<SqlToken> remaining = new(tokenArray[position..]);
@@ -1839,6 +1954,40 @@ public static class SqlParser
             else
             {
                 position += CountConsumed(tokenArray, position, selectResult.Remainder);
+
+                // ── DEFINE block or inline LET bindings ──
+                if (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Define)
+                {
+                    TokenList<SqlToken> defineRemaining = new(tokenArray[position..]);
+                    TokenListParserResult<SqlToken, (LetBinding[] LetBindings, AssertClause[] Assertions)> defineResult =
+                        DefineBlockParser.TryParse(defineRemaining);
+
+                    if (!defineResult.HasValue)
+                    {
+                        AddErrorFromToken(errors, tokenArray, position, "Invalid DEFINE block.");
+                        position = SkipToNextClauseIndex(tokenArray, position + 1);
+                    }
+                    else
+                    {
+                        if (defineResult.Value.LetBindings.Length > 0)
+                            recoveryLetBindings = defineResult.Value.LetBindings;
+                        recoveryDefineAssertions.AddRange(defineResult.Value.Assertions);
+                        position += CountConsumed(tokenArray, position, defineResult.Remainder);
+                    }
+                }
+                else
+                {
+                    TokenList<SqlToken> letRemaining = new(tokenArray[position..]);
+                    TokenListParserResult<SqlToken, LetBinding[]> letResult =
+                        LetBindingsParser.TryParse(letRemaining);
+
+                    if (letResult.HasValue && letResult.Value.Length > 0)
+                    {
+                        recoveryLetBindings = letResult.Value;
+                        position += CountConsumed(tokenArray, position, letResult.Remainder);
+                    }
+                }
+
                 TokenList<SqlToken> afterSelect = new(tokenArray[position..]);
                 TokenListParserResult<SqlToken, SelectColumn[]> columnsResult =
                     ColumnList.TryParse(afterSelect);
@@ -1977,6 +2126,27 @@ public static class SqlParser
             {
                 qualifyClause = qualifyResult.Value;
                 position += CountConsumed(tokenArray, position, qualifyResult.Remainder);
+            }
+        }
+
+        // ── ASSERT clauses ──
+        List<AssertClause> assertions = new();
+        while (position < tokenArray.Length && tokenArray[position].Kind == SqlToken.Assert)
+        {
+            TokenList<SqlToken> remaining = new(tokenArray[position..]);
+            TokenListParserResult<SqlToken, AssertClause> assertResult =
+                AssertClauseParser.TryParse(remaining);
+
+            if (!assertResult.HasValue)
+            {
+                AddErrorFromToken(errors, tokenArray, position, "Invalid ASSERT clause.");
+                position = SkipToNextClauseIndex(tokenArray, position + 1);
+                break;
+            }
+            else
+            {
+                assertions.Add(assertResult.Value);
+                position += CountConsumed(tokenArray, position, assertResult.Remainder);
             }
         }
 
@@ -2125,12 +2295,14 @@ public static class SqlParser
                 groupByClause,
                 havingClause,
                 qualifyClause,
+                MergeAssertions(recoveryDefineAssertions.ToArray(), assertions.Count > 0 ? assertions.ToArray() : Array.Empty<AssertClause>()),
                 pivotClause,
                 unpivotClause,
                 orderByClause,
                 limitValue,
                 offsetValue,
-                CommonTableExpressions: commonTableExpressions);
+                CommonTableExpressions: commonTableExpressions,
+                LetBindings: recoveryLetBindings);
             query = new SelectQueryExpression(statement);
         }
 
