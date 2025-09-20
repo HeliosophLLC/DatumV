@@ -73,6 +73,8 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
         // we discover this from the first row.
         HashSet<DataValue>? singleKeySet = null;
         HashSet<CompositeKey>? compositeKeySet = null;
+        HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> compositeKeyLookup = default;
+        DataValue[]? compositeKeyScratch = null;
         int columnCount = -1;
 
         RowBatch? outputBatch = null;
@@ -96,7 +98,9 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            compositeKeySet = new HashSet<CompositeKey>();
+                            compositeKeySet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                            compositeKeyLookup = compositeKeySet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+                            compositeKeyScratch = new DataValue[columnCount];
                         }
                     }
 
@@ -112,15 +116,14 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        DataValue[] parts = new DataValue[columnCount];
                         for (int index = 0; index < columnCount; index++)
                         {
-                            parts[index] = row[index];
+                            compositeKeyScratch![index] = row[index];
                         }
 
-                        CompositeKey compositeKey = new(parts);
-                        isNew = compositeKeySet!.Add(compositeKey);
-                        hashCode = compositeKey.GetHashCode();
+                        ReadOnlySpan<DataValue> keySpan = compositeKeyScratch.AsSpan(0, columnCount);
+                        isNew = compositeKeyLookup.Add(keySpan);
+                        hashCode = CompositeKeyComparer.Instance.GetHashCode(keySpan);
                     }
 
                     if (isNew)
@@ -219,7 +222,8 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                     // the in-memory set) by re-hashing them. Only include rows whose hash
                     // maps to this partition.
                     HashSet<DataValue>? partitionSingleSet = columnCount == 1 ? new() : null;
-                    HashSet<CompositeKey>? partitionCompositeSet = columnCount != 1 ? new() : null;
+                    HashSet<CompositeKey>? partitionCompositeSet = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     if (columnCount == 1)
                     {
@@ -242,6 +246,11 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                         }
                     }
 
+                    HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> partitionLookup =
+                        partitionCompositeSet is not null
+                            ? partitionCompositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>()
+                            : default;
+
                     // Read the spill file and emit any rows not already seen.
                     await foreach (Row spilledRow in ReadSpillPartitionAsync(
                         spillPaths[partition], schemaNames!, schemaNameIndex!, context.CancellationToken))
@@ -255,13 +264,12 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            DataValue[] parts = new DataValue[columnCount];
                             for (int index = 0; index < columnCount; index++)
                             {
-                                parts[index] = spilledRow[index];
+                                compositeKeyScratch![index] = spilledRow[index];
                             }
 
-                            spilledIsNew = partitionCompositeSet!.Add(new CompositeKey(parts));
+                            spilledIsNew = partitionLookup.Add(compositeKeyScratch.AsSpan(0, columnCount));
                         }
 
                         if (spilledIsNew)

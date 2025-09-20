@@ -138,6 +138,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
         HashSet<DataValue>? singleKeySet = null;
         HashSet<CompositeKey>? compositeKeySet = null;
+        HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> compositeKeyLookup = default;
+        DataValue[]? compositeKeyScratch = null;
         int columnCount = -1;
         RowBatch? outputBatch = null;
 
@@ -160,7 +162,9 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            compositeKeySet = new HashSet<CompositeKey>();
+                            compositeKeySet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                            compositeKeyLookup = compositeKeySet.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+                            compositeKeyScratch = new DataValue[columnCount];
                         }
                     }
 
@@ -175,15 +179,14 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        DataValue[] parts = new DataValue[columnCount];
                         for (int index = 0; index < columnCount; index++)
                         {
-                            parts[index] = row[index];
+                            compositeKeyScratch![index] = row[index];
                         }
 
-                        CompositeKey compositeKey = new(parts);
-                        isNew = compositeKeySet!.Add(compositeKey);
-                        hashCode = compositeKey.GetHashCode();
+                        ReadOnlySpan<DataValue> keySpan = compositeKeyScratch.AsSpan(0, columnCount);
+                        isNew = compositeKeyLookup.Add(keySpan);
+                        hashCode = CompositeKeyComparer.Instance.GetHashCode(keySpan);
                     }
 
                     if (isNew)
@@ -263,7 +266,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
 
                     HashSet<DataValue>? partitionSingleSet = columnCount == 1 ? new() : null;
-                    HashSet<CompositeKey>? partitionCompositeSet = columnCount != 1 ? new() : null;
+                    HashSet<CompositeKey>? partitionCompositeSet = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     if (columnCount == 1)
                     {
@@ -286,6 +290,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                     }
 
+                    HashSet<CompositeKey>.AlternateLookup<ReadOnlySpan<DataValue>> partitionLookup =
+                        partitionCompositeSet is not null
+                            ? partitionCompositeSet.GetAlternateLookup<ReadOnlySpan<DataValue>>()
+                            : default;
+
                     await foreach (Row spilledRow in ReadSpillPartitionAsync(
                         spillPaths[partition], schemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
@@ -298,13 +307,12 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            DataValue[] parts = new DataValue[columnCount];
                             for (int index = 0; index < columnCount; index++)
                             {
-                                parts[index] = spilledRow[index];
+                                compositeKeyScratch![index] = spilledRow[index];
                             }
 
-                            spilledIsNew = partitionCompositeSet!.Add(new CompositeKey(parts));
+                            spilledIsNew = partitionLookup.Add(compositeKeyScratch.AsSpan(0, columnCount));
                         }
 
                         if (spilledIsNew)
@@ -343,6 +351,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     {
         HashSet<DataValue>? rightSingleSet = null;
         HashSet<CompositeKey>? rightCompositeSet = null;
+        DataValue[]? compositeKeyScratch = null;
         int columnCount = -1;
 
         long? memoryBudget = context.MemoryBudgetBytes;
@@ -373,7 +382,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            rightCompositeSet = new HashSet<CompositeKey>();
+                            rightCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                            compositeKeyScratch = new DataValue[columnCount];
                         }
                     }
 
@@ -385,7 +395,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        AddRowToSet(row, columnCount, rightSingleSet, rightCompositeSet);
+                        AddRowToSet(row, columnCount, rightSingleSet, rightCompositeSet, compositeKeyScratch);
 
                         if (estimator is not null)
                         {
@@ -431,7 +441,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
             {
                 // Fully in-memory path: probe left against right set.
                 HashSet<DataValue>? emittedSingleSet = columnCount == 1 ? new() : null;
-                HashSet<CompositeKey>? emittedCompositeSet = columnCount != 1 ? new() : null;
+                HashSet<CompositeKey>? emittedCompositeSet = columnCount != 1
+                    ? new(CompositeKeyComparer.Instance) : null;
 
                 await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
                 {
@@ -440,7 +451,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         Row row = leftBatch[i];
                         context.CancellationToken.ThrowIfCancellationRequested();
 
-                        if (!ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet))
+                        if (!ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet, compositeKeyScratch))
                         {
                             continue;
                         }
@@ -452,8 +463,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            DataValue[] parts = ExtractRowParts(row, columnCount);
-                            isNew = emittedCompositeSet!.Add(new CompositeKey(parts));
+                            ReadOnlySpan<DataValue> keySpan = FillScratch(row, compositeKeyScratch!, columnCount);
+                            isNew = emittedCompositeSet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
                         }
 
                         if (isNew)
@@ -491,7 +502,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
 
                 HashSet<DataValue>? emittedSingleSet = columnCount == 1 ? new() : null;
-                HashSet<CompositeKey>? emittedCompositeSet = columnCount != 1 ? new() : null;
+                HashSet<CompositeKey>? emittedCompositeSet = columnCount != 1
+                    ? new(CompositeKeyComparer.Instance) : null;
 
                 await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
                 {
@@ -512,7 +524,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         else
                         {
                             // Partition is fully in-memory — probe directly.
-                            if (!ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet))
+                            if (!ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet, compositeKeyScratch))
                             {
                                 continue;
                             }
@@ -524,8 +536,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             }
                             else
                             {
-                                DataValue[] parts = ExtractRowParts(row, columnCount);
-                                isNew = emittedCompositeSet!.Add(new CompositeKey(parts));
+                                ReadOnlySpan<DataValue> keySpan = FillScratch(row, compositeKeyScratch!, columnCount);
+                                isNew = emittedCompositeSet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
                             }
 
                             if (isNew)
@@ -558,12 +570,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                     // Load right partition into a local set.
                     HashSet<DataValue>? partRightSingle = columnCount == 1 ? new() : null;
-                    HashSet<CompositeKey>? partRightComposite = columnCount != 1 ? new() : null;
+                    HashSet<CompositeKey>? partRightComposite = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     await foreach (Row row in ReadSpillPartitionAsync(
                         rightSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        AddRowToSet(row, columnCount, partRightSingle, partRightComposite);
+                        AddRowToSet(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch);
                     }
 
                     // Also include in-memory rows for this partition.
@@ -577,12 +590,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
 
                     HashSet<DataValue>? partEmittedSingle = columnCount == 1 ? new() : null;
-                    HashSet<CompositeKey>? partEmittedComposite = columnCount != 1 ? new() : null;
+                    HashSet<CompositeKey>? partEmittedComposite = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     await foreach (Row row in ReadSpillPartitionAsync(
                         leftSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        if (!ContainsRow(row, columnCount, partRightSingle, partRightComposite))
+                        if (!ContainsRow(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
                         {
                             continue;
                         }
@@ -594,8 +608,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            DataValue[] parts = ExtractRowParts(row, columnCount);
-                            isNew = partEmittedComposite!.Add(new CompositeKey(parts));
+                            ReadOnlySpan<DataValue> keySpan = FillScratch(row, compositeKeyScratch!, columnCount);
+                            isNew = partEmittedComposite!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
                         }
 
                         if (isNew)
@@ -636,6 +650,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     {
         Dictionary<DataValue, int>? rightSingleCounts = null;
         Dictionary<CompositeKey, int>? rightCompositeCounts = null;
+        DataValue[]? compositeKeyScratch = null;
         int columnCount = -1;
 
         long? memoryBudget = context.MemoryBudgetBytes;
@@ -665,7 +680,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            rightCompositeCounts = new Dictionary<CompositeKey, int>();
+                            rightCompositeCounts = new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance);
+                            compositeKeyScratch = new DataValue[columnCount];
                         }
                     }
 
@@ -677,7 +693,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts);
+                        IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
 
                         if (estimator is not null)
                         {
@@ -727,7 +743,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         Row row = leftBatch[i];
                         context.CancellationToken.ThrowIfCancellationRequested();
 
-                        if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts))
+                        if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                         {
                             outputBatch ??= RowBatch.Rent(context.BatchSize);
                             outputBatch.Add(row);
@@ -775,7 +791,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts))
+                            if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                             {
                                 outputBatch ??= RowBatch.Rent(context.BatchSize);
                                 outputBatch.Add(row);
@@ -802,12 +818,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
 
                     Dictionary<DataValue, int>? partRightSingle = columnCount == 1 ? new() : null;
-                    Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1 ? new() : null;
+                    Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     await foreach (Row row in ReadSpillPartitionAsync(
                         rightSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        IncrementCount(row, columnCount, partRightSingle, partRightComposite);
+                        IncrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch);
                     }
 
                     AddInMemoryCountsForPartition(partition, columnCount,
@@ -821,7 +838,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     await foreach (Row row in ReadSpillPartitionAsync(
                         leftSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        if (DecrementCount(row, columnCount, partRightSingle, partRightComposite))
+                        if (DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
                         {
                             outputBatch ??= RowBatch.Rent(context.BatchSize);
                             outputBatch.Add(row);
@@ -859,6 +876,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     {
         HashSet<DataValue>? rightSingleSet = null;
         HashSet<CompositeKey>? rightCompositeSet = null;
+        DataValue[]? compositeKeyScratch = null;
         int columnCount = -1;
 
         long? memoryBudget = context.MemoryBudgetBytes;
@@ -888,7 +906,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            rightCompositeSet = new HashSet<CompositeKey>();
+                            rightCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                            compositeKeyScratch = new DataValue[columnCount];
                         }
                     }
 
@@ -900,7 +919,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        AddRowToSet(row, columnCount, rightSingleSet, rightCompositeSet);
+                        AddRowToSet(row, columnCount, rightSingleSet, rightCompositeSet, compositeKeyScratch);
 
                         if (estimator is not null)
                         {
@@ -963,11 +982,12 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             }
                             else
                             {
-                                emittedCompositeSet = new HashSet<CompositeKey>();
+                                emittedCompositeSet = new HashSet<CompositeKey>(CompositeKeyComparer.Instance);
+                                compositeKeyScratch ??= new DataValue[columnCount];
                             }
                         }
 
-                        if (ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet))
+                        if (ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet, compositeKeyScratch))
                         {
                             continue;
                         }
@@ -979,8 +999,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            DataValue[] parts = ExtractRowParts(row, columnCount);
-                            isNew = emittedCompositeSet!.Add(new CompositeKey(parts));
+                            ReadOnlySpan<DataValue> keySpan = FillScratch(row, compositeKeyScratch!, columnCount);
+                            isNew = emittedCompositeSet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
                         }
 
                         if (isNew)
@@ -1016,7 +1036,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                 }
 
                 HashSet<DataValue>? emittedSingleSet = columnCount == 1 ? new() : null;
-                HashSet<CompositeKey>? emittedCompositeSet = columnCount != 1 ? new() : null;
+                HashSet<CompositeKey>? emittedCompositeSet = columnCount != 1
+                    ? new(CompositeKeyComparer.Instance) : null;
 
                 await foreach (RowBatch leftBatch in _left.ExecuteAsync(context).ConfigureAwait(false))
                 {
@@ -1035,7 +1056,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            if (ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet))
+                            if (ContainsRow(row, columnCount, rightSingleSet, rightCompositeSet, compositeKeyScratch))
                             {
                                 continue;
                             }
@@ -1047,8 +1068,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             }
                             else
                             {
-                                DataValue[] parts = ExtractRowParts(row, columnCount);
-                                isNew = emittedCompositeSet!.Add(new CompositeKey(parts));
+                                ReadOnlySpan<DataValue> keySpan = FillScratch(row, compositeKeyScratch!, columnCount);
+                                isNew = emittedCompositeSet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
                             }
 
                             if (isNew)
@@ -1080,12 +1101,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                     // Load right partition.
                     HashSet<DataValue>? partRightSingle = columnCount == 1 ? new() : null;
-                    HashSet<CompositeKey>? partRightComposite = columnCount != 1 ? new() : null;
+                    HashSet<CompositeKey>? partRightComposite = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     await foreach (Row row in ReadSpillPartitionAsync(
                         rightSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        AddRowToSet(row, columnCount, partRightSingle, partRightComposite);
+                        AddRowToSet(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch);
                     }
 
                     AddInMemoryRowsForPartition(partition, columnCount,
@@ -1097,12 +1119,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
 
                     HashSet<DataValue>? partEmittedSingle = columnCount == 1 ? new() : null;
-                    HashSet<CompositeKey>? partEmittedComposite = columnCount != 1 ? new() : null;
+                    HashSet<CompositeKey>? partEmittedComposite = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     await foreach (Row row in ReadSpillPartitionAsync(
                         leftSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        if (ContainsRow(row, columnCount, partRightSingle, partRightComposite))
+                        if (ContainsRow(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
                         {
                             continue;
                         }
@@ -1114,8 +1137,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            DataValue[] parts = ExtractRowParts(row, columnCount);
-                            isNew = partEmittedComposite!.Add(new CompositeKey(parts));
+                            ReadOnlySpan<DataValue> keySpan = FillScratch(row, compositeKeyScratch!, columnCount);
+                            isNew = partEmittedComposite!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
                         }
 
                         if (isNew)
@@ -1156,6 +1179,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     {
         Dictionary<DataValue, int>? rightSingleCounts = null;
         Dictionary<CompositeKey, int>? rightCompositeCounts = null;
+        DataValue[]? compositeKeyScratch = null;
         int columnCount = -1;
 
         long? memoryBudget = context.MemoryBudgetBytes;
@@ -1185,7 +1209,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            rightCompositeCounts = new Dictionary<CompositeKey, int>();
+                            rightCompositeCounts = new Dictionary<CompositeKey, int>(CompositeKeyComparer.Instance);
+                            compositeKeyScratch = new DataValue[columnCount];
                         }
                     }
 
@@ -1197,7 +1222,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
                     else
                     {
-                        IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts);
+                        IncrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch);
 
                         if (estimator is not null)
                         {
@@ -1256,7 +1281,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             continue;
                         }
 
-                        if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts))
+                        if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                         {
                             outputBatch ??= RowBatch.Rent(context.BatchSize);
                             outputBatch.Add(row);
@@ -1304,7 +1329,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         }
                         else
                         {
-                            if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts))
+                            if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                             {
                                 outputBatch ??= RowBatch.Rent(context.BatchSize);
                                 outputBatch.Add(row);
@@ -1331,12 +1356,13 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     }
 
                     Dictionary<DataValue, int>? partRightSingle = columnCount == 1 ? new() : null;
-                    Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1 ? new() : null;
+                    Dictionary<CompositeKey, int>? partRightComposite = columnCount != 1
+                        ? new(CompositeKeyComparer.Instance) : null;
 
                     await foreach (Row row in ReadSpillPartitionAsync(
                         rightSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        IncrementCount(row, columnCount, partRightSingle, partRightComposite);
+                        IncrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch);
                     }
 
                     AddInMemoryCountsForPartition(partition, columnCount,
@@ -1350,7 +1376,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     await foreach (Row row in ReadSpillPartitionAsync(
                         leftSpillPaths[partition], spillSchemaNames!, schemaNameIndex!, context.CancellationToken))
                     {
-                        if (!DecrementCount(row, columnCount, partRightSingle, partRightComposite))
+                        if (!DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
                         {
                             outputBatch ??= RowBatch.Rent(context.BatchSize);
                             outputBatch.Add(row);
@@ -1383,17 +1409,16 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
     // ---------------------------------------------------------------
 
     /// <summary>
-    /// Extracts the values from a row into a new array.
+    /// Fills the scratch buffer with the row's column values and returns a span over them.
     /// </summary>
-    private static DataValue[] ExtractRowParts(Row row, int columnCount)
+    private static ReadOnlySpan<DataValue> FillScratch(Row row, DataValue[] scratch, int columnCount)
     {
-        DataValue[] parts = new DataValue[columnCount];
         for (int index = 0; index < columnCount; index++)
         {
-            parts[index] = row[index];
+            scratch[index] = row[index];
         }
 
-        return parts;
+        return scratch.AsSpan(0, columnCount);
     }
 
     /// <summary>
@@ -1544,7 +1569,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         Row row,
         int columnCount,
         HashSet<DataValue>? singleKeySet,
-        HashSet<CompositeKey>? compositeKeySet)
+        HashSet<CompositeKey>? compositeKeySet,
+        DataValue[]? scratch)
     {
         if (columnCount == 1)
         {
@@ -1552,13 +1578,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         else
         {
-            DataValue[] parts = new DataValue[columnCount];
-            for (int index = 0; index < columnCount; index++)
-            {
-                parts[index] = row[index];
-            }
-
-            compositeKeySet!.Add(new CompositeKey(parts));
+            ReadOnlySpan<DataValue> keySpan = FillScratch(row, scratch!, columnCount);
+            compositeKeySet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Add(keySpan);
         }
     }
 
@@ -1569,7 +1590,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         Row row,
         int columnCount,
         HashSet<DataValue>? singleKeySet,
-        HashSet<CompositeKey>? compositeKeySet)
+        HashSet<CompositeKey>? compositeKeySet,
+        DataValue[]? scratch)
     {
         if (singleKeySet is null && compositeKeySet is null)
         {
@@ -1581,13 +1603,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
             return singleKeySet!.Contains(row[0]);
         }
 
-        DataValue[] parts = new DataValue[columnCount];
-        for (int index = 0; index < columnCount; index++)
-        {
-            parts[index] = row[index];
-        }
-
-        return compositeKeySet!.Contains(new CompositeKey(parts));
+        ReadOnlySpan<DataValue> keySpan = FillScratch(row, scratch!, columnCount);
+        return compositeKeySet!.GetAlternateLookup<ReadOnlySpan<DataValue>>().Contains(keySpan);
     }
 
     /// <summary>
@@ -1597,7 +1614,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         Row row,
         int columnCount,
         Dictionary<DataValue, int>? singleCounts,
-        Dictionary<CompositeKey, int>? compositeCounts)
+        Dictionary<CompositeKey, int>? compositeCounts,
+        DataValue[]? scratch)
     {
         if (columnCount == 1)
         {
@@ -1606,14 +1624,10 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         }
         else
         {
-            DataValue[] parts = new DataValue[columnCount];
-            for (int index = 0; index < columnCount; index++)
-            {
-                parts[index] = row[index];
-            }
-
-            CompositeKey compositeKey = new(parts);
-            compositeCounts![compositeKey] = compositeCounts.GetValueOrDefault(compositeKey) + 1;
+            ReadOnlySpan<DataValue> keySpan = FillScratch(row, scratch!, columnCount);
+            var lookup = compositeCounts!.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+            lookup.TryGetValue(keySpan, out int count);
+            lookup[keySpan] = count + 1;
         }
     }
 
@@ -1626,7 +1640,8 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
         Row row,
         int columnCount,
         Dictionary<DataValue, int>? singleCounts,
-        Dictionary<CompositeKey, int>? compositeCounts)
+        Dictionary<CompositeKey, int>? compositeCounts,
+        DataValue[]? scratch)
     {
         if (singleCounts is null && compositeCounts is null)
         {
@@ -1645,16 +1660,11 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
             return false;
         }
 
-        DataValue[] parts = new DataValue[columnCount];
-        for (int index = 0; index < columnCount; index++)
+        ReadOnlySpan<DataValue> keySpan = FillScratch(row, scratch!, columnCount);
+        var lookup = compositeCounts!.GetAlternateLookup<ReadOnlySpan<DataValue>>();
+        if (lookup.TryGetValue(keySpan, out int compositeCount) && compositeCount > 0)
         {
-            parts[index] = row[index];
-        }
-
-        CompositeKey compositeKey = new(parts);
-        if (compositeCounts!.TryGetValue(compositeKey, out int compositeCount) && compositeCount > 0)
-        {
-            compositeCounts[compositeKey] = compositeCount - 1;
+            lookup[keySpan] = compositeCount - 1;
             return true;
         }
 

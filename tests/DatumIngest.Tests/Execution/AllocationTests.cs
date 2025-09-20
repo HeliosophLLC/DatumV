@@ -224,6 +224,78 @@ public sealed class AllocationTests : IDisposable
         AssertAllocations("CTE inlined", bytes, gen2, maxBytes: 10_000_000);
     }
 
+    // ──────────────── Distinct / Set-op composite-key paths ────────────────
+    //
+    // These tests target the per-row DataValue[] allocation in DistinctOperator
+    // and SetOperationOperator when operating on multi-column (composite) keys.
+    // The thresholds are calibrated BEFORE the scratch-buffer optimisation so
+    // that the fix produces a measurable drop.
+
+    [Fact]
+    public async Task DistinctMultiColumn_AllocationsBounded()
+    {
+        // Exercises DistinctOperator lines 115 and 258 (composite key path).
+        // Every row allocates new DataValue[columnCount] for the CompositeKey.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT DISTINCT category, name FROM data",
+            BuildCatalog());
+
+        // Baseline: ~8.6 MB
+        AssertAllocations("DISTINCT multi-col", bytes, gen2, maxBytes: 18_000_000);
+    }
+
+    [Fact]
+    public async Task UnionDistinctMultiColumn_AllocationsBounded()
+    {
+        // Exercises SetOperationOperator.ExecuteUnionDistinctAsync composite key
+        // path (lines 178, 301).
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, name FROM data UNION SELECT category, name FROM data_b",
+            BuildCatalog(withSecond: true));
+
+        // Baseline: ~15.5 MB
+        AssertAllocations("UNION DISTINCT multi-col", bytes, gen2, maxBytes: 32_000_000);
+    }
+
+    [Fact]
+    public async Task IntersectMultiColumn_AllocationsBounded()
+    {
+        // Exercises SetOperationOperator AddRowToSet and ContainsRow
+        // composite key paths.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, name FROM data INTERSECT SELECT category, name FROM data_b",
+            BuildCatalog(withSecond: true));
+
+        // Baseline: ~14.8 MB (down from ~16.2 MB before scratch-buffer optimisation)
+        AssertAllocations("INTERSECT multi-col", bytes, gen2, maxBytes: 30_000_000);
+    }
+
+    [Fact]
+    public async Task IntersectAllMultiColumn_AllocationsBounded()
+    {
+        // Exercises SetOperationOperator IncrementCount and DecrementCount
+        // composite key paths.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, name FROM data INTERSECT ALL SELECT category, name FROM data_b",
+            BuildCatalog(withSecond: true));
+
+        // Baseline: ~15.8 MB (down from ~17.3 MB before scratch-buffer optimisation)
+        AssertAllocations("INTERSECT ALL multi-col", bytes, gen2, maxBytes: 32_000_000);
+    }
+
+    [Fact]
+    public async Task ExceptMultiColumn_AllocationsBounded()
+    {
+        // Exercises SetOperationOperator AddRowToSet (line 1555) and
+        // ContainsRow (line 1584) composite key paths.
+        (long bytes, int gen2) = await MeasureQueryAsync(
+            "SELECT category, name FROM data EXCEPT SELECT category, name FROM data_b",
+            BuildCatalog(withSecond: true));
+
+        // Baseline: ~16.4 MB (down from ~17.8 MB before scratch-buffer optimisation)
+        AssertAllocations("EXCEPT multi-col", bytes, gen2, maxBytes: 34_000_000);
+    }
+
     // ──────────────── Assertion helper ────────────────
 
     private static void AssertAllocations(
