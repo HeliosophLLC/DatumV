@@ -140,6 +140,36 @@
 				"reveal": "always",
 				"panel": "dedicated"
 			}
+		},
+		{
+			"label": "Shell: Build & Launch",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"-c", "Release",
+				"--project", "src/DatumIngest.Cli",
+				"--",
+				"shell",
+				"--source", "${input:sourceDirectory}"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"focus": true
+			}
+		}
+	],
+	"inputs": [
+		{
+			"id": "sourceDirectory",
+			"type": "promptString",
+			"description": "Path to the directory containing .datum files",
+			"default": "E:\\Datasets\\019d5610-9245-70c1-9fbf-038e7addb609"
 		}
 	]
 }
