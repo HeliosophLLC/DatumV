@@ -147,6 +147,7 @@ internal sealed class GraceHashJoinExecutor
             Row? firstBuildRow = null;
             bool hasNullKey = false;
             long inMemoryRowCount = 0;
+            DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
 
             ExecutionTracer.Write($"JOIN Phase1a iterating buildOperator type={buildOperator.GetType().Name}");
             await foreach (RowBatch buildBatch in buildOperator.ExecuteAsync(context).ConfigureAwait(false))
@@ -173,15 +174,15 @@ internal sealed class GraceHashJoinExecutor
                     }
                     else
                     {
-                        DataValue[] parts = EvaluateKeyParts(keyPairs, buildRow, rightSide: buildKeyIsRight);
-                        if (HasNull(parts))
+                        EvaluateKeyPartsInto(keyPairs, buildRow, buildKeyIsRight, keyScratch);
+                        if (HasNull(keyScratch))
                         {
                             hasNullKey = true;
                         }
                     }
                 }
 
-                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight);
+                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch);
                 partitions[partitionIndex].AddBuildRow(buildRow);
 
                 // Only count rows that landed in memory (not appended to an already-spilled partition).
@@ -271,7 +272,7 @@ internal sealed class GraceHashJoinExecutor
                     bool isFirst = firstProbeRow is null;
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
-                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight);
+                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch);
                     SpillPartition partition = partitions[partitionIndex];
 
                     if (!partition.IsBuildSpilled)
@@ -280,7 +281,7 @@ internal sealed class GraceHashJoinExecutor
                         // A LIMIT operator above can stop iteration here, preventing the
                         // remaining probe rows from ever being read from the source.
                         foreach (Row result in ProbePartitionRow(
-                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool))
+                            buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool, keyScratch))
                         {
                             outputBatch ??= RowBatch.Rent(context.BatchSize);
                             outputBatch.Add(result);
@@ -325,7 +326,7 @@ internal sealed class GraceHashJoinExecutor
                     Row probeRow = probeBatch[probeBatchIndex];
                     firstProbeRow ??= probeRow;
                     phase1bProbeCount++;
-                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight);
+                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch);
                     SpillPartition partition = partitions[partitionIndex];
 
                     if (partition.IsBuildSpilled)
@@ -485,7 +486,8 @@ internal sealed class GraceHashJoinExecutor
         bool useSingleKey,
         bool isSemiJoin,
         Row? nullBuildTemplate,
-        LocalBufferPool bufferPool)
+        LocalBufferPool bufferPool,
+        DataValue[] keyScratch)
     {
         bool buildKeyIsRight = !_flipped;
         List<(int Index, Row Row)>? matches = null;
@@ -501,10 +503,10 @@ internal sealed class GraceHashJoinExecutor
         }
         else
         {
-            DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: !buildKeyIsRight);
-            if (!HasNull(parts))
+            EvaluateKeyPartsInto(keyPairs, probeRow, !buildKeyIsRight, keyScratch);
+            if (!HasNull(keyScratch))
             {
-                table.CompositeKeyTable!.TryGetValue(parts.AsSpan(), out matches);
+                table.CompositeKeyTable!.TryGetValue(keyScratch.AsSpan(), out matches);
             }
         }
 
@@ -604,6 +606,7 @@ internal sealed class GraceHashJoinExecutor
         RowBatch? outputBatch = null;
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs = _extraction.KeyPairs;
         bool buildKeyIsRight = !_flipped;
+        DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
 
         for (int partitionIndex = 0; partitionIndex < partitions.Length; partitionIndex++)
         {
@@ -761,10 +764,10 @@ internal sealed class GraceHashJoinExecutor
                 }
                 else
                 {
-                    DataValue[] parts = EvaluateKeyParts(keyPairs, probeRow, rightSide: !buildKeyIsRight);
-                    if (!HasNull(parts))
+                    EvaluateKeyPartsInto(keyPairs, probeRow, !buildKeyIsRight, keyScratch);
+                    if (!HasNull(keyScratch))
                     {
-                        compositeKeyTable!.TryGetValue(parts.AsSpan(), out matches);
+                        compositeKeyTable!.TryGetValue(keyScratch.AsSpan(), out matches);
                     }
                 }
 
@@ -928,6 +931,8 @@ internal sealed class GraceHashJoinExecutor
             subPartitions[index] = new SpillPartition(subSpillDir, index);
         }
 
+        DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
+
         try
         {
             // Re-partition build rows with shifted hash bits.
@@ -935,7 +940,7 @@ internal sealed class GraceHashJoinExecutor
 
             foreach (Row buildRow in buildRows)
             {
-                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight);
+                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: buildKeyIsRight, keyScratch);
                 subPartitions[partitionIndex].AddBuildRow(buildRow);
 
                 if (estimator.ShouldSample())
@@ -954,7 +959,7 @@ internal sealed class GraceHashJoinExecutor
             // Re-partition probe rows.
             foreach (Row probeRow in probeRows)
             {
-                int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: !buildKeyIsRight);
+                int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, subPartitionCount, recursionDepth, rightSide: !buildKeyIsRight, keyScratch);
                 SpillPartition partition = subPartitions[partitionIndex];
 
                 if (partition.IsBuildSpilled && !partition.IsProbeSpilled)
@@ -992,7 +997,8 @@ internal sealed class GraceHashJoinExecutor
         bool useSingleKey,
         int partitionCount,
         int recursionDepth,
-        bool rightSide)
+        bool rightSide,
+        DataValue[] keyScratch)
     {
         int hash;
 
@@ -1010,13 +1016,13 @@ internal sealed class GraceHashJoinExecutor
         }
         else
         {
-            DataValue[] parts = EvaluateKeyParts(keyPairs, row, rightSide);
-            if (HasNull(parts))
+            EvaluateKeyPartsInto(keyPairs, row, rightSide, keyScratch);
+            if (HasNull(keyScratch))
             {
                 return 0;
             }
 
-            CompositeKey compositeKey = new(parts);
+            CompositeKey compositeKey = new(keyScratch);
             hash = compositeKey.GetHashCode();
         }
 
@@ -1084,19 +1090,36 @@ internal sealed class GraceHashJoinExecutor
         return partitions;
     }
 
+    /// <summary>
+    /// Allocates and returns a new key-parts array. Use only when the array must
+    /// be stored (e.g. as a dictionary key in the build-side hash table).
+    /// </summary>
     private DataValue[] EvaluateKeyParts(
         IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
         Row row,
         bool rightSide)
     {
         DataValue[] parts = new DataValue[keyPairs.Count];
+        EvaluateKeyPartsInto(keyPairs, row, rightSide, parts);
+        return parts;
+    }
+
+    /// <summary>
+    /// Fills a caller-provided scratch buffer with evaluated key parts.
+    /// Avoids per-row allocation when the array is only used transiently
+    /// (probing, hashing, null checks).
+    /// </summary>
+    private void EvaluateKeyPartsInto(
+        IReadOnlyList<(Expression Left, Expression Right)> keyPairs,
+        Row row,
+        bool rightSide,
+        DataValue[] scratch)
+    {
         for (int index = 0; index < keyPairs.Count; index++)
         {
             Expression expression = rightSide ? keyPairs[index].Right : keyPairs[index].Left;
-            parts[index] = _evaluator.Evaluate(expression, row);
+            scratch[index] = _evaluator.Evaluate(expression, row);
         }
-
-        return parts;
     }
 
     private static bool HasNull(DataValue[] parts)

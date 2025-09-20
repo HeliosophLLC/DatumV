@@ -114,14 +114,14 @@ public sealed class AllocationTests : IDisposable
         // Exercises GraceHashJoinExecutor.EvaluateKeyParts() which allocates
         // a new DataValue[] per row for composite (multi-column) join keys.
         // A memory budget is set to force the GraceHashJoinExecutor path.
-        // Before fix: per-row DataValue[] allocation inflates total.
-        // After fix (scratch buffer reuse): allocation drops by ~1 MB.
+        // Before fix (per-row alloc): ~16.7 MB.
+        // After fix (scratch buffer reuse): ~13.8 MB (~17% reduction).
         (long bytes, int gen2) = await MeasureQueryAsync(
             "SELECT a.id, a.name, b.description FROM data AS a INNER JOIN composite_lookup AS b ON a.id = b.lookup_id AND a.category = b.category",
             BuildCatalog(withCompositeKeyLookup: true),
             memoryBudgetBytes: 128 * 1024 * 1024);
 
-        Assert.Fail($"Composite-key JOIN (GraceHash) allocated {bytes:N0} bytes (Gen2={gen2}). Calibrate threshold.");
+        AssertAllocations("Composite-key JOIN", bytes, gen2, maxBytes: 15_000_000);
     }
 
     // ──────────────── Aggregation ────────────────
