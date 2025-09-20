@@ -745,7 +745,8 @@ public static class SqlParser
             from asKw in Token.EqualTo(SqlToken.As)
             from name in Token.EqualTo(SqlToken.Identifier)
             select GetTokenText(name)
-        ).OptionalOrDefault()
+        ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
+        .OptionalOrDefault()
         select new SelectColumn(expression, alias);
 
     /// <summary>A single column in the SELECT list.</summary>
@@ -845,17 +846,20 @@ public static class SqlParser
             ? new TableReference(GetTokenText(schemaQualified), alias, ToSpan(first, schemaQualified), tablesample, SchemaName: GetTokenText(first))
             : new TableReference(GetTokenText(first), alias, ToSpan(first), tablesample));
 
-    /// <summary>A subquery source: (SELECT ...) AS alias.</summary>
+    /// <summary>A subquery source: (SELECT ...) [AS] alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> SubquerySourceParser =
         from open in Token.EqualTo(SqlToken.LeftParen)
         from query in SP.Ref(() => SelectStatementParser!)
         from close in Token.EqualTo(SqlToken.RightParen)
-        from asKw in Token.EqualTo(SqlToken.As)
-        from alias in Token.EqualTo(SqlToken.Identifier)
+        from alias in (
+            from asKw in Token.EqualTo(SqlToken.As)
+            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            select aliasName
+        ).Try().Or(Token.EqualTo(SqlToken.Identifier))
         select (TableSource)new SubquerySource(query, GetTokenText(alias));
 
     /// <summary>
-    /// A table-valued function source: identifier(args) [AS alias].
+    /// A table-valued function source: identifier(args) [AS] alias.
     /// Must be tried before table reference because both start with Identifier.
     /// </summary>
     private static readonly TokenListParser<SqlToken, TableSource> FunctionSourceParser =
@@ -868,7 +872,8 @@ public static class SqlParser
             from asKw in Token.EqualTo(SqlToken.As)
             from aliasName in Token.EqualTo(SqlToken.Identifier)
             select GetTokenText(aliasName)
-        ).OptionalOrDefault()
+        ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
+        .OptionalOrDefault()
         select (TableSource)new FunctionSource(GetTokenText(name), args, alias, ToSpan(name));
 
     /// <summary>A table source: subquery, function call, or table reference.</summary>

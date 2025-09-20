@@ -192,6 +192,16 @@ public class SqlParserTests
         Assert.Equal("n", result.Columns[0].Alias);
     }
 
+    /// <summary>Column alias without the AS keyword.</summary>
+    [Fact]
+    public void SelectWithAlias_WithoutAs()
+    {
+        SelectStatement result = Parse("SELECT r.Value e FROM RANGE(0, 100) AS r");
+
+        Assert.Single(result.Columns);
+        Assert.Equal("e", result.Columns[0].Alias);
+    }
+
     [Fact]
     public void SelectQualifiedColumn()
     {
@@ -732,6 +742,18 @@ public class SqlParserTests
         Assert.Equal(2, subquery.Query.Columns.Count);
     }
 
+    /// <summary>Derived table alias without the AS keyword.</summary>
+    [Fact]
+    public void SubqueryInFrom_AliasWithoutAs()
+    {
+        SelectStatement result = Parse(
+            "SELECT T.Value FROM (SELECT r.Value FROM RANGE(0, 100) AS r WHERE r.Value > 0) T");
+
+        Assert.NotNull(result.From);
+        SubquerySource subquery = Assert.IsType<SubquerySource>(result.From.Source);
+        Assert.Equal("T", subquery.Alias);
+    }
+
     [Fact]
     public void NestedSubqueries()
     {
@@ -772,6 +794,19 @@ public class SqlParserTests
         FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
         Assert.Equal("RANGE", source.FunctionName);
         Assert.Null(source.Alias);
+    }
+
+    /// <summary>Function source alias without the AS keyword.</summary>
+    [Fact]
+    public void FunctionSourceInFrom_AliasWithoutAs()
+    {
+        SelectStatement result = Parse(
+            "SELECT r.Value FROM RANGE(0, 100) r WHERE r.Value > 0");
+
+        Assert.NotNull(result.From);
+        FunctionSource source = Assert.IsType<FunctionSource>(result.From.Source);
+        Assert.Equal("RANGE", source.FunctionName);
+        Assert.Equal("r", source.Alias);
     }
 
     [Fact]
@@ -1858,6 +1893,18 @@ public class SqlParserTests
         StructLiteralExpression literal =
             Assert.IsType<StructLiteralExpression>(result.Columns[0].Expression);
         Assert.NotNull(literal.Span);
+    }
+
+    /// <summary>Struct literal with bare alias (no AS keyword).</summary>
+    [Fact]
+    public void StructLiteral_BareAlias()
+    {
+        SelectStatement result = Parse(
+            "SELECT r.Value, { test: r.Value } exp FROM RANGE(0, 100) r WHERE r.Value > 0");
+
+        Assert.Equal(2, result.Columns.Count);
+        Assert.IsType<StructLiteralExpression>(result.Columns[1].Expression);
+        Assert.Equal("exp", result.Columns[1].Alias);
     }
 
     // ───────────────────── Index access (bracket operator) ─────────────────────
