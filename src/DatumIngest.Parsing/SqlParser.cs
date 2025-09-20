@@ -409,9 +409,30 @@ public static class SqlParser
             Span: ToSpan(open, close));
 
     /// <summary>
+    /// A single struct field: <c>name: expr</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, StructField> StructFieldParser =
+        from name in Token.EqualTo(SqlToken.Identifier)
+        from colon in Token.EqualTo(SqlToken.Colon)
+        from value in SP.Ref(() => ExpressionParser!)
+        select new StructField(GetTokenText(name), value);
+
+    /// <summary>
+    /// Struct literal: <c>{ field1: expr1, field2: expr2, ... }</c>.
+    /// An empty struct <c>{}</c> is also valid.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> StructLiteral =
+        from open in Token.EqualTo(SqlToken.LeftBrace)
+        from fields in StructFieldParser
+            .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+        from close in Token.EqualTo(SqlToken.RightBrace)
+        select (Expression)new StructLiteralExpression(fields, Span: ToSpan(open, close));
+
+    /// <summary>
     /// Primary expression: the atomic unit in the precedence hierarchy.
     /// Order matters: function call must be tried before column reference
     /// because both start with an Identifier token.
+    /// StructLiteral is tried before ArrayLiteral (both start with a bracket-style delimiter).
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> PrimaryExpression =
         ExistsCall.Try()
@@ -427,7 +448,28 @@ public static class SqlParser
             .Or(ParameterReference)
             .Or(NegationExpression)
             .Or(ParenExpression)
+            .Or(StructLiteral.Try())
             .Or(ArrayLiteral);
+
+    /// <summary>
+    /// Primary expression with optional postfix index-access subscripts: <c>expr[i]</c>.
+    /// Zero or more <c>[index]</c> suffixes are applied left-to-right, so
+    /// <c>a[0][1]</c> parses as <c>(a[0])[1]</c>.
+    /// The disambiguation from array literals is natural: an <c>ArrayLiteral</c> is
+    /// consumed entirely by <see cref="PrimaryExpression"/>, and the postfix layer
+    /// only applies <em>after</em> a primary has already been matched.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> PostfixPrimary =
+        from primary in PrimaryExpression
+        from subscripts in (
+            from open in Token.EqualTo(SqlToken.LeftBracket)
+            from index in SP.Ref(() => ExpressionParser!)
+            from close in Token.EqualTo(SqlToken.RightBracket)
+            select (open, index)
+        ).Try().Many()
+        select subscripts.Aggregate(
+            primary,
+            (expr, sub) => (Expression)new IndexAccessExpression(expr, sub.index, ToSpan(sub.open)));
 
     // ───────────────────── Operator precedence layers ─────────────────────
     // Precedence (lowest to highest):
@@ -444,7 +486,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Expression> Power =
         SP.Chain(
             Token.EqualTo(SqlToken.Caret).Select(_ => BinaryOperator.Power),
-            PrimaryExpression,
+            PostfixPrimary,
             (op, left, right) => new BinaryExpression(left, op, right));
 
     /// <summary>Multiplication, division, and modulo.</summary>

@@ -1808,4 +1808,102 @@ public class SqlParserTests
         LiteralExpression fraction = Assert.IsType<LiteralExpression>(func.Arguments[1]);
         Assert.Equal(0.5, (double)fraction.Value!);
     }
+
+    // ───────────────────── Struct literal ─────────────────────
+
+    [Fact]
+    public void StructLiteral_SingleField()
+    {
+        SelectStatement result = Parse("SELECT {x: 1} FROM t");
+
+        StructLiteralExpression literal =
+            Assert.IsType<StructLiteralExpression>(result.Columns[0].Expression);
+        Assert.Single(literal.Fields);
+        Assert.Equal("x", literal.Fields[0].Name);
+        Assert.Equal(1.0, Assert.IsType<LiteralExpression>(literal.Fields[0].Value).Value);
+    }
+
+    [Fact]
+    public void StructLiteral_MultipleFields()
+    {
+        SelectStatement result = Parse("SELECT {name: 'alice', age: 30} FROM t");
+
+        StructLiteralExpression literal =
+            Assert.IsType<StructLiteralExpression>(result.Columns[0].Expression);
+        Assert.Equal(2, literal.Fields.Count);
+        Assert.Equal("name", literal.Fields[0].Name);
+        Assert.Equal("alice", Assert.IsType<LiteralExpression>(literal.Fields[0].Value).Value);
+        Assert.Equal("age", literal.Fields[1].Name);
+        Assert.Equal(30.0, Assert.IsType<LiteralExpression>(literal.Fields[1].Value).Value);
+    }
+
+    [Fact]
+    public void StructLiteral_WithColumnReferenceValue()
+    {
+        SelectStatement result = Parse("SELECT {val: price} FROM t");
+
+        StructLiteralExpression literal =
+            Assert.IsType<StructLiteralExpression>(result.Columns[0].Expression);
+        Assert.Single(literal.Fields);
+        Assert.Equal("val", literal.Fields[0].Name);
+        ColumnReference col = Assert.IsType<ColumnReference>(literal.Fields[0].Value);
+        Assert.Equal("price", col.ColumnName);
+    }
+
+    [Fact]
+    public void StructLiteral_HasSourceSpan()
+    {
+        SelectStatement result = Parse("SELECT {x: 1} FROM t");
+
+        StructLiteralExpression literal =
+            Assert.IsType<StructLiteralExpression>(result.Columns[0].Expression);
+        Assert.NotNull(literal.Span);
+    }
+
+    // ───────────────────── Index access (bracket operator) ─────────────────────
+
+    [Fact]
+    public void IndexAccess_OnColumnReference_IntegerIndex()
+    {
+        SelectStatement result = Parse("SELECT arr[0] FROM t");
+
+        IndexAccessExpression access =
+            Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
+        ColumnReference source = Assert.IsType<ColumnReference>(access.Source);
+        Assert.Equal("arr", source.ColumnName);
+        Assert.Equal(0.0, Assert.IsType<LiteralExpression>(access.Index).Value);
+    }
+
+    [Fact]
+    public void IndexAccess_OnColumnReference_StringIndex()
+    {
+        SelectStatement result = Parse("SELECT obj['field'] FROM t");
+
+        IndexAccessExpression access =
+            Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
+        ColumnReference source = Assert.IsType<ColumnReference>(access.Source);
+        Assert.Equal("obj", source.ColumnName);
+        Assert.Equal("field", Assert.IsType<LiteralExpression>(access.Index).Value);
+    }
+
+    [Fact]
+    public void IndexAccess_OnStructLiteral()
+    {
+        SelectStatement result = Parse("SELECT {x: 1, y: 2}['x'] FROM t");
+
+        IndexAccessExpression access =
+            Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
+        Assert.IsType<StructLiteralExpression>(access.Source);
+        Assert.Equal("x", Assert.IsType<LiteralExpression>(access.Index).Value);
+    }
+
+    [Fact]
+    public void IndexAccess_HasSourceSpan()
+    {
+        SelectStatement result = Parse("SELECT arr[1] FROM t");
+
+        IndexAccessExpression access =
+            Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
+        Assert.NotNull(access.Span);
+    }
 }

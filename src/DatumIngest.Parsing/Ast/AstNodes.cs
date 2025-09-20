@@ -894,3 +894,39 @@ public sealed record AlterTableAddColumnStatement(
 /// </summary>
 /// <param name="TableName">The target table name.</param>
 public sealed record AnalyzeTableStatement(string TableName) : Statement;
+
+// ───────────────────── Struct expressions ─────────────────────
+
+/// <summary>
+/// A single named field within a struct literal: <c>field_name: expression</c>.
+/// </summary>
+/// <param name="Name">The field name as written in the query.</param>
+/// <param name="Value">The value expression for this field.</param>
+public sealed record StructField(string Name, Expression Value);
+
+/// <summary>
+/// A struct literal expression: <c>{ field1: expr1, field2: expr2, ... }</c>.
+/// Field names become the keys of the resulting struct value; their types are
+/// resolved at plan time and stored in a <c>ColumnInfo</c>
+/// with a <c>Fields</c> list so that no schema is allocated per row.
+/// </summary>
+/// <param name="Fields">The ordered list of named field/value pairs.</param>
+/// <param name="Span">Source location spanning the opening brace to the closing brace.</param>
+public sealed record StructLiteralExpression(
+    IReadOnlyList<StructField> Fields,
+    SourceSpan? Span = null) : Expression;
+
+/// <summary>
+/// A postfix index-access expression: <c>expr[index]</c>.
+/// Used for array element access (<c>arr[0]</c>) and struct field access
+/// by name (<c>row['field']</c>).
+/// The <c>ExpressionTypeResolver</c> resolves the return type at plan time
+/// using the element kind of the base expression's <c>ColumnInfo</c>.
+/// </summary>
+/// <param name="Source">The expression whose result is subscripted.</param>
+/// <param name="Index">The index expression (integer for arrays, string for structs).</param>
+/// <param name="Span">Source location of the opening bracket token.</param>
+public sealed record IndexAccessExpression(
+    Expression Source,
+    Expression Index,
+    SourceSpan? Span = null) : Expression;

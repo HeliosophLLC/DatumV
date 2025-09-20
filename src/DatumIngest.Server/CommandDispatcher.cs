@@ -259,10 +259,8 @@ public sealed class CommandDispatcher
                     string outputName = selectColumn.Alias
                         ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 
-                    DataKind kind = ExpressionTypeResolver.ResolveType(
-                        selectColumn.Expression, sourceSchema, session.FunctionRegistry) ?? DataKind.String;
-
-                    outputColumns.Add(new ColumnInfo(outputName, kind, nullable: true));
+                    outputColumns.Add(ExpressionTypeResolver.ResolveOutputColumnInfo(
+                        selectColumn.Expression, outputName, nullable: true, sourceSchema, session.FunctionRegistry));
                     if (selectColumn.Alias is not null)
                     {
                         aliasedPositions.Add(outputColumns.Count - 1);
@@ -277,7 +275,18 @@ public sealed class CommandDispatcher
         for (int index = 0; index < outputColumns.Count; index++)
         {
             ColumnInfo original = outputColumns[index];
-            deduplicatedColumns.Add(new ColumnInfo(names[index], original.Kind, original.Nullable));
+            if (original.Fields is not null)
+            {
+                deduplicatedColumns.Add(new ColumnInfo(names[index], original.Nullable, original.Fields));
+            }
+            else if (original.ArrayElementKind is not null)
+            {
+                deduplicatedColumns.Add(new ColumnInfo(names[index], original.Kind, original.Nullable, original.ArrayElementKind));
+            }
+            else
+            {
+                deduplicatedColumns.Add(new ColumnInfo(names[index], original.Kind, original.Nullable));
+            }
         }
 
         return new Schema(deduplicatedColumns);

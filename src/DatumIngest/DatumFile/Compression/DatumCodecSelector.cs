@@ -41,6 +41,7 @@ public static class DatumCodecSelector
             DataKind.Matrix => DatumEncoding.FixedFloat32,
             DataKind.Tensor => DatumEncoding.FixedFloat32,
             DataKind.Array => DatumEncoding.VariableDataValue,
+            DataKind.Struct => DatumEncoding.VariableDataValue,
             _ => throw new NotSupportedException($"No canonical encoding defined for DataKind.{kind}."),
         };
     }

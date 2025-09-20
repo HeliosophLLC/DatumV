@@ -359,6 +359,15 @@ public enum SqlToken
     /// <summary>The [ (left bracket) delimiter for array literals.</summary>
     LeftBracket,
 
-    /// <summary>The ] (right bracket) delimiter for array literals.</summary>
+    /// <summary>The ] (right bracket) delimiter for array literals and index access.</summary>
     RightBracket,
+
+    /// <summary>The { (left brace) delimiter for struct literals.</summary>
+    LeftBrace,
+
+    /// <summary>The } (right brace) delimiter for struct literals.</summary>
+    RightBrace,
+
+    /// <summary>The : (colon) separator for struct field key–value pairs.</summary>
+    Colon,
 }

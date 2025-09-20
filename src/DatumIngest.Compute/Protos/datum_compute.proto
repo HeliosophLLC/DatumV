@@ -509,6 +509,11 @@ message ColumnInfoMessage {
   // For Array columns: the element type. Unset (DATA_KIND_UINT8 = 0) for
   // non-array columns; use has_array_element_kind to distinguish.
   optional DataKindValue array_element_kind = 4;
+
+  // For Struct columns: ordered field descriptors (name, kind, nullable).
+  // Empty for non-struct columns. Allows clients to interpret StructMessage.fields
+  // without separately tracking the enclosing query's SchemaMessage.
+  repeated ColumnInfoMessage fields = 5;
 }
 
 // Mirrors DatumIngest.Model.DataKind enum values.
@@ -537,6 +542,7 @@ enum DataKindValue {
   DATA_KIND_INT64 = 21;
   DATA_KIND_UINT64 = 22;
   DATA_KIND_FLOAT64 = 23;
+  DATA_KIND_STRUCT = 24;
 }
 
 // Discriminated value type transported over the wire.
@@ -569,6 +575,7 @@ message DataValueMessage {
     int64 int64_value = 23;
     uint64 uint64_value = 24;
     double float64_value = 25;
+    StructMessage struct_value = 26;  // Named-field composite value
   }
 }
 
@@ -579,6 +586,13 @@ message ArrayMessage {
 
   // One entry per element, each set according to element_kind.
   repeated DataValueMessage elements = 2;
+}
+
+// Named-field composite value. Field names are resolved from the column schema;
+// only positional values are transported over the wire.
+message StructMessage {
+  // One entry per field in declaration order.
+  repeated DataValueMessage fields = 1;
 }
 
 message VectorMessage {

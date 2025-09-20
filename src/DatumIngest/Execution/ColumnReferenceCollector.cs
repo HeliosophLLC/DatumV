@@ -162,6 +162,18 @@ public static class ColumnReferenceCollector
                 // they do not reference the outer query's tables.
                 break;
 
+            case StructLiteralExpression structLiteral:
+                foreach (StructField field in structLiteral.Fields)
+                {
+                    Walk(field.Value, references);
+                }
+                break;
+
+            case IndexAccessExpression indexAccess:
+                Walk(indexAccess.Source, references);
+                Walk(indexAccess.Index, references);
+                break;
+
             case LiteralExpression:
                 // No column references in literals.
                 break;

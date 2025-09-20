@@ -1051,6 +1051,52 @@ Nested array literals are supported:
 SELECT [[1, 2], [3, 4]]
 ```
 
+## Struct Literals
+
+Brace syntax constructs struct values inline. Each field is a `name: expression` pair:
+
+```sql
+SELECT {name: 'alice', score: 9.5}                  -- two-field struct
+SELECT {x: lng, y: lat, label: category} FROM data  -- fields from column references
+SELECT {}                                            -- empty struct
+```
+
+Field names become the keys of the resulting struct value. Types are inferred from each field's expression at plan time. Struct literals can be nested:
+
+```sql
+SELECT {point: {x: 1.0, y: 2.0}, radius: 5.0}
+```
+
+## Index Access
+
+The postfix `[index]` operator accesses array elements by position or struct fields by name. Multiple subscripts chain left-to-right.
+
+### Array element access
+
+```sql
+SELECT scores[0]           -- first element (0-based)
+SELECT matrix[1]           -- second element of a vector/array column
+```
+
+### Struct field access
+
+```sql
+SELECT row['name']         -- access field 'name' from a struct column
+SELECT meta['created_at']  -- string key returns the named field
+```
+
+Field name lookup is case-insensitive. Accessing a field that does not exist returns null.
+
+### Chained access
+
+```sql
+-- Access an element of an array stored inside a struct field
+SELECT record['scores'][2] FROM data
+
+-- Access a field of an inline struct literal
+SELECT {x: 10, y: 20}['y']   -- returns 20
+```
+
 ## Common Table Expressions (WITH)
 
 CTEs define named temporary result sets scoped to a single statement. They can simplify complex queries by breaking them into readable, composable stages.
@@ -1405,6 +1451,8 @@ See [Compute Backend — Query](compute.md#query-server-streaming) for details.
 | `Date` | Calendar date | `DateOnly` |
 | `DateTime` | Date and time | `DateTime` |
 | `JsonValue` | Raw JSON string | `string` |
+| `Array` | Ordered sequence of same-typed values | `DataValue[]` |
+| `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names live in `ColumnInfo.Fields`) |
 
 ### Type conversions
 

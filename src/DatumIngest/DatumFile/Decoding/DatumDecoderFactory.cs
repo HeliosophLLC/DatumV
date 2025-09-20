@@ -27,6 +27,7 @@ public static class DatumDecoderFactory
     private static readonly FixedShapeFloatColumnDecoder FloatDecoder = new();
     private static readonly DictionaryColumnDecoder DictionaryDecoder = new();
     private static readonly ArrayColumnDecoder ArrayDecoder = new();
+    private static readonly StructColumnDecoder StructDecoder = new();
 
     /// <summary>
     /// Returns the decoder for the given column descriptor and page encoding.
@@ -75,6 +76,7 @@ public static class DatumDecoderFactory
             DataKind.Matrix => FloatDecoder,
             DataKind.Tensor => FloatDecoder,
             DataKind.Array => ArrayDecoder,
+            DataKind.Struct => StructDecoder,
             _ => throw new NotSupportedException(
                 $"No decoder available for DataKind.{descriptor.Kind}.")
         };

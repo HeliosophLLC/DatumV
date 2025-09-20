@@ -248,6 +248,15 @@ internal static class RowSerializer
                 }
                 break;
 
+            case DataKind.Struct:
+                DataValue[] structFields = value.AsStruct();
+                writer.Write(value.StructFieldCount);
+                foreach (DataValue field in structFields)
+                {
+                    WriteDataValue(writer, field);
+                }
+                break;
+
             default:
                 throw new NotSupportedException(
                     $"Cannot serialize DataValue of kind {value.Kind}.");
@@ -297,6 +306,7 @@ internal static class RowSerializer
             DataKind.Time => DataValue.FromTime(new TimeOnly(reader.ReadInt64())),
             DataKind.Duration => DataValue.FromDuration(new TimeSpan(reader.ReadInt64())),
             DataKind.Array => ReadArray(reader),
+            DataKind.Struct => ReadStruct(reader),
             _ => throw new InvalidDataException(
                 $"Unknown DataKind {kind} in spill file."),
         };
@@ -368,5 +378,17 @@ internal static class RowSerializer
         }
 
         return DataValue.FromArray(elementKind, elements);
+    }
+
+    private static DataValue ReadStruct(BinaryReader reader)
+    {
+        short fieldCount = reader.ReadInt16();
+        DataValue[] fields = new DataValue[fieldCount];
+        for (int index = 0; index < fieldCount; index++)
+        {
+            fields[index] = ReadDataValue(reader);
+        }
+
+        return DataValue.FromStruct(fieldCount, fields);
     }
 }

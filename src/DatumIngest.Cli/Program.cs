@@ -1480,6 +1480,7 @@ static string FormatValue(DataValue value)
         DataKind.Tensor => $"Tensor[{FormatTensorShape(value)}]",
         DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
         DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
+        DataKind.Struct => $"{{{string.Join(", ", value.AsStruct().Select((v, i) => $"f{i}: {(v.IsNull ? "NULL" : v.ToString())}"))}}}",
         _ => value.ToString() ?? ""
     };
 }

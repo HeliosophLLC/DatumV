@@ -1313,4 +1313,129 @@ public class ExpressionEvaluatorTests
         Assert.Equal(DataKind.Int32, result.Kind);
         Assert.Equal(1, result.AsInt32());
     }
+
+    // ─────────────── Struct literal ───────────────
+
+    [Fact]
+    public void StructLiteral_TwoFields_ProducesStructValue()
+    {
+        StructLiteralExpression literal = new(
+        [
+            new StructField("x", new LiteralExpression(1)),
+            new StructField("y", new LiteralExpression(2)),
+        ]);
+
+        DataValue result = _evaluator.Evaluate(literal, MakeRow());
+
+        Assert.Equal(DataKind.Struct, result.Kind);
+        Assert.False(result.IsNull);
+        Assert.Equal(2, result.StructFieldCount);
+        DataValue[] fields = result.AsStruct();
+        Assert.Equal(2, fields.Length);
+        Assert.Equal(1, fields[0].AsInt32());
+        Assert.Equal(2, fields[1].AsInt32());
+    }
+
+    [Fact]
+    public void StructLiteral_WithColumnReferences_CapturesRowValues()
+    {
+        Row row = MakeRow(("a", DataValue.FromFloat32(3.14f)), ("b", DataValue.FromString("hi")));
+
+        StructLiteralExpression literal = new(
+        [
+            new StructField("val", new ColumnReference("a")),
+            new StructField("tag", new ColumnReference("b")),
+        ]);
+
+        DataValue result = _evaluator.Evaluate(literal, row);
+
+        DataValue[] fields = result.AsStruct();
+        Assert.Equal(3.14f, fields[0].AsFloat32(), precision: 4);
+        Assert.Equal("hi", fields[1].AsString());
+    }
+
+    // ─────────────── Index access on struct literal ───────────────
+
+    [Fact]
+    public void IndexAccess_StructLiteral_ReturnsFieldByName()
+    {
+        // {x: 10, y: 20}['y']
+        IndexAccessExpression access = new(
+            new StructLiteralExpression(
+            [
+                new StructField("x", new LiteralExpression(10)),
+                new StructField("y", new LiteralExpression(20)),
+            ]),
+            new LiteralExpression("y"));
+
+        DataValue result = _evaluator.Evaluate(access, MakeRow());
+
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(20, result.AsInt32());
+    }
+
+    [Fact]
+    public void IndexAccess_StructLiteral_UnknownField_ReturnsNull()
+    {
+        // {x: 1}['z']  — field 'z' does not exist
+        IndexAccessExpression access = new(
+            new StructLiteralExpression(
+            [
+                new StructField("x", new LiteralExpression(1)),
+            ]),
+            new LiteralExpression("z"));
+
+        DataValue result = _evaluator.Evaluate(access, MakeRow());
+
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void IndexAccess_StructLiteral_FieldNameLookupIsCaseInsensitive()
+    {
+        // {Foo: 42}['foo']
+        IndexAccessExpression access = new(
+            new StructLiteralExpression(
+            [
+                new StructField("Foo", new LiteralExpression(42)),
+            ]),
+            new LiteralExpression("foo"));
+
+        DataValue result = _evaluator.Evaluate(access, MakeRow());
+
+        Assert.Equal(42, result.AsInt32());
+    }
+
+    // ─────────────── Index access on struct column reference ───────────────
+
+    [Fact]
+    public void IndexAccess_StructColumnReference_ResolvesFieldViaSchema()
+    {
+        // Row has a struct column "info" with fields [name, score].
+        // Access info['score'] — evaluator needs schema to know field positions.
+        DataValue structValue = DataValue.FromStruct(
+            2,
+            [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)]);
+
+        Row row = MakeRow(("info", structValue));
+
+        ColumnInfo[] fieldInfos =
+        [
+            new ColumnInfo("name", DataKind.String, false),
+            new ColumnInfo("score", DataKind.Float32, false),
+        ];
+        ColumnInfo structColumn = new("info", false, fieldInfos);
+        Schema schema = new([structColumn]);
+
+        ExpressionEvaluator evaluatorWithSchema = new(FunctionRegistry.CreateDefault(), sourceSchema: schema);
+
+        IndexAccessExpression access = new(
+            new ColumnReference("info"),
+            new LiteralExpression("score"));
+
+        DataValue result = evaluatorWithSchema.Evaluate(access, row);
+
+        Assert.Equal(DataKind.Float32, result.Kind);
+        Assert.Equal(9.5f, result.AsFloat32(), precision: 4);
+    }
 }

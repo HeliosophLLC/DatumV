@@ -28,6 +28,14 @@ internal static class ProtoConverter
             message.ArrayElementKind = ToProtoKind(column.ArrayElementKind.Value);
         }
 
+        if (column.Fields is not null)
+        {
+            foreach (ColumnInfo field in column.Fields)
+            {
+                message.Fields.Add(ToProto(field));
+            }
+        }
+
         return message;
     }
 
@@ -145,6 +153,15 @@ internal static class ProtoConverter
                 message.ArrayValue = arrayMessage;
                 break;
 
+            case DataKind.Struct:
+                StructMessage structMessage = new();
+                foreach (DataValue field in value.AsStruct())
+                {
+                    structMessage.Fields.Add(ToProto(field));
+                }
+                message.StructValue = structMessage;
+                break;
+
             case DataKind.Int8:
                 message.Int8Value = value.AsInt8();
                 break;
@@ -204,6 +221,7 @@ internal static class ProtoConverter
             DataKind.Time => DataKindValue.DataKindTime,
             DataKind.Duration => DataKindValue.DataKindDuration,
             DataKind.Array => DataKindValue.DataKindArray,
+            DataKind.Struct => DataKindValue.DataKindStruct,
             DataKind.Int8 => DataKindValue.DataKindInt8,
             DataKind.Int16 => DataKindValue.DataKindInt16,
             DataKind.UInt16 => DataKindValue.DataKindUint16,
@@ -242,6 +260,7 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.UuidValue => DataValue.FromUuid(Guid.Parse(message.UuidValue)),
             DataValueMessage.ValueOneofCase.JsonValue => DataValue.FromJsonValue(message.JsonValue),
             DataValueMessage.ValueOneofCase.ArrayValue => FromProtoArray(message.ArrayValue),
+            DataValueMessage.ValueOneofCase.StructValue => FromProtoStruct(message.StructValue),
             DataValueMessage.ValueOneofCase.Int8Value => DataValue.FromInt8((sbyte)message.Int8Value),
             DataValueMessage.ValueOneofCase.Int16Value => DataValue.FromInt16((short)message.Int16Value),
             DataValueMessage.ValueOneofCase.Uint16Value => DataValue.FromUInt16((ushort)message.Uint16Value),
@@ -270,6 +289,20 @@ internal static class ProtoConverter
     }
 
     /// <summary>
+    /// Converts a Protobuf <see cref="StructMessage"/> to a typed <see cref="DataValue"/> struct.
+    /// </summary>
+    private static DataValue FromProtoStruct(StructMessage structMessage)
+    {
+        DataValue[] fields = new DataValue[structMessage.Fields.Count];
+        for (int i = 0; i < fields.Length; i++)
+        {
+            fields[i] = FromProto(structMessage.Fields[i]);
+        }
+
+        return DataValue.FromStruct((short)fields.Length, fields);
+    }
+
+    /// <summary>
     /// Maps the Protobuf <see cref="DataKindValue"/> enum to the domain <see cref="DataKind"/>.
     /// </summary>
     private static DataKind FromProtoKind(DataKindValue kind)
@@ -292,6 +325,7 @@ internal static class ProtoConverter
             DataKindValue.DataKindTime => DataKind.Time,
             DataKindValue.DataKindDuration => DataKind.Duration,
             DataKindValue.DataKindArray => DataKind.Array,
+            DataKindValue.DataKindStruct => DataKind.Struct,
             DataKindValue.DataKindInt8 => DataKind.Int8,
             DataKindValue.DataKindInt16 => DataKind.Int16,
             DataKindValue.DataKindUint16 => DataKind.UInt16,

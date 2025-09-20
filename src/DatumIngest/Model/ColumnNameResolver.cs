@@ -21,6 +21,7 @@ public static class ColumnNameResolver
         {
             ColumnReference columnReference => columnReference.ColumnName,
             FunctionCallExpression functionCall => functionCall.FunctionName,
+            StructLiteralExpression => "struct",
             _ => "expression",
         };
     }

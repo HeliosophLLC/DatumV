@@ -39,6 +39,8 @@ public static class ExpressionTypeResolver
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
             LambdaExpression => null, // Not a value — only valid as an argument to IHigherOrderFunction.
             ParameterExpression => null,
+            StructLiteralExpression structLiteral => ResolveStructLiteral(structLiteral, sourceSchema, functions),
+            IndexAccessExpression indexAccess => ResolveIndexAccess(indexAccess, sourceSchema, functions),
             _ => null,
         };
     }
@@ -77,6 +79,163 @@ public static class ExpressionTypeResolver
 
         ColumnInfo? info = sourceSchema.FindColumn(column.ColumnName);
         return info?.Kind;
+    }
+
+    /// <summary>
+    /// Returns the full <see cref="ColumnInfo"/> for a column-reference expression,
+    /// including <see cref="ColumnInfo.Fields"/> for struct columns.
+    /// Returns <c>null</c> for non-column-reference expressions or unknown columns.
+    /// </summary>
+    private static ColumnInfo? ResolveColumnInfo(ColumnReference column, Schema sourceSchema)
+    {
+        if (column.TableName is not null)
+        {
+            string qualifiedName = $"{column.TableName}.{column.ColumnName}";
+            ColumnInfo? qualified = sourceSchema.FindColumn(qualifiedName);
+            if (qualified is not null)
+            {
+                return qualified;
+            }
+        }
+
+        return sourceSchema.FindColumn(column.ColumnName);
+    }
+
+    private static DataKind? ResolveStructLiteral(
+        StructLiteralExpression structLiteral,
+        Schema sourceSchema,
+        FunctionRegistry functions)
+    {
+        // Cannot resolve type when there are no fields — an empty struct is unknown-typed.
+        if (structLiteral.Fields.Count == 0)
+        {
+            return DataKind.Struct;
+        }
+
+        // All field kinds must be resolvable for the struct type to be fully known.
+        // If any field kind is unresolvable, we still return Struct (just without Fields).
+        return DataKind.Struct;
+    }
+
+    private static DataKind? ResolveIndexAccess(
+        IndexAccessExpression indexAccess,
+        Schema sourceSchema,
+        FunctionRegistry functions)
+    {
+        DataKind? sourceKind = ResolveType(indexAccess.Source, sourceSchema, functions);
+
+        if (sourceKind == DataKind.Array)
+        {
+            // Array element access: return the element kind.
+            return ResolveArrayElementKindFromExpression(indexAccess.Source, sourceSchema, functions)
+                ?? DataKind.Float32;
+        }
+
+        if (sourceKind == DataKind.Struct
+            && indexAccess.Index is LiteralExpression { Value: string fieldName })
+        {
+            // Struct field access by name: resolve via ColumnInfo.Fields.
+            IReadOnlyList<ColumnInfo>? fields = null;
+
+            if (indexAccess.Source is ColumnReference colRef)
+            {
+                fields = ResolveColumnInfo(colRef, sourceSchema)?.Fields;
+            }
+            else if (indexAccess.Source is StructLiteralExpression literal)
+            {
+                // Build a transient field list from the literal's AST names.
+                // We only need the names here; kinds are resolved next.
+                fields = BuildFieldColumnInfos(literal, sourceSchema, functions);
+            }
+
+            if (fields is not null)
+            {
+                foreach (ColumnInfo fieldInfo in fields)
+                {
+                    if (string.Equals(fieldInfo.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return fieldInfo.Kind;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the output <see cref="ColumnInfo"/> for a SELECT-list expression,
+    /// including <see cref="ColumnInfo.Fields"/> when the expression produces a struct.
+    /// Callers building output schemas should use this instead of <see cref="ResolveType"/>
+    /// to ensure that struct field metadata and array element kind are propagated.
+    /// </summary>
+    /// <param name="expression">The expression to analyze.</param>
+    /// <param name="outputName">The output column name (after alias resolution).</param>
+    /// <param name="nullable">Whether the output column is nullable.</param>
+    /// <param name="sourceSchema">The schema providing column type information.</param>
+    /// <param name="functions">The function registry for resolving scalar function return types.</param>
+    /// <returns>A <see cref="ColumnInfo"/> describing the output column.</returns>
+    public static ColumnInfo ResolveOutputColumnInfo(
+        Expression expression,
+        string outputName,
+        bool nullable,
+        Schema sourceSchema,
+        FunctionRegistry functions)
+    {
+        if (expression is StructLiteralExpression structLiteral)
+        {
+            IReadOnlyList<ColumnInfo>? fields = BuildFieldColumnInfos(structLiteral, sourceSchema, functions);
+            return fields is not null
+                ? new ColumnInfo(outputName, nullable, fields)
+                : new ColumnInfo(outputName, DataKind.Struct, nullable);
+        }
+
+        if (expression is ColumnReference colRef)
+        {
+            ColumnInfo? source = ResolveColumnInfo(colRef, sourceSchema);
+            if (source?.Fields is not null)
+            {
+                return new ColumnInfo(outputName, nullable, source.Fields);
+            }
+
+            if (source?.ArrayElementKind is not null)
+            {
+                return new ColumnInfo(outputName, source.Kind, nullable, source.ArrayElementKind);
+            }
+
+            if (source is not null)
+            {
+                return new ColumnInfo(outputName, source.Kind, nullable);
+            }
+        }
+
+        DataKind kind = ResolveType(expression, sourceSchema, functions) ?? DataKind.String;
+        return new ColumnInfo(outputName, kind, nullable);
+    }
+
+    /// <summary>
+    /// Builds a transient <see cref="ColumnInfo"/> list from a struct literal's fields
+    /// by resolving each field's value expression kind.
+    /// </summary>
+    private static IReadOnlyList<ColumnInfo>? BuildFieldColumnInfos(
+        StructLiteralExpression literal,
+        Schema sourceSchema,
+        FunctionRegistry functions)
+    {
+        List<ColumnInfo> result = new(literal.Fields.Count);
+
+        foreach (StructField field in literal.Fields)
+        {
+            DataKind? kind = ResolveType(field.Value, sourceSchema, functions);
+            if (kind is null)
+            {
+                return null;
+            }
+
+            result.Add(new ColumnInfo(field.Name, kind.Value, nullable: false));
+        }
+
+        return result;
     }
 
     /// <summary>

@@ -602,6 +602,20 @@ internal sealed class SemanticAnalyzer
                 AnalyzeExpression(lambda.Body, aliasToTable, lambdaOpaqueAliases, diagnostics);
                 break;
 
+            // StructLiteralExpression — validate each field's value expression.
+            case StructLiteralExpression structLiteral:
+                foreach (StructField field in structLiteral.Fields)
+                {
+                    AnalyzeExpression(field.Value, aliasToTable, opaqueAliases, diagnostics);
+                }
+                break;
+
+            // IndexAccessExpression — validate both source and index sub-expressions.
+            case IndexAccessExpression indexAccess:
+                AnalyzeExpression(indexAccess.Source, aliasToTable, opaqueAliases, diagnostics);
+                AnalyzeExpression(indexAccess.Index, aliasToTable, opaqueAliases, diagnostics);
+                break;
+
             // LiteralExpression — nothing to validate.
         }
     }

@@ -18,6 +18,7 @@ public sealed class ExpressionEvaluator
     private readonly FunctionRegistry _functions;
     private readonly QueryMeter? _meter;
     private readonly Row? _outerRow;
+    private readonly Schema? _sourceSchema;
 
     /// <summary>
     /// Compiled regex cache for case-sensitive LIKE patterns. Avoids recompiling
@@ -60,11 +61,17 @@ public sealed class ExpressionEvaluator
     /// a correlated subquery. Column references that cannot be resolved against the current row
     /// will fall back to this row.
     /// </param>
-    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null)
+    /// <param name="sourceSchema">
+    /// Optional query output schema used to resolve struct field names at evaluation time.
+    /// When provided, struct field access via a column reference can locate field positions by name
+    /// without scanning the AST at runtime.
+    /// </param>
+    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null)
     {
         _functions = functions;
         _meter = meter;
         _outerRow = outerRow;
+        _sourceSchema = sourceSchema;
     }
 
     /// <summary>
@@ -102,6 +109,8 @@ public sealed class ExpressionEvaluator
             LambdaExpression => throw new InvalidOperationException(
                 "Lambda expressions cannot be evaluated as standalone values. " +
                 "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
+            StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, row),
+            IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, row),
             _ => throw new InvalidOperationException(
                 $"Unsupported expression type: {expression.GetType().Name}.")
         };
@@ -956,7 +965,124 @@ public sealed class ExpressionEvaluator
         return DataValueComparer.Compare(left, right);
     }
 
-    // ──────────────────── LIKE / ILIKE / REGEXP pattern matching ────────────────────
+    // ───────────────── Struct and index-access evaluation ─────────────────
+
+    private DataValue EvaluateStructLiteral(StructLiteralExpression literal, Row row)
+    {
+        DataValue[] fields = new DataValue[literal.Fields.Count];
+
+        for (int index = 0; index < literal.Fields.Count; index++)
+        {
+            fields[index] = Evaluate(literal.Fields[index].Value, row);
+        }
+
+        return DataValue.FromStruct((short)literal.Fields.Count, fields);
+    }
+
+    private DataValue EvaluateIndexAccess(IndexAccessExpression indexAccess, Row row)
+    {
+        DataValue source = Evaluate(indexAccess.Source, row);
+
+        if (source.IsNull)
+        {
+            return source;
+        }
+
+        DataValue index = Evaluate(indexAccess.Index, row);
+
+        if (source.Kind == DataKind.Array)
+        {
+            DataValue[] elements = source.AsArray();
+
+            // Use 0-based integer index.
+            int position = (int)ToFloat(index);
+            if (position < 0 || position >= elements.Length)
+            {
+                return DataValue.NullArray(source.ArrayElementKind);
+            }
+
+            return elements[position];
+        }
+
+        if (source.Kind == DataKind.Struct)
+        {
+            return EvaluateStructFieldAccess(source, index, indexAccess, row);
+        }
+
+        throw new InvalidOperationException(
+            $"Index access is not supported on {source.Kind} values.");
+    }
+
+    private DataValue EvaluateStructFieldAccess(
+        DataValue source, DataValue index, IndexAccessExpression indexAccess, Row row)
+    {
+        DataValue[] fields = source.AsStruct();
+        string fieldName = index.AsString();
+
+        // Try to resolve field position from schema when source is a column reference.
+        if (indexAccess.Source is ColumnReference colRef)
+        {
+            IReadOnlyList<ColumnInfo>? columnFields = FindStructColumnFields(colRef, _sourceSchema);
+            if (columnFields is not null)
+            {
+                return LookupFieldByName(fields, columnFields, fieldName, source.StructFieldCount);
+            }
+        }
+
+        // For struct literals, the field names are available in the AST.
+        if (indexAccess.Source is StructLiteralExpression literal)
+        {
+            for (int i = 0; i < literal.Fields.Count; i++)
+            {
+                if (string.Equals(literal.Fields[i].Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i < fields.Length ? fields[i] : DataValue.Null(DataKind.Float32);
+                }
+            }
+
+            return DataValue.NullStruct(source.StructFieldCount);
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot resolve struct field '{fieldName}': the source expression of kind " +
+            $"{indexAccess.Source.GetType().Name} does not carry field name metadata at evaluation time. " +
+            "Access struct fields via a column reference or a struct literal.");
+    }
+
+    private static IReadOnlyList<ColumnInfo>? FindStructColumnFields(ColumnReference column, Schema? schema)
+    {
+        if (schema is null)
+        {
+            return null;
+        }
+
+        ColumnInfo? info = null;
+
+        if (column.TableName is not null)
+        {
+            info = schema.FindColumn($"{column.TableName}.{column.ColumnName}");
+        }
+
+        info ??= schema.FindColumn(column.ColumnName);
+        return info?.Fields;
+    }
+
+    private static DataValue LookupFieldByName(
+        DataValue[] fields,
+        IReadOnlyList<ColumnInfo> columnFields,
+        string fieldName,
+        short fieldCount)
+    {
+        for (int i = 0; i < columnFields.Count; i++)
+        {
+            if (string.Equals(columnFields[i].Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i < fields.Length ? fields[i] : DataValue.Null(columnFields[i].Kind);
+            }
+        }
+
+        return DataValue.NullStruct(fieldCount);
+    }
 
     /// <summary>
     /// Evaluates a case-sensitive LIKE expression. Converts SQL wildcards

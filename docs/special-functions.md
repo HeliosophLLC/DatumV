@@ -94,3 +94,43 @@ Nested array literals are supported:
 ```sql
 SELECT [[1, 2], [3, 4]]
 ```
+
+---
+
+## Struct Literal Syntax
+
+Brace syntax `{ field: expr, ... }` constructs a typed struct value with named fields.
+
+```sql
+SELECT {name: 'alice', score: 9.5}                  -- two-field struct
+SELECT {x: lng, y: lat} FROM waypoints              -- fields from columns
+SELECT {}                                            -- empty struct
+```
+
+Field names are identifiers; values can be any scalar expression. Types are inferred from each field's expression at plan time. Struct literals can be nested:
+
+```sql
+SELECT {point: {x: 1.0, y: 2.0}, radius: 5.0}
+```
+
+---
+
+## Index Access (Bracket Operator)
+
+The postfix `[index]` operator accesses array elements by zero-based integer position, or struct fields by name string. Multiple subscripts chain left-to-right.
+
+```sql
+-- Array element access (0-based integer index)
+SELECT scores[0]           -- first element
+SELECT embeddings[127]     -- element at position 127
+
+-- Struct field access (string key)
+SELECT record['name']      -- field named 'name' (case-insensitive)
+SELECT meta['created_at']  -- field named 'created_at'
+
+-- Chained access
+SELECT record['scores'][2]              -- element 2 of a nested array field
+SELECT {x: 10, y: 20}['y']             -- inline struct: returns 20
+```
+
+Accessing an array index out of bounds or a struct field that does not exist returns null.

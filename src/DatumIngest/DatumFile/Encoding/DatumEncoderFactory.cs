@@ -27,6 +27,7 @@ public static class DatumEncoderFactory
     private static readonly BinaryColumnEncoder BinaryEncoder = new();
     private static readonly FixedShapeFloatColumnEncoder FloatEncoder = new();
     private static readonly ArrayColumnEncoder ArrayEncoder = new();
+    private static readonly StructColumnEncoder StructEncoder = new();
     private static readonly DictionaryColumnEncoder DictionaryEncoder = new();
 
     /// <summary>
@@ -72,6 +73,7 @@ public static class DatumEncoderFactory
             DataKind.Matrix => FloatEncoder,
             DataKind.Tensor => FloatEncoder,
             DataKind.Array => ArrayEncoder,
+            DataKind.Struct => StructEncoder,
             _ => throw new NotSupportedException($"No encoder available for DataKind.{descriptor.Kind}.")
         };
     }

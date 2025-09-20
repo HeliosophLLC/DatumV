@@ -430,7 +430,7 @@ Returns the column schema of a registered table. When a `context_id` is provided
 | `table_name` | `string` | Name of the table. |
 | `context_id` | `string` | *(Optional)* Query context for temp table resolution. When empty, resolves against the session's base catalog only. |
 
-**Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, `nullable`, and (for `Array` columns) `array_element_kind`.
+**Returns:** `repeated ColumnInfoMessage` — each with `name`, `kind`, `nullable`, `array_element_kind` (for `Array` columns), and `fields` (for `Struct` columns).
 
 #### ListTables
 
@@ -626,6 +626,7 @@ The `DataValueMessage` uses a `oneof` discriminated union to carry typed values:
 | `Matrix` | `matrix_value` | `MatrixMessage` | `rows`, `columns`, `repeated float values` |
 | `Tensor` | `tensor_value` | `TensorMessage` | `repeated int32 shape`, `repeated float values` |
 | `Array` | `array_value` | `ArrayMessage` | `element_kind` + `repeated DataValueMessage elements` |
+| `Struct` | `struct_value` | `StructMessage` | `repeated DataValueMessage fields` (positional; names and types in `ColumnInfoMessage.fields`) |
 
 Null values set `is_null = true` with no `oneof` field populated.
 
@@ -636,6 +637,12 @@ Null values set `is_null = true` with no `oneof` field populated.
 | `element_kind` | `DataKindValue` | Element type shared by all values in the array (e.g. `DATA_KIND_FLOAT64`). |
 | `elements` | `repeated DataValueMessage` | One entry per element, each set according to `element_kind`. |
 
+**`StructMessage`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fields` | `repeated DataValueMessage` | Positional field values in the order defined by the column schema. Match them by index against `ColumnInfoMessage.fields` on the corresponding column to resolve names and types. |
+
 **`ColumnInfoMessage`:**
 
 | Field | Type | Description |
@@ -644,6 +651,7 @@ Null values set `is_null = true` with no `oneof` field populated.
 | `kind` | `DataKindValue` | Column data kind. |
 | `nullable` | `bool` | Whether the column is nullable. |
 | `array_element_kind` | `optional DataKindValue` | For `Array` columns: the element type. Absent for non-array columns. |
+| `fields` | `repeated ColumnInfoMessage` | For `Struct` columns: ordered field descriptors (name, kind, nullable). Empty for non-struct columns. Parallel to `StructMessage.fields` by index. |
 
 ## .NET Client Package
 

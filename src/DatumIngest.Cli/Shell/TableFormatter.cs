@@ -43,7 +43,7 @@ internal sealed class TableFormatter
                 for (int i = 0; i < columnCount; i++)
                 {
                     DataValue value = row[i];
-                    cells[i] = value.IsNull ? "NULL" : FormatValue(value);
+                    cells[i] = value.IsNull ? "NULL" : FormatValue(value, schema.Columns[i].Fields);
                 }
 
                 bufferedCells.Add(cells);
@@ -152,8 +152,12 @@ internal sealed class TableFormatter
 
     /// <summary>
     /// Formats a single <see cref="DataValue"/> for display in the table.
+    /// When the value is a <see cref="DataKind.Struct"/>, <paramref name="structFields"/> supplies
+    /// the field names from the column schema so values are rendered as <c>{name: value, …}</c>.
+    /// When <paramref name="structFields"/> is <see langword="null"/> the fields are rendered
+    /// positionally as <c>{f0: value, …}</c>.
     /// </summary>
-    internal static string FormatValue(DataValue value)
+    internal static string FormatValue(DataValue value, IReadOnlyList<ColumnInfo>? structFields = null)
     {
         return value.Kind switch
         {
@@ -169,6 +173,7 @@ internal sealed class TableFormatter
             DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
             DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
             DataKind.Array => FormatArrayValue(value),
+            DataKind.Struct => FormatStructValue(value, structFields),
             _ => value.ToString() ?? ""
         };
     }
@@ -189,5 +194,17 @@ internal sealed class TableFormatter
     {
         DataValue[] elements = value.AsArray();
         return $"[{string.Join(", ", elements.Select(e => e.IsNull ? "NULL" : e.ToString()))}]";
+    }
+
+    private static string FormatStructValue(DataValue value, IReadOnlyList<ColumnInfo>? fields)
+    {
+        DataValue[] fieldValues = value.AsStruct();
+        IEnumerable<string> parts = fieldValues.Select((fieldValue, index) =>
+        {
+            string name = fields is not null && index < fields.Count ? fields[index].Name : $"f{index}";
+            string formatted = fieldValue.IsNull ? "NULL" : FormatValue(fieldValue);
+            return $"{name}: {formatted}";
+        });
+        return $"{{{string.Join(", ", parts)}}}";
     }
 }

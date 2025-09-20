@@ -149,6 +149,7 @@ public sealed class CsvOutputWriter : IOutputWriter
             DataKind.Time => value.AsTime().ToString("HH:mm:ss"),
             DataKind.Duration => value.AsDuration().ToString("c"),
             DataKind.Array => FormatArray(value),
+            DataKind.Struct => FormatStruct(value),
             _ => value.ToString() ?? ""
         };
     }
@@ -175,7 +176,7 @@ public sealed class CsvOutputWriter : IOutputWriter
     }
 
     /// <summary>
-    /// Formats an <see cref="DataKind.Array"/> value as a JSON array string.
+    /// Formats a <see cref="DataKind.Array"/> value as a JSON array string.
     /// </summary>
     private static string FormatArray(DataValue value)
     {
@@ -204,6 +205,44 @@ public sealed class CsvOutputWriter : IOutputWriter
             else
             {
                 builder.Append(element.ToString());
+            }
+        }
+
+        builder.Append(']');
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Formats a <see cref="DataKind.Struct"/> value as a positional JSON array string.
+    /// Field names are not included because they live in the column schema, not the value.
+    /// </summary>
+    private static string FormatStruct(DataValue value)
+    {
+        DataValue[] fields = value.AsStruct();
+        System.Text.StringBuilder builder = new();
+        builder.Append('[');
+        for (int index = 0; index < fields.Length; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            DataValue field = fields[index];
+            if (field.IsNull)
+            {
+                builder.Append("null");
+            }
+            else if (field.Kind is DataKind.String or DataKind.Date or DataKind.DateTime
+                or DataKind.Time or DataKind.Uuid or DataKind.Duration)
+            {
+                builder.Append('"');
+                builder.Append(field.ToString()!.Replace("\"", "\\\""));
+                builder.Append('"');
+            }
+            else
+            {
+                builder.Append(field.ToString());
             }
         }
 

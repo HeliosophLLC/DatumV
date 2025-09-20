@@ -131,6 +131,9 @@ public static class SqlTokenizer
             .Match(Character.EqualTo('^'), SqlToken.Caret)
             .Match(Character.EqualTo('['), SqlToken.LeftBracket)
             .Match(Character.EqualTo(']'), SqlToken.RightBracket)
+            .Match(Character.EqualTo('{'), SqlToken.LeftBrace)
+            .Match(Character.EqualTo('}'), SqlToken.RightBrace)
+            .Match(Character.EqualTo(':'), SqlToken.Colon)
 
             // String literals (before keywords and identifiers)
             .Match(StringLiteralToken, SqlToken.StringLiteral)

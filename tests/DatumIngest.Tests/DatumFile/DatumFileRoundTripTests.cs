@@ -334,6 +334,47 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
         Assert.Equal(10f, row1[0].AsFloat32(), 0.0001f);
     }
 
+    // ──────────────────── Struct ────────────────────
+
+    [Fact]
+    public async Task RoundTrip_Struct_HeterogeneousFields()
+    {
+        DataValue[] fields0 = [DataValue.FromString("alice"), DataValue.FromFloat32(9.5f)];
+        DataValue[] fields1 = [DataValue.FromString("bob"),   DataValue.FromFloat32(7.2f)];
+
+        DataValue[][] columns = await WriteAndRead("struct_fields.datum",
+            [new ColumnInfo("rec", DataKind.Struct, false)],
+            [Row("rec", DataValue.FromStruct(2, fields0)),
+             Row("rec", DataValue.FromStruct(2, fields1))]);
+
+        Assert.Equal(DataKind.Struct, columns[0][0].Kind);
+        DataValue[] read0 = columns[0][0].AsStruct();
+        Assert.Equal(2, read0.Length);
+        Assert.Equal("alice", read0[0].AsString());
+        Assert.Equal(9.5f, read0[1].AsFloat32(), 0.0001f);
+
+        Assert.Equal(DataKind.Struct, columns[0][1].Kind);
+        DataValue[] read1 = columns[0][1].AsStruct();
+        Assert.Equal(2, read1.Length);
+        Assert.Equal("bob",  read1[0].AsString());
+        Assert.Equal(7.2f,   read1[1].AsFloat32(), 0.0001f);
+    }
+
+    [Fact]
+    public async Task RoundTrip_Struct_WithNullRow()
+    {
+        DataValue[] fields = [DataValue.FromInt32(1), DataValue.FromString("x")];
+
+        DataValue[][] columns = await WriteAndRead("struct_null.datum",
+            [new ColumnInfo("rec", DataKind.Struct, true)],
+            [Row("rec", DataValue.FromStruct(2, fields)),
+             Row("rec", DataValue.Null(DataKind.Struct))]);
+
+        Assert.False(columns[0][0].IsNull);
+        Assert.Equal("x", columns[0][0].AsStruct()[1].AsString());
+        Assert.True(columns[0][1].IsNull);
+    }
+
     // ──────────────────── Multi-column ────────────────────
 
     [Fact]

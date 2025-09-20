@@ -41,12 +41,12 @@ DatumIngest™ replaces those scripts with SQL. Point it at all your sources sim
 
 ## Key Features
 
-- **ML-native type system** — Vector, Matrix, Tensor, and Image are first-class column types alongside Float32, String, Date, DateTime, Time, Duration, JsonValue, UUID, and Boolean
+- **ML-native type system** — Vector, Matrix, Tensor, Image, and Struct are first-class column types alongside Float32, String, Date, DateTime, Time, Duration, JsonValue, UUID, and Boolean
 - **Fused image pipeline** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more transforms, with automatic decode/encode fusion across chains
 - **200+ built-in functions** — `softmax`, `cosine_similarity`, `normalize`, `cyclical_encode`, vector reductions, distance metrics, ML activations, UUID generation, hashing, and more
 - **Six data providers** — CSV, JSON, JSONL, ZIP (lazy decompression), HDF5, Parquet
 - **Three output formats** — CSV, Parquet, HDF5 with `SHARD ON` support
-- **SQL interface** — SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, GROUP BY ALL, DISTINCT aggregates (`COUNT(DISTINCT x)`), window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT with ALL variants), quoted identifiers, parameterized queries (`$name`), schema-qualified virtual tables (`information_schema`, `datum_catalog`), DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE)
+- **SQL interface** — SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN, WHERE, INTO, ORDER BY, LIMIT, CASE/WHEN, GROUP BY, GROUP BY ALL, DISTINCT aggregates (`COUNT(DISTINCT x)`), window functions (OVER/PARTITION BY), subqueries (scalar, IN, NOT IN, EXISTS, NOT EXISTS), Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT with ALL variants), quoted identifiers, parameterized queries (`$name`), schema-qualified virtual tables (`information_schema`, `datum_catalog`), DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE), struct literals (`{field: expr}`), array/struct index access (`expr[index]`)
 - **Dataset statistics** — HyperLogLog cardinality, Welford's online stats, histograms, quantiles, image metadata
 - **JSON manifest** — structured feature manifest with column interactions (Pearson, Spearman, Cramér's V, ANOVA F, MI), auto-discovered as `.datum-manifest` sidecars for cost-model integration
 - **Streaming execution** — `IAsyncEnumerable<Row>` pipeline with projection pushdown, predicate pushdown, and Parquet row group pruning via min/max statistics
@@ -67,7 +67,7 @@ DuckDB and Pandas are excellent general-purpose tools. DatumIngest is purpose-bu
 
 - **Image transforms in SQL** — `resize`, `crop`, `grayscale`, `elastic_deform`, `perspective_warp`, and 10+ more, with automatic decode/encode fusion across chained transforms. DuckDB and Pandas have no image pipeline.
 - **ZIP archives as tables** — `FROM images` where `images` is a ZIP file. Each entry becomes a row with lazy decompression. No extract step.
-- **ML-native types** — Vector, Matrix, Tensor, and Image are first-class column types with dedicated functions (`softmax`, `cosine_similarity`, `cyclical_encode`, `normalize`).
+- **ML-native types** — Vector, Matrix, Tensor, Image, and Struct are first-class column types with dedicated functions (`softmax`, `cosine_similarity`, `cyclical_encode`, `normalize`).
 - **Dataset manifests** — one command generates a JSON manifest with per-column statistics, histograms, quantiles, and pairwise column interactions. Sidecar `.datum-manifest` and `.datum-schema` files are auto-discovered and feed back into the query planner for data-driven cardinality estimation and cached schema resolution.
 - **Sharded output with checkpointing** — write to sharded CSV/Parquet/HDF5 and resume from the last completed shard after a crash.
 
