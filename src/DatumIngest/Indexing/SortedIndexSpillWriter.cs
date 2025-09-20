@@ -44,7 +44,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// <summary>
     /// Reusable comparer for <see cref="DataValue"/> used by priority queue merges.
     /// </summary>
-    private static readonly Comparer<DataValue> DataValueComparer =
+    private static readonly Comparer<DataValue> ValueKeyComparer =
         Comparer<DataValue>.Create(CompareDataValues);
 
     /// <summary>
@@ -53,12 +53,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
     /// </summary>
     private static int CompareDataValues(DataValue left, DataValue right)
     {
-        if (left.Kind == DataKind.Float32 && right.Kind == DataKind.Float32)
-        {
-            return left.AsFloat32().CompareTo(right.AsFloat32());
-        }
-
-        return StatisticsPredicateEvaluator.CompareValues(left, right);
+        return DataValueComparer.Compare(left, right);
     }
 
     private readonly string _spillDirectory;
@@ -496,7 +491,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 runMetadata[runIndex].EntryCount);
         }
 
-        PriorityQueue<int, DataValue> queue = new(DataValueComparer);
+        PriorityQueue<int, DataValue> queue = new(ValueKeyComparer);
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
@@ -708,7 +703,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
                 runMetadata[runIndex].EntryCount);
         }
 
-        PriorityQueue<int, DataValue> queue = new(DataValueComparer);
+        PriorityQueue<int, DataValue> queue = new(ValueKeyComparer);
 
         for (int runIndex = 0; runIndex < runCount; runIndex++)
         {
@@ -779,7 +774,7 @@ internal sealed class SortedIndexSpillWriter : IDisposable
 
         // K-way merge using a priority queue.
         ValueIndexEntry[] result = new ValueIndexEntry[totalEntries];
-        PriorityQueue<int, DataValue> queue = new(DataValueComparer);
+        PriorityQueue<int, DataValue> queue = new(ValueKeyComparer);
 
         // Seed the queue with the first entry from each run.
         for (int runIndex = 0; runIndex < runCount; runIndex++)

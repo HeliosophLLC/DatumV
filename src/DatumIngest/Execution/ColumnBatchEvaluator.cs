@@ -995,55 +995,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// </summary>
     private static int CompareDataValues(DataValue left, DataValue right, ColumnBatch batch)
     {
-        if (left.Kind == DataKind.String && right.Kind == DataKind.String)
-        {
-            // For arena-backed strings, compare UTF-8 bytes directly (ordinal).
-            if (left.IsArenaBacked && right.IsArenaBacked)
-            {
-                ReadOnlySpan<byte> leftBytes = left.GetArenaStringSpan(batch.StringArena);
-                ReadOnlySpan<byte> rightBytes = right.GetArenaStringSpan(batch.StringArena);
-                return leftBytes.SequenceCompareTo(rightBytes);
-            }
-
-            return string.Compare(
-                ResolveString(left, batch),
-                ResolveString(right, batch),
-                StringComparison.Ordinal);
-        }
-
-        if (left.Kind == DataKind.Date && right.Kind == DataKind.Date)
-        {
-            return left.AsDate().CompareTo(right.AsDate());
-        }
-
-        if (left.Kind == DataKind.DateTime && right.Kind == DataKind.DateTime)
-        {
-            return left.AsDateTime().CompareTo(right.AsDateTime());
-        }
-
-        if (left.Kind == DataKind.Uuid && right.Kind == DataKind.Uuid)
-        {
-            return left.AsUuid().CompareTo(right.AsUuid());
-        }
-
-        if (left.Kind == DataKind.Boolean && right.Kind == DataKind.Boolean)
-        {
-            return left.AsBoolean().CompareTo(right.AsBoolean());
-        }
-
-        if (left.Kind == DataKind.Time && right.Kind == DataKind.Time)
-        {
-            return left.AsTime().CompareTo(right.AsTime());
-        }
-
-        if (left.Kind == DataKind.Duration && right.Kind == DataKind.Duration)
-        {
-            return left.AsDuration().CompareTo(right.AsDuration());
-        }
-
-        float leftFloat = ToFloat(left);
-        float rightFloat = ToFloat(right);
-        return leftFloat.CompareTo(rightFloat);
+        return DataValueComparer.Compare(left, right, batch.StringArena);
     }
 
     private bool TryGetOrBuildLiteralValueSet(

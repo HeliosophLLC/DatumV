@@ -370,16 +370,7 @@ public sealed class WindowOperator : IQueryOperator
         if (left.IsNull) return 1;
         if (right.IsNull) return -1;
 
-        return left.Kind switch
-        {
-            DataKind.Float32 => left.AsFloat32().CompareTo(right.AsFloat32()),
-            DataKind.UInt8 => left.AsUInt8().CompareTo(right.AsUInt8()),
-            DataKind.String => string.Compare(
-                left.AsString(), right.AsString(), StringComparison.Ordinal),
-            DataKind.Date => left.AsDate().CompareTo(right.AsDate()),
-            DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),
-            _ => 0,
-        };
+        return DataValueComparer.Compare(left, right);
     }
 
     /// <summary>

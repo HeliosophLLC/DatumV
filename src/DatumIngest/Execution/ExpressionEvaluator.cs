@@ -953,51 +953,7 @@ public sealed class ExpressionEvaluator
 
     private static int CompareDataValues(DataValue left, DataValue right)
     {
-        // Compare as strings if both are strings.
-        if (left.Kind == DataKind.String && right.Kind == DataKind.String)
-        {
-            return string.Compare(left.AsString(), right.AsString(), StringComparison.Ordinal);
-        }
-
-        // Compare dates.
-        if (left.Kind == DataKind.Date && right.Kind == DataKind.Date)
-        {
-            return left.AsDate().CompareTo(right.AsDate());
-        }
-
-        if (left.Kind == DataKind.DateTime && right.Kind == DataKind.DateTime)
-        {
-            return left.AsDateTime().CompareTo(right.AsDateTime());
-        }
-
-        // Compare UUIDs.
-        if (left.Kind == DataKind.Uuid && right.Kind == DataKind.Uuid)
-        {
-            return left.AsUuid().CompareTo(right.AsUuid());
-        }
-
-        // Compare booleans (false < true).
-        if (left.Kind == DataKind.Boolean && right.Kind == DataKind.Boolean)
-        {
-            return left.AsBoolean().CompareTo(right.AsBoolean());
-        }
-
-        // Compare times.
-        if (left.Kind == DataKind.Time && right.Kind == DataKind.Time)
-        {
-            return left.AsTime().CompareTo(right.AsTime());
-        }
-
-        // Compare durations.
-        if (left.Kind == DataKind.Duration && right.Kind == DataKind.Duration)
-        {
-            return left.AsDuration().CompareTo(right.AsDuration());
-        }
-
-        // Otherwise compare as floats.
-        float leftValue = ToFloat(left);
-        float rightValue = ToFloat(right);
-        return leftValue.CompareTo(rightValue);
+        return DataValueComparer.Compare(left, right);
     }
 
     // ──────────────────── LIKE / ILIKE / REGEXP pattern matching ────────────────────
