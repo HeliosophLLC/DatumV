@@ -88,7 +88,21 @@ public sealed class ProjectOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        // Build a name→expression map for LET bindings so the evaluator can recover struct
+        // field metadata from binding expressions (e.g., hidden __destructure_N bindings
+        // produced by named destructuring desugaring whose original RHS is a struct literal).
+        IReadOnlyDictionary<string, Expression>? letBindingExpressions = null;
+        if (_letBindings is not null)
+        {
+            Dictionary<string, Expression> map = new(_letBindings.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (LetBinding b in _letBindings)
+            {
+                map[b.Name] = b.Expression;
+            }
+            letBindingExpressions = map;
+        }
+
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, letBindingExpressions: letBindingExpressions);
         ProjectionSchema? schema = null;
         LocalBufferPool pool = context.LocalBufferPool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;

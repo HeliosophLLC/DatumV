@@ -626,11 +626,16 @@ public sealed class QueryPlanner
         }
 
         // 3c. GROUP BY / aggregation.
+        // Desugar destructured LET bindings before any rewriting pass so that all
+        // downstream code (aggregate rewriting, window rewriting, ProjectOperator) only
+        // sees plain LetBinding nodes. statement.LetBindings is left untouched so that
+        // separate utility passes (column-reference collection, pushdown analysis) that
+        // read it directly continue to work against the original AST expressions.
+        IReadOnlyList<LetBinding>? letBindings = DesugarDestructuredLetBindings(statement.LetBindings);
         bool hasGroupBy = statement.GroupBy is not null;
         bool hasAggregates = HasAggregateFunction(statement.Columns, _functionRegistry)
-            || HasLetAggregateFunction(statement.LetBindings, _functionRegistry);
+            || HasLetAggregateFunction(letBindings, _functionRegistry);
         IReadOnlyList<SelectColumn> projectionColumns = statement.Columns;
-        IReadOnlyList<LetBinding>? letBindings = statement.LetBindings;
         IReadOnlyList<AssertClause>? assertions = statement.Assertions;
 
         if (hasGroupBy || hasAggregates)
@@ -656,9 +661,9 @@ public sealed class QueryPlanner
                     }
                 }
 
-                if (statement.LetBindings is not null)
+                if (letBindings is not null)
                 {
-                    foreach (LetBinding binding in statement.LetBindings)
+                    foreach (LetBinding binding in letBindings)
                     {
                         if (binding.OutputAlias is not null
                             && !ExpressionContainsAggregate(binding.Expression, _functionRegistry))
@@ -3279,6 +3284,85 @@ public sealed class QueryPlanner
     /// Returns <see langword="true"/> if any LET binding expression contains an
     /// aggregate function call, requiring the GROUP BY rewriting path.
     /// </summary>
+    /// <summary>
+    /// Expands any destructured LET bindings into a flat sequence of plain <see cref="LetBinding"/>
+    /// nodes before any rewriting passes run. Each destructured binding becomes one hidden memoizing
+    /// binding (named <c>__destructure_N</c>) plus one plain binding per extracted name.
+    /// Plain bindings are passed through unchanged.
+    /// </summary>
+    private static IReadOnlyList<LetBinding>? DesugarDestructuredLetBindings(
+        IReadOnlyList<LetBinding>? letBindings)
+    {
+        if (letBindings is null)
+        {
+            return null;
+        }
+
+        // Fast path: skip allocation when no destructuring is present.
+        bool hasDestructure = false;
+        foreach (LetBinding binding in letBindings)
+        {
+            if (binding.Destructure is not null)
+            {
+                hasDestructure = true;
+                break;
+            }
+        }
+
+        if (!hasDestructure)
+        {
+            return letBindings;
+        }
+
+        List<LetBinding> expanded = new(letBindings.Count + 4);
+        int counter = 0;
+
+        foreach (LetBinding binding in letBindings)
+        {
+            if (binding.Destructure is null)
+            {
+                expanded.Add(binding);
+                continue;
+            }
+
+            DestructurePattern pattern = binding.Destructure;
+            string hiddenName = $"__destructure_{counter++}";
+
+            // Hidden binding memoizes the RHS expression once per row.
+            expanded.Add(new LetBinding(hiddenName, binding.Expression, OutputAlias: null, Span: binding.Span));
+
+            Expression hiddenRef = new ColumnReference(null, hiddenName);
+
+            if (pattern.Mode == DestructureMode.Positional)
+            {
+                for (int i = 0; i < pattern.Names.Count; i++)
+                {
+                    Expression index = new LiteralExpression((float)i);
+                    expanded.Add(new LetBinding(
+                        pattern.Names[i],
+                        new IndexAccessExpression(hiddenRef, index),
+                        OutputAlias: null,
+                        Span: binding.Span));
+                }
+            }
+            else
+            {
+                // Named: extract each field by its string key.
+                foreach (string fieldName in pattern.Names)
+                {
+                    Expression index = new LiteralExpression(fieldName);
+                    expanded.Add(new LetBinding(
+                        fieldName,
+                        new IndexAccessExpression(hiddenRef, index),
+                        OutputAlias: null,
+                        Span: binding.Span));
+                }
+            }
+        }
+
+        return expanded;
+    }
+
     private static bool HasLetAggregateFunction(
         IReadOnlyList<LetBinding>? letBindings, FunctionRegistry functionRegistry)
     {

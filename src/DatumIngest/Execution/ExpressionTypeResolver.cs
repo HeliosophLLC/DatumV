@@ -131,6 +131,12 @@ public static class ExpressionTypeResolver
                 ?? DataKind.Float32;
         }
 
+        if (sourceKind == DataKind.Vector)
+        {
+            // Vector element access: always returns a Float32 scalar.
+            return DataKind.Float32;
+        }
+
         if (sourceKind == DataKind.Struct
             && indexAccess.Index is LiteralExpression { Value: string fieldName })
         {

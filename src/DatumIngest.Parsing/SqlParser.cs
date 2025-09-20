@@ -755,8 +755,56 @@ public static class SqlParser
             .Or(StarColumn.Try())
             .Or(ExpressionColumn);
 
+    /// <summary>
+    /// Parses a comma-separated list of two or more identifiers for a destructure pattern,
+    /// already positioned after the opening delimiter.
+    /// </summary>
+    private static TokenListParser<SqlToken, string[]> DestructureNameListParser(SqlToken closingToken) =>
+        from firstName in Token.EqualTo(SqlToken.Identifier)
+        from rest in (
+            from comma in Token.EqualTo(SqlToken.Comma)
+            from ident in Token.EqualTo(SqlToken.Identifier)
+            select ident
+        ).AtLeastOnce()
+        from close in Token.EqualTo(closingToken)
+        select new[] { GetTokenText(firstName) }.Concat(rest.Select(GetTokenText)).ToArray();
+
+    /// <summary>
+    /// A positional destructuring LET binding: <c>LET (a, b [, c ...]) = expression</c>.
+    /// Extracts values by zero-based index from a Vector, Array, or Struct.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, LetBinding> PositionalDestructureLetBindingParser =
+        from letKw in Token.EqualTo(SqlToken.Let)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from names in DestructureNameListParser(SqlToken.RightParen)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from expression in ExpressionParser
+        select new LetBinding(
+            string.Empty,
+            expression,
+            OutputAlias: null,
+            Span: ToSpan(open),
+            Destructure: new DestructurePattern(names, DestructureMode.Positional, ToSpan(open)));
+
+    /// <summary>
+    /// A named destructuring LET binding: <c>LET {field1, field2 [, field3 ...]} = expression</c>.
+    /// Extracts values by field name from a Struct.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, LetBinding> NamedDestructureLetBindingParser =
+        from letKw in Token.EqualTo(SqlToken.Let)
+        from open in Token.EqualTo(SqlToken.LeftBrace)
+        from names in DestructureNameListParser(SqlToken.RightBrace)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from expression in ExpressionParser
+        select new LetBinding(
+            string.Empty,
+            expression,
+            OutputAlias: null,
+            Span: ToSpan(open),
+            Destructure: new DestructurePattern(names, DestructureMode.Named, ToSpan(open)));
+
     /// <summary>A single LET binding: <c>LET name = expression [AS alias]</c>.</summary>
-    private static readonly TokenListParser<SqlToken, LetBinding> LetBindingParser =
+    private static readonly TokenListParser<SqlToken, LetBinding> ScalarLetBindingParser =
         from letKw in Token.EqualTo(SqlToken.Let)
         from name in Token.EqualTo(SqlToken.Identifier)
         from eq in Token.EqualTo(SqlToken.Equals)
@@ -767,6 +815,16 @@ public static class SqlParser
             select GetTokenText(alias)
         ).OptionalOrDefault()
         select new LetBinding(GetTokenText(name), expression, outputAlias, ToSpan(name));
+
+    /// <summary>
+    /// A single LET binding in any form: positional destructuring, named destructuring, or scalar.
+    /// Positional and named are tried first (with backtracking) so that the scalar parser does not
+    /// greedily consume the <c>LET</c> keyword before the pattern delimiter is visible.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, LetBinding> LetBindingParser =
+        PositionalDestructureLetBindingParser.Try()
+            .Or(NamedDestructureLetBindingParser.Try())
+            .Or(ScalarLetBindingParser);
 
     /// <summary>
     /// Zero or more comma-separated LET bindings at the start of a SELECT list.

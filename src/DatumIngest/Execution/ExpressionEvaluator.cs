@@ -21,6 +21,15 @@ public sealed class ExpressionEvaluator
     private readonly Schema? _sourceSchema;
 
     /// <summary>
+    /// Maps LET binding names to their source expressions. Used by
+    /// <see cref="EvaluateStructFieldAccess"/> when the schema doesn't carry struct
+    /// field metadata for a hidden <c>__destructure_N</c> binding: if the binding's
+    /// original expression is a <see cref="StructLiteralExpression"/>, field names
+    /// can be recovered from the AST without schema.
+    /// </summary>
+    private readonly IReadOnlyDictionary<string, Expression>? _letBindingExpressions;
+
+    /// <summary>
     /// Compiled regex cache for case-sensitive LIKE patterns. Avoids recompiling
     /// the same SQL LIKE pattern on every row comparison.
     /// </summary>
@@ -66,12 +75,19 @@ public sealed class ExpressionEvaluator
     /// When provided, struct field access via a column reference can locate field positions by name
     /// without scanning the AST at runtime.
     /// </param>
-    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null)
+    /// <param name="letBindingExpressions">
+    /// Optional map of LET binding names to their source expressions. Used as a fallback when
+    /// struct field access cannot be resolved via <paramref name="sourceSchema"/> — if the
+    /// referenced binding's expression is a struct literal, field positions are recovered from
+    /// the AST. Enables named destructuring of struct literals through hidden bindings.
+    /// </param>
+    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null)
     {
         _functions = functions;
         _meter = meter;
         _outerRow = outerRow;
         _sourceSchema = sourceSchema;
+        _letBindingExpressions = letBindingExpressions;
     }
 
     /// <summary>
@@ -992,6 +1008,13 @@ public sealed class ExpressionEvaluator
 
         if (source.Kind == DataKind.Array)
         {
+            if (index.Kind == DataKind.String)
+            {
+                throw new InvalidOperationException(
+                    $"Named field access ('{index.AsString()}') is not supported on Array: " +
+                    $"use positional destructuring: LET (a, b, ...) = expr.");
+            }
+
             DataValue[] elements = source.AsArray();
 
             // Use 0-based integer index.
@@ -1004,8 +1027,42 @@ public sealed class ExpressionEvaluator
             return elements[position];
         }
 
+        if (source.Kind == DataKind.Vector)
+        {
+            if (index.Kind == DataKind.String)
+            {
+                throw new InvalidOperationException(
+                    $"Named field access ('{index.AsString()}') is not supported on Vector — " +
+                    $"use positional destructuring: LET (a, b, ...) = expr.");
+            }
+
+            float[] vector = source.AsVector();
+
+            // Use 0-based integer index.
+            int position = (int)ToFloat(index);
+            if (position < 0 || position >= vector.Length)
+            {
+                return DataValue.Null(DataKind.Float32);
+            }
+
+            return DataValue.FromFloat32(vector[position]);
+        }
+
         if (source.Kind == DataKind.Struct)
         {
+            // Integer index → positional (ordinal) access by declaration order.
+            if (index.Kind is DataKind.Float32 or DataKind.Float64 or DataKind.Int32 or DataKind.Int64)
+            {
+                DataValue[] fields = source.AsStruct();
+                int position = (int)ToFloat(index);
+                if (position < 0 || position >= fields.Length)
+                {
+                    return DataValue.NullStruct(source.StructFieldCount);
+                }
+                return fields[position];
+            }
+
+            // String index → named field access.
             return EvaluateStructFieldAccess(source, index, indexAccess, row);
         }
 
@@ -1041,6 +1098,37 @@ public sealed class ExpressionEvaluator
             }
 
             return DataValue.NullStruct(source.StructFieldCount);
+        }
+
+        // Fallback for hidden LET binding references (e.g., __destructure_N produced by named
+        // destructuring desugaring). When the schema doesn't carry struct field metadata for the
+        // binding, recover field positions by following the chain of ColumnReference aliases in
+        // _letBindingExpressions until we reach a StructLiteralExpression whose field names are
+        // encoded in the AST. This handles both direct (`LET {a} = {x:1}`) and indirect
+        // (`LET s = {x:1}; LET {a} = s`) cases.
+        if (indexAccess.Source is ColumnReference bindingRef
+            && _letBindingExpressions is not null
+            && _letBindingExpressions.TryGetValue(bindingRef.ColumnName, out Expression? bindingExpr))
+        {
+            // Follow ColumnReference aliases up to a small depth cap to guard against cycles.
+            for (int depth = 0; depth < 8 && bindingExpr is ColumnReference chainRef; depth++)
+            {
+                if (!_letBindingExpressions.TryGetValue(chainRef.ColumnName, out bindingExpr))
+                    break;
+            }
+
+            if (bindingExpr is StructLiteralExpression bindingLiteral)
+            {
+                for (int i = 0; i < bindingLiteral.Fields.Count; i++)
+                {
+                    if (string.Equals(bindingLiteral.Fields[i].Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return i < fields.Length ? fields[i] : DataValue.Null(DataKind.Float32);
+                    }
+                }
+
+                return DataValue.NullStruct(source.StructFieldCount);
+            }
         }
 
         throw new InvalidOperationException(

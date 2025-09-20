@@ -24,14 +24,14 @@ public sealed class CyclicalEncodeFunction : IScalarFunction
             throw new ArgumentException("cyclical_encode() requires exactly 2 arguments: value (Scalar) and period (Scalar).");
         }
 
-        if (argumentKinds[0] != DataKind.Float32)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
-            throw new ArgumentException($"cyclical_encode() first argument must be Scalar, got {argumentKinds[0]}.");
+            throw new ArgumentException($"cyclical_encode() first argument must be a numeric scalar, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            throw new ArgumentException($"cyclical_encode() second argument must be Scalar, got {argumentKinds[1]}.");
+            throw new ArgumentException($"cyclical_encode() second argument must be a numeric scalar, got {argumentKinds[1]}.");
         }
 
         return DataKind.Vector;
@@ -48,10 +48,11 @@ public sealed class CyclicalEncodeFunction : IScalarFunction
             return DataValue.Null(DataKind.Vector);
         }
 
-        double angle = 2.0 * System.Math.PI * input.AsFloat32() / period.AsFloat32();
+        double angle = 2.0 * System.Math.PI * DataValueComparer.ToFloat(input) / DataValueComparer.ToFloat(period);
         float sinComponent = (float)System.Math.Sin(angle);
         float cosComponent = (float)System.Math.Cos(angle);
 
         return DataValue.FromVector([sinComponent, cosComponent]);
     }
+
 }

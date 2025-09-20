@@ -106,6 +106,8 @@ FROM data
 
 ```
 LET <identifier> = <expression> [AS <alias>]
+LET (<name1>, <name2>, ...) = <expression>
+LET {<field1>, <field2>, ...} = <expression>
 ```
 
 - **`<identifier>`** — the binding name, used to reference the cached value in later LET bindings and SELECT columns.
@@ -126,6 +128,39 @@ SELECT
 FROM orders
 -- Result columns: line_total, final_price
 ```
+
+#### Tuple Destructuring
+
+A LET binding can unpack a multi-valued result into several named variables in one step.
+
+**Positional** — extracts by zero-based index. Supported on Array, Vector, and Struct:
+
+```sql
+-- Unpack a 2-element Vector (e.g. cyclical_encode output)
+SELECT LET (sin_v, cos_v) = cyclical_encode(month, 12),
+       sin_v AS s, cos_v AS c
+FROM events
+
+-- Unpack a float array column
+SELECT LET (r, g, b) = pixel, r, g, b FROM images
+```
+
+**Named** — extracts by field name. Supported on Struct only; field order in the pattern is independent of the struct's declaration order:
+
+```sql
+-- Extract named fields from a struct literal
+SELECT LET {alpha, beta} = {beta: 8.0, alpha: 7.0},
+       alpha AS av, beta AS bv
+FROM data
+
+-- Named destructure of a scalar LET alias
+SELECT LET s = {score: 0.9, label: 'cat'},
+       LET {score, label} = s,
+       score, label
+FROM predictions
+```
+
+The source expression is evaluated **once per row** regardless of how many names are extracted. Destructured names are plain LET bindings and can be used in subsequent LET expressions. Named destructuring on a Vector or Array is a runtime error — use positional destructuring instead.
 
 #### Memoization
 
@@ -805,6 +840,24 @@ SELECT DEFINE {
     ASSERT discount >= 0 MESSAGE 'discount cannot be negative';
 } id, amount, discount, subtotal, tax
 FROM orders
+```
+
+Destructuring bindings work inside DEFINE blocks too:
+
+```sql
+-- Unpack a Vector result and validate components in the same block
+SELECT DEFINE {
+    LET (sin_m, cos_m) = cyclical_encode(month, 12);
+    ASSERT sin_m BETWEEN -1.0 AND 1.0 ON FAIL WARN;
+} sin_m AS s, cos_m AS c
+FROM events
+
+-- Named destructuring with an ASSERT guard
+SELECT DEFINE {
+    LET {lo, hi} = bounds_column;
+    ASSERT hi > lo MESSAGE 'inverted bounds' ON FAIL SKIP;
+} lo, hi
+FROM ranges
 ```
 
 ### Equivalence to inline LET + trailing ASSERT

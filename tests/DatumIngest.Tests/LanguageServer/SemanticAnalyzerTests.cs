@@ -799,4 +799,146 @@ public sealed class SemanticAnalyzerTests
             diagnostic.Severity == DiagnosticSeverity.Warning &&
             diagnostic.Message.Contains("Unknown table"));
     }
+
+    // ───────────────────── LET binding diagnostics ─────────────────────
+
+    /// <summary>
+    /// A scalar LET binding name referenced in an ASSERT predicate must not produce
+    /// an "Unknown column" diagnostic — LET names are runtime virtual columns, not
+    /// manifest columns, so they are added to the opaque scope for ASSERT analysis.
+    /// </summary>
+    [Fact]
+    public void Analyze_ScalarLetName_InAssertPredicate_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "price", "qty")]);
+
+        // 'total' is referenced only inside the DEFINE block (LET + ASSERT), not in the
+        // SELECT column list, so the analyzer never sees it as an unresolved column reference
+        // outside the opaque-alias scope.
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT DEFINE { LET total = price * qty; ASSERT total > 0; } price FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("total") &&
+            d.Message.Contains("Unknown column"));
+    }
+
+    /// <summary>
+    /// Names produced by positional destructuring (<c>LET (a, b) = expr</c>) must not
+    /// generate "Unknown column" warnings when referenced in an ASSERT predicate inside
+    /// a DEFINE block. Destructured names are added to the opaque scope by the analyzer.
+    /// </summary>
+    [Fact]
+    public void Analyze_PositionalDestructuringNames_InAssertPredicate_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "arr")]);
+
+        // 'x' and 'y' are destructured names — not in the table schema.
+        // The analyzer must suppress "Unknown column" for them in ASSERT predicates.
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT DEFINE { LET (x, y) = arr; ASSERT x > 0; } arr FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown column") &&
+            (d.Message.Contains("'x'") || d.Message.Contains("'y'")));
+    }
+
+    /// <summary>
+    /// Names produced by named destructuring (<c>LET {alpha, beta} = expr</c>) must not
+    /// generate "Unknown column" warnings when referenced in an ASSERT predicate.
+    /// </summary>
+    [Fact]
+    public void Analyze_NamedDestructuringNames_InAssertPredicate_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "pair")]);
+
+        // 'lo' and 'hi' are named-destructuring bindings — not in the table schema.
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT DEFINE { LET {lo, hi} = pair; ASSERT hi > lo; } pair FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown column") &&
+            (d.Message.Contains("'lo'") || d.Message.Contains("'hi'")));
+    }
+
+    // ───────────────────── LET names in SELECT / WHERE / ORDER BY ─────────────────────
+
+    /// <summary>
+    /// A scalar LET name referenced directly in a SELECT output column must not produce
+    /// an "Unknown column" warning — the name is a virtual row field, not a schema column.
+    /// </summary>
+    [Fact]
+    public void Analyze_ScalarLetName_InSelectColumn_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "price", "qty")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET total = price * qty, total FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("'total'") &&
+            d.Message.Contains("Unknown column"));
+    }
+
+    /// <summary>
+    /// Positional destructuring names referenced in SELECT output columns must not warn.
+    /// </summary>
+    [Fact]
+    public void Analyze_PositionalDestructuringNames_InSelectColumn_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "arr")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET (x, y) = arr, x, y FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown column") &&
+            (d.Message.Contains("'x'") || d.Message.Contains("'y'")));
+    }
+
+    /// <summary>
+    /// Named destructuring names referenced in SELECT output columns must not warn.
+    /// </summary>
+    [Fact]
+    public void Analyze_NamedDestructuringNames_InSelectColumn_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "pair")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET {lo, hi} = pair, lo, hi FROM t", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("Unknown column") &&
+            (d.Message.Contains("'lo'") || d.Message.Contains("'hi'")));
+    }
+
+    /// <summary>
+    /// A LET name used in a WHERE clause must not produce an "Unknown column" warning.
+    /// </summary>
+    [Fact]
+    public void Analyze_LetName_InWhereClause_NoUnknownColumnWarning()
+    {
+        LanguageServerManifest manifest = CreateManifest(
+            tables: [Table("t", "price", "qty")]);
+
+        Diagnostic[] diagnostics = DiagnosticsProvider.GetDiagnostics(
+            "SELECT LET total = price * qty, price FROM t WHERE total > 100", manifest);
+
+        Assert.DoesNotContain(diagnostics, d =>
+            d.Severity == DiagnosticSeverity.Warning &&
+            d.Message.Contains("'total'") &&
+            d.Message.Contains("Unknown column"));
+    }
 }

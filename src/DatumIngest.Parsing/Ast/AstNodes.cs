@@ -33,6 +33,30 @@ public sealed record SelectStatement(
     IReadOnlyList<LetBinding>? LetBindings = null);
 
 /// <summary>
+/// Specifies how a destructured LET binding extracts values from its right-hand-side expression.
+/// </summary>
+public enum DestructureMode
+{
+    /// <summary>Extract by zero-based ordinal position. Applies to Vector, Array, and Struct.</summary>
+    Positional,
+    /// <summary>Extract by field name. Applies to Struct only.</summary>
+    Named,
+}
+
+/// <summary>
+/// Represents the left-hand side of a destructured LET binding: a list of names and the
+/// extraction mode. Carried on the AST until the planner desugars it into individual plain
+/// bindings backed by a single hidden memoizing binding.
+/// </summary>
+/// <param name="Names">The names to extract. Must contain at least two elements.</param>
+/// <param name="Mode">Whether extraction is positional (index-based) or named (field-based).</param>
+/// <param name="Span">Source location for diagnostic reporting.</param>
+public sealed record DestructurePattern(
+    IReadOnlyList<string> Names,
+    DestructureMode Mode,
+    SourceSpan? Span = null);
+
+/// <summary>
 /// A named, memoized intermediate expression declared via <c>LET</c> in the SELECT list.
 /// Evaluated once per row and cached for all references. Not included in the output
 /// unless <see cref="OutputAlias"/> is non-null (set via <c>AS alias</c>).
@@ -41,11 +65,17 @@ public sealed record SelectStatement(
 /// <param name="Expression">The expression to evaluate and cache once per row.</param>
 /// <param name="OutputAlias">When non-null, the binding value is emitted as an output column with this name.</param>
 /// <param name="Span">Source location of the binding name for diagnostic reporting.</param>
+/// <param name="Destructure">
+/// When non-null, this binding is a destructuring pattern. <see cref="Name"/> is a placeholder;
+/// the planner will expand this into one hidden memoizing binding plus one plain binding per
+/// extracted name before any rewriting passes run.
+/// </param>
 public sealed record LetBinding(
     string Name,
     Expression Expression,
     string? OutputAlias = null,
-    SourceSpan? Span = null);
+    SourceSpan? Span = null,
+    DestructurePattern? Destructure = null);
 
 /// <summary>
 /// A single Common Table Expression (CTE) definition within a WITH clause.

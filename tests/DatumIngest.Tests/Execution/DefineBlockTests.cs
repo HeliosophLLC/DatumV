@@ -301,6 +301,142 @@ public sealed class DefineBlockTests
         Assert.Single(rows);
     }
 
+    // ─────────────── Destructuring in DEFINE ───────────────
+
+    /// <summary>
+    /// A positional destructuring LET inside a DEFINE block parses to a single LetBinding
+    /// with a Destructure pattern carrying all extracted names.
+    /// </summary>
+    [Fact]
+    public void Parse_PositionalDestructuringInDefine_PopulatesLetBindings()
+    {
+        SelectStatement statement = ParseStatement(
+            "SELECT DEFINE { LET (a, b) = pair; } a, b FROM t");
+
+        Assert.NotNull(statement.LetBindings);
+        Assert.Single(statement.LetBindings);
+        LetBinding binding = statement.LetBindings[0];
+        Assert.NotNull(binding.Destructure);
+        Assert.Equal(DestructureMode.Positional, binding.Destructure.Mode);
+        Assert.Equal(["a", "b"], binding.Destructure.Names);
+    }
+
+    /// <summary>
+    /// A named destructuring LET inside a DEFINE block parses to a LetBinding with
+    /// a Named destructure pattern carrying the field names.
+    /// </summary>
+    [Fact]
+    public void Parse_NamedDestructuringInDefine_PopulatesLetBindings()
+    {
+        SelectStatement statement = ParseStatement(
+            "SELECT DEFINE { LET {x, y} = pair; } x, y FROM t");
+
+        Assert.NotNull(statement.LetBindings);
+        Assert.Single(statement.LetBindings);
+        LetBinding binding = statement.LetBindings[0];
+        Assert.NotNull(binding.Destructure);
+        Assert.Equal(DestructureMode.Named, binding.Destructure.Mode);
+        Assert.Equal(["x", "y"], binding.Destructure.Names);
+    }
+
+    /// <summary>
+    /// Positional destructuring inside a DEFINE block correctly unpacks a float array
+    /// into named scalar columns accessible in the output.
+    /// </summary>
+    [Fact]
+    public async Task Execute_DefinePositionalDestructuring_ProducesComponents()
+    {
+        TableCatalog catalog = CreateCatalog(("t",
+        [
+            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]))),
+            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)]))),
+        ]));
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT DEFINE { LET (x, y) = arr; } x AS x_out, y AS y_out FROM t",
+            catalog);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1f, rows[0]["x_out"].AsFloat32());
+        Assert.Equal(2f, rows[0]["y_out"].AsFloat32());
+        Assert.Equal(3f, rows[1]["x_out"].AsFloat32());
+        Assert.Equal(4f, rows[1]["y_out"].AsFloat32());
+    }
+
+    /// <summary>
+    /// Named destructuring inside a DEFINE block correctly extracts struct fields
+    /// by name into individual output columns.
+    /// </summary>
+    [Fact]
+    public async Task Execute_DefineNamedDestructuring_ProducesNamedFields()
+    {
+        TableCatalog catalog = CreateCatalog(("t",
+        [
+            MakeRow(("dummy", DataValue.FromFloat32(0f))),
+        ]));
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT DEFINE { LET {alpha, beta} = {alpha: 10.0, beta: 20.0}; } alpha AS av, beta AS bv FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        // Struct literal fields are Float64 (SQL numeric literals are always double).
+        Assert.Equal(10.0, rows[0]["av"].AsFloat64(), precision: 4);
+        Assert.Equal(20.0, rows[0]["bv"].AsFloat64(), precision: 4);
+    }
+
+    /// <summary>
+    /// An ASSERT inside the same DEFINE block can reference positional destructuring
+    /// names — failing rows are skipped correctly.
+    /// </summary>
+    [Fact]
+    public async Task Execute_AssertReferencesPositionalDestructuringNames_Works()
+    {
+        TableCatalog catalog = CreateCatalog(("t",
+        [
+            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(5f), DataValue.FromFloat32(10f)]))),
+            MakeRow(("arr", DataValue.FromArray(DataKind.Float32,
+                [DataValue.FromFloat32(-1f), DataValue.FromFloat32(10f)]))),
+        ]));
+
+        AssertionDiagnostics diagnostics = new();
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT DEFINE { LET (x, y) = arr; ASSERT x > 0 ON FAIL SKIP; } x AS x_out, y AS y_out FROM t",
+            catalog, diagnostics);
+
+        Assert.Single(rows);
+        Assert.Equal(1, diagnostics.SkippedRowCount);
+        Assert.Equal(5f, rows[0]["x_out"].AsFloat32());
+    }
+
+    /// <summary>
+    /// Mixed positional destructuring and a scalar LET inside a DEFINE block
+    /// both execute correctly and produce output columns.
+    /// </summary>
+    [Fact]
+    public async Task Execute_DefineMixedDestructuringAndScalarLet_AllColumnsAvailable()
+    {
+        TableCatalog catalog = CreateCatalog(("t",
+        [
+            MakeRow(
+                ("arr", DataValue.FromArray(DataKind.Float32,
+                    [DataValue.FromFloat32(3f), DataValue.FromFloat32(4f)])),
+                ("scale", DataValue.FromFloat32(10f))),
+        ]));
+
+        List<Row> rows = await ExecuteQueryAsync(
+            "SELECT DEFINE { LET (dx, dy) = arr; LET mag = dx * dx + dy * dy; } mag AS m, dx AS x FROM t",
+            catalog);
+
+        Assert.Single(rows);
+        // dx=3, dy=4 → mag = 9+16 = 25
+        Assert.Equal(25f, rows[0]["m"].AsFloat32(), precision: 3);
+        Assert.Equal(3f, rows[0]["x"].AsFloat32());
+    }
+
     // ───────────────── Helpers ─────────────────
 
     /// <summary>

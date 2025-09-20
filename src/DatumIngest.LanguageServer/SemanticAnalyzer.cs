@@ -259,6 +259,26 @@ internal sealed class SemanticAnalyzer
             }
         }
 
+        // Register LET binding names (scalar and destructured) as opaque aliases so that
+        // references to them anywhere in the statement — SELECT columns, WHERE, ORDER BY,
+        // QUALIFY, ASSERT — do not produce false "Unknown column" warnings. LET names are
+        // virtual row fields computed at runtime and are never present in table schemas.
+        if (statement.LetBindings is { Count: > 0 })
+        {
+            foreach (LetBinding letBinding in statement.LetBindings)
+            {
+                if (letBinding.Destructure is not null)
+                {
+                    foreach (string name in letBinding.Destructure.Names)
+                        opaqueAliases.Add(name);
+                }
+                else
+                {
+                    opaqueAliases.Add(letBinding.Name);
+                }
+            }
+        }
+
         // Walk expressions for column and function references.
         foreach (SelectColumn column in statement.Columns)
         {
@@ -323,27 +343,14 @@ internal sealed class SemanticAnalyzer
 
         if (statement.Assertions is not null)
         {
-            // LET binding names are virtual columns that exist only in the augmented row at
-            // runtime — they are not in any underlying table schema, so the regular column
-            // resolver would emit false 'Unknown column' squiggles for them. Adding them as
-            // opaque pseudo-aliases suppresses unqualified-column warnings inside ASSERT
-            // predicates, which is the same conservative approach used for lambda parameters.
-            HashSet<string> assertOpaqueAliases = opaqueAliases;
-            if (statement.LetBindings is { Count: > 0 })
-            {
-                assertOpaqueAliases = new(opaqueAliases, StringComparer.OrdinalIgnoreCase);
-                foreach (LetBinding letBinding in statement.LetBindings)
-                {
-                    assertOpaqueAliases.Add(letBinding.Name);
-                }
-            }
-
+            // LET names are already in opaqueAliases (registered above), so ASSERT
+            // predicates automatically inherit suppression of unknown-column warnings.
             foreach (AssertClause assertClause in statement.Assertions)
             {
-                AnalyzeExpression(assertClause.Predicate, aliasToTable, assertOpaqueAliases, diagnostics);
+                AnalyzeExpression(assertClause.Predicate, aliasToTable, opaqueAliases, diagnostics);
                 if (assertClause.Message is not null)
                 {
-                    AnalyzeExpression(assertClause.Message, aliasToTable, assertOpaqueAliases, diagnostics);
+                    AnalyzeExpression(assertClause.Message, aliasToTable, opaqueAliases, diagnostics);
                 }
             }
         }

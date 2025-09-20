@@ -165,6 +165,82 @@ SELECT LET subtotal = price * qty,
 FROM line_items
 ```
 
+### Tuple Destructuring
+
+A LET binding can unpack a multi-valued result into several named variables in a single step. Two forms are supported:
+
+#### Positional destructuring
+
+```
+LET (name1, name2, ...) = expression
+```
+
+Extracts values by **zero-based position**. Works on **Array**, **Vector**, and **Struct** sources.
+
+```sql
+-- Unpack a float array into named scalars
+SELECT LET (r, g, b) = pixel_array, r, g, b FROM images
+
+-- Unpack cyclical_encode output (returns a 2-element Vector)
+SELECT LET (sin_month, cos_month) = cyclical_encode(month, 12),
+       sin_month AS s, cos_month AS c
+FROM events
+
+-- Unpack a struct by field declaration order
+SELECT LET (x, y) = {x: 1.0, y: 2.0}, x, y FROM data
+```
+
+#### Named destructuring
+
+```
+LET {field1, field2, ...} = expression
+```
+
+Extracts values by **field name**. Works on **Struct** sources only. Field order in the pattern does not need to match the struct's field declaration order.
+
+```sql
+-- Extract specific fields from a struct literal
+SELECT LET {lo, hi} = {lo: 0.0, hi: 1.0}, lo, hi FROM data
+
+-- Extract from a struct column via a scalar LET alias
+SELECT LET s = build_struct(row), LET {score, label} = s, score, label FROM predictions
+
+-- Field order is independent of struct declaration order
+SELECT LET {beta, alpha} = {alpha: 7.0, beta: 8.0}, alpha, beta FROM data
+```
+
+#### Source semantics
+
+| Source kind | Positional | Named |
+|-------------|-----------|-------|
+| Array       | ✓ zero-based index | ✗ |
+| Vector      | ✓ zero-based index | ✗ |
+| Struct      | ✓ declaration order | ✓ by field name |
+
+Named destructuring on an Array or Vector is a runtime error — use positional destructuring instead.
+
+#### Memoization
+
+The source expression is evaluated **once per row** regardless of how many names are extracted. This matters when the source has side-effects or is expensive:
+
+```sql
+-- cyclical_encode is called once; sin_v and cos_v share the result
+SELECT LET (sin_v, cos_v) = cyclical_encode(month, 12),
+       sin_v * sin_v + cos_v * cos_v AS unit_check   -- always ≈ 1.0
+FROM data
+```
+
+#### Chaining
+
+Destructured names are plain LET bindings and can be used in subsequent LET expressions:
+
+```sql
+SELECT LET (dx, dy) = displacement,
+       LET dist = sqrt(dx * dx + dy * dy),
+       dist AS distance
+FROM movements
+```
+
 ### Evaluation order and scope
 
 - LET bindings evaluate left-to-right; each may reference any binding declared before it.
@@ -271,6 +347,26 @@ SELECT DEFINE {
 } id, amount, tax
 FROM orders
 ASSERT tax < 1000 ON FAIL WARN    -- evaluated after the DEFINE block's assertion
+```
+
+### Destructuring inside DEFINE
+
+Tuple destructuring bindings work inside DEFINE blocks alongside ASSERT clauses:
+
+```sql
+-- Unpack and validate a Vector result in one block
+SELECT DEFINE {
+    LET (sin_m, cos_m) = cyclical_encode(month, 12);
+    ASSERT sin_m BETWEEN -1.0 AND 1.0 ON FAIL WARN;
+} sin_m AS s, cos_m AS c
+FROM events
+
+-- Named destructuring with guard
+SELECT DEFINE {
+    LET {lo, hi} = bounds;
+    ASSERT hi > lo MESSAGE 'inverted range' ON FAIL SKIP;
+} lo, hi
+FROM ranges
 ```
 
 ### Constraints

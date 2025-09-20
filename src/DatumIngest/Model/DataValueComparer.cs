@@ -60,6 +60,39 @@ internal static class DataValueComparer
         };
     }
 
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="kind"/> is any integer or
+    /// floating-point scalar kind that can be losslessly widened to <see cref="float"/>
+    /// or <see cref="double"/>.
+    /// </summary>
+    internal static bool IsNumericScalar(DataKind kind) =>
+        kind is DataKind.Float32 or DataKind.Float64
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64;
+
+    /// <summary>
+    /// Extracts the value of any numeric scalar <see cref="DataValue"/> as a
+    /// <see cref="float"/>. Int64 and UInt64 values are cast with possible precision
+    /// loss beyond 2^24.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="value"/> is not a numeric scalar kind.
+    /// </exception>
+    internal static float ToFloat(DataValue value) => value.Kind switch
+    {
+        DataKind.Float32 => value.AsFloat32(),
+        DataKind.Float64 => (float)value.AsFloat64(),
+        DataKind.Int8    => value.AsInt8(),
+        DataKind.Int16   => value.AsInt16(),
+        DataKind.Int32   => value.AsInt32(),
+        DataKind.Int64   => value.AsInt64(),
+        DataKind.UInt8   => value.AsUInt8(),
+        DataKind.UInt16  => value.AsUInt16(),
+        DataKind.UInt32  => value.AsUInt32(),
+        DataKind.UInt64  => value.AsUInt64(),
+        _ => throw new InvalidOperationException($"Cannot convert {value.Kind} to float."),
+    };
+
     private static double ToDouble(DataValue value) => value.Kind switch
     {
         DataKind.Boolean  => value.AsBoolean() ? 1.0 : 0.0,
