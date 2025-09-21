@@ -22,6 +22,7 @@ public static class ColumnNameResolver
             ColumnReference columnReference => columnReference.ColumnName,
             FunctionCallExpression functionCall => functionCall.FunctionName,
             StructLiteralExpression => "struct",
+            ScanExpression scan => scan.OutputAliases[0],
             _ => "expression",
         };
     }

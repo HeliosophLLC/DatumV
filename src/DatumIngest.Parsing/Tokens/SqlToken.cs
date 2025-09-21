@@ -379,4 +379,10 @@ public enum SqlToken
 
     /// <summary>The <c>DEFINE</c> keyword for grouping LET bindings and ASSERT clauses into a block.</summary>
     Define,
+
+    /// <summary>The <c>SCAN</c> keyword for fold/prefix-scan expressions over ordered partitions.</summary>
+    Scan,
+
+    /// <summary>The <c>INIT</c> keyword specifying the initial accumulator value for a SCAN expression.</summary>
+    Init,
 }

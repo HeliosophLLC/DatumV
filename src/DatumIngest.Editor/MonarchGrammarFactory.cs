@@ -139,7 +139,7 @@ internal static class MonarchGrammarFactory
         "UNION", "ALL", "INTERSECT", "EXCEPT",
 
         // DatumIngest extensions
-        "LET", "PIVOT", "UNPIVOT", "FOR", "INCLUDE",
+        "LET", "SCAN", "INIT", "PIVOT", "UNPIVOT", "FOR", "INCLUDE",
 
         // ASSERT / DEFINE clause keywords
         "ASSERT", "DEFINE", "MESSAGE", "FAIL", "WARN", "SKIP", "ABORT",

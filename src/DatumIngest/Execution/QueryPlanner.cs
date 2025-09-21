@@ -303,6 +303,7 @@ public sealed class QueryPlanner
         if (statement.GroupBy is not null) return false;
         if (HasAggregateFunction(statement.Columns, _functionRegistry)) return false;
         if (HasWindowFunction(statement.Columns, _functionRegistry)) return false;
+        if (HasScanExpression(statement.Columns)) return false;
         if (statement.Pivot is not null) return false;
         if (statement.Unpivot is not null) return false;
         if (statement.Distinct) return false;
@@ -850,6 +851,59 @@ public sealed class QueryPlanner
 
             source = new WindowOperator(source, windowColumns);
             projectionColumns = windowRewrittenColumns;
+        }
+
+        // 3d'. SCAN fold expressions — insert FoldScanOperator after WindowOperator
+        // but before projection. SCAN expressions produce running accumulators
+        // where output[i] = f(output[i-1], input[i]).
+        bool hasScanExpressions = HasScanExpression(projectionColumns)
+            || HasLetScanExpression(letBindings);
+
+        if (hasScanExpressions)
+        {
+            List<FoldScanColumn> scanColumns = new();
+            List<SelectColumn> scanRewrittenColumns = new();
+
+            foreach (SelectColumn column in projectionColumns)
+            {
+                if (column is SelectAllColumns or SelectTableColumns)
+                {
+                    scanRewrittenColumns.Add(column);
+                    continue;
+                }
+
+                // For tuple SCAN expressions at the top level of a select column,
+                // expand into multiple select columns (one per output alias).
+                if (column.Expression is ScanExpression topScan && topScan.OutputAliases.Count > 1)
+                {
+                    RewriteScanExpression(column.Expression, scanColumns);
+                    for (int i = 0; i < topScan.OutputAliases.Count; i++)
+                    {
+                        scanRewrittenColumns.Add(new SelectColumn(
+                            new ColumnReference(null, topScan.OutputAliases[i]),
+                            topScan.OutputAliases[i]));
+                    }
+                    continue;
+                }
+
+                Expression rewritten = RewriteScanExpression(column.Expression, scanColumns);
+                scanRewrittenColumns.Add(new SelectColumn(rewritten, column.Alias));
+            }
+
+            // Rewrite SCAN expressions inside LET binding expressions.
+            if (letBindings is not null)
+            {
+                List<LetBinding> scanRewrittenLetBindings = new(letBindings.Count);
+                foreach (LetBinding binding in letBindings)
+                {
+                    Expression rewritten = RewriteScanExpression(binding.Expression, scanColumns);
+                    scanRewrittenLetBindings.Add(binding with { Expression = rewritten });
+                }
+                letBindings = scanRewrittenLetBindings;
+            }
+
+            source = new Operators.FoldScanOperator(source, scanColumns);
+            projectionColumns = scanRewrittenColumns;
         }
 
         // 3e. QUALIFY — post-window-function filter, analogous to HAVING for GROUP BY.
@@ -3533,6 +3587,236 @@ public sealed class QueryPlanner
             : null;
 
         return new CaseExpression(rewrittenOperand, rewrittenClauses, rewrittenElse, caseExpression.Span);
+    }
+
+    // ───────────────────── SCAN expression detection and rewriting ─────────────────────
+
+    /// <summary>
+    /// Returns <see langword="true"/> if any <see cref="SelectColumn"/> expression
+    /// contains a <see cref="ScanExpression"/>.
+    /// </summary>
+    private static bool HasScanExpression(IReadOnlyList<SelectColumn> columns)
+    {
+        foreach (SelectColumn column in columns)
+        {
+            if (column is SelectAllColumns or SelectTableColumns)
+            {
+                continue;
+            }
+
+            if (ExpressionContainsScanExpression(column.Expression))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> if any <see cref="LetBinding"/> expression
+    /// contains a <see cref="ScanExpression"/>.
+    /// </summary>
+    private static bool HasLetScanExpression(IReadOnlyList<LetBinding>? letBindings)
+    {
+        if (letBindings is null)
+        {
+            return false;
+        }
+
+        foreach (LetBinding binding in letBindings)
+        {
+            if (ExpressionContainsScanExpression(binding.Expression))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively checks whether an expression tree contains a <see cref="ScanExpression"/>.
+    /// </summary>
+    private static bool ExpressionContainsScanExpression(Expression expression)
+    {
+        return expression switch
+        {
+            ScanExpression => true,
+            BinaryExpression bin => ExpressionContainsScanExpression(bin.Left)
+                || ExpressionContainsScanExpression(bin.Right),
+            UnaryExpression unary => ExpressionContainsScanExpression(unary.Operand),
+            CastExpression cast => ExpressionContainsScanExpression(cast.Expression),
+            CaseExpression caseExpr =>
+                (caseExpr.Operand is not null && ExpressionContainsScanExpression(caseExpr.Operand))
+                || caseExpr.WhenClauses.Any(w =>
+                    ExpressionContainsScanExpression(w.Condition) || ExpressionContainsScanExpression(w.Result))
+                || (caseExpr.ElseResult is not null && ExpressionContainsScanExpression(caseExpr.ElseResult)),
+            FunctionCallExpression func => func.Arguments.Any(ExpressionContainsScanExpression),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Rewrites an expression by replacing <see cref="ScanExpression"/> nodes with
+    /// <see cref="ColumnReference"/> nodes that reference the output columns of the
+    /// <see cref="Operators.FoldScanOperator"/>. Each SCAN expression is converted to a
+    /// <see cref="FoldScanColumn"/> descriptor. PREV() calls inside body expressions
+    /// are rewritten to <c>__prev_</c>-prefixed column references.
+    /// </summary>
+    private static Expression RewriteScanExpression(
+        Expression expression,
+        List<FoldScanColumn> scanColumns)
+    {
+        if (expression is ScanExpression scan)
+        {
+            // Validate counts match.
+            if (scan.AccumulatorNames.Count != scan.BodyExpressions.Count
+                || scan.AccumulatorNames.Count != scan.InitExpressions.Count
+                || scan.AccumulatorNames.Count != scan.OutputAliases.Count)
+            {
+                throw new InvalidOperationException(
+                    "SCAN expression has mismatched accumulator, body, init, and alias counts.");
+            }
+
+            if (scan.Window.OrderBy is null or { Count: 0 })
+            {
+                throw new InvalidOperationException(
+                    "SCAN expression requires ORDER BY in the OVER clause.");
+            }
+
+            // Collect PREV() column references from body expressions.
+            HashSet<string> prevColumnNames = new(StringComparer.OrdinalIgnoreCase);
+
+            // Rewrite PREV(col) calls in body expressions to __prev_col column references.
+            List<Expression> rewrittenBodies = new(scan.BodyExpressions.Count);
+            foreach (Expression body in scan.BodyExpressions)
+            {
+                rewrittenBodies.Add(RewritePrevCalls(body, prevColumnNames));
+            }
+
+            scanColumns.Add(new FoldScanColumn(
+                scan.AccumulatorNames,
+                rewrittenBodies,
+                scan.InitExpressions,
+                scan.Window,
+                scan.OutputAliases,
+                prevColumnNames.ToList()));
+
+            // Replace the SCAN expression with a column reference to the first output alias.
+            // For tuple form, the other aliases are also available as columns from the operator.
+            return new ColumnReference(null, scan.OutputAliases[0]);
+        }
+
+        // Recurse into sub-expressions.
+        return expression switch
+        {
+            BinaryExpression bin => new BinaryExpression(
+                RewriteScanExpression(bin.Left, scanColumns),
+                bin.Operator,
+                RewriteScanExpression(bin.Right, scanColumns)),
+            UnaryExpression unary => new UnaryExpression(
+                unary.Operator,
+                RewriteScanExpression(unary.Operand, scanColumns)),
+            CastExpression cast => new CastExpression(
+                RewriteScanExpression(cast.Expression, scanColumns),
+                cast.TargetType),
+            CaseExpression caseExpr => RewriteCaseScanExpression(caseExpr, scanColumns),
+            _ => expression,
+        };
+    }
+
+    /// <summary>
+    /// Rewrites SCAN expression references inside a CASE expression.
+    /// </summary>
+    private static CaseExpression RewriteCaseScanExpression(
+        CaseExpression caseExpression,
+        List<FoldScanColumn> scanColumns)
+    {
+        Expression? rewrittenOperand = caseExpression.Operand is not null
+            ? RewriteScanExpression(caseExpression.Operand, scanColumns)
+            : null;
+
+        List<WhenClause> rewrittenClauses = new(caseExpression.WhenClauses.Count);
+        foreach (WhenClause whenClause in caseExpression.WhenClauses)
+        {
+            rewrittenClauses.Add(new WhenClause(
+                RewriteScanExpression(whenClause.Condition, scanColumns),
+                RewriteScanExpression(whenClause.Result, scanColumns)));
+        }
+
+        Expression? rewrittenElse = caseExpression.ElseResult is not null
+            ? RewriteScanExpression(caseExpression.ElseResult, scanColumns)
+            : null;
+
+        return new CaseExpression(rewrittenOperand, rewrittenClauses, rewrittenElse, caseExpression.Span);
+    }
+
+    /// <summary>
+    /// Rewrites <c>PREV(col)</c> function calls into <c>__prev_col</c> column references.
+    /// Collects the <c>__prev_</c>-prefixed column names into <paramref name="prevColumnNames"/>.
+    /// </summary>
+    private static Expression RewritePrevCalls(
+        Expression expression,
+        HashSet<string> prevColumnNames)
+    {
+        if (expression is FunctionCallExpression func
+            && string.Equals(func.FunctionName, "PREV", StringComparison.OrdinalIgnoreCase))
+        {
+            if (func.Arguments.Count != 1 || func.Arguments[0] is not ColumnReference colRef)
+            {
+                throw new InvalidOperationException(
+                    "PREV() requires exactly one column reference argument.");
+            }
+
+            string prevName = "__prev_" + colRef.ColumnName;
+            prevColumnNames.Add(prevName);
+            return new ColumnReference(null, prevName);
+        }
+
+        return expression switch
+        {
+            BinaryExpression bin => new BinaryExpression(
+                RewritePrevCalls(bin.Left, prevColumnNames),
+                bin.Operator,
+                RewritePrevCalls(bin.Right, prevColumnNames)),
+            UnaryExpression unary => new UnaryExpression(
+                unary.Operator,
+                RewritePrevCalls(unary.Operand, prevColumnNames)),
+            CastExpression cast => new CastExpression(
+                RewritePrevCalls(cast.Expression, prevColumnNames),
+                cast.TargetType),
+            FunctionCallExpression funcExpr => new FunctionCallExpression(
+                funcExpr.FunctionName,
+                funcExpr.Arguments.Select(a => RewritePrevCalls(a, prevColumnNames)).ToList(),
+                funcExpr.OrderBy,
+                funcExpr.Distinct,
+                funcExpr.Span),
+            IsNullExpression isNull => new IsNullExpression(
+                RewritePrevCalls(isNull.Expression, prevColumnNames),
+                isNull.Negated),
+            BetweenExpression between => new BetweenExpression(
+                RewritePrevCalls(between.Expression, prevColumnNames),
+                RewritePrevCalls(between.Low, prevColumnNames),
+                RewritePrevCalls(between.High, prevColumnNames),
+                between.Negated),
+            InExpression inExpr => new InExpression(
+                RewritePrevCalls(inExpr.Expression, prevColumnNames),
+                inExpr.Values.Select(v => RewritePrevCalls(v, prevColumnNames)).ToList(),
+                inExpr.Negated),
+            CaseExpression caseExpr => new CaseExpression(
+                caseExpr.Operand is not null ? RewritePrevCalls(caseExpr.Operand, prevColumnNames) : null,
+                caseExpr.WhenClauses.Select(w => new WhenClause(
+                    RewritePrevCalls(w.Condition, prevColumnNames),
+                    RewritePrevCalls(w.Result, prevColumnNames))).ToList(),
+                caseExpr.ElseResult is not null ? RewritePrevCalls(caseExpr.ElseResult, prevColumnNames) : null,
+                caseExpr.Span),
+            IndexAccessExpression idx => new IndexAccessExpression(
+                RewritePrevCalls(idx.Source, prevColumnNames),
+                RewritePrevCalls(idx.Index, prevColumnNames),
+                idx.Span),
+            _ => expression,
+        };
     }
 
     /// <summary>

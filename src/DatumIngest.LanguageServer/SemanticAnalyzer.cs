@@ -615,6 +615,36 @@ internal sealed class SemanticAnalyzer
 
                 break;
 
+            // ScanExpression — validate body, init, and window sub-expressions.
+            case ScanExpression scanExpr:
+                foreach (Expression body in scanExpr.BodyExpressions)
+                {
+                    AnalyzeExpression(body, aliasToTable, opaqueAliases, diagnostics);
+                }
+
+                foreach (Expression init in scanExpr.InitExpressions)
+                {
+                    AnalyzeExpression(init, aliasToTable, opaqueAliases, diagnostics);
+                }
+
+                if (scanExpr.Window.PartitionBy is not null)
+                {
+                    foreach (Expression partition in scanExpr.Window.PartitionBy)
+                    {
+                        AnalyzeExpression(partition, aliasToTable, opaqueAliases, diagnostics);
+                    }
+                }
+
+                if (scanExpr.Window.OrderBy is not null)
+                {
+                    foreach (OrderByItem orderByItem in scanExpr.Window.OrderBy)
+                    {
+                        AnalyzeExpression(orderByItem.Expression, aliasToTable, opaqueAliases, diagnostics);
+                    }
+                }
+
+                break;
+
             // ErrorExpression — inserted by error recovery; skip validation.
             case ErrorExpression:
                 break;

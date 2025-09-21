@@ -114,6 +114,9 @@ public sealed class ExpressionEvaluator
             WindowFunctionCallExpression window => throw new InvalidOperationException(
                 $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
                 "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
+            ScanExpression => throw new InvalidOperationException(
+                "SCAN expression was not rewritten by the query planner. " +
+                "SCAN expressions must appear in SELECT or LET bindings."),
             SubqueryExpression => throw new InvalidOperationException(
                 "Subquery expression was not rewritten by the query planner."),
             InSubqueryExpression => throw new InvalidOperationException(

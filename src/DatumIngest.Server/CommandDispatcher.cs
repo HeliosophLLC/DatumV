@@ -263,6 +263,19 @@ public sealed class CommandDispatcher
                     break;
 
                 default:
+                    // Tuple-form SCAN expands to multiple output columns (one per alias).
+                    if (selectColumn.Expression is ScanExpression tupleScan
+                        && tupleScan.OutputAliases.Count > 1
+                        && selectColumn.Alias is null)
+                    {
+                        foreach (string scanAlias in tupleScan.OutputAliases)
+                        {
+                            outputColumns.Add(new ColumnInfo(scanAlias, DataKind.Float64, nullable: true));
+                            aliasedPositions.Add(outputColumns.Count - 1);
+                        }
+                        break;
+                    }
+
                     string outputName = selectColumn.Alias
                         ?? ColumnNameResolver.GetRawName(selectColumn.Expression);
 

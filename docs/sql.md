@@ -2,7 +2,7 @@
 
 [← Back to README](../README.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
-DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, GROUP BY ALL, HAVING, window functions (OVER/PARTITION BY), QUALIFY, ASSERT, DEFINE, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
+DatumIngest supports a subset of SQL designed for ML dataset ETL: SELECT, SELECT DISTINCT, SELECT * EXCEPT, SELECT * REPLACE, FROM, JOIN (including LATERAL / APPLY), WHERE, GROUP BY, GROUP BY ALL, HAVING, window functions (OVER/PARTITION BY), SCAN (fold/prefix-scan), QUALIFY, ASSERT, DEFINE, PIVOT, UNPIVOT, INTO, ORDER BY, LIMIT, OFFSET, subqueries, Common Table Expressions (WITH / WITH RECURSIVE), set operations (UNION, INTERSECT, EXCEPT), and DDL/DML for session-scoped temp tables (CREATE TEMP TABLE, INSERT INTO, UPDATE, DELETE, ALTER TABLE, DROP TABLE, ANALYZE).
 
 ## Comments
 
@@ -718,7 +718,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) <= 3
 QUALIFY slots into the pipeline between HAVING and ORDER BY:
 
 ```
-FROM → JOIN → WHERE → GROUP BY → HAVING → Window → QUALIFY → SELECT → DISTINCT → ORDER BY → LIMIT
+FROM → JOIN → WHERE → GROUP BY → HAVING → Window → SCAN → QUALIFY → SELECT → DISTINCT → ORDER BY → LIMIT
 ```
 
 All clauses can coexist:
@@ -806,7 +806,7 @@ ASSERT total >= 0 MESSAGE 'negative total'
 QUALIFY is a pre-projection window filter; ASSERT is a post-projection row validator. The pipeline order is:
 
 ```
-FROM → JOIN → WHERE → GROUP BY → HAVING → Window → QUALIFY → SELECT (LET) → ASSERT → DISTINCT → ORDER BY → LIMIT
+FROM → JOIN → WHERE → GROUP BY → HAVING → Window → SCAN → QUALIFY → SELECT (LET) → ASSERT → DISTINCT → ORDER BY → LIMIT
 ```
 
 ### Execution model

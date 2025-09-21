@@ -435,7 +435,8 @@ public static class SqlParser
     /// StructLiteral is tried before ArrayLiteral (both start with a bracket-style delimiter).
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> PrimaryExpression =
-        ExistsCall.Try()
+        SP.Ref(() => ScanExpressionParser!).Try()
+            .Or(ExistsCall.Try())
             .Or(CaseCall.Try())
             .Or(CastCall.Try())
             .Or(FunctionCall.Try())
@@ -754,6 +755,91 @@ public static class SqlParser
         TableStarColumn.Try()
             .Or(StarColumn.Try())
             .Or(ExpressionColumn);
+
+    // ───────────────────── SCAN (fold/prefix-scan) expressions ─────────────────────
+
+    /// <summary>
+    /// Parses the OVER clause for a SCAN expression. Unlike window functions, ORDER BY is required.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, WindowSpecification> ScanOverClauseParser =
+        from over in Token.EqualTo(SqlToken.Over)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from partitionBy in WindowPartitionByParser.OptionalOrDefault()
+        from orderBy in WindowOrderByParser
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select new WindowSpecification(partitionBy, orderBy);
+
+    /// <summary>
+    /// Parses a parenthesized, comma-separated list of two or more expressions.
+    /// Used for tuple-form SCAN body and INIT clauses.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression[]> ParenExpressionListParser =
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from first in SP.Ref(() => ExpressionParser!)
+        from rest in (
+            from comma in Token.EqualTo(SqlToken.Comma)
+            from expr in SP.Ref(() => ExpressionParser!)
+            select expr
+        ).AtLeastOnce()
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select new Expression[] { first }.Concat(rest).ToArray();
+
+    /// <summary>
+    /// Parses a parenthesized, comma-separated list of two or more identifiers for
+    /// SCAN accumulator names or output aliases. Already consumes the delimiters.
+    /// </summary>
+    private static TokenListParser<SqlToken, string[]> ScanNameListParser() =>
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from firstName in Token.EqualTo(SqlToken.Identifier)
+        from rest in (
+            from comma in Token.EqualTo(SqlToken.Comma)
+            from ident in Token.EqualTo(SqlToken.Identifier)
+            select ident
+        ).AtLeastOnce()
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select new[] { GetTokenText(firstName) }.Concat(rest.Select(GetTokenText)).ToArray();
+
+    /// <summary>
+    /// Tuple-form SCAN expression:
+    /// <c>SCAN (a, b) = (e1, e2) INIT (v1, v2) OVER (...) AS (a1, a2)</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> TupleScanExpressionParser =
+        from scanKw in Token.EqualTo(SqlToken.Scan)
+        from names in ScanNameListParser()
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from bodies in ParenExpressionListParser
+        from initKw in Token.EqualTo(SqlToken.Init)
+        from inits in ParenExpressionListParser
+        from window in ScanOverClauseParser
+        from asKw in Token.EqualTo(SqlToken.As)
+        from aliases in ScanNameListParser()
+        select (Expression)new ScanExpression(names, bodies, inits, window, aliases, ToSpan(scanKw));
+
+    /// <summary>
+    /// Scalar SCAN expression:
+    /// <c>SCAN acc = expr INIT seed OVER (...) AS alias</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> ScalarScanExpressionParser =
+        from scanKw in Token.EqualTo(SqlToken.Scan)
+        from name in Token.EqualTo(SqlToken.Identifier)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from body in SP.Ref(() => ExpressionParser!)
+        from initKw in Token.EqualTo(SqlToken.Init)
+        from init in SP.Ref(() => ExpressionParser!)
+        from window in ScanOverClauseParser
+        from asKw in Token.EqualTo(SqlToken.As)
+        from alias in Token.EqualTo(SqlToken.Identifier)
+        select (Expression)new ScanExpression(
+            [GetTokenText(name)], [body], [init], window, [GetTokenText(alias)], ToSpan(scanKw));
+
+    /// <summary>
+    /// SCAN expression in either tuple or scalar form.
+    /// Tuple is tried first with backtracking since both start with the SCAN token.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> ScanExpressionParser =
+        TupleScanExpressionParser.Try().Or(ScalarScanExpressionParser);
+
+    // ───────────────────── LET bindings ─────────────────────
 
     /// <summary>
     /// Parses a comma-separated list of two or more identifiers for a destructure pattern,

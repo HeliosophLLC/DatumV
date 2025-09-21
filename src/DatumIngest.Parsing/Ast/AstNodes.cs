@@ -718,6 +718,42 @@ public sealed record FollowingBound(int Offset) : FrameBound;
 /// <summary>UNBOUNDED FOLLOWING — the frame extends to the last row of the partition.</summary>
 public sealed record UnboundedFollowingBound() : FrameBound;
 
+// ──────────────────────── SCAN (fold/prefix-scan) expressions ────────────────────────
+
+/// <summary>
+/// A SCAN fold/prefix-scan expression that computes a running accumulator
+/// over ordered partitions. Each row's output feeds back as input to the
+/// next row's computation: <c>output[i] = f(output[i-1], input[i])</c>.
+/// <para>
+/// Scalar form: <c>SCAN acc = expr INIT seed OVER (...) AS alias</c>.
+/// Tuple form: <c>SCAN (a, b) = (e1, e2) INIT (v1, v2) OVER (...) AS (a1, a2)</c>.
+/// </para>
+/// </summary>
+/// <param name="AccumulatorNames">
+/// The accumulator variable names (one for scalar, multiple for tuple form).
+/// These names are visible inside <paramref name="BodyExpressions"/> only.
+/// </param>
+/// <param name="BodyExpressions">
+/// The fold body expressions, one per accumulator. May reference accumulator
+/// names and <c>PREV(col)</c> pseudo-function calls.
+/// </param>
+/// <param name="InitExpressions">
+/// The seed values for each accumulator at partition start.
+/// </param>
+/// <param name="Window">The OVER clause specifying partitioning and ordering.</param>
+/// <param name="OutputAliases">
+/// The output column aliases (one per accumulator). These are the only
+/// names visible outside the SCAN expression.
+/// </param>
+/// <param name="Span">Source location for diagnostics.</param>
+public sealed record ScanExpression(
+    IReadOnlyList<string> AccumulatorNames,
+    IReadOnlyList<Expression> BodyExpressions,
+    IReadOnlyList<Expression> InitExpressions,
+    WindowSpecification Window,
+    IReadOnlyList<string> OutputAliases,
+    SourceSpan? Span = null) : Expression;
+
 // ──────────────────────── Set operations ────────────────────────
 
 /// <summary>

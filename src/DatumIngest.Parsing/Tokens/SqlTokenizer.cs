@@ -215,8 +215,10 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("REPLACE"), SqlToken.Replace, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("ALL"), SqlToken.All, requireDelimiters: true)
 
-            // LET binding keyword
+            // LET / SCAN binding keywords
             .Match(Span.EqualToIgnoreCase("LET"), SqlToken.Let, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("SCAN"), SqlToken.Scan, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("INIT"), SqlToken.Init, requireDelimiters: true)
 
             // ASSERT / MESSAGE / DEFINE keywords
             .Match(Span.EqualToIgnoreCase("ASSERT"), SqlToken.Assert, requireDelimiters: true)
