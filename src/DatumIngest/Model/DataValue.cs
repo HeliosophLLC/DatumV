@@ -557,6 +557,148 @@ public readonly struct DataValue : IEquatable<DataValue>
         return BitConverter.Int64BitsToDouble(_numericBits);
     }
 
+    // ─────────────────────── Widening numeric conversions ───────────────────────
+
+    /// <summary>
+    /// Returns <see langword="true"/> when this value's <see cref="Kind"/> is any integer,
+    /// floating-point, or boolean scalar that can be widened to <see cref="float"/> or <see cref="double"/>.
+    /// Boolean values are treated as 1 (true) and 0 (false).
+    /// </summary>
+    public bool IsNumericScalar => _kind is DataKind.Float32 or DataKind.Float64
+        or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
+        or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
+        or DataKind.Boolean;
+
+    /// <summary>
+    /// Widens any numeric scalar value to <see cref="float"/>.
+    /// Int64/UInt64 values may lose precision beyond 2^24.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is null or not a numeric scalar kind.</exception>
+    public float ToFloat()
+    {
+        if (TryToFloat(out float result)) return result;
+        throw new InvalidOperationException($"Cannot convert {_kind} to float.");
+    }
+
+    /// <summary>
+    /// Widens any numeric scalar value to <see cref="double"/>.
+    /// UInt64 values may lose precision beyond 2^53.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is null or not a numeric scalar kind.</exception>
+    public double ToDouble()
+    {
+        if (TryToDouble(out double result)) return result;
+        throw new InvalidOperationException($"Cannot convert {_kind} to double.");
+    }
+
+    /// <summary>
+    /// Converts any numeric scalar value to <see cref="int"/>.
+    /// Floating-point values are truncated. Values outside the int range overflow silently.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is null or not a numeric scalar kind.</exception>
+    public int ToInt32()
+    {
+        if (TryToInt32(out int result)) return result;
+        throw new InvalidOperationException($"Cannot convert {_kind} to int.");
+    }
+
+    /// <summary>
+    /// Converts any numeric scalar value to <see cref="long"/>.
+    /// Floating-point values are truncated. UInt64 values beyond <see cref="long.MaxValue"/> overflow silently.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The value is null or not a numeric scalar kind.</exception>
+    public long ToInt64()
+    {
+        if (TryToInt64(out long result)) return result;
+        throw new InvalidOperationException($"Cannot convert {_kind} to long.");
+    }
+
+    /// <summary>Attempts to widen this value to <see cref="float"/>. Returns <see langword="false"/> for non-numeric kinds or null values.</summary>
+    public bool TryToFloat(out float result)
+    {
+        if (IsNull) { result = default; return false; }
+        switch (_kind)
+        {
+            case DataKind.Float32: result = AsFloat32(); return true;
+            case DataKind.Float64: result = (float)AsFloat64(); return true;
+            case DataKind.UInt8:   result = AsUInt8(); return true;
+            case DataKind.Int8:    result = AsInt8(); return true;
+            case DataKind.Int16:   result = AsInt16(); return true;
+            case DataKind.UInt16:  result = AsUInt16(); return true;
+            case DataKind.Int32:   result = AsInt32(); return true;
+            case DataKind.UInt32:  result = AsUInt32(); return true;
+            case DataKind.Int64:   result = AsInt64(); return true;
+            case DataKind.UInt64:  result = AsUInt64(); return true;
+            case DataKind.Boolean: result = AsBoolean() ? 1f : 0f; return true;
+            default: result = default; return false;
+        }
+    }
+
+    /// <summary>Attempts to widen this value to <see cref="double"/>. Returns <see langword="false"/> for non-numeric kinds or null values.</summary>
+    public bool TryToDouble(out double result)
+    {
+        if (IsNull) { result = default; return false; }
+        switch (_kind)
+        {
+            case DataKind.Float32: result = AsFloat32(); return true;
+            case DataKind.Float64: result = AsFloat64(); return true;
+            case DataKind.UInt8:   result = AsUInt8(); return true;
+            case DataKind.Int8:    result = AsInt8(); return true;
+            case DataKind.Int16:   result = AsInt16(); return true;
+            case DataKind.UInt16:  result = AsUInt16(); return true;
+            case DataKind.Int32:   result = AsInt32(); return true;
+            case DataKind.UInt32:  result = AsUInt32(); return true;
+            case DataKind.Int64:   result = AsInt64(); return true;
+            case DataKind.UInt64:  result = (double)AsUInt64(); return true;
+            case DataKind.Boolean: result = AsBoolean() ? 1.0 : 0.0; return true;
+            default: result = default; return false;
+        }
+    }
+
+    /// <summary>Attempts to convert this value to <see cref="int"/>. Returns <see langword="false"/> for non-numeric kinds or null values.</summary>
+    public bool TryToInt32(out int result)
+    {
+        if (IsNull) { result = default; return false; }
+        switch (_kind)
+        {
+            case DataKind.Float32: result = (int)AsFloat32(); return true;
+            case DataKind.Float64: result = (int)AsFloat64(); return true;
+            case DataKind.UInt8:   result = AsUInt8(); return true;
+            case DataKind.Int8:    result = AsInt8(); return true;
+            case DataKind.Int16:   result = AsInt16(); return true;
+            case DataKind.UInt16:  result = AsUInt16(); return true;
+            case DataKind.Int32:   result = AsInt32(); return true;
+            case DataKind.UInt32:  result = (int)AsUInt32(); return true;
+            case DataKind.Int64:   result = (int)AsInt64(); return true;
+            case DataKind.UInt64:  result = (int)AsUInt64(); return true;
+            case DataKind.Boolean: result = AsBoolean() ? 1 : 0; return true;
+            default: result = default; return false;
+        }
+    }
+
+    /// <summary>Attempts to convert this value to <see cref="long"/>. Returns <see langword="false"/> for non-numeric kinds or null values.</summary>
+    public bool TryToInt64(out long result)
+    {
+        if (IsNull) { result = default; return false; }
+        switch (_kind)
+        {
+            case DataKind.Float32: result = (long)AsFloat32(); return true;
+            case DataKind.Float64: result = (long)AsFloat64(); return true;
+            case DataKind.UInt8:   result = AsUInt8(); return true;
+            case DataKind.Int8:    result = AsInt8(); return true;
+            case DataKind.Int16:   result = AsInt16(); return true;
+            case DataKind.UInt16:  result = AsUInt16(); return true;
+            case DataKind.Int32:   result = AsInt32(); return true;
+            case DataKind.UInt32:  result = AsUInt32(); return true;
+            case DataKind.Int64:   result = AsInt64(); return true;
+            case DataKind.UInt64:  result = (long)AsUInt64(); return true;
+            case DataKind.Boolean: result = AsBoolean() ? 1L : 0L; return true;
+            default: result = default; return false;
+        }
+    }
+
+    // ─────────────────────── Reference-type accessors ─────────────────────────
+
     /// <summary>Returns the byte array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public byte[] AsUInt8Array()

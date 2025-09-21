@@ -393,47 +393,11 @@ public sealed class ParquetOutputWriter : IOutputWriter
         return new DataColumn(field, data);
     }
 
-    /// <summary>
-    /// Converts any numeric <see cref="DataValue"/> to a float for Parquet int/short column output.
-    /// </summary>
-    private static float ToFloat(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.Float64 => (float)value.AsFloat64(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.UInt32 => value.AsUInt32(),
-            DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt64 => value.AsUInt64(),
-            _ => 0f,
-        };
-    }
+    private static float ToFloat(DataValue value) =>
+        value.TryToFloat(out float f) ? f : 0f;
 
-    /// <summary>
-    /// Converts any numeric <see cref="DataValue"/> to a double for Parquet long column output.
-    /// </summary>
-    private static double ToDouble(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.Float64 => value.AsFloat64(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.UInt32 => value.AsUInt32(),
-            DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt64 => value.AsUInt64(),
-            _ => 0.0,
-        };
-    }
+    private static double ToDouble(DataValue value) =>
+        value.TryToDouble(out double d) ? d : 0.0;
 
     /// <summary>
     /// Builds a binary column that embeds raw byte arrays directly in the Parquet data.

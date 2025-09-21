@@ -83,22 +83,5 @@ internal static class WindowFunctionHelper
     /// Converts any numeric <see cref="DataValue"/> to an <see langword="int"/>.
     /// Used by window functions that accept integer offset or bucket count arguments.
     /// </summary>
-    internal static int ToInt(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => (int)value.AsFloat32(),
-            DataKind.Float64 => (int)value.AsFloat64(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.UInt32 => (int)value.AsUInt32(),
-            DataKind.Int64 => (int)value.AsInt64(),
-            DataKind.UInt64 => (int)value.AsUInt64(),
-            _ => throw new InvalidOperationException(
-                $"Cannot convert {value.Kind} to int for window function argument."),
-        };
-    }
+    internal static int ToInt(DataValue value) => value.ToInt32();
 }

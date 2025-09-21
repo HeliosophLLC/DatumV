@@ -33,10 +33,10 @@ public sealed class ArrayAvgFunction : IElementKindAwareFunction
         // Validate element kind when known at plan time.
         if (arrayElementKinds.Length > 0 && arrayElementKinds[0] is DataKind elementKind)
         {
-            if (elementKind is not DataKind.Float32 and not DataKind.UInt8)
+            if (!DataValueComparer.IsNumericScalar(elementKind))
             {
                 throw new ArgumentException(
-                    $"array_avg() requires an Array of Scalar or UInt8 elements, got Array of {elementKind}.");
+                    $"array_avg() requires an Array of numeric elements, got Array of {elementKind}.");
             }
         }
 
@@ -59,9 +59,7 @@ public sealed class ArrayAvgFunction : IElementKindAwareFunction
         {
             if (element.IsNull) continue;
 
-            sum += element.Kind == DataKind.UInt8
-                ? element.AsUInt8()
-                : element.AsFloat32();
+            sum += element.ToFloat();
             count++;
         }
 

@@ -71,9 +71,9 @@ public sealed class RdimFunction : IScalarFunction
             throw new ArgumentException($"rdim() first argument must be a Vector, Matrix, or Tensor.");
         }
 
-        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            throw new ArgumentException("rdim() second argument (axis) must be Scalar or UInt8.");
+            throw new ArgumentException("rdim() second argument (axis) must be numeric.");
         }
 
         return DataKind.Float32;
@@ -88,9 +88,7 @@ public sealed class RdimFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        int axis = (int)(arguments[1].Kind is DataKind.UInt8
-            ? arguments[1].AsUInt8()
-            : arguments[1].AsFloat32());
+        int axis = arguments[1].ToInt32();
 
         switch (input.Kind)
         {

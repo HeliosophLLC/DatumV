@@ -207,22 +207,5 @@ public abstract class BinaryMathFunction : IScalarFunction
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
             or DataKind.Float32 or DataKind.Float64 or DataKind.UInt8;
 
-    /// <summary>
-    /// Extracts the value of any numeric scalar <see cref="DataValue"/> as a <see cref="float"/>.
-    /// Int64 and UInt64 values are cast with possible precision loss beyond 2^24.
-    /// </summary>
-    private static float ExtractFloat(DataValue value) => value.Kind switch
-    {
-        DataKind.Int8 => value.AsInt8(),
-        DataKind.Int16 => value.AsInt16(),
-        DataKind.UInt16 => value.AsUInt16(),
-        DataKind.Int32 => value.AsInt32(),
-        DataKind.UInt32 => value.AsUInt32(),
-        DataKind.Int64 => (float)value.AsInt64(),
-        DataKind.UInt64 => (float)value.AsUInt64(),
-        DataKind.Float32 => value.AsFloat32(),
-        DataKind.Float64 => (float)value.AsFloat64(),
-        DataKind.UInt8 => value.AsUInt8(),
-        _ => throw new InvalidOperationException($"Not a numeric scalar: {value.Kind}."),
-    };
+    private static float ExtractFloat(DataValue value) => value.ToFloat();
 }

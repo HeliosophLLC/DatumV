@@ -951,19 +951,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// </summary>
     private static float ToFloat(DataValue value)
     {
+        if (value.TryToFloat(out float f)) return f;
         return value.Kind switch
         {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.Float64 => (float)value.AsFloat64(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.UInt32 => value.AsUInt32(),
-            DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt64 => value.AsUInt64(),
-            DataKind.Boolean => value.AsBoolean() ? 1f : 0f,
             DataKind.Duration => (float)value.AsDuration().TotalSeconds,
             DataKind.Time => (float)(value.AsTime().Hour * 3600 + value.AsTime().Minute * 60 +
                 value.AsTime().Second + value.AsTime().Millisecond / 1000.0),

@@ -242,27 +242,8 @@ public sealed class CastFunction : IScalarFunction
             or DataKind.Float32 or DataKind.Float64 or DataKind.UInt8;
     }
 
-    /// <summary>
-    /// Extracts the numeric value of <paramref name="value"/> as a <see cref="double"/>.
-    /// Returns false if the value is not a numeric kind.
-    /// </summary>
-    private static bool TryExtractAsDouble(DataValue value, out double result)
-    {
-        switch (value.Kind)
-        {
-            case DataKind.Int8: result = value.AsInt8(); return true;
-            case DataKind.Int16: result = value.AsInt16(); return true;
-            case DataKind.UInt16: result = value.AsUInt16(); return true;
-            case DataKind.Int32: result = value.AsInt32(); return true;
-            case DataKind.UInt32: result = value.AsUInt32(); return true;
-            case DataKind.Int64: result = (double)value.AsInt64(); return true;
-            case DataKind.UInt64: result = (double)value.AsUInt64(); return true;
-            case DataKind.Float32: result = value.AsFloat32(); return true;
-            case DataKind.Float64: result = value.AsFloat64(); return true;
-            case DataKind.UInt8: result = value.AsUInt8(); return true;
-            default: result = 0.0; return false;
-        }
-    }
+    private static bool TryExtractAsDouble(DataValue value, out double result) =>
+        value.TryToDouble(out result);
 
     /// <summary>
     /// Creates a <see cref="DataValue"/> of the given numeric <paramref name="targetKind"/>

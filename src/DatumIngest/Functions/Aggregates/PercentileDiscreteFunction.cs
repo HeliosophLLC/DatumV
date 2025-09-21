@@ -63,22 +63,7 @@ public sealed class PercentileDiscreteFunction : IAggregateFunction
         DataKind.Int32 or DataKind.UInt32 or
         DataKind.Int64 or DataKind.UInt64;
 
-    /// <summary>
-    /// Extracts the double representation of any numeric <see cref="DataValue"/>.
-    /// </summary>
-    internal static double ToDouble(DataValue value) => value.Kind switch
-    {
-        DataKind.Float64 => value.AsFloat64(),
-        DataKind.Float32 => value.AsFloat32(),
-        DataKind.Int64   => value.AsInt64(),
-        DataKind.UInt64  => value.AsUInt64(),
-        DataKind.Int32   => value.AsInt32(),
-        DataKind.UInt32  => value.AsUInt32(),
-        DataKind.Int16   => value.AsInt16(),
-        DataKind.UInt16  => value.AsUInt16(),
-        DataKind.Int8    => value.AsInt8(),
-        _                => value.AsUInt8(),
-    };
+    internal static double ToDouble(DataValue value) => value.ToDouble();
 
     /// <summary>
     /// Collects all non-null values and returns the nearest-rank value at finalization.

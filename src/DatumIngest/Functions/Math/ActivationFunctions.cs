@@ -135,17 +135,17 @@ public sealed class LeakyReluFunction : IScalarFunction
         }
 
         DataKind kind = argumentKinds[0];
-        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (!DataValueComparer.IsNumericScalar(kind) && kind is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"leaky_relu() does not support {kind}.");
         }
 
-        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
+        if (argumentKinds.Length == 2 && !DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            throw new ArgumentException("leaky_relu() second argument (alpha) must be Scalar or UInt8.");
+            throw new ArgumentException("leaky_relu() second argument (alpha) must be numeric.");
         }
 
-        return kind is DataKind.UInt8 ? DataKind.Float32 : kind;
+        return DataValueComparer.IsNumericScalar(kind) ? DataKind.Float32 : kind;
     }
 
     /// <inheritdoc />
@@ -154,13 +154,13 @@ public sealed class LeakyReluFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Float32 : input.Kind);
+            return DataValue.Null(input.IsNumericScalar ? DataKind.Float32 : input.Kind);
         }
 
         float alpha = 0.01f;
         if (arguments.Length == 2 && !arguments[1].IsNull)
         {
-            alpha = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32();
+            alpha = arguments[1].ToFloat();
         }
 
         float LeakyRelu(float v) => v > 0f ? v : alpha * v;
@@ -216,17 +216,17 @@ public sealed class EluFunction : IScalarFunction
         }
 
         DataKind kind = argumentKinds[0];
-        if (kind is not (DataKind.Float32 or DataKind.UInt8 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
+        if (!DataValueComparer.IsNumericScalar(kind) && kind is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
         {
             throw new ArgumentException($"elu() does not support {kind}.");
         }
 
-        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
+        if (argumentKinds.Length == 2 && !DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            throw new ArgumentException("elu() second argument (alpha) must be Scalar or UInt8.");
+            throw new ArgumentException("elu() second argument (alpha) must be numeric.");
         }
 
-        return kind is DataKind.UInt8 ? DataKind.Float32 : kind;
+        return DataValueComparer.IsNumericScalar(kind) ? DataKind.Float32 : kind;
     }
 
     /// <inheritdoc />
@@ -235,13 +235,13 @@ public sealed class EluFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(input.Kind is DataKind.UInt8 ? DataKind.Float32 : input.Kind);
+            return DataValue.Null(input.IsNumericScalar ? DataKind.Float32 : input.Kind);
         }
 
         float alpha = 1.0f;
         if (arguments.Length == 2 && !arguments[1].IsNull)
         {
-            alpha = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32();
+            alpha = arguments[1].ToFloat();
         }
 
         float Elu(float v) => v > 0f ? v : alpha * (MathF.Exp(v) - 1f);

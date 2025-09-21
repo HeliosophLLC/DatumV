@@ -1589,22 +1589,11 @@ internal sealed class StatementExecutor
         }
 
         // Extract the numeric value as double for safe widening/narrowing.
-        double numeric = value.Kind switch
+        if (!value.TryToDouble(out double numeric))
         {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.Float64 => value.AsFloat64(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.UInt32 => value.AsUInt32(),
-            DataKind.UInt64 => value.AsUInt64(),
-            DataKind.Boolean => value.AsBoolean() ? 1.0 : 0.0,
-            _ => throw new InvalidOperationException(
-                $"Cannot coerce {value.Kind} to {targetKind} in computed column expression."),
-        };
+            throw new InvalidOperationException(
+                $"Cannot coerce {value.Kind} to {targetKind} in computed column expression.");
+        }
 
         return targetKind switch
         {

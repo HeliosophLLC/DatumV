@@ -203,8 +203,8 @@ public sealed class HashEncodeFunction : IScalarFunction
             throw new ArgumentException("hash_encode() requires exactly 2 arguments (value, num_buckets).");
         if (argumentKinds[0] != DataKind.String)
             throw new ArgumentException("hash_encode() first argument must be String.");
-        if (argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
-            throw new ArgumentException("hash_encode() second argument (num_buckets) must be Scalar or UInt8.");
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
+            throw new ArgumentException("hash_encode() second argument (num_buckets) must be numeric.");
         return DataKind.Vector;
     }
 
@@ -214,9 +214,7 @@ public sealed class HashEncodeFunction : IScalarFunction
         if (arguments[0].IsNull)
             return DataValue.Null(DataKind.Vector);
 
-        int numBuckets = (int)(arguments[1].Kind is DataKind.UInt8
-            ? arguments[1].AsUInt8()
-            : arguments[1].AsFloat32());
+        int numBuckets = arguments[1].ToInt32();
 
         if (numBuckets <= 0)
             throw new ArgumentException("hash_encode() num_buckets must be a positive integer.");

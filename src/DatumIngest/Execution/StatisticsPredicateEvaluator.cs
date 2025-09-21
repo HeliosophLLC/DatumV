@@ -373,22 +373,6 @@ public static class StatisticsPredicateEvaluator
         return leftDouble.CompareTo(rightDouble);
     }
 
-    private static double ToDouble(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.Float64 => value.AsFloat64(),
-            DataKind.UInt8 => value.AsUInt8(),
-            DataKind.Int8 => value.AsInt8(),
-            DataKind.Int16 => value.AsInt16(),
-            DataKind.UInt16 => value.AsUInt16(),
-            DataKind.Int32 => value.AsInt32(),
-            DataKind.UInt32 => value.AsUInt32(),
-            DataKind.Int64 => value.AsInt64(),
-            DataKind.UInt64 => value.AsUInt64(),
-            DataKind.Boolean => value.AsBoolean() ? 1d : 0d,
-            _ => 0d,
-        };
-    }
+    private static double ToDouble(DataValue value) =>
+        value.TryToDouble(out double d) ? d : 0.0;
 }

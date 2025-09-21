@@ -90,8 +90,8 @@ public sealed class GreatestFunction : IScalarFunction
 
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
-                throw new ArgumentException($"greatest() argument {i + 1} must be Scalar or UInt8.");
+            if (argumentKinds[i] is var kind && !DataValueComparer.IsNumericScalar(kind))
+                throw new ArgumentException($"greatest() argument {i + 1} must be numeric.");
         }
         return DataKind.Float32;
     }
@@ -110,7 +110,7 @@ public sealed class GreatestFunction : IScalarFunction
         {
             if (arguments[i].IsNull) continue;
             allNull = false;
-            float value = arguments[i].Kind is DataKind.UInt8 ? arguments[i].AsUInt8() : arguments[i].AsFloat32();
+            float value = arguments[i].ToFloat();
             if (value > max) max = value;
         }
         return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(max);
@@ -161,8 +161,8 @@ public sealed class LeastFunction : IScalarFunction
 
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] is not (DataKind.Float32 or DataKind.UInt8))
-                throw new ArgumentException($"least() argument {i + 1} must be Scalar or UInt8.");
+            if (argumentKinds[i] is var kind && !DataValueComparer.IsNumericScalar(kind))
+                throw new ArgumentException($"least() argument {i + 1} must be numeric.");
         }
         return DataKind.Float32;
     }
@@ -181,7 +181,7 @@ public sealed class LeastFunction : IScalarFunction
         {
             if (arguments[i].IsNull) continue;
             allNull = false;
-            float value = arguments[i].Kind is DataKind.UInt8 ? arguments[i].AsUInt8() : arguments[i].AsFloat32();
+            float value = arguments[i].ToFloat();
             if (value < min) min = value;
         }
         return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(min);
@@ -218,8 +218,8 @@ public sealed class IsNanFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_nan() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
-            throw new ArgumentException("is_nan() requires a Scalar or UInt8 argument.");
+        if (argumentKinds[0] is var kind && !DataValueComparer.IsNumericScalar(kind))
+            throw new ArgumentException("is_nan() requires a numeric argument.");
         return DataKind.Float32;
     }
 
@@ -227,7 +227,7 @@ public sealed class IsNanFunction : IScalarFunction
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(float.IsNaN(value) ? 1f : 0f);
     }
 }
@@ -245,8 +245,8 @@ public sealed class IsFiniteFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_finite() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
-            throw new ArgumentException("is_finite() requires a Scalar or UInt8 argument.");
+        if (argumentKinds[0] is var kind && !DataValueComparer.IsNumericScalar(kind))
+            throw new ArgumentException("is_finite() requires a numeric argument.");
         return DataKind.Float32;
     }
 
@@ -254,7 +254,7 @@ public sealed class IsFiniteFunction : IScalarFunction
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(float.IsFinite(value) ? 1f : 0f);
     }
 }
@@ -273,8 +273,8 @@ public sealed class IsEvenFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_even() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
-            throw new ArgumentException("is_even() requires a Scalar or UInt8 argument.");
+        if (argumentKinds[0] is var kind && !DataValueComparer.IsNumericScalar(kind))
+            throw new ArgumentException("is_even() requires a numeric argument.");
         return DataKind.Float32;
     }
 
@@ -282,7 +282,7 @@ public sealed class IsEvenFunction : IScalarFunction
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(value == MathF.Truncate(value) && value % 2 == 0 ? 1f : 0f);
     }
 }
@@ -301,8 +301,8 @@ public sealed class IsOddFunction : IScalarFunction
     {
         if (argumentKinds.Length != 1)
             throw new ArgumentException("is_odd() requires exactly 1 argument.");
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
-            throw new ArgumentException("is_odd() requires a Scalar or UInt8 argument.");
+        if (argumentKinds[0] is var kind && !DataValueComparer.IsNumericScalar(kind))
+            throw new ArgumentException("is_odd() requires a numeric argument.");
         return DataKind.Float32;
     }
 
@@ -310,7 +310,7 @@ public sealed class IsOddFunction : IScalarFunction
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
-        float value = arguments[0].Kind is DataKind.UInt8 ? arguments[0].AsUInt8() : arguments[0].AsFloat32();
+        float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(value == MathF.Truncate(value) && value % 2 != 0 ? 1f : 0f);
     }
 }

@@ -17,7 +17,7 @@ public sealed class PearsonAccumulator
     private double _coMoment;
 
     /// <summary>
-    /// Adds a pair of values. Both must be numeric (Scalar or UInt8).
+    /// Adds a pair of numeric values. Non-numeric kinds are treated as NaN and skipped.
     /// Null values and non-numeric kinds are skipped.
     /// </summary>
     public void Add(DataValue valueA, DataValue valueB)
@@ -64,13 +64,6 @@ public sealed class PearsonAccumulator
         return denominator < double.Epsilon ? double.NaN : _coMoment / denominator;
     }
 
-    private static double ToDouble(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.UInt8 => value.AsUInt8(),
-            _ => double.NaN
-        };
-    }
+    private static double ToDouble(DataValue value) =>
+        value.TryToDouble(out double d) ? d : double.NaN;
 }

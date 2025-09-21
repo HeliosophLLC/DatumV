@@ -18,7 +18,7 @@ public sealed class SpearmanAccumulator
     private readonly Random _random = new(42);
 
     /// <summary>
-    /// Adds a pair of numeric values. Both must be Scalar or UInt8.
+    /// Adds a pair of numeric values. Non-numeric kinds are treated as NaN and skipped.
     /// </summary>
     public void Add(DataValue valueA, DataValue valueB)
     {
@@ -150,13 +150,6 @@ public sealed class SpearmanAccumulator
         return denominator < double.Epsilon ? double.NaN : covariance / denominator;
     }
 
-    private static float ToFloat(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32(),
-            DataKind.UInt8 => value.AsUInt8(),
-            _ => float.NaN
-        };
-    }
+    private static float ToFloat(DataValue value) =>
+        value.TryToFloat(out float f) ? f : float.NaN;
 }

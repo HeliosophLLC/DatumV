@@ -307,8 +307,8 @@ public sealed class VecNormFunction : IScalarFunction
             throw new ArgumentException("vec_norm() requires 1 or 2 arguments.");
         if (argumentKinds[0] is not (DataKind.Vector or DataKind.Matrix or DataKind.Tensor))
             throw new ArgumentException($"vec_norm() does not support {argumentKinds[0]}.");
-        if (argumentKinds.Length == 2 && argumentKinds[1] is not (DataKind.Float32 or DataKind.UInt8))
-            throw new ArgumentException("vec_norm() second argument (p) must be Scalar or UInt8.");
+        if (argumentKinds.Length == 2 && !DataValueComparer.IsNumericScalar(argumentKinds[1]))
+            throw new ArgumentException("vec_norm() second argument (p) must be numeric.");
         return DataKind.Float32;
     }
 
@@ -321,7 +321,7 @@ public sealed class VecNormFunction : IScalarFunction
         float p = 2f;
         if (arguments.Length == 2 && !arguments[1].IsNull)
         {
-            p = arguments[1].Kind is DataKind.UInt8 ? arguments[1].AsUInt8() : arguments[1].AsFloat32();
+            p = arguments[1].ToFloat();
         }
 
         if (float.IsPositiveInfinity(p))

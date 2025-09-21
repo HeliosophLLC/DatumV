@@ -36,20 +36,7 @@ public sealed class AvgFunction : IAggregateFunction
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
             or DataKind.Float32 or DataKind.Float64;
 
-    internal static double ExtractAsDouble(DataValue value) => value.Kind switch
-    {
-        DataKind.Int8 => value.AsInt8(),
-        DataKind.Int16 => value.AsInt16(),
-        DataKind.UInt8 => value.AsUInt8(),
-        DataKind.UInt16 => value.AsUInt16(),
-        DataKind.Int32 => value.AsInt32(),
-        DataKind.UInt32 => value.AsUInt32(),
-        DataKind.Int64 => (double)value.AsInt64(),
-        DataKind.UInt64 => (double)value.AsUInt64(),
-        DataKind.Float32 => value.AsFloat32(),
-        DataKind.Float64 => value.AsFloat64(),
-        _ => throw new InvalidOperationException($"Cannot extract double from {value.Kind}."),
-    };
+    internal static double ExtractAsDouble(DataValue value) => value.ToDouble();
 
     private sealed class AvgAccumulator : IAggregateAccumulator
     {

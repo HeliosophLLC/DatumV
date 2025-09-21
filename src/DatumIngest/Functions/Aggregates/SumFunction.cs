@@ -39,18 +39,7 @@ public sealed class SumFunction : IAggregateFunction
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new SumAccumulator();
 
-    private static long ExtractAsInt64(DataValue value) => value.Kind switch
-    {
-        DataKind.Int8 => value.AsInt8(),
-        DataKind.Int16 => value.AsInt16(),
-        DataKind.UInt8 => value.AsUInt8(),
-        DataKind.UInt16 => value.AsUInt16(),
-        DataKind.Int32 => value.AsInt32(),
-        DataKind.UInt32 => value.AsUInt32(),
-        DataKind.Int64 => value.AsInt64(),
-        DataKind.UInt64 => (long)value.AsUInt64(),
-        _ => (long)value.AsFloat32(),
-    };
+    private static long ExtractAsInt64(DataValue value) => value.ToInt64();
 
     private sealed class SumAccumulator : IAggregateAccumulator
     {
