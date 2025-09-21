@@ -1325,15 +1325,9 @@ static async Task<int> RunManifestSchemaAsync(TableCatalog catalog, string? outp
     // Collect function documentation.
     List<FunctionSignature> functions = new(FunctionDocumentation.All);
 
-    // Collect keywords from the SQL token enum.
-    List<string> keywords = new()
-    {
-        "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "FULL", "OUTER",
-        "CROSS", "INNER", "ON", "INTO", "AS", "AND", "OR", "NOT", "IN",
-        "BETWEEN", "LIKE", "IS", "NULL", "ORDER", "BY", "ASC", "DESC",
-        "LIMIT", "OFFSET", "SHARD", "CAST", "TRUE", "FALSE",
-        "OVER", "PARTITION", "ROWS", "UNBOUNDED", "PRECEDING", "FOLLOWING", "CURRENT",
-    };
+    // Collect keywords — the authoritative list lives in Program.ManifestKeywords.cs
+    // and is sync-tested against MonarchGrammarFactory.ClauseKeywords().
+    List<string> keywords = new(Program.ManifestKeywords());
 
     LanguageServerManifest manifest = new()
     {
