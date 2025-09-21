@@ -394,7 +394,7 @@ public sealed class CompletionProvider
         "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT",
     ];
 
-    private static readonly string[] ColumnTypeKeywords =
+    internal static readonly string[] ColumnTypeKeywords =
     [
         "Boolean", "Int8", "Int16", "Int32", "Int64",
         "UInt8", "UInt16", "UInt32", "UInt64",

@@ -24,6 +24,8 @@ internal static class MonarchGrammarFactory
     ///   <item><c>comment</c> — line comments (--) and block comments (/* */)</item>
     ///   <item><c>operator</c> — arithmetic and comparison symbols</item>
     ///   <item><c>delimiter</c> — commas, parentheses, dots</item>
+    ///   <item><c>type.identifier</c> — column data type names (Int32, Float64, String, etc.)</item>
+    ///   <item><c>predefined.function</c> — built-in function names (count, sum, abs, etc.)</item>
     ///   <item><c>identifier</c> — unquoted and double-quoted identifiers (default)</item>
     /// </list>
     /// Token rules are intentionally ordered: multi-character operators before
@@ -36,6 +38,8 @@ internal static class MonarchGrammarFactory
         ignoreCase = true,
         keywords = ClauseKeywords(),
         boolNullKeywords = new[] { "TRUE", "FALSE", "NULL" },
+        typeKeywords = TypeKeywords(),
+        builtinFunctions = BuiltinFunctions(),
         tokenizer = new
         {
             root = new object[]
@@ -67,7 +71,9 @@ internal static class MonarchGrammarFactory
                         cases = new Dictionary<string, string>
                         {
                             ["@boolNullKeywords"] = "keyword.constant",
+                            ["@typeKeywords"] = "type.identifier",
                             ["@keywords"] = "keyword",
+                            ["@builtinFunctions"] = "predefined.function",
                             ["@default"] = "identifier",
                         }
                     }
@@ -107,7 +113,7 @@ internal static class MonarchGrammarFactory
     /// and NULL are intentionally excluded — they are in <c>boolNullKeywords</c>
     /// so themes can color them distinctly from clause keywords.
     /// </summary>
-    private static string[] ClauseKeywords() =>
+    internal static string[] ClauseKeywords() =>
     [
         // Core DML and clause keywords
         "SELECT", "INTO", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "OUTER",
@@ -145,5 +151,180 @@ internal static class MonarchGrammarFactory
 
         // DML keywords
         "INSERT", "VALUES", "UPDATE", "SET", "DELETE",
+    ];
+
+    /// <summary>
+    /// Returns column data type names. These are tokenized as <c>type.identifier</c>
+    /// so editor themes can color them distinctly from keywords and plain identifiers.
+    /// </summary>
+    internal static string[] TypeKeywords() =>
+    [
+        "Boolean", "Int8", "Int16", "Int32", "Int64",
+        "UInt8", "UInt16", "UInt32", "UInt64",
+        "Float32", "Float64",
+        "String", "Date", "DateTime", "Time", "Duration",
+        "Uuid", "JsonValue", "Vector", "Matrix", "Tensor",
+        "Array", "Struct", "Image", "UInt8Array",
+    ];
+
+    /// <summary>
+    /// Returns built-in function names. These are tokenized as <c>predefined.function</c>
+    /// so editor themes can color them distinctly from plain identifiers.
+    /// Names that overlap with SQL keywords (e.g. LEFT, RIGHT, CAST, RANGE)
+    /// are intentionally excluded — the <c>@keywords</c> case takes precedence in the
+    /// Monarch grammar, so they will be colored as keywords regardless.
+    /// </summary>
+    internal static string[] BuiltinFunctions() =>
+    [
+        // Aggregate functions
+        "COUNT", "SUM", "AVG", "MIN", "MAX",
+        "VARIANCE", "VAR_SAMP", "VAR_POP",
+        "STDDEV", "STDDEV_SAMP", "STDDEV_POP",
+        "MEDIAN", "PERCENTILE_CONT", "PERCENTILE_DISC", "MODE",
+        "CORR", "COVAR_POP", "COVAR_SAMP",
+        "APPROX_MEDIAN", "APPROX_PERCENTILE",
+        "STRING_AGG", "ARRAY_AGG", "ARG_MAX", "ARG_MIN",
+
+        // Window functions
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE",
+        "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
+
+        // Table-valued functions
+        "UNNEST",
+
+        // String functions
+        "len", "mid", "substring", "upper", "lower",
+        "trim", "ltrim", "rtrim", "btrim",
+        "contains", "starts_with", "ends_with", "position", "replace",
+        "concat", "concat_ws", "repeat", "reverse",
+        "lpad", "rpad", "regexp_extract", "regexp_replace",
+        "word_count", "split_part", "initcap", "translate",
+        "ascii", "chr",
+        "get_filename", "get_file_extension", "get_path",
+
+        // Date/Time functions
+        "now", "year", "month", "day", "hour", "minute", "second",
+        "quarter", "dayofweek", "dayofyear",
+        "make_date", "make_timestamp", "make_time", "current_time",
+        "date_diff", "date_add", "date_trunc", "date_bucket",
+        "date_span", "date_offset", "time_diff",
+        "strftime", "is_date",
+
+        // Duration functions
+        "make_duration", "duration_seconds", "duration_minutes",
+        "duration_hours", "duration_days",
+
+        // Type conversion functions
+        "to_epoch", "date_part", "cyclical_encode",
+
+        // JSON functions
+        "json_value", "json_query", "json_exists", "json_array_length",
+
+        // Math — Arithmetic & Basics
+        "abs", "sign", "negate", "mod",
+        "add", "subtract", "multiply", "divide",
+
+        // Math — Powers/Roots/Logs
+        "sqrt", "cbrt", "square", "exp", "exp2",
+        "ln", "log2", "log10", "pow", "log",
+
+        // Math — Trigonometric & Hyperbolic
+        "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+        "sinh", "cosh", "tanh", "degrees", "radians",
+        "pi", "euler",
+
+        // Math — Rounding & Quantization
+        "ceil", "floor", "truncate", "round",
+        "quantize", "bucketize", "clip",
+
+        // Math — ML Activations
+        "sigmoid", "relu", "selu", "gelu", "swish",
+        "softplus", "softsign", "mish",
+        "hard_sigmoid", "hard_swish", "leaky_relu", "elu",
+        "softmax", "log_softmax", "l2_normalize",
+
+        // Math — Vector Reductions
+        "vec_sum", "vec_mean", "vec_min", "vec_max",
+        "vec_std", "vec_var", "vec_median",
+        "vec_argmin", "vec_argmax", "vec_norm",
+        "vec_count_nonzero", "vec_any", "vec_all", "vec_product",
+
+        // Tensor introspection
+        "rdim", "shape",
+
+        // Vector/Tensor manipulation
+        "vec", "tensor", "vec_slice", "vec_concat",
+        "vec_reverse", "vec_sort", "vec_unique",
+        "vec_flatten", "vec_pad", "vec_repeat",
+        "linspace", "arange",
+
+        // Distance/Similarity
+        "cosine_similarity", "euclidean_distance",
+        "manhattan_distance", "dot", "hamming_distance",
+
+        // Utility & Conditional
+        "nullif", "coalesce", "greatest", "least",
+        "is_nan", "is_finite", "is_even", "is_odd",
+        "if_null", "iif", "choose",
+
+        // Random & Sampling
+        "random", "hash_split", "random_int", "random_range",
+        "random_normal", "random_boolean",
+        "random_truncated_normal", "random_log_normal",
+        "random_exponential", "random_beta",
+        "random_poisson", "random_categorical",
+        "random_vector", "random_normal_vector",
+        "random_permutation", "random_choice",
+
+        // Numeric/Array
+        "normalize", "clamp", "denormalize", "reshape",
+
+        // Array functions
+        "array", "array_length", "array_get",
+        "array_contains", "array_position", "array_join",
+        "array_concat", "array_slice", "array_sort",
+        "array_reverse", "array_distinct",
+        "array_min", "array_max", "array_sum", "array_avg",
+        "array_transform", "array_filter",
+
+        // Byte functions
+        "bytes", "bytes_concat", "bytes_slice",
+
+        // Categorical/Encoding
+        "one_hot", "one_hot_unk",
+        "label_encode", "label_encode_unk", "hash_encode",
+
+        // Hash functions
+        "md5", "sha256", "sha512", "crc32",
+
+        // Encoding functions
+        "base64_encode", "base64_decode",
+        "hex_encode", "hex_decode",
+
+        // UUID functions
+        "uuid4", "uuid7", "is_uuid",
+        "uuid_str", "uuid_bytes", "uuid_version", "uuid_timestamp",
+
+        // Image — Metadata
+        "width", "height", "channels", "pixel_count", "dimensions",
+
+        // Image — Loading & Decode
+        "load_image", "image_to_bytes",
+        "image_to_tensor_hwc", "image_to_tensor_chw",
+
+        // Image — Analysis
+        "image_brightness_mean", "image_brightness_std",
+        "image_brightness_histogram",
+        "detect_blur", "compression_artifact_score",
+        "image_pixel_mean", "image_pixel_std",
+
+        // Image — Transforms
+        "resize", "crop", "grayscale", "rotate",
+        "noise", "blur", "brighten", "darken", "sobel",
+        "resize_and_crop", "affine_transform",
+        "elastic_deform", "perspective_warp",
+
+        // Image — Hashing
+        "perceptual_hash",
     ];
 }

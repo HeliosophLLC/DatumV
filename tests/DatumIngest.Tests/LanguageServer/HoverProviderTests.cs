@@ -217,4 +217,43 @@ public sealed class HoverProviderTests
         Assert.NotNull(result);
         Assert.Contains("SET", result.Contents);
     }
+
+    // ───────────────────── Data type hover ─────────────────────
+
+    [Fact]
+    public void GetHover_Int16Type_ReturnsTypeDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        // "Int16" starts at offset 24 in this statement.
+        HoverResult? result = provider.GetHover("CREATE TABLE #t (col1 Int16)", 22);
+
+        Assert.NotNull(result);
+        Assert.Contains("Int16", result.Contents);
+        Assert.Contains("16-bit integer", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_Float32Type_ReturnsTypeDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("CREATE TABLE #t (col1 Float32)", 22);
+
+        Assert.NotNull(result);
+        Assert.Contains("Float32", result.Contents);
+        Assert.Contains("floating-point", result.Contents);
+    }
+
+    [Fact]
+    public void GetHover_StringType_ReturnsTypeDocumentation()
+    {
+        HoverProvider provider = CreateProvider();
+
+        HoverResult? result = provider.GetHover("CREATE TABLE #t (col1 String)", 22);
+
+        Assert.NotNull(result);
+        Assert.Contains("String", result.Contents);
+        Assert.Contains("UTF-8", result.Contents);
+    }
 }

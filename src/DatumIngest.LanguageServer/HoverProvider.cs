@@ -105,6 +105,12 @@ public sealed class HoverProvider
             return $"**Schema: {name}**\n\n{VirtualSchemaDescriptions[name]}";
         }
 
+        // Check if the identifier is a data type name.
+        if (TypeDescriptions.TryGetValue(name, out string? typeDescription))
+        {
+            return typeDescription;
+        }
+
         // Try as table name first, then as unqualified column.
         string? tableHover = GetTableHover(name);
         if (tableHover is not null)
@@ -375,6 +381,38 @@ public sealed class HoverProvider
     {
         return kind < SqlToken.Identifier;
     }
+
+    // ─────────────────── Data type hover support ───────────────────
+
+    internal static readonly Dictionary<string, string> TypeDescriptions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Boolean"] = "**Boolean** — True or false. Aliases: `bool`.",
+            ["Int8"] = "**Int8** — Signed 8-bit integer (−128 to 127).",
+            ["Int16"] = "**Int16** — Signed 16-bit integer (−32,768 to 32,767).",
+            ["Int32"] = "**Int32** — Signed 32-bit integer (−2,147,483,648 to 2,147,483,647).",
+            ["Int64"] = "**Int64** — Signed 64-bit integer.",
+            ["UInt8"] = "**UInt8** — Unsigned 8-bit integer (0 to 255).",
+            ["UInt16"] = "**UInt16** — Unsigned 16-bit integer (0 to 65,535).",
+            ["UInt32"] = "**UInt32** — Unsigned 32-bit integer (0 to 4,294,967,295).",
+            ["UInt64"] = "**UInt64** — Unsigned 64-bit integer.",
+            ["Float32"] = "**Float32** — 32-bit IEEE 754 floating-point number.",
+            ["Float64"] = "**Float64** — 64-bit IEEE 754 floating-point number (double precision).",
+            ["String"] = "**String** — Variable-length UTF-8 text.",
+            ["Date"] = "**Date** — Calendar date without time component (year, month, day).",
+            ["DateTime"] = "**DateTime** — Date and time with microsecond precision.",
+            ["Time"] = "**Time** — Time of day without date component.",
+            ["Duration"] = "**Duration** — Elapsed time span with microsecond precision.",
+            ["Uuid"] = "**Uuid** — 128-bit universally unique identifier (RFC 4122).",
+            ["JsonValue"] = "**JsonValue** — Arbitrary JSON value stored as text. Supports JSON path operations.",
+            ["Vector"] = "**Vector** — Fixed-length array of Float32 values. Supports distance and similarity operations.",
+            ["Matrix"] = "**Matrix** — Two-dimensional array of Float32 values.",
+            ["Tensor"] = "**Tensor** — Multi-dimensional array of Float32 values.",
+            ["Array"] = "**Array** — Variable-length typed array. Element type is inferred from context.",
+            ["Struct"] = "**Struct** — Named tuple of typed fields. Field types are inferred from context.",
+            ["Image"] = "**Image** — Binary image data with format metadata.",
+            ["UInt8Array"] = "**UInt8Array** — Variable-length byte array (binary data).",
+        };
 
     // ─────────────────── Virtual schema hover support ───────────────────
 
