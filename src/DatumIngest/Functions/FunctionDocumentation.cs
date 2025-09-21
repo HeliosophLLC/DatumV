@@ -378,6 +378,15 @@ public static class FunctionDocumentation
             Category = FunctionCategory.Conversion,
         });
 
+        Register(new FunctionSignature
+        {
+            Name = "typeof",
+            Parameters = [Parameter("value", "any")],
+            ReturnType = "Type",
+            Description = "Returns the runtime type of a value as a Type tag. Use with type literals for type-oriented comparisons: typeof(x) == Int32.",
+            Category = FunctionCategory.Conversion,
+        });
+
         // ── Date/Time — Extraction ──
 
         RegisterDateExtraction("year", "Extracts the year from a Date or DateTime.");

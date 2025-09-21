@@ -146,6 +146,10 @@ internal static class IndexWriter
                 writer.Write(value.AsUInt64());
                 break;
 
+            case DataKind.Type:
+                writer.Write((byte)value.AsType());
+                break;
+
             default:
                 throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
         }
@@ -295,6 +299,10 @@ internal static class IndexWriter
 
             case DataKind.UInt64:
                 writer.Write(value.AsUInt64());
+                break;
+
+            case DataKind.Type:
+                writer.Write((byte)value.AsType());
                 break;
 
             default:

@@ -85,6 +85,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
             ParameterExpression parameter => throw new InvalidOperationException(
                 $"Unbound parameter '${parameter.Name}'."),
+            TypeLiteralExpression typeLiteral => EvaluateTypeLiteralColumn(typeLiteral, batch.RowCount),
             _ => throw new InvalidOperationException(
                 $"Unsupported expression type: {expression.GetType().Name}."),
         };
@@ -148,6 +149,20 @@ public sealed class ColumnBatchEvaluator : IDisposable
     private DataValue[] EvaluateLiteralColumn(LiteralExpression literal, int rowCount)
     {
         DataValue value = ResolveLiteral(literal);
+        DataValue[] result = RentBuffer(rowCount);
+        result.AsSpan(0, rowCount).Fill(value);
+        return result;
+    }
+
+    private DataValue[] EvaluateTypeLiteralColumn(TypeLiteralExpression typeLiteral, int rowCount)
+    {
+        if (!Enum.TryParse<DataKind>(typeLiteral.TypeName, ignoreCase: true, out DataKind kind))
+        {
+            throw new InvalidOperationException(
+                $"Unknown type name: '{typeLiteral.TypeName}'.");
+        }
+
+        DataValue value = DataValue.FromType(kind);
         DataValue[] result = RentBuffer(rowCount);
         result.AsSpan(0, rowCount).Fill(value);
         return result;

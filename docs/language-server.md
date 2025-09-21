@@ -186,6 +186,8 @@ The grammar uses standard Monaco token type names that map automatically to edit
 |---|---|
 | `keyword` | SQL clause and operator keywords (`SELECT`, `FROM`, `LET`, `PIVOT`, …) |
 | `keyword.constant` | `TRUE`, `FALSE`, `NULL` |
+| `type.identifier` | Column data type names (`Int32`, `Float64`, `String`, `Boolean`, …) |
+| `predefined.function` | Built-in function names (`count`, `sum`, `typeof`, `abs`, …) |
 | `string` | Single-quoted string literals (`'hello'`, `''` escape) |
 | `number` | Integer, decimal, and scientific notation literals |
 | `variable` | Named parameter placeholders (`$threshold`) |

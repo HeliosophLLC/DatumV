@@ -1994,4 +1994,114 @@ public class SqlParserTests
 
         Assert.IsType<BinaryExpression>(result.Where);
     }
+
+    // ───────────────────── typeof() and type literals ─────────────────────
+
+    [Fact]
+    public void TypeLiteral_ParsedInExpression()
+    {
+        SelectStatement result = Parse("SELECT Int32 FROM t");
+
+        Assert.Single(result.Columns);
+        TypeLiteralExpression typeLiteral = Assert.IsType<TypeLiteralExpression>(result.Columns[0].Expression);
+        Assert.Equal("Int32", typeLiteral.TypeName);
+    }
+
+    [Fact]
+    public void Typeof_Comparison_ParsedCorrectly()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE typeof(x) = Int32");
+
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(result.Where);
+        FunctionCallExpression func = Assert.IsType<FunctionCallExpression>(binary.Left);
+        Assert.Equal("typeof", func.FunctionName);
+        TypeLiteralExpression typeLiteral = Assert.IsType<TypeLiteralExpression>(binary.Right);
+        Assert.Equal("Int32", typeLiteral.TypeName);
+    }
+
+    [Fact]
+    public void Cast_WithTypeKeyword_StillWorks()
+    {
+        SelectStatement result = Parse("SELECT CAST(x AS Int32) FROM t");
+
+        Assert.Single(result.Columns);
+        CastExpression cast = Assert.IsType<CastExpression>(result.Columns[0].Expression);
+        Assert.Equal("Int32", cast.TargetType);
+    }
+
+    [Fact]
+    public void TypeKeyword_AsAlias_Works()
+    {
+        SelectStatement result = Parse("SELECT 1 AS Int32 FROM t");
+
+        Assert.Single(result.Columns);
+        Assert.Equal("Int32", result.Columns[0].Alias);
+    }
+
+    [Fact]
+    public void TypeLiteral_InCaseWhen()
+    {
+        SelectStatement result = Parse(
+            "SELECT CASE typeof(x) WHEN Int32 THEN 'integer' ELSE 'other' END FROM t");
+
+        Assert.Single(result.Columns);
+        CaseExpression caseExpr = Assert.IsType<CaseExpression>(result.Columns[0].Expression);
+        FunctionCallExpression operand = Assert.IsType<FunctionCallExpression>(caseExpr.Operand);
+        Assert.Equal("typeof", operand.FunctionName);
+        TypeLiteralExpression whenValue = Assert.IsType<TypeLiteralExpression>(caseExpr.WhenClauses[0].Condition);
+        Assert.Equal("Int32", whenValue.TypeName);
+    }
+
+    // ───────────────────── IS [NOT] Type ─────────────────────
+
+    [Fact]
+    public void IsType_DesugarsToTypeofEquals()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE x IS Int32");
+
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.Equal, binary.Operator);
+
+        FunctionCallExpression func = Assert.IsType<FunctionCallExpression>(binary.Left);
+        Assert.Equal("typeof", func.FunctionName);
+        Assert.Single(func.Arguments);
+        ColumnReference col = Assert.IsType<ColumnReference>(func.Arguments[0]);
+        Assert.Equal("x", col.ColumnName);
+
+        TypeLiteralExpression typeLiteral = Assert.IsType<TypeLiteralExpression>(binary.Right);
+        Assert.Equal("Int32", typeLiteral.TypeName);
+    }
+
+    [Fact]
+    public void IsNotType_DesugarsToTypeofNotEquals()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE x IS NOT Float64");
+
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.NotEqual, binary.Operator);
+
+        FunctionCallExpression func = Assert.IsType<FunctionCallExpression>(binary.Left);
+        Assert.Equal("typeof", func.FunctionName);
+
+        TypeLiteralExpression typeLiteral = Assert.IsType<TypeLiteralExpression>(binary.Right);
+        Assert.Equal("Float64", typeLiteral.TypeName);
+    }
+
+    [Fact]
+    public void IsNull_StillWorks_WithIsType()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE x IS NULL");
+
+        IsNullExpression isNull = Assert.IsType<IsNullExpression>(result.Where);
+        Assert.False(isNull.Negated);
+    }
+
+    [Fact]
+    public void IsNotNull_StillWorks_WithIsType()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE x IS NOT NULL");
+
+        IsNullExpression isNull = Assert.IsType<IsNullExpression>(result.Where);
+        Assert.True(isNull.Negated);
+    }
 }

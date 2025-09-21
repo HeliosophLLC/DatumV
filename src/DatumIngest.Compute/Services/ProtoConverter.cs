@@ -193,6 +193,10 @@ internal static class ProtoConverter
             case DataKind.Float64:
                 message.Float64Value = value.AsFloat64();
                 break;
+
+            case DataKind.Type:
+                message.TypeValue = (uint)value.AsType();
+                break;
         }
 
         return message;
@@ -230,6 +234,7 @@ internal static class ProtoConverter
             DataKind.Int64 => DataKindValue.DataKindInt64,
             DataKind.UInt64 => DataKindValue.DataKindUint64,
             DataKind.Float64 => DataKindValue.DataKindFloat64,
+            DataKind.Type => DataKindValue.DataKindType,
             _ => DataKindValue.DataKindString,
         };
     }
@@ -269,6 +274,7 @@ internal static class ProtoConverter
             DataValueMessage.ValueOneofCase.Int64Value => DataValue.FromInt64(message.Int64Value),
             DataValueMessage.ValueOneofCase.Uint64Value => DataValue.FromUInt64(message.Uint64Value),
             DataValueMessage.ValueOneofCase.Float64Value => DataValue.FromFloat64(message.Float64Value),
+            DataValueMessage.ValueOneofCase.TypeValue => DataValue.FromType((DataKind)(byte)message.TypeValue),
             _ => DataValue.UnknownNull(),
         };
     }
@@ -334,6 +340,7 @@ internal static class ProtoConverter
             DataKindValue.DataKindInt64 => DataKind.Int64,
             DataKindValue.DataKindUint64 => DataKind.UInt64,
             DataKindValue.DataKindFloat64 => DataKind.Float64,
+            DataKindValue.DataKindType => DataKind.Type,
             _ => DataKind.String,
         };
     }

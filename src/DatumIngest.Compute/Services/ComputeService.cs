@@ -916,6 +916,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             "Int64" => ParameterKindValue.ParameterKindInt64,
             "UInt64" => ParameterKindValue.ParameterKindUint64,
             "Float64" => ParameterKindValue.ParameterKindFloat64,
+            "Struct" => ParameterKindValue.ParameterKindStruct,
+            "Type" => ParameterKindValue.ParameterKindType,
             _ => ParameterKindValue.ParameterKindAny,
         };
     }

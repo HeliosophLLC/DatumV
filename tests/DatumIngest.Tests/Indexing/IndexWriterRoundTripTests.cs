@@ -148,6 +148,7 @@ public sealed class IndexWriterRoundTripTests
         DataKind.Array    => DataValue.FromArray(
             DataKind.Float32, [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]),
         DataKind.Struct   => DataValue.FromStruct(2, [DataValue.FromString("a"), DataValue.FromInt32(1)]),
+        DataKind.Type     => DataValue.FromType(DataKind.Int32),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind,
             $"No sample value defined for DataKind.{kind}. Update CreateSampleValue."),
     };
@@ -235,6 +236,9 @@ public sealed class IndexWriterRoundTripTests
                 break;
             case DataKind.Image:
                 Assert.Equal(expected.AsImage(), actual.AsImage());
+                break;
+            case DataKind.Type:
+                Assert.Equal(expected.AsType(), actual.AsType());
                 break;
             default:
                 Assert.Fail($"No assertion defined for DataKind.{kind}.");

@@ -473,6 +473,9 @@ public sealed class FunctionRegistry
         // Image — Hashing
         registry.RegisterScalar(new Image.PerceptualHashFunction());
 
+        // Type introspection
+        registry.RegisterScalar(new Scalar.TypeofFunction());
+
         // Table-valued
         registry.RegisterTableValued(new TableValued.UnnestFunction());
         registry.RegisterTableValued(new TableValued.RangeFunction());

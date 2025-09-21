@@ -109,6 +109,15 @@ public static class SqlParser
         return query;
     }
 
+    /// <summary>
+    /// Matches an <see cref="SqlToken.Identifier"/> or a <see cref="SqlToken.TypeKeyword"/>
+    /// in positions where an identifier-like name is expected (column aliases, table aliases,
+    /// column names in DDL, etc.). Type keywords are reserved in expression position but can
+    /// still be used as names in non-expression contexts.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Token<SqlToken>> IdentifierLike =
+        Token.EqualTo(SqlToken.Identifier).Or(Token.EqualTo(SqlToken.TypeKeyword));
+
     // ───────────────────── Atomic expressions ─────────────────────
 
     /// <summary>Column reference: optional table qualifier + column name.</summary>
@@ -158,6 +167,17 @@ public static class SqlParser
             .Select(token => (Expression)new ParameterExpression(
                 token.ToStringValue()[1..],
                 ToSpan(token)));
+
+    /// <summary>
+    /// Type literal: a bare type name (<c>Int32</c>, <c>Float64</c>, <c>String</c>, etc.)
+    /// in expression position. Produces a <see cref="TypeLiteralExpression"/> for use with
+    /// <c>typeof()</c> comparisons. Also accepts <c>Time</c> which is tokenized as
+    /// <see cref="SqlToken.Time"/> because it is a reserved keyword (AT TIME ZONE).
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> TypeLiteral =
+        Token.EqualTo(SqlToken.TypeKeyword)
+            .Or(Token.EqualTo(SqlToken.Time))
+            .Select(token => (Expression)new TypeLiteralExpression(token.ToStringValue(), ToSpan(token)));
 
     // ───────────────────── Window specification parsers ─────────────────────
 
@@ -327,7 +347,7 @@ public static class SqlParser
         from open in Token.EqualTo(SqlToken.LeftParen)
         from expression in SP.Ref(() => ExpressionParser!)
         from asKw in Token.EqualTo(SqlToken.As)
-        from targetType in Token.EqualTo(SqlToken.Identifier)
+        from targetType in Token.EqualTo(SqlToken.TypeKeyword).Or(Token.EqualTo(SqlToken.Identifier)).Or(Token.EqualTo(SqlToken.Time))
         from close in Token.EqualTo(SqlToken.RightParen)
         select (Expression)new CastExpression(expression, GetTokenText(targetType), ToSpan(cast, close));
 
@@ -441,6 +461,7 @@ public static class SqlParser
             .Or(CastCall.Try())
             .Or(FunctionCall.Try())
             .Or(QualifiedColumn)
+            .Or(TypeLiteral)
             .Or(NumberLiteral)
             .Or(StringLiteral)
             .Or(NullLiteral)
@@ -529,6 +550,7 @@ public static class SqlParser
     private static readonly TokenListParser<SqlToken, Expression> Comparison =
         from left in AtTimeZoneLevel
         from postfix in IsNullPostfix.Try()
+            .Or(IsTypePostfix.Try())
             .Or(NotInSubqueryPostfix.Try())
             .Or(NotInPostfix.Try())
             .Or(InSubqueryPostfix.Try())
@@ -549,6 +571,21 @@ public static class SqlParser
         from nullKw in Token.EqualTo(SqlToken.Null)
         select (Func<Expression, Expression>)(expr =>
             new IsNullExpression(expr, Negated: notKw.HasValue));
+
+    /// <summary>
+    /// IS [NOT] TypeKeyword postfix: <c>x IS Int32</c> desugars to
+    /// <c>typeof(x) = Int32</c>; <c>x IS NOT Int32</c> desugars to
+    /// <c>typeof(x) != Int32</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> IsTypePostfix =
+        from isKw in Token.EqualTo(SqlToken.Is)
+        from notKw in Token.EqualTo(SqlToken.Not).OptionalOrDefault()
+        from typeKw in Token.EqualTo(SqlToken.TypeKeyword)
+        select (Func<Expression, Expression>)(expr =>
+            new BinaryExpression(
+                new FunctionCallExpression("typeof", [expr]),
+                notKw.HasValue ? BinaryOperator.NotEqual : BinaryOperator.Equal,
+                new TypeLiteralExpression(typeKw.ToStringValue(), ToSpan(typeKw))));
 
     /// <summary>IN (SELECT ...) subquery postfix.</summary>
     private static readonly TokenListParser<SqlToken, Func<Expression, Expression>> InSubqueryPostfix =
@@ -759,9 +796,9 @@ public static class SqlParser
         from expression in ExpressionParser
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from name in Token.EqualTo(SqlToken.Identifier)
+            from name in IdentifierLike
             select GetTokenText(name)
-        ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
+        ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
         select new SelectColumn(expression, alias);
 
@@ -805,10 +842,10 @@ public static class SqlParser
     /// </summary>
     private static TokenListParser<SqlToken, string[]> ScanNameListParser() =>
         from open in Token.EqualTo(SqlToken.LeftParen)
-        from firstName in Token.EqualTo(SqlToken.Identifier)
+        from firstName in IdentifierLike
         from rest in (
             from comma in Token.EqualTo(SqlToken.Comma)
-            from ident in Token.EqualTo(SqlToken.Identifier)
+            from ident in IdentifierLike
             select ident
         ).AtLeastOnce()
         from close in Token.EqualTo(SqlToken.RightParen)
@@ -843,7 +880,7 @@ public static class SqlParser
         from init in SP.Ref(() => ExpressionParser!)
         from window in ScanOverClauseParser
         from asKw in Token.EqualTo(SqlToken.As)
-        from alias in Token.EqualTo(SqlToken.Identifier)
+        from alias in IdentifierLike
         select (Expression)new ScanExpression(
             [GetTokenText(name)], [body], [init], window, [GetTokenText(alias)], ToSpan(scanKw));
 
@@ -907,12 +944,12 @@ public static class SqlParser
     /// <summary>A single LET binding: <c>LET name = expression [AS alias]</c>.</summary>
     private static readonly TokenListParser<SqlToken, LetBinding> ScalarLetBindingParser =
         from letKw in Token.EqualTo(SqlToken.Let)
-        from name in Token.EqualTo(SqlToken.Identifier)
+        from name in IdentifierLike
         from eq in Token.EqualTo(SqlToken.Equals)
         from expression in ExpressionParser
         from outputAlias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from alias in Token.EqualTo(SqlToken.Identifier)
+            from alias in IdentifierLike
             select GetTokenText(alias)
         ).OptionalOrDefault()
         select new LetBinding(GetTokenText(name), expression, outputAlias, ToSpan(name));
@@ -997,9 +1034,9 @@ public static class SqlParser
         from tablesample in TablesampleClauseParser.AsNullable().OptionalOrDefault()
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            from aliasName in IdentifierLike
             select GetTokenText(aliasName)
-        ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
+        ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
         select (TableSource)(schemaQualified.HasValue
             ? new TableReference(GetTokenText(schemaQualified), alias, ToSpan(first, schemaQualified), tablesample, SchemaName: GetTokenText(first))
@@ -1012,9 +1049,9 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            from aliasName in IdentifierLike
             select aliasName
-        ).Try().Or(Token.EqualTo(SqlToken.Identifier))
+        ).Try().Or(IdentifierLike)
         select (TableSource)new SubquerySource(query, GetTokenText(alias));
 
     /// <summary>
@@ -1029,9 +1066,9 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            from aliasName in IdentifierLike
             select GetTokenText(aliasName)
-        ).Try().Or(Token.EqualTo(SqlToken.Identifier).Select(GetTokenText))
+        ).Try().Or(IdentifierLike.Select(GetTokenText))
         .OptionalOrDefault()
         select (TableSource)new FunctionSource(GetTokenText(name), args, alias, ToSpan(name));
 
@@ -1305,7 +1342,7 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            from aliasName in IdentifierLike
             select GetTokenText(aliasName)
         ).Try().OptionalOrDefault()
         select new PivotClause(aggregates, pivotColumn, valueList, alias);
@@ -1333,7 +1370,7 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         from alias in (
             from asKw in Token.EqualTo(SqlToken.As)
-            from aliasName in Token.EqualTo(SqlToken.Identifier)
+            from aliasName in IdentifierLike
             select GetTokenText(aliasName)
         ).Try().OptionalOrDefault()
         select new UnpivotClause(GetTokenText(valueColumn), GetTokenText(nameColumn), sourceColumns, includeNulls, alias);
@@ -1378,7 +1415,7 @@ public static class SqlParser
     /// </summary>
     private static readonly TokenListParser<SqlToken, string[]> CommonTableExpressionColumnListParser =
         from open in Token.EqualTo(SqlToken.LeftParen)
-        from names in Token.EqualTo(SqlToken.Identifier)
+        from names in IdentifierLike
             .Select(GetTokenText)
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         from close in Token.EqualTo(SqlToken.RightParen)
@@ -1646,14 +1683,16 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.If).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Primary).Select(t => t.ToStringValue()))
             .Or(Token.EqualTo(SqlToken.Key).Select(t => t.ToStringValue()))
-            .Or(Token.EqualTo(SqlToken.Analyze).Select(t => t.ToStringValue()));
+            .Or(Token.EqualTo(SqlToken.Analyze).Select(t => t.ToStringValue()))
+            .Or(Token.EqualTo(SqlToken.TypeKeyword).Select(t => t.ToStringValue()));
 
     /// <summary>
     /// Parses a column type name. Accepts a plain identifier and also compound types
     /// like <c>NOT NULL</c> as a suffix modifier.
     /// </summary>
     private static readonly TokenListParser<SqlToken, string> TypeNameParser =
-        Token.EqualTo(SqlToken.Identifier).Select(GetTokenText);
+        Token.EqualTo(SqlToken.TypeKeyword).Or(Token.EqualTo(SqlToken.Identifier)).Or(Token.EqualTo(SqlToken.Time))
+            .Select(GetTokenText);
 
     /// <summary>
     /// Parses a single column definition: <c>name type [NOT NULL] [PRIMARY KEY]</c>.
@@ -1817,7 +1856,7 @@ public static class SqlParser
         from tableName in IdentifierOrKeywordAsName
         from alias in (
             from _as in Token.EqualTo(SqlToken.As).OptionalOrDefault()
-            from aliasName in Token.EqualTo(SqlToken.Identifier).Select(GetTokenText)
+            from aliasName in IdentifierLike.Select(GetTokenText)
             select aliasName
         ).Try().AsNullable().OptionalOrDefault()
         from setKw in Token.EqualTo(SqlToken.Set)

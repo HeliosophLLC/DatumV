@@ -394,4 +394,7 @@ public enum SqlToken
 
     /// <summary>The <c>ZONE</c> keyword (used in AT TIME ZONE expressions).</summary>
     Zone,
+
+    /// <summary>A type keyword (Int32, Float64, String, Boolean, etc.) used as a type literal in expressions.</summary>
+    TypeKeyword,
 }

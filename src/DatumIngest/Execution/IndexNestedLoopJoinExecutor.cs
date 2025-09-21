@@ -152,55 +152,95 @@ internal sealed class IndexNestedLoopJoinExecutor
         {
             for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
             {
-            Row probeRow = probeBatch[probeBatchIndex];
+                Row probeRow = probeBatch[probeBatchIndex];
 
-            if (++probeRowsProcessed > trialBudget)
-            {
-                // Too many probe rows — NLJ is not benefiting from
-                // LIMIT short-circuit. Discard buffered output and signal
-                // the caller to fall back to hash join.
-                ExecutionTracer.Write($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
-                probeBatch.Return();
-                outputBatch?.Return();
-                foreach (RowBatch buffered in trialBuffer) { buffered.Return(); }
-                _circuitBreakerTripped = true;
-                yield break;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Evaluate the probe-side key.
-            DataValue probeKey = _evaluator.Evaluate(probeKeyExpression, probeRow);
-
-            if (probeKey.IsNull)
-            {
-                // NULL keys never match in equi-join.
-                continue;
-            }
-
-            // Look up matching build-side entries via the sorted index.
-            IReadOnlyList<ValueIndexEntry> matches = _buildIndex.FindExact(probeKey);
-
-            if (matches.Count == 0)
-            {
-                continue;
-            }
-
-            if (_joinType == JoinType.LeftSemi)
-            {
-                // SEMI join: just emit the probe row without build columns,
-                // but we need to verify residual if present.
-                if (residual is null)
+                if (++probeRowsProcessed > trialBudget)
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(probeRow);
-                    if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
+                    // Too many probe rows — NLJ is not benefiting from
+                    // LIMIT short-circuit. Discard buffered output and signal
+                    // the caller to fall back to hash join.
+                    ExecutionTracer.Write($"INLJ circuit breaker tripped  probeRows={probeRowsProcessed}  matches={totalMatches}  buffered={trialBuffer.Count} batches");
+                    probeBatch.Return();
+                    outputBatch?.Return();
+                    foreach (RowBatch buffered in trialBuffer) { buffered.Return(); }
+                    _circuitBreakerTripped = true;
+                    yield break;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Evaluate the probe-side key.
+                DataValue probeKey = _evaluator.Evaluate(probeKeyExpression, probeRow);
+
+                if (probeKey.IsNull)
+                {
+                    // NULL keys never match in equi-join.
                     continue;
                 }
 
-                // Fetch build rows to evaluate residual.
-                bool semiMatch = false;
+                // Look up matching build-side entries via the sorted index.
+                IReadOnlyList<ValueIndexEntry> matches = _buildIndex.FindExact(probeKey);
 
+                if (matches.Count == 0)
+                {
+                    continue;
+                }
+
+                if (_joinType == JoinType.LeftSemi)
+                {
+                    // SEMI join: just emit the probe row without build columns,
+                    // but we need to verify residual if present.
+                    if (residual is null)
+                    {
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(probeRow);
+                        if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
+                        continue;
+                    }
+
+                    // Fetch build rows to evaluate residual.
+                    bool semiMatch = false;
+
+                    foreach (ValueIndexEntry entry in matches)
+                    {
+                        Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        if (rawBuildRow is null)
+                        {
+                            continue;
+                        }
+
+                        Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, bufferPool);
+                        if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
+
+                        combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
+                        if (residualScratchBuffer is null)
+                        {
+                            (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
+                        }
+
+                        combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
+                        bufferPool.Return(buildRow.RawValues);
+
+                        if (EvaluateResidual(residual, residualScratchRow))
+                        {
+                            semiMatch = true;
+                            break;
+                        }
+                    }
+
+                    if (semiMatch)
+                    {
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(probeRow);
+                        if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
+                    }
+
+                    continue;
+                }
+
+                // INNER join: fetch each matching build row and yield combined rows.
                 foreach (ValueIndexEntry entry in matches)
                 {
                     Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
@@ -215,71 +255,31 @@ internal sealed class IndexNestedLoopJoinExecutor
                     if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
 
                     combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
-                    if (residualScratchBuffer is null)
+
+                    if (residual is not null)
                     {
-                        (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
+                        if (residualScratchBuffer is null)
+                        {
+                            (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
+                        }
+
+                        combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
+
+                        if (!EvaluateResidual(residual, residualScratchRow))
+                        {
+                            bufferPool.Return(buildRow.RawValues);
+                            continue;
+                        }
                     }
 
-                    combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
+                    Row combined = combinedSchema.CombinePooled(probeRow, buildRow, bufferPool);
                     bufferPool.Return(buildRow.RawValues);
+                    totalMatches++;
 
-                    if (EvaluateResidual(residual, residualScratchRow))
-                    {
-                        semiMatch = true;
-                        break;
-                    }
-                }
-
-                if (semiMatch)
-                {
                     outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(probeRow);
+                    outputBatch.Add(combined);
                     if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                 }
-
-                continue;
-            }
-
-            // INNER join: fetch each matching build row and yield combined rows.
-            foreach (ValueIndexEntry entry in matches)
-            {
-                Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (rawBuildRow is null)
-                {
-                    continue;
-                }
-
-                Row buildRow = ApplyBuildAlias(rawBuildRow.Value, ref buildAliasSchema, bufferPool);
-                if (_buildAlias is not null) bufferPool.Return(rawBuildRow.Value.RawValues);
-
-                combinedSchema ??= JoinOperator.CombinedRowSchema.Build(probeRow, buildRow);
-
-                if (residual is not null)
-                {
-                    if (residualScratchBuffer is null)
-                    {
-                        (residualScratchRow, residualScratchBuffer) = combinedSchema.CreateReusableRow();
-                    }
-
-                    combinedSchema.CombineInto(probeRow, buildRow, residualScratchBuffer);
-
-                    if (!EvaluateResidual(residual, residualScratchRow))
-                    {
-                        bufferPool.Return(buildRow.RawValues);
-                        continue;
-                    }
-                }
-
-                Row combined = combinedSchema.CombinePooled(probeRow, buildRow, bufferPool);
-                bufferPool.Return(buildRow.RawValues);
-                totalMatches++;
-
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
-                outputBatch.Add(combined);
-                if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
-            }
             }
             probeBatch.Return();
         }

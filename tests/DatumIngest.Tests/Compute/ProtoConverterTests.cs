@@ -267,6 +267,8 @@ public sealed class ProtoConverterTests
     [InlineData(DataKind.Int64, DataKindValue.DataKindInt64)]
     [InlineData(DataKind.UInt64, DataKindValue.DataKindUint64)]
     [InlineData(DataKind.Float64, DataKindValue.DataKindFloat64)]
+    [InlineData(DataKind.Struct, DataKindValue.DataKindStruct)]
+    [InlineData(DataKind.Type, DataKindValue.DataKindType)]
     public void ToProto_ColumnInfo_MapsEveryDataKind(DataKind kind, DataKindValue expectedProtoKind)
     {
         ColumnInfo column = new("test", kind, false);
@@ -274,6 +276,114 @@ public sealed class ProtoConverterTests
         ColumnInfoMessage message = ProtoConverter.ToProto(column);
 
         Assert.Equal(expectedProtoKind, message.Kind);
+    }
+
+    // ───────────────────── Proto enum sync tests ─────────────────────
+
+    /// <summary>
+    /// Ensures every <see cref="DataKind"/> enum value has a corresponding entry in
+    /// the Protobuf <see cref="DataKindValue"/> enum. If a new DataKind is added without
+    /// updating the proto, this test will fail.
+    /// </summary>
+    [Fact]
+    public void DataKindValue_CoversAllDataKinds()
+    {
+        HashSet<string> protoNames = new(
+            Enum.GetNames<DataKindValue>().Select(n => n.Replace("DataKind", "").ToUpperInvariant()),
+            StringComparer.OrdinalIgnoreCase);
+
+        List<string> missing = [];
+        foreach (DataKind kind in Enum.GetValues<DataKind>())
+        {
+            // ToProtoKind is private — verify via ColumnInfo round-trip instead.
+            // If the mapping is missing, ToProto falls through to the default
+            // (DataKindString), which won't match the expected kind name.
+            ColumnInfoMessage message = ProtoConverter.ToProto(new ColumnInfo("test", kind, false));
+            string protoName = message.Kind.ToString().Replace("DataKind", "");
+
+            if (!string.Equals(protoName, kind.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                missing.Add(kind.ToString());
+            }
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            $"The following DataKind values have no matching DataKindValue in the proto: " +
+            $"{string.Join(", ", missing)}. Update datum_compute.proto and ProtoConverter.ToProtoKind().");
+    }
+
+    /// <summary>
+    /// Ensures every <see cref="DataKind"/> enum value has a corresponding entry in
+    /// the Protobuf <see cref="ParameterKindValue"/> enum. If a new DataKind is added
+    /// without updating the proto, this test will fail.
+    /// </summary>
+    [Fact]
+    public void ParameterKindValue_CoversAllDataKinds()
+    {
+        // Build a set of known ParameterKindValue names, normalized to match DataKind names.
+        HashSet<string> parameterKinds = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in Enum.GetNames<ParameterKindValue>())
+        {
+            // "PARAMETER_KIND_UINT8" → "UINT8", "PARAMETER_KIND_ANY" → "ANY"
+            string normalized = name.Replace("ParameterKind", "");
+            parameterKinds.Add(normalized);
+        }
+
+        List<string> missing = [];
+        foreach (string kindName in Enum.GetNames<DataKind>())
+        {
+            if (!parameterKinds.Contains(kindName))
+            {
+                missing.Add(kindName);
+            }
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            $"The following DataKind values have no matching ParameterKindValue in the proto: " +
+            $"{string.Join(", ", missing)}. Add PARAMETER_KIND_{string.Join(", PARAMETER_KIND_", missing).ToUpperInvariant()} to datum_compute.proto.");
+    }
+
+    /// <summary>
+    /// Ensures every <see cref="DataKind"/> value can survive a ToProto → FromProto
+    /// round-trip through <see cref="DataValueMessage"/>. If a new DataKind is added
+    /// without adding a oneof field or converter mapping, this test will fail.
+    /// Kinds that do not yet have a FromProto path (Vector, Matrix, Tensor,
+    /// UInt8Array, Image) are excluded — they are serialized for the wire but
+    /// deserialized by the client SDK, not by ProtoConverter.FromProto.
+    /// </summary>
+    [Fact]
+    public void ToProtoFromProto_AllDataKinds_RoundTrip()
+    {
+        // These kinds are serialized by ToProto but FromProto does not yet
+        // reconstruct them (the gRPC client SDK handles deserialization).
+        HashSet<DataKind> clientOnlyKinds =
+        [
+            DataKind.Vector, DataKind.Matrix, DataKind.Tensor,
+            DataKind.UInt8Array, DataKind.Image,
+        ];
+
+        List<string> failures = [];
+
+        foreach (DataKind kind in Enum.GetValues<DataKind>())
+        {
+            if (clientOnlyKinds.Contains(kind)) continue;
+
+            DataValue sample = Indexing.IndexWriterRoundTripTests.CreateSampleValue(kind);
+            DataValueMessage message = ProtoConverter.ToProto(sample);
+            DataValue roundTripped = ProtoConverter.FromProto(message);
+
+            if (roundTripped.Kind != kind)
+            {
+                failures.Add($"{kind} (expected Kind={kind}, got Kind={roundTripped.Kind})");
+            }
+        }
+
+        Assert.True(
+            failures.Count == 0,
+            $"The following DataKind values failed proto round-trip: " +
+            $"{string.Join(", ", failures)}. Update DataValueMessage oneof and ProtoConverter.");
     }
 
     /// <summary>

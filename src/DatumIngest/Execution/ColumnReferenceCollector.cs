@@ -175,7 +175,8 @@ public static class ColumnReferenceCollector
                 break;
 
             case LiteralExpression:
-                // No column references in literals.
+            case TypeLiteralExpression:
+                // No column references in literals or type literals.
                 break;
         }
     }

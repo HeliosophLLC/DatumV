@@ -577,6 +577,13 @@ public sealed record ExistsExpression(
 public sealed record CastExpression(Expression Expression, string TargetType, SourceSpan? Span = null) : Expression;
 
 /// <summary>
+/// A type literal expression: a bare type name (e.g. <c>Int32</c>, <c>Float64</c>) used
+/// in expression position. Produces a <c>DataKind.Type</c> value for comparison
+/// with <c>typeof()</c> results: <c>typeof(x) == Int32</c>.
+/// </summary>
+public sealed record TypeLiteralExpression(string TypeName, SourceSpan? Span = null) : Expression;
+
+/// <summary>
 /// An <c>AT TIME ZONE</c> expression: <c>expr AT TIME ZONE timezone</c>.
 /// Converts a DateTime value to the specified timezone, preserving the instant
 /// but adjusting the UTC offset to match the target zone (including DST).

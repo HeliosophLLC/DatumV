@@ -53,6 +53,7 @@ internal static class DataValueComparer
             DataKind.Time     => left.AsTime().CompareTo(right.AsTime()),
             DataKind.Duration => left.AsDuration().CompareTo(right.AsDuration()),
             DataKind.Uuid     => left.AsUuid().CompareTo(right.AsUuid()),
+            DataKind.Type     => ((byte)left.AsType()).CompareTo((byte)right.AsType()),
             DataKind.String   => arena is not null
                 ? CompareStrings(left, right, arena)
                 : string.Compare(left.AsString(), right.AsString(), StringComparison.Ordinal),

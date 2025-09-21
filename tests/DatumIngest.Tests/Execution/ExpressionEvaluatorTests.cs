@@ -1524,4 +1524,114 @@ public class ExpressionEvaluatorTests
 
         Assert.Throws<TimeZoneNotFoundException>(() => _evaluator.Evaluate(expr, row));
     }
+
+    // ─────────────── typeof() and type literals ───────────────
+
+    [Fact]
+    public void Typeof_ReturnsTypeTag()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Expression expr = new FunctionCallExpression("typeof", [new ColumnReference("x")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.Type, result.Kind);
+        Assert.Equal(DataKind.Int32, result.AsType());
+    }
+
+    [Fact]
+    public void Typeof_StringColumn_ReturnsStringType()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("hello")));
+        Expression expr = new FunctionCallExpression("typeof", [new ColumnReference("x")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.Type, result.Kind);
+        Assert.Equal(DataKind.String, result.AsType());
+    }
+
+    [Fact]
+    public void TypeLiteral_ProducesTypeValue()
+    {
+        Row row = MakeRow();
+        Expression expr = new TypeLiteralExpression("Int32");
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.Type, result.Kind);
+        Assert.Equal(DataKind.Int32, result.AsType());
+    }
+
+    [Fact]
+    public void Typeof_EqualsTypeLiteral_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("typeof", [new ColumnReference("x")]),
+            BinaryOperator.Equal,
+            new TypeLiteralExpression("Int32"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.Boolean, result.Kind);
+        Assert.True(result.AsBoolean());
+    }
+
+    [Fact]
+    public void Typeof_NotEqualsTypeLiteral_ReturnsFalse()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("typeof", [new ColumnReference("x")]),
+            BinaryOperator.Equal,
+            new TypeLiteralExpression("Float64"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.Boolean, result.Kind);
+        Assert.False(result.AsBoolean());
+    }
+
+    [Fact]
+    public void Typeof_DisplayString_ShowsTypeName()
+    {
+        DataValue typeValue = DataValue.FromType(DataKind.Float64);
+
+        Assert.Equal("Float64", typeValue.ToDisplayString());
+    }
+
+    // ─────────────── IS [NOT] Type (desugared) ───────────────
+
+    [Fact]
+    public void IsType_Desugared_MatchingType_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+
+        // x IS Int32 desugars to: typeof(x) = Int32
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("typeof", [new ColumnReference("x")]),
+            BinaryOperator.Equal,
+            new TypeLiteralExpression("Int32"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.AsBoolean());
+    }
+
+    [Fact]
+    public void IsNotType_Desugared_DifferentType_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("hello")));
+
+        // x IS NOT Int32 desugars to: typeof(x) != Int32
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("typeof", [new ColumnReference("x")]),
+            BinaryOperator.NotEqual,
+            new TypeLiteralExpression("Int32"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.AsBoolean());
+    }
 }

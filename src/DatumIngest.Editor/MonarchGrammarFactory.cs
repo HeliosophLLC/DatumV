@@ -165,6 +165,7 @@ internal static class MonarchGrammarFactory
         "String", "Date", "DateTime", "Time", "Duration",
         "Uuid", "JsonValue", "Vector", "Matrix", "Tensor",
         "Array", "Struct", "Image", "UInt8Array",
+        "Type",
     ];
 
     /// <summary>
@@ -214,8 +215,8 @@ internal static class MonarchGrammarFactory
         "make_duration", "duration_seconds", "duration_minutes",
         "duration_hours", "duration_days",
 
-        // Type conversion functions
-        "to_epoch", "date_part", "cyclical_encode",
+        // Type conversion / introspection functions
+        "to_epoch", "date_part", "cyclical_encode", "typeof",
 
         // JSON functions
         "json_value", "json_query", "json_exists", "json_array_length",

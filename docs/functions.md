@@ -20,7 +20,7 @@ Every function belongs to a single **category** that describes its operational d
 | **Categorical** | Categorical encoding: one-hot, label encoding (explicit domain), and feature hashing. |
 | **Json** | JSON path access, existence testing, and array inspection. |
 | **Array** | Typed array construction, inspection, search, manipulation, and string conversion. |
-| **Conversion** | Explicit type conversion between data kinds. |
+| **Conversion** | Type conversion (`cast`, `to_epoch`) and type introspection (`typeof`). |
 | **Utility** | General-purpose conditional, null-handling, and byte manipulation functions. |
 | **Table** | Table-valued functions that produce multiple rows (used in FROM/JOIN clauses). |
 | **Aggregate** | Aggregate functions that reduce multiple rows into a single result (COUNT, SUM, AVG, MIN, MAX, VARIANCE, STDDEV, MEDIAN, MODE, PERCENTILE_CONT, PERCENTILE_DISC, CORR, COVAR_POP, COVAR_SAMP, APPROX_MEDIAN, APPROX_PERCENTILE, STRING_AGG, ARRAY_AGG, ARG_MAX, ARG_MIN). |
@@ -118,6 +118,51 @@ Every function belongs to a single **category** that describes its operational d
 |----------|-----------|-------------|----|
 | `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Float32 yields epoch days; DateTime→Float32 yields epoch seconds. Supports "uuid" and "bool" target types. | 1 |
 | `to_epoch` | `to_epoch(val)` | Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Float32. | 1 |
+| `typeof` | `typeof(val)` | Returns the runtime DataKind of a value as a Type tag. Use with type literals for type-oriented comparisons: `typeof(x) = Int32`. | 1 |
+
+### typeof examples
+
+```sql
+-- Project the runtime type of each value
+SELECT name, typeof(value) AS value_type FROM data
+-- Output: "Int32", "Float64", "String", etc.
+
+-- Filter rows by type
+SELECT * FROM mixed_data WHERE typeof(value) = Int32
+
+-- IS shorthand (equivalent to the above)
+SELECT * FROM mixed_data WHERE value IS Int32
+SELECT * FROM mixed_data WHERE value IS NOT String
+
+-- Filter to numeric types with IN
+SELECT * FROM t WHERE typeof(col) IN (Int32, Int64, Float32, Float64)
+
+-- Type-driven branching with CASE
+SELECT CASE typeof(x)
+    WHEN Int32 THEN 'integer'
+    WHEN Float64 THEN 'float'
+    WHEN String THEN 'text'
+    ELSE 'other'
+END AS type_label
+FROM t
+
+-- Conditional formatting based on runtime type
+SELECT CASE typeof(value)
+    WHEN Float64 THEN round(value, 2)
+    WHEN DateTime THEN strftime(value, '%Y-%m-%d')
+    ELSE CAST(value AS String)
+END AS formatted
+FROM mixed_data
+
+-- Data quality: find rows where a column has an unexpected type
+SELECT * FROM raw_data WHERE value IS NOT Float64
+```
+
+Type literals (`Int32`, `Float64`, `String`, etc.) are reserved keywords in
+expression position. They produce a `Type` value that can be compared with
+`typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`. See
+[Type Literals and typeof()](sql.md#type-literals-and-typeof) in the SQL
+Reference for the full list of type names and escaping rules.
 
 ## UUID
 

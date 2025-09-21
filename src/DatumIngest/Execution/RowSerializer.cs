@@ -257,6 +257,10 @@ internal static class RowSerializer
                 }
                 break;
 
+            case DataKind.Type:
+                writer.Write((byte)value.AsType());
+                break;
+
             default:
                 throw new NotSupportedException(
                     $"Cannot serialize DataValue of kind {value.Kind}.");
@@ -307,6 +311,7 @@ internal static class RowSerializer
             DataKind.Duration => DataValue.FromDuration(new TimeSpan(reader.ReadInt64())),
             DataKind.Array => ReadArray(reader),
             DataKind.Struct => ReadStruct(reader),
+            DataKind.Type => DataValue.FromType((DataKind)reader.ReadByte()),
             _ => throw new InvalidDataException(
                 $"Unknown DataKind {kind} in spill file."),
         };

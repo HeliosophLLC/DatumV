@@ -301,10 +301,12 @@ WHERE col ILIKE '%pattern%'
 WHERE col REGEXP '^\d{3}-\d{4}$'
 WHERE col IS NULL
 WHERE col IS NOT NULL
+WHERE col IS Int32
+WHERE col IS NOT String
 WHERE NOT (col1 > 10 OR col2 < 5)
 ```
 
-Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`, `ILIKE`, `REGEXP`, `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`.
+Supported operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `AND`, `OR`, `NOT`, `LIKE`, `ILIKE`, `REGEXP`, `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL`, `IS Type`, `IS NOT Type`.
 
 ### Pattern matching
 
@@ -1604,19 +1606,105 @@ See [Compute Backend — Query](compute.md#query-server-streaming) for details.
 
 | DataKind | Description | Internal representation |
 |----------|-------------|------------------------|
-| `Float32` | 32-bit float | `float` |
-| `UInt8` | Unsigned 8-bit integer | `byte` |
+| `Boolean` | True or false | `bool` |
+| `UInt8` | Unsigned 8-bit integer (0–255) | `byte` |
+| `Int8` | Signed 8-bit integer (−128–127) | `sbyte` |
+| `Int16` | Signed 16-bit integer | `short` |
+| `UInt16` | Unsigned 16-bit integer | `ushort` |
+| `Int32` | Signed 32-bit integer | `int` |
+| `UInt32` | Unsigned 32-bit integer | `uint` |
+| `Int64` | Signed 64-bit integer | `long` |
+| `UInt64` | Unsigned 64-bit integer | `ulong` |
+| `Float32` | 32-bit IEEE 754 float | `float` |
+| `Float64` | 64-bit IEEE 754 double | `double` |
+| `String` | Variable-length UTF-8 text | `string` |
+| `Date` | Calendar date (no time component) | `DateOnly` |
+| `DateTime` | Date and time with UTC offset | `DateTimeOffset` |
+| `Time` | Time of day (no date component) | `TimeOnly` |
+| `Duration` | Elapsed time span | `TimeSpan` |
+| `Uuid` | 128-bit UUID (RFC 9562) | `Guid` |
+| `JsonValue` | Raw JSON string for deferred parsing | `string` |
 | `Vector` | Rank-1 float array | `float[]` |
 | `Matrix` | Rank-2 float array | `float[]` + shape `[rows, cols]` |
 | `Tensor` | N-dimensional float array | `float[]` + `int[]` shape |
 | `UInt8Array` | Raw byte array | `byte[]` |
 | `Image` | Encoded image bytes | `byte[]` |
-| `String` | Unicode text | `string` |
-| `Date` | Calendar date | `DateOnly` |
-| `DateTime` | Date and time | `DateTime` |
-| `JsonValue` | Raw JSON string | `string` |
 | `Array` | Ordered sequence of same-typed values | `DataValue[]` |
-| `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names live in `ColumnInfo.Fields`) |
+| `Struct` | Named, ordered collection of heterogeneous fields | `DataValue[]` (field names in `ColumnInfo.Fields`) |
+| `Type` | A type tag describing another DataKind | `DataKind` enum value (stored as byte) |
+
+### Type Literals and typeof()
+
+Type names (`Int32`, `Float64`, `String`, `Boolean`, `Date`, `DateTime`, etc.)
+are reserved keywords in expression position. They produce a `Type` value — a
+first-class type tag rather than a string. This enables type-oriented
+comparisons without string matching.
+
+#### typeof()
+
+`typeof(expr)` returns the runtime `DataKind` of its argument as a `Type` value.
+The result can be projected, compared, and used in any expression context:
+
+```sql
+-- Project the runtime type as a column (displays "Float64", "String", etc.)
+SELECT name, typeof(value) AS value_type FROM data
+
+-- Filter rows by type
+SELECT * FROM mixed_data WHERE typeof(value) = Int32
+
+-- Multiple type check with IN
+SELECT * FROM t WHERE typeof(col) IN (Int32, Int64, Float32, Float64)
+```
+
+#### IS [NOT] Type
+
+The `IS` predicate provides a concise shorthand for type checks. It desugars to
+a `typeof()` comparison — no new semantics, just cleaner syntax:
+
+```sql
+-- These pairs are equivalent:
+SELECT * FROM t WHERE x IS Int32
+SELECT * FROM t WHERE typeof(x) = Int32
+
+SELECT * FROM t WHERE x IS NOT String
+SELECT * FROM t WHERE typeof(x) != String
+```
+
+`IS NULL` / `IS NOT NULL` continue to work unchanged — `NULL` is a distinct
+keyword, so there is no ambiguity.
+
+#### CASE on type
+
+Simple CASE with `typeof()` enables type-driven branching:
+
+```sql
+SELECT CASE typeof(x)
+    WHEN Int32   THEN round(x, 0)
+    WHEN Float64 THEN round(x, 2)
+    WHEN String  THEN len(x)
+    ELSE NULL
+END AS result
+FROM t
+```
+
+#### Type literal rules
+
+All `DataKind` names (`Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`,
+`UInt16`, `UInt32`, `UInt64`, `Float32`, `Float64`, `String`, `Date`,
+`DateTime`, `Time`, `Duration`, `Uuid`, `JsonValue`, `Vector`, `Matrix`,
+`Tensor`, `UInt8Array`, `Image`, `Array`, `Struct`, `Type`) are reserved in
+expression position. They produce a `Type` value that can be compared with
+`typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`.
+
+To use a type name as a column alias or table name, double-quote it:
+
+```sql
+SELECT 1 AS "Int32"
+CREATE TEMP TABLE "String" (id Int32, value String)
+```
+
+Type names in non-expression contexts (column names in DDL, aliases after `AS`,
+table names after `FROM`) are accepted without quoting.
 
 ### Type conversions
 

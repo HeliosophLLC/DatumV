@@ -58,6 +58,7 @@ internal static class IndexReader
             DataKind.UInt32 => DataValue.FromUInt32(reader.ReadUInt32()),
             DataKind.Int64 => DataValue.FromInt64(reader.ReadInt64()),
             DataKind.UInt64 => DataValue.FromUInt64(reader.ReadUInt64()),
+            DataKind.Type => DataValue.FromType((DataKind)reader.ReadByte()),
             _ => throw new InvalidDataException($"Unknown DataKind {kind} in datum-index file.")
         };
     }

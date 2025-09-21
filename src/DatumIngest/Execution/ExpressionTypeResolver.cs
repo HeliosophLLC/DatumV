@@ -42,6 +42,7 @@ public static class ExpressionTypeResolver
             ParameterExpression => null,
             StructLiteralExpression structLiteral => ResolveStructLiteral(structLiteral, sourceSchema, functions),
             IndexAccessExpression indexAccess => ResolveIndexAccess(indexAccess, sourceSchema, functions),
+            TypeLiteralExpression => DataKind.Type,
             _ => null,
         };
     }

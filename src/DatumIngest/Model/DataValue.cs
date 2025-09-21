@@ -257,6 +257,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromDuration(TimeSpan value) =>
         new(DataKind.Duration, numericBits: value.Ticks, bits1: 0L, flags: 0);
 
+    /// <summary>Creates a type tag value that describes another <see cref="DataKind"/>.</summary>
+    public static DataValue FromType(DataKind value) =>
+        new(DataKind.Type, numericBits: (long)value, bits1: 0L, flags: 0);
+
     // ───────────────────────── Arena state ─────────────────────────
 
     /// <summary>
@@ -820,6 +824,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Image    => $"Image[{AsImage().Length} bytes]",
             DataKind.Array    => FormatArrayDisplay(),
             DataKind.Struct   => FormatStructDisplay(),
+            DataKind.Type     => AsType().ToString(),
             _ => ToString() ?? _kind.ToString(),
         };
     }
@@ -1040,6 +1045,14 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new TimeSpan(_numericBits);
     }
 
+    /// <summary>Returns the <see cref="DataKind"/> that this type tag describes.</summary>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public DataKind AsType()
+    {
+        ThrowIfNullOrWrongKind(DataKind.Type);
+        return (DataKind)(byte)_numericBits;
+    }
+
     /// <summary>Returns the typed array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public DataValue[] AsArray()
@@ -1176,6 +1189,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
             or DataKind.Boolean or DataKind.Date or DataKind.Time or DataKind.Duration
+            or DataKind.Type
                 => _numericBits == other._numericBits,
 
             // Float types: recover the actual float so IEEE semantics (NaN != NaN, -0 == 0) are preserved.
@@ -1228,6 +1242,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
             or DataKind.Boolean or DataKind.Date or DataKind.Time or DataKind.Duration
+            or DataKind.Type
                 => HashCode.Combine(_kind, _numericBits),
 
             // Float types: delegate to float/double GetHashCode so -0 == 0 hashing is preserved.

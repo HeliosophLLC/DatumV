@@ -90,4 +90,11 @@ public enum DataKind : byte
     /// positional <see cref="DataValue"/>[] in the <see cref="ReferenceStore"/>.
     /// </summary>
     Struct = 24,
+
+    /// <summary>
+    /// A type tag value that describes another <see cref="DataKind"/>.
+    /// Produced by the <c>typeof()</c> function and compared against type literals
+    /// (e.g. <c>typeof(x) == Int32</c>).
+    /// </summary>
+    Type = 25,
 }

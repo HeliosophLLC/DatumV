@@ -46,6 +46,7 @@ public sealed class HoverProvider
         string? markdown = hit.Kind switch
         {
             SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit),
+            SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
                 "such as `array_transform` and `array_filter`.",
@@ -412,6 +413,7 @@ public sealed class HoverProvider
             ["Struct"] = "**Struct** — Named tuple of typed fields. Field types are inferred from context.",
             ["Image"] = "**Image** — Binary image data with format metadata.",
             ["UInt8Array"] = "**UInt8Array** — Variable-length byte array (binary data).",
+            ["Type"] = "**Type** — A type tag describing another DataKind. Produced by `typeof()` for type comparisons.",
         };
 
     // ─────────────────── Virtual schema hover support ───────────────────

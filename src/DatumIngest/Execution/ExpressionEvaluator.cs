@@ -131,6 +131,7 @@ public sealed class ExpressionEvaluator
                 "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
             StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, row),
             IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, row),
+            TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
             _ => throw new InvalidOperationException(
                 $"Unsupported expression type: {expression.GetType().Name}.")
         };
@@ -186,6 +187,17 @@ public sealed class ExpressionEvaluator
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type: {literal.Value.GetType().Name}."),
         };
+    }
+
+    private static DataValue EvaluateTypeLiteral(TypeLiteralExpression typeLiteral)
+    {
+        if (!Enum.TryParse<DataKind>(typeLiteral.TypeName, ignoreCase: true, out DataKind kind))
+        {
+            throw new InvalidOperationException(
+                $"Unknown type name: '{typeLiteral.TypeName}'.");
+        }
+
+        return DataValue.FromType(kind);
     }
 
     private static DataValue EvaluateColumn(ColumnReference column, Row row, Row? outerRow)

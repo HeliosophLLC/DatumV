@@ -345,6 +345,8 @@ enum ParameterKindValue {
   PARAMETER_KIND_INT64 = 22;
   PARAMETER_KIND_UINT64 = 23;
   PARAMETER_KIND_FLOAT64 = 24;
+  PARAMETER_KIND_STRUCT = 25;
+  PARAMETER_KIND_TYPE = 26;
 }
 
 // Classifies a function by its operational domain.
@@ -562,6 +564,7 @@ enum DataKindValue {
   DATA_KIND_UINT64 = 22;
   DATA_KIND_FLOAT64 = 23;
   DATA_KIND_STRUCT = 24;
+  DATA_KIND_TYPE = 25;
 }
 
 // Discriminated value type transported over the wire.
@@ -595,6 +598,7 @@ message DataValueMessage {
     uint64 uint64_value = 24;
     double float64_value = 25;
     StructMessage struct_value = 26;  // Named-field composite value
+    uint32 type_value = 27;            // DataKind enum byte for Type tag values
   }
 }
 

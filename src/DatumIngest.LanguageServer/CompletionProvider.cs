@@ -403,5 +403,6 @@ public sealed class CompletionProvider
         "String", "Date", "DateTime", "Time", "Duration",
         "Uuid", "JsonValue", "Vector", "Matrix", "Tensor",
         "Array", "Struct", "Image", "UInt8Array",
+        "Type",
     ];
 }
