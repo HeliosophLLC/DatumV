@@ -1633,6 +1633,34 @@ Explicit narrowing via `CAST(value AS type)`:
 - `Date` → `Float32` (epoch days since 1970-01-01)
 - `DateTime` → `Float32` (epoch seconds since 1970-01-01T00:00:00Z, float32)
 
+### AT TIME ZONE
+
+Converts a `DateTime` value to a specific timezone. The instant in time is preserved — only the UTC offset (and therefore the displayed local time) changes. Uses IANA timezone names.
+
+```sql
+expr AT TIME ZONE 'timezone_name'
+```
+
+```sql
+-- UTC pickup time → local New York time
+SELECT pickup_datetime AT TIME ZONE 'America/New_York' AS local_time
+FROM trips
+
+-- Compare timestamps across zones (no parentheses needed)
+SELECT * FROM events
+WHERE created_at AT TIME ZONE 'America/New_York' = updated_at AT TIME ZONE 'UTC'
+
+-- Extract local hour after converting
+SELECT date_part('hour', pickup_datetime AT TIME ZONE 'America/New_York') AS local_hour
+FROM trips
+
+-- Extract UTC offset in seconds (e.g. -18000 for EST, -14400 for EDT)
+SELECT date_part('timezone', pickup_datetime AT TIME ZONE 'America/New_York') AS tz_offset
+FROM trips
+```
+
+Timezone names follow the [IANA tz database](https://www.iana.org/time-zones) (e.g. `America/New_York`, `Europe/London`, `Asia/Kolkata`, `UTC`). DST transitions are handled automatically.
+
 ### Vector, Matrix, and Tensor relationship
 
 All three store a flat `float[]` buffer internally:

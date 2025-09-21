@@ -385,4 +385,13 @@ public enum SqlToken
 
     /// <summary>The <c>INIT</c> keyword specifying the initial accumulator value for a SCAN expression.</summary>
     Init,
+
+    /// <summary>The <c>AT</c> keyword (used in AT TIME ZONE expressions).</summary>
+    At,
+
+    /// <summary>The <c>TIME</c> keyword (used in AT TIME ZONE expressions).</summary>
+    Time,
+
+    /// <summary>The <c>ZONE</c> keyword (used in AT TIME ZONE expressions).</summary>
+    Zone,
 }

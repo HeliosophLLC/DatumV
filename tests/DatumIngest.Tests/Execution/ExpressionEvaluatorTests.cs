@@ -1438,4 +1438,90 @@ public class ExpressionEvaluatorTests
         Assert.Equal(DataKind.Float32, result.Kind);
         Assert.Equal(9.5f, result.AsFloat32(), precision: 4);
     }
+
+    // ─────────────── AT TIME ZONE ───────────────
+
+    [Fact]
+    public void AtTimeZone_UtcToEasternStandardTime()
+    {
+        // 2026-01-15 12:00 UTC → 2026-01-15 07:00 EST (-05:00)
+        DateTimeOffset utc = new(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
+        Row row = MakeRow(("ts", DataValue.FromDateTime(utc)));
+
+        Expression expr = new AtTimeZoneExpression(
+            new ColumnReference("ts"),
+            new LiteralExpression("America/New_York"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.DateTime, result.Kind);
+        DateTimeOffset converted = result.ToDateTimeOffset();
+        Assert.Equal(7, converted.Hour);
+        Assert.Equal(new TimeSpan(-5, 0, 0), converted.Offset);
+    }
+
+    [Fact]
+    public void AtTimeZone_UtcToEasternDaylightTime()
+    {
+        // 2026-07-15 12:00 UTC → 2026-07-15 08:00 EDT (-04:00)
+        DateTimeOffset utc = new(2026, 7, 15, 12, 0, 0, TimeSpan.Zero);
+        Row row = MakeRow(("ts", DataValue.FromDateTime(utc)));
+
+        Expression expr = new AtTimeZoneExpression(
+            new ColumnReference("ts"),
+            new LiteralExpression("America/New_York"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        DateTimeOffset converted = result.ToDateTimeOffset();
+        Assert.Equal(8, converted.Hour);
+        Assert.Equal(new TimeSpan(-4, 0, 0), converted.Offset);
+    }
+
+    [Fact]
+    public void AtTimeZone_NullInputReturnsNull()
+    {
+        Row row = MakeRow(("ts", DataValue.Null(DataKind.DateTime)));
+
+        Expression expr = new AtTimeZoneExpression(
+            new ColumnReference("ts"),
+            new LiteralExpression("America/New_York"));
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.DateTime, result.Kind);
+    }
+
+    [Fact]
+    public void AtTimeZone_RoundTripsBackToUtc()
+    {
+        // Convert to New_York and back to UTC — should get the same instant.
+        DateTimeOffset utc = new(2026, 6, 15, 18, 0, 0, TimeSpan.Zero);
+        Row row = MakeRow(("ts", DataValue.FromDateTime(utc)));
+
+        Expression toNy = new AtTimeZoneExpression(
+            new ColumnReference("ts"),
+            new LiteralExpression("America/New_York"));
+
+        Expression backToUtc = new AtTimeZoneExpression(
+            toNy,
+            new LiteralExpression("UTC"));
+
+        DataValue result = _evaluator.Evaluate(backToUtc, row);
+
+        Assert.Equal(utc.UtcTicks, result.ToDateTimeOffset().UtcTicks);
+    }
+
+    [Fact]
+    public void AtTimeZone_InvalidTimezone_Throws()
+    {
+        Row row = MakeRow(("ts", DataValue.FromDateTime(DateTimeOffset.UtcNow)));
+
+        Expression expr = new AtTimeZoneExpression(
+            new ColumnReference("ts"),
+            new LiteralExpression("Not/AZone"));
+
+        Assert.Throws<TimeZoneNotFoundException>(() => _evaluator.Evaluate(expr, row));
+    }
 }

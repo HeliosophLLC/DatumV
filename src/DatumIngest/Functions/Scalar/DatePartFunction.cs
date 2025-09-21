@@ -51,8 +51,11 @@ public sealed class DatePartFunction : IScalarFunction
 
         string partName = partValue.AsString();
 
-        // Normalize to a DateTime for uniform extraction.
-        DateTime dateTime = input.ToDateTimeOffset().DateTime;
+        // Normalize to a DateTime for uniform extraction. For offset-aware parts,
+        // read the offset from the original DateTimeOffset before calling .DateTime.
+        DateTimeOffset dto = input.ToDateTimeOffset();
+        DateTime dateTime = dto.DateTime;
+        TimeSpan offset = dto.Offset;
 
         float result = partName.ToLowerInvariant() switch
         {
@@ -67,8 +70,11 @@ public sealed class DatePartFunction : IScalarFunction
             "week_of_year" => ISOWeek.GetWeekOfYear(dateTime),
             "quarter" => (dateTime.Month - 1) / 3 + 1,
             "is_weekend" => dateTime.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1f : 0f,
+            "timezone" => (float)offset.TotalSeconds,
+            "timezone_hour" => offset.Hours,
+            "timezone_minute" => offset.Minutes,
             _ => throw new ArgumentException(
-                $"Unknown date part '{partName}'. Supported: year, month, day, day_of_week, hour, minute, second, day_of_year, week_of_year, quarter, is_weekend."),
+                $"Unknown date part '{partName}'. Supported: year, month, day, day_of_week, hour, minute, second, day_of_year, week_of_year, quarter, is_weekend, timezone, timezone_hour, timezone_minute."),
         };
 
         return DataValue.FromFloat32(result);

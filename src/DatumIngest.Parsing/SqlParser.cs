@@ -508,11 +508,26 @@ public static class SqlParser
             (op, left, right) => new BinaryExpression(left, op, right));
 
     /// <summary>
+    /// AT TIME ZONE level — sits between Additive and the comparison predicates so that
+    /// <c>ts AT TIME ZONE 'X' = ts AT TIME ZONE 'Y'</c> parses correctly without parens.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> AtTimeZoneLevel =
+        from expr in Additive
+        from result in (
+            from atKw in Token.EqualTo(SqlToken.At)
+            from timeKw in Token.EqualTo(SqlToken.Time)
+            from zoneKw in Token.EqualTo(SqlToken.Zone)
+            from tz in Additive
+            select (Expression)new AtTimeZoneExpression(expr, tz, ToSpan(atKw, zoneKw))
+        ).Try().OptionalOrDefault()
+        select result ?? expr;
+
+    /// <summary>
     /// Postfix predicates: IS [NOT] NULL, [NOT] IN (...), [NOT] BETWEEN ... AND ..., LIKE.
-    /// Applied to the result of an Additive expression.
+    /// Applied to the result of an AtTimeZoneLevel expression.
     /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> Comparison =
-        from left in Additive
+        from left in AtTimeZoneLevel
         from postfix in IsNullPostfix.Try()
             .Or(NotInSubqueryPostfix.Try())
             .Or(NotInPostfix.Try())
@@ -633,7 +648,7 @@ public static class SqlParser
             .Or(Token.EqualTo(SqlToken.GreaterOrEqual).Select(_ => BinaryOperator.GreaterThanOrEqual))
             .Or(Token.EqualTo(SqlToken.LessThan).Select(_ => BinaryOperator.LessThan))
             .Or(Token.EqualTo(SqlToken.GreaterThan).Select(_ => BinaryOperator.GreaterThan))
-        from right in Additive
+        from right in SP.Ref(() => AtTimeZoneLevel!)
         select (Func<Expression, Expression>)(left =>
             new BinaryExpression(left, op, right));
 

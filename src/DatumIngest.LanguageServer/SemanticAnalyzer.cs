@@ -550,6 +550,11 @@ internal sealed class SemanticAnalyzer
                 AnalyzeExpression(cast.Expression, aliasToTable, opaqueAliases, diagnostics);
                 break;
 
+            case AtTimeZoneExpression atz:
+                AnalyzeExpression(atz.Expression, aliasToTable, opaqueAliases, diagnostics);
+                AnalyzeExpression(atz.TimeZone, aliasToTable, opaqueAliases, diagnostics);
+                break;
+
             case CaseExpression caseExpr:
                 if (caseExpr.Operand is not null)
                 {

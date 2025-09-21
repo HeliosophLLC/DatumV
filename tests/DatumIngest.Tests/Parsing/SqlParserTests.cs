@@ -1953,4 +1953,45 @@ public class SqlParserTests
             Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
         Assert.NotNull(access.Span);
     }
+
+    // ───────────────────── AT TIME ZONE ─────────────────────
+
+    [Fact]
+    public void AtTimeZone_ParsesColumnWithStringLiteral()
+    {
+        SelectStatement result = Parse("SELECT ts AT TIME ZONE 'America/New_York' FROM t");
+
+        AtTimeZoneExpression atz = Assert.IsType<AtTimeZoneExpression>(result.Columns[0].Expression);
+        Assert.IsType<ColumnReference>(atz.Expression);
+        LiteralExpression tz = Assert.IsType<LiteralExpression>(atz.TimeZone);
+        Assert.Equal("America/New_York", tz.Value);
+    }
+
+    [Fact]
+    public void AtTimeZone_ParsesWithAlias()
+    {
+        SelectStatement result = Parse("SELECT ts AT TIME ZONE 'UTC' AS utc_ts FROM t");
+
+        Assert.Equal("utc_ts", result.Columns[0].Alias);
+        Assert.IsType<AtTimeZoneExpression>(result.Columns[0].Expression);
+    }
+
+    [Fact]
+    public void AtTimeZone_HasSourceSpan()
+    {
+        SelectStatement result = Parse("SELECT ts AT TIME ZONE 'UTC' FROM t");
+
+        AtTimeZoneExpression atz = Assert.IsType<AtTimeZoneExpression>(result.Columns[0].Expression);
+        Assert.NotNull(atz.Span);
+    }
+
+    [Fact]
+    public void AtTimeZone_InWhereClause()
+    {
+        // Verify it parses in a predicate position (chained with a comparison)
+        SelectStatement result = Parse(
+            "SELECT ts FROM t WHERE ts AT TIME ZONE 'UTC' = ts AT TIME ZONE 'America/New_York'");
+
+        Assert.IsType<BinaryExpression>(result.Where);
+    }
 }

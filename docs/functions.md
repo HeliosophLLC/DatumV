@@ -229,6 +229,11 @@ FROM users
 | `week_of_year` | 1–53 (ISO 8601) | 12 |
 | `quarter` | 1–4 | 1 |
 | `is_weekend` | 0 or 1 | 0 |
+| `timezone` | UTC offset in seconds (e.g. `-18000` for EST) | -18000 |
+| `timezone_hour` | Signed hour component of UTC offset | -5 |
+| `timezone_minute` | Minute component of UTC offset (useful for `+05:30` zones) | 30 |
+
+> **Note:** `timezone`, `timezone_hour`, and `timezone_minute` reflect the UTC offset stored in the value. Use `AT TIME ZONE` first to convert a UTC timestamp to a specific zone before extracting these parts.
 
 ### Temporal ML encoding examples
 

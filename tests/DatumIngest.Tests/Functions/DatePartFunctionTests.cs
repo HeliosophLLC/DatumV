@@ -174,4 +174,65 @@ public class DatePartFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String]));
     }
+
+    // ───────────────────── timezone parts ─────────────────────
+
+    [Fact]
+    public void DatePart_Timezone_UtcIsZero()
+    {
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        DataValue result = _function.Execute([DataValue.FromString("timezone"), input]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Timezone_PositiveOffset()
+    {
+        // +05:30 India Standard Time = 19800 seconds
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, new TimeSpan(5, 30, 0)));
+        DataValue result = _function.Execute([DataValue.FromString("timezone"), input]);
+        Assert.Equal(19800f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Timezone_NegativeOffset()
+    {
+        // -05:00 EST = -18000 seconds
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, new TimeSpan(-5, 0, 0)));
+        DataValue result = _function.Execute([DataValue.FromString("timezone"), input]);
+        Assert.Equal(-18000f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_TimezoneHour_Positive()
+    {
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, new TimeSpan(5, 30, 0)));
+        DataValue result = _function.Execute([DataValue.FromString("timezone_hour"), input]);
+        Assert.Equal(5f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_TimezoneHour_Negative()
+    {
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, new TimeSpan(-5, 0, 0)));
+        DataValue result = _function.Execute([DataValue.FromString("timezone_hour"), input]);
+        Assert.Equal(-5f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_TimezoneMinute_HalfHourZone()
+    {
+        // India +05:30 → minutes = 30
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, new TimeSpan(5, 30, 0)));
+        DataValue result = _function.Execute([DataValue.FromString("timezone_minute"), input]);
+        Assert.Equal(30f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_TimezoneMinute_WholeHourZone()
+    {
+        DataValue input = DataValue.FromDateTime(new DateTimeOffset(2026, 1, 1, 12, 0, 0, new TimeSpan(-5, 0, 0)));
+        DataValue result = _function.Execute([DataValue.FromString("timezone_minute"), input]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
 }

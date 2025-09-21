@@ -72,6 +72,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
             BetweenExpression between => EvaluateBetweenColumn(between, batch),
             IsNullExpression isNull => EvaluateIsNullColumn(isNull, batch),
             CastExpression cast => EvaluateCastColumn(cast, batch),
+            AtTimeZoneExpression atz => EvaluateAtTimeZoneColumn(atz, batch),
             CaseExpression caseExpression => EvaluateCaseColumn(caseExpression, batch),
             LikeExpression like => EvaluateLikeColumn(like, batch),
             WindowFunctionCallExpression window => throw new InvalidOperationException(
@@ -812,6 +813,40 @@ public sealed class ColumnBatchEvaluator : IDisposable
         {
             arguments.AsSpan(0, 2).Clear();
             ArrayPool<DataValue>.Shared.Return(arguments);
+        }
+
+        return result;
+    }
+
+    // ───────────────────────── AT TIME ZONE ─────────────────────────
+
+    private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private DataValue[] EvaluateAtTimeZoneColumn(AtTimeZoneExpression atz, ColumnBatch batch)
+    {
+        DataValue[] source = EvaluateColumn(atz.Expression, batch);
+        DataValue[] tzValues = EvaluateColumn(atz.TimeZone, batch);
+        int rowCount = batch.RowCount;
+        DataValue[] result = RentBuffer(rowCount);
+
+        for (int row = 0; row < rowCount; row++)
+        {
+            DataValue value = source[row];
+            if (value.IsNull)
+            {
+                result[row] = DataValue.Null(DataKind.DateTime);
+                continue;
+            }
+
+            string tzName = tzValues[row].AsString();
+            if (!_timeZoneCache.TryGetValue(tzName, out TimeZoneInfo? tz))
+            {
+                tz = TimeZoneInfo.FindSystemTimeZoneById(tzName);
+                _timeZoneCache[tzName] = tz;
+            }
+
+            DateTimeOffset converted = TimeZoneInfo.ConvertTime(value.ToDateTimeOffset(), tz);
+            result[row] = DataValue.FromDateTime(converted);
         }
 
         return result;

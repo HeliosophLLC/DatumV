@@ -392,6 +392,7 @@ public sealed class CompletionProvider
     [
         "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
         "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT",
+        "AT TIME ZONE",
     ];
 
     internal static readonly string[] ColumnTypeKeywords =

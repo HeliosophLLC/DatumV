@@ -577,6 +577,16 @@ public sealed record ExistsExpression(
 public sealed record CastExpression(Expression Expression, string TargetType, SourceSpan? Span = null) : Expression;
 
 /// <summary>
+/// An <c>AT TIME ZONE</c> expression: <c>expr AT TIME ZONE timezone</c>.
+/// Converts a DateTime value to the specified timezone, preserving the instant
+/// but adjusting the UTC offset to match the target zone (including DST).
+/// </summary>
+public sealed record AtTimeZoneExpression(
+    Expression Expression,
+    Expression TimeZone,
+    SourceSpan? Span = null) : Expression;
+
+/// <summary>
 /// Placeholder expression inserted by the error-recovering parser where
 /// unparseable input was skipped. Downstream consumers (semantic analysis,
 /// expression evaluation) should treat this as opaque and skip validation.

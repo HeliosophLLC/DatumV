@@ -220,6 +220,11 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("SCAN"), SqlToken.Scan, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("INIT"), SqlToken.Init, requireDelimiters: true)
 
+            // AT TIME ZONE keywords
+            .Match(Span.EqualToIgnoreCase("ZONE"), SqlToken.Zone, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("TIME"), SqlToken.Time, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("AT"), SqlToken.At, requireDelimiters: true)
+
             // ASSERT / MESSAGE / DEFINE keywords
             .Match(Span.EqualToIgnoreCase("ASSERT"), SqlToken.Assert, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("MESSAGE"), SqlToken.Message, requireDelimiters: true)

@@ -109,6 +109,7 @@ public sealed class ExpressionEvaluator
             BetweenExpression between => EvaluateBetween(between, row),
             IsNullExpression isNull => EvaluateIsNull(isNull, row),
             CastExpression cast => EvaluateCast(cast, row),
+            AtTimeZoneExpression atz => EvaluateAtTimeZone(atz, row),
             CaseExpression caseExpr => EvaluateCase(caseExpr, row),
             LikeExpression like => EvaluateLikeEscape(like, row),
             WindowFunctionCallExpression window => throw new InvalidOperationException(
@@ -712,6 +713,7 @@ public sealed class ExpressionEvaluator
     /// the type name (e.g. "Float32", "UInt8"). Avoids allocating a new DataValue per row.
     /// </summary>
     private readonly Dictionary<string, DataValue> _castTargetCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
 
     private DataValue EvaluateCast(CastExpression cast, Row row)
     {
@@ -743,6 +745,33 @@ public sealed class ExpressionEvaluator
             arguments.AsSpan(0, 2).Clear();
             ArrayPool<DataValue>.Shared.Return(arguments);
         }
+    }
+
+    /// <summary>
+    /// Evaluates an AT TIME ZONE expression by converting the DateTimeOffset to the
+    /// specified IANA timezone. The instant in time is preserved; only the UTC offset
+    /// (and therefore the displayed local time) changes.
+    /// </summary>
+    private DataValue EvaluateAtTimeZone(AtTimeZoneExpression atz, Row row)
+    {
+        DataValue value = Evaluate(atz.Expression, row);
+
+        if (value.IsNull)
+        {
+            return DataValue.Null(DataKind.DateTime);
+        }
+
+        DataValue tzValue = Evaluate(atz.TimeZone, row);
+        string tzName = tzValue.AsString();
+
+        if (!_timeZoneCache.TryGetValue(tzName, out TimeZoneInfo? tz))
+        {
+            tz = TimeZoneInfo.FindSystemTimeZoneById(tzName);
+            _timeZoneCache[tzName] = tz;
+        }
+
+        DateTimeOffset converted = TimeZoneInfo.ConvertTime(value.ToDateTimeOffset(), tz);
+        return DataValue.FromDateTime(converted);
     }
 
     /// <summary>

@@ -35,6 +35,7 @@ public static class ExpressionTypeResolver
             IsNullExpression => DataKind.Boolean,
             LikeExpression => DataKind.Boolean,
             CastExpression cast => ResolveCast(cast),
+            AtTimeZoneExpression => DataKind.DateTime,
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
             LambdaExpression => null, // Not a value — only valid as an argument to IHigherOrderFunction.
