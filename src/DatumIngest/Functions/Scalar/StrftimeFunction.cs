@@ -51,9 +51,7 @@ public sealed class StrftimeFunction : IScalarFunction
 
         string format = formatValue.AsString();
 
-        string result = dateValue.Kind == DataKind.Date
-            ? dateValue.AsDate().ToString(format, CultureInfo.InvariantCulture)
-            : dateValue.AsDateTime().ToString(format, CultureInfo.InvariantCulture);
+        string result = dateValue.ToDateTimeOffset().ToString(format, CultureInfo.InvariantCulture);
 
         return DataValue.FromString(result);
     }

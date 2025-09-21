@@ -199,13 +199,7 @@ public abstract class BinaryMathFunction : IScalarFunction
         };
     }
 
-    /// <summary>
-    /// Returns true when <paramref name="kind"/> is any numeric scalar kind.
-    /// </summary>
-    private static bool IsNumericScalar(DataKind kind) =>
-        kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64 or DataKind.UInt8;
+    private static bool IsNumericScalar(DataKind kind) => DataValueComparer.IsNumericScalar(kind);
 
     private static float ExtractFloat(DataValue value) => value.ToFloat();
 }

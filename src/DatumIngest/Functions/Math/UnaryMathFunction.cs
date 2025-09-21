@@ -49,16 +49,7 @@ public abstract class UnaryMathFunction : IScalarFunction
 
         switch (input.Kind)
         {
-            case DataKind.UInt8:
-            case DataKind.Int8:
-            case DataKind.Int16:
-            case DataKind.UInt16:
-            case DataKind.Int32:
-            case DataKind.UInt32:
-            case DataKind.Int64:
-            case DataKind.UInt64:
-            case DataKind.Float32:
-            case DataKind.Float64:
+            case var k when DataValueComparer.IsNumericScalar(k):
                 return DataValue.FromFloat32(Apply(ExtractFloat(input)));
 
             case DataKind.Vector:

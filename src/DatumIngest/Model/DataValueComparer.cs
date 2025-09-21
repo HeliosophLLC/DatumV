@@ -61,6 +61,20 @@ internal static class DataValueComparer
     }
 
     /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="kind"/> supports natural
+    /// ordering via <see cref="Compare"/>. This includes all numeric scalars, strings,
+    /// date/time types, duration, uuid, and boolean.
+    /// </summary>
+    internal static bool IsComparable(DataKind kind) =>
+        kind is DataKind.Float32 or DataKind.Float64
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
+            or DataKind.Boolean
+            or DataKind.String
+            or DataKind.Date or DataKind.DateTime or DataKind.Time
+            or DataKind.Duration or DataKind.Uuid;
+
+    /// <summary>
     /// Returns <see langword="true"/> when <paramref name="kind"/> is any integer or
     /// floating-point scalar kind that can be losslessly widened to <see cref="float"/>
     /// or <see cref="double"/>.

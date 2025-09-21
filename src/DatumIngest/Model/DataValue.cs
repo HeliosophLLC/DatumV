@@ -697,6 +697,157 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
     }
 
+    // ─────────────────────── Date/time widening ───────────────────────────────
+
+    /// <summary>
+    /// Converts a <see cref="DataKind.Date"/> or <see cref="DataKind.DateTime"/>
+    /// value to <see cref="DateTimeOffset"/>. Date values become midnight UTC.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The value is null or its kind is neither Date nor DateTime.
+    /// </exception>
+    public DateTimeOffset ToDateTimeOffset()
+    {
+        if (IsNull) throw new InvalidOperationException("Cannot convert a null DataValue to DateTimeOffset.");
+        return _kind switch
+        {
+            DataKind.Date => new DateTimeOffset(AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+            DataKind.DateTime => AsDateTime(),
+            _ => throw new InvalidOperationException(
+                $"Cannot convert DataKind.{_kind} to DateTimeOffset. Expected Date or DateTime."),
+        };
+    }
+
+    // ─────────────────────── Object boxing ─────────────────────────────────────
+
+    /// <summary>
+    /// Returns the value as its natural boxed CLR type. Useful for JSON serialization
+    /// and other contexts where the typed object is needed rather than a string.
+    /// </summary>
+    /// <returns>
+    /// The boxed primitive (<see cref="float"/>, <see cref="int"/>, <see cref="bool"/>, etc.),
+    /// the reference-type payload (<see cref="string"/>, <c>float[]</c>, <c>byte[]</c>, etc.),
+    /// or <see langword="null"/> when <see cref="IsNull"/> is true.
+    /// Composite types (<see cref="DataKind.Array"/>, <see cref="DataKind.Struct"/>) return
+    /// the raw <c>DataValue[]</c> — callers that need recursive conversion should handle
+    /// those kinds explicitly.
+    /// </returns>
+    public object? ToObject()
+    {
+        if (IsNull) return null;
+
+        return _kind switch
+        {
+            DataKind.Float32   => AsFloat32(),
+            DataKind.Float64   => AsFloat64(),
+            DataKind.UInt8     => AsUInt8(),
+            DataKind.Int8      => AsInt8(),
+            DataKind.Int16     => AsInt16(),
+            DataKind.UInt16    => AsUInt16(),
+            DataKind.Int32     => AsInt32(),
+            DataKind.UInt32    => AsUInt32(),
+            DataKind.Int64     => AsInt64(),
+            DataKind.UInt64    => AsUInt64(),
+            DataKind.Boolean   => AsBoolean(),
+            DataKind.String    => AsString(),
+            DataKind.Date      => AsDate(),
+            DataKind.DateTime  => AsDateTime(),
+            DataKind.Time      => AsTime(),
+            DataKind.Duration  => AsDuration(),
+            DataKind.Uuid      => AsUuid(),
+            DataKind.JsonValue => AsJsonValue(),
+            DataKind.Vector    => AsVector(),
+            DataKind.Matrix    => AsMatrix(out _, out _),
+            DataKind.Tensor    => AsTensor(out _),
+            DataKind.UInt8Array => AsUInt8Array(),
+            DataKind.Image     => AsImage(),
+            DataKind.Array     => AsArray(),
+            DataKind.Struct    => AsStruct(),
+            _ => ToString(),
+        };
+    }
+
+    // ─────────────────────── Display formatting ───────────────────────────────
+
+    /// <summary>
+    /// Returns a human-readable string representation of this value suitable for
+    /// display in tables, logs, and diagnostics.
+    /// </summary>
+    /// <param name="converter">
+    /// Optional per-kind override. When supplied, the delegate is called first with the
+    /// value's <see cref="DataKind"/>. If it returns <c>(true, result)</c> the result is
+    /// used directly; if it returns <c>(false, _)</c> the canonical formatting applies.
+    /// This lets callers customise specific kinds (e.g. numeric precision, date format)
+    /// while inheriting default formatting for everything else.
+    /// </param>
+    /// <returns>
+    /// A formatted string, or <c>"NULL"</c> when <see cref="IsNull"/> is true.
+    /// </returns>
+    public string ToDisplayString(Func<DataValue, (bool Handled, string? Result)>? converter = null)
+    {
+        if (IsNull) return "NULL";
+
+        if (converter is not null)
+        {
+            (bool handled, string? result) = converter(this);
+            if (handled) return result ?? "NULL";
+        }
+
+        return _kind switch
+        {
+            DataKind.Float32  => AsFloat32().ToString("G"),
+            DataKind.Float64  => AsFloat64().ToString("G"),
+            DataKind.UInt8    => AsUInt8().ToString(),
+            DataKind.Int8     => AsInt8().ToString(),
+            DataKind.Int16    => AsInt16().ToString(),
+            DataKind.UInt16   => AsUInt16().ToString(),
+            DataKind.Int32    => AsInt32().ToString(),
+            DataKind.UInt32   => AsUInt32().ToString(),
+            DataKind.Int64    => AsInt64().ToString(),
+            DataKind.UInt64   => AsUInt64().ToString(),
+            DataKind.Boolean  => AsBoolean() ? "true" : "false",
+            DataKind.String   => AsString(),
+            DataKind.Date     => AsDate().ToString("yyyy-MM-dd"),
+            DataKind.DateTime => AsDateTime().ToString("O"),
+            DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
+            DataKind.Duration => AsDuration().ToString("c"),
+            DataKind.Uuid     => AsUuid().ToString("D"),
+            DataKind.JsonValue => AsJsonValue(),
+            DataKind.Vector   => $"[{string.Join(", ", AsVector().Select(v => v.ToString("G")))}]",
+            DataKind.Matrix   => FormatMatrixDisplay(),
+            DataKind.Tensor   => FormatTensorDisplay(),
+            DataKind.UInt8Array => $"UInt8Array[{AsUInt8Array().Length}]",
+            DataKind.Image    => $"Image[{AsImage().Length} bytes]",
+            DataKind.Array    => FormatArrayDisplay(),
+            DataKind.Struct   => FormatStructDisplay(),
+            _ => ToString() ?? _kind.ToString(),
+        };
+    }
+
+    private string FormatMatrixDisplay()
+    {
+        float[] data = AsMatrix(out int rows, out int columns);
+        return $"Matrix[{rows}x{columns}]";
+    }
+
+    private string FormatTensorDisplay()
+    {
+        float[] data = AsTensor(out int[] shape);
+        return $"Tensor[{string.Join("x", shape)}]";
+    }
+
+    private string FormatArrayDisplay()
+    {
+        DataValue[] elements = AsArray();
+        return $"[{string.Join(", ", elements.Select(e => e.ToDisplayString()))}]";
+    }
+
+    private string FormatStructDisplay()
+    {
+        DataValue[] fields = AsStruct();
+        return $"{{{string.Join(", ", fields.Select(f => f.ToDisplayString()))}}}";
+    }
+
     // ─────────────────────── Reference-type accessors ─────────────────────────
 
     /// <summary>Returns the byte array payload.</summary>

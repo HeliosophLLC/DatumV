@@ -13,9 +13,8 @@ namespace DatumIngest.DatumFile.Decoding;
 /// </remarks>
 public static class DatumDecoderFactory
 {
-    private static readonly ScalarColumnDecoder ScalarDecoder = new();
-    private static readonly UInt8ColumnDecoder UInt8Decoder = new();
-    private static readonly FixedNumericColumnDecoder FixedNumericDecoder = new();
+    private static readonly FloatColumnDecoder FloatScalarDecoder = new();
+    private static readonly IntegerColumnDecoder IntegerDecoder = new();
     private static readonly BooleanColumnDecoder BooleanDecoder = new();
     private static readonly DateColumnDecoder DateDecoder = new();
     private static readonly DateTimeColumnDecoder DateTimeDecoder = new();
@@ -52,16 +51,16 @@ public static class DatumDecoderFactory
 
         return descriptor.Kind switch
         {
-            DataKind.Float32 => ScalarDecoder,
-            DataKind.UInt8 => UInt8Decoder,
-            DataKind.Int8 => FixedNumericDecoder,
-            DataKind.Int16 => FixedNumericDecoder,
-            DataKind.UInt16 => FixedNumericDecoder,
-            DataKind.Int32 => FixedNumericDecoder,
-            DataKind.UInt32 => FixedNumericDecoder,
-            DataKind.Int64 => FixedNumericDecoder,
-            DataKind.UInt64 => FixedNumericDecoder,
-            DataKind.Float64 => FixedNumericDecoder,
+            DataKind.Float32 => FloatScalarDecoder,
+            DataKind.Float64 => FloatScalarDecoder,
+            DataKind.UInt8 => IntegerDecoder,
+            DataKind.Int8 => IntegerDecoder,
+            DataKind.Int16 => IntegerDecoder,
+            DataKind.UInt16 => IntegerDecoder,
+            DataKind.Int32 => IntegerDecoder,
+            DataKind.UInt32 => IntegerDecoder,
+            DataKind.Int64 => IntegerDecoder,
+            DataKind.UInt64 => IntegerDecoder,
             DataKind.Boolean => BooleanDecoder,
             DataKind.Date => DateDecoder,
             DataKind.DateTime => DateTimeDecoder,

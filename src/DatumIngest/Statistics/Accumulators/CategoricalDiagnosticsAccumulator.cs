@@ -315,19 +315,7 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
             new CategoricalDiagnosticsResult(coverageTopK, rareRatio, rareCategoryCount, totalCategoryCount, _capped));
     }
 
-    private static string ValueToString(DataValue value)
-    {
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32().ToString("G"),
-            DataKind.UInt8 => value.AsUInt8().ToString(),
-            DataKind.String => value.AsString(),
-            DataKind.Date => value.AsDate().ToString("O"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            DataKind.JsonValue => value.AsJsonValue(),
-            _ => value.ToString() ?? ""
-        };
-    }
+    private static string ValueToString(DataValue value) => value.ToDisplayString();
 }
 
 /// <summary>

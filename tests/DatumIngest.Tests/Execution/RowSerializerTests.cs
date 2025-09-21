@@ -1,5 +1,6 @@
 using DatumIngest.Execution;
 using DatumIngest.Model;
+using DatumIngest.Tests.Indexing;
 
 namespace DatumIngest.Tests.Execution;
 
@@ -9,6 +10,51 @@ namespace DatumIngest.Tests.Execution;
 /// </summary>
 public class RowSerializerTests
 {
+    /// <summary>
+    /// Every <see cref="DataKind"/> must survive a write→read round-trip through
+    /// <see cref="RowSerializer.WriteDataValue"/> and <see cref="RowSerializer.ReadDataValue"/>.
+    /// Uses the shared <see cref="IndexWriterRoundTripTests.CreateSampleValue"/> factory.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllDataKinds))]
+    public void WriteDataValue_RoundTrips(DataKind kind)
+    {
+        DataValue original = IndexWriterRoundTripTests.CreateSampleValue(kind);
+        AssertSingleValueRoundTrip(original);
+    }
+
+    /// <summary>
+    /// Null values of every <see cref="DataKind"/> must round-trip, preserving the kind tag.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllDataKinds))]
+    public void WriteDataValue_Null_RoundTrips(DataKind kind)
+    {
+        AssertSingleValueRoundTrip(DataValue.Null(kind));
+    }
+
+    /// <summary>
+    /// Guards against a new <see cref="DataKind"/> being added without updating the
+    /// serializer or test data. If this fails, add the new kind to
+    /// <see cref="IndexWriterRoundTripTests.CreateSampleValue"/> and the serializer.
+    /// </summary>
+    [Fact]
+    public void AllDataKinds_AreCoveredByTests()
+    {
+        HashSet<DataKind> allKinds = new(Enum.GetValues<DataKind>());
+        HashSet<DataKind> testedKinds = new(AllDataKinds().Select(args => (DataKind)args[0]));
+
+        HashSet<DataKind> missing = new(allKinds);
+        missing.ExceptWith(testedKinds);
+
+        Assert.True(missing.Count == 0,
+            $"DataKind values not covered by RowSerializer round-trip tests: {string.Join(", ", missing)}. " +
+            "Add them to CreateSampleValue and the serializer.");
+    }
+
+    public static IEnumerable<object[]> AllDataKinds() =>
+        Enum.GetValues<DataKind>().Select(k => new object[] { k });
+
     [Fact]
     public void RoundTrip_Scalar()
     {
@@ -19,6 +65,54 @@ public class RowSerializerTests
     public void RoundTrip_UInt8()
     {
         AssertSingleValueRoundTrip(DataValue.FromUInt8(255));
+    }
+
+    [Fact]
+    public void RoundTrip_Int8()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromInt8(-7));
+    }
+
+    [Fact]
+    public void RoundTrip_Int16()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromInt16(-1234));
+    }
+
+    [Fact]
+    public void RoundTrip_UInt16()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromUInt16(5678));
+    }
+
+    [Fact]
+    public void RoundTrip_Int32()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromInt32(-100_000));
+    }
+
+    [Fact]
+    public void RoundTrip_UInt32()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromUInt32(200_000));
+    }
+
+    [Fact]
+    public void RoundTrip_Int64()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromInt64(-9_000_000_000L));
+    }
+
+    [Fact]
+    public void RoundTrip_UInt64()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromUInt64(18_000_000_000UL));
+    }
+
+    [Fact]
+    public void RoundTrip_Float64()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromFloat64(2.718281828));
     }
 
     [Fact]
@@ -106,25 +200,34 @@ public class RowSerializerTests
         AssertSingleValueRoundTrip(DataValue.FromDuration(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(30)));
     }
 
-    [Theory]
-    [InlineData(DataKind.Float32)]
-    [InlineData(DataKind.UInt8)]
-    [InlineData(DataKind.String)]
-    [InlineData(DataKind.Vector)]
-    [InlineData(DataKind.Matrix)]
-    [InlineData(DataKind.Tensor)]
-    [InlineData(DataKind.UInt8Array)]
-    [InlineData(DataKind.Image)]
-    [InlineData(DataKind.Date)]
-    [InlineData(DataKind.DateTime)]
-    [InlineData(DataKind.JsonValue)]
-    [InlineData(DataKind.Uuid)]
-    [InlineData(DataKind.Boolean)]
-    [InlineData(DataKind.Time)]
-    [InlineData(DataKind.Duration)]
-    public void RoundTrip_NullValue(DataKind kind)
+    [Fact]
+    public void RoundTrip_Array()
     {
-        AssertSingleValueRoundTrip(DataValue.Null(kind));
+        AssertSingleValueRoundTrip(DataValue.FromArray(
+            DataKind.Float32, [DataValue.FromFloat32(1f), DataValue.FromFloat32(2f)]));
+    }
+
+    [Fact]
+    public void RoundTrip_Struct()
+    {
+        AssertSingleValueRoundTrip(DataValue.FromStruct(2, [DataValue.FromString("a"), DataValue.FromInt32(1)]));
+    }
+
+    [Fact]
+    public void RoundTrip_NestedArray()
+    {
+        DataValue inner = DataValue.FromArray(
+            DataKind.Int32, [DataValue.FromInt32(10), DataValue.FromInt32(20)]);
+        DataValue outer = DataValue.FromArray(DataKind.Array, [inner]);
+        AssertSingleValueRoundTrip(outer);
+    }
+
+    [Fact]
+    public void RoundTrip_NestedStruct()
+    {
+        DataValue inner = DataValue.FromStruct(1, [DataValue.FromBoolean(true)]);
+        DataValue outer = DataValue.FromStruct(2, [DataValue.FromString("x"), inner]);
+        AssertSingleValueRoundTrip(outer);
     }
 
     [Fact]
@@ -211,29 +314,11 @@ public class RowSerializerTests
     [Fact]
     public void RoundTrip_AllDataKindsTogether()
     {
-        Row original = new(
-            [
-                "float32", "uint8", "string", "vector", "matrix", "tensor",
-                "uint8array", "image", "date", "datetime", "json", "uuid",
-                "boolean", "time", "duration"
-            ],
-            [
-                DataValue.FromFloat32(42f),
-                DataValue.FromUInt8(7),
-                DataValue.FromString("test"),
-                DataValue.FromVector([1f, 2f]),
-                DataValue.FromMatrix([1f, 2f, 3f, 4f], 2, 2),
-                DataValue.FromTensor([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f], [2, 2, 2]),
-                DataValue.FromUInt8Array([0xAB, 0xCD]),
-                DataValue.FromImage([0x89, 0x50]),
-                DataValue.FromDate(new DateOnly(2026, 1, 1)),
-                DataValue.FromDateTime(new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero)),
-                DataValue.FromJsonValue("[1,2,3]"),
-                DataValue.FromUuid(Guid.Empty),
-                DataValue.FromBoolean(true),
-                DataValue.FromTime(new TimeOnly(8, 0, 0)),
-                DataValue.FromDuration(TimeSpan.FromSeconds(90)),
-            ]);
+        DataKind[] allKinds = Enum.GetValues<DataKind>();
+        string[] names = allKinds.Select(k => k.ToString()).ToArray();
+        DataValue[] values = allKinds.Select(IndexWriterRoundTripTests.CreateSampleValue).ToArray();
+
+        Row original = new(names, values);
 
         Row restored = WriteAndReadSingleRow(original);
 

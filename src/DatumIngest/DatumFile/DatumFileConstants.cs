@@ -46,7 +46,7 @@ public static class DatumFileConstants
     public const int MinimumRowGroupSize = 512;
 
     /// <summary>
-    /// When any FixedFloat32 column decompressed page would exceed this many bytes,
+    /// When any FixedFloat column decompressed page would exceed this many bytes,
     /// the writer halves the row group size for all subsequent row groups.
     /// 32 MiB keeps one float column row group comfortably within typical L3 budgets.
     /// </summary>
@@ -97,12 +97,13 @@ public enum DatumEncoding : byte
     DeltaInt64 = 3,
 
     /// <summary>
-    /// Dense packed <c>float32</c> array with a null bitmap prefix. Shape is fixed per column in the schema.
-    /// Applied to Vector, Matrix, Tensor, and Scalar columns.
+    /// Dense packed float array with a null bitmap prefix and byte-lane shuffle.
+    /// Element size (4 for Float32, 8 for Float64) is determined by the column's DataKind.
+    /// Applied to Float32, Float64, Vector, Matrix, and Tensor columns.
     /// A byte-shuffle pre-filter (BLOSC-style lane interleaving) is applied before Zstd compression.
-    /// Null rows store <c>float.NaN</c> in the array so element offsets remain implicit.
+    /// Null rows store NaN in the array so element offsets remain implicit.
     /// </summary>
-    FixedFloat32 = 4,
+    FixedFloat = 4,
 
     /// <summary>
     /// Variable-length byte sequences preceded by a <c>uint32</c> offset table of <c>N + 1</c> entries.

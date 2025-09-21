@@ -31,10 +31,7 @@ public sealed class AvgFunction : IAggregateFunction
     /// <inheritdoc/>
     public IAggregateAccumulator CreateAccumulator() => new AvgAccumulator();
 
-    private static bool IsNumericKind(DataKind kind) =>
-        kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64;
+    private static bool IsNumericKind(DataKind kind) => DataValueComparer.IsNumericScalar(kind);
 
     internal static double ExtractAsDouble(DataValue value) => value.ToDouble();
 

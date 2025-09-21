@@ -37,9 +37,7 @@ public sealed class QuarterFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        int month = input.Kind == DataKind.Date
-            ? input.AsDate().Month
-            : input.AsDateTime().Month;
+        int month = input.ToDateTimeOffset().Month;
 
         int quarter = (month - 1) / 3 + 1;
         return DataValue.FromFloat32(quarter);

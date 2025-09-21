@@ -14,7 +14,7 @@ namespace DatumIngest.DatumFile;
 /// Subsequent column accesses create independent <see cref="MemoryMappedViewStream"/> instances,
 /// enabling concurrent decode with <see cref="ReadColumnsParallel"/>.
 /// <para>
-/// Use <see cref="GetColumnMemory"/> for zero-copy access to <see cref="DatumEncoding.FixedFloat32"/>
+/// Use <see cref="GetColumnMemory"/> for zero-copy access to <see cref="DatumEncoding.FixedFloat"/>
 /// column pages, bypassing <see cref="DataValue"/> boxing entirely.
 /// </para>
 /// </remarks>
@@ -197,18 +197,18 @@ public sealed class DatumMemoryMappedReader : IDisposable
     }
 
     /// <summary>
-    /// Decodes a <see cref="DatumEncoding.FixedFloat32"/> column page into a contiguous
+    /// Decodes a <see cref="DatumEncoding.FixedFloat"/> column page into a contiguous
     /// float array without creating <see cref="DataValue"/> wrappers, providing a
     /// zero-boxing path for embedding and tensor columns.
     /// </summary>
-    /// <param name="columnIndex">Schema column index. The column must use <see cref="DatumEncoding.FixedFloat32"/>.</param>
+    /// <param name="columnIndex">Schema column index. The column must use <see cref="DatumEncoding.FixedFloat"/>.</param>
     /// <param name="rowGroupIndex">Zero-based row group index.</param>
     /// <returns>
     /// A <see cref="Memory{T}"/> of <c>float</c> containing all elements in row-major order.
     /// Null rows are represented as <see cref="float.NaN"/> blocks at their element positions.
     /// </returns>
     /// <exception cref="NotSupportedException">
-    /// Thrown when the column page does not use <see cref="DatumEncoding.FixedFloat32"/> encoding.
+    /// Thrown when the column page does not use <see cref="DatumEncoding.FixedFloat"/> encoding.
     /// </exception>
     public Memory<float> GetColumnMemory(int columnIndex, int rowGroupIndex)
     {
@@ -217,10 +217,10 @@ public sealed class DatumMemoryMappedReader : IDisposable
         DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
         DatumColumnDescriptor descriptor = _schema.Columns[columnIndex];
 
-        if (chunk.Encoding != DatumEncoding.FixedFloat32)
+        if (chunk.Encoding != DatumEncoding.FixedFloat)
         {
             throw new NotSupportedException(
-                $"GetColumnMemory requires a FixedFloat32 column page, but column '{descriptor.Name}' " +
+                $"GetColumnMemory requires a FixedFloat column page, but column '{descriptor.Name}' " +
                 $"uses {chunk.Encoding} in row group {rowGroupIndex}.");
         }
 
@@ -241,7 +241,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
             : floatBytes / (sizeof(float) * rowCount);
 
         float[] floats = new float[rowCount * elementsPerRow];
-        FloatByteShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), floats);
+        ByteLaneShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), floats);
 
         return floats.AsMemory();
     }

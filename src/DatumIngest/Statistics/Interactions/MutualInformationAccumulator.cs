@@ -233,28 +233,13 @@ public sealed class MutualInformationAccumulator
     {
         if (isNumeric)
         {
-            return value.Kind switch
-            {
-                DataKind.Float32 => value.AsFloat32(),
-                DataKind.UInt8 => (float)value.AsUInt8(),
-                _ => null
-            };
+            return value.TryToFloat(out float f) ? f : null;
         }
 
-        return value.Kind switch
-        {
-            DataKind.String => value.AsString(),
-            DataKind.JsonValue => value.AsJsonValue(),
-            DataKind.Date => value.AsDate().ToString("O"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            _ => null
-        };
+        return value.ToDisplayString();
     }
 
-    private static bool IsNumericKind(DataKind kind)
-    {
-        return kind is DataKind.Float32 or DataKind.UInt8;
-    }
+    private static bool IsNumericKind(DataKind kind) => DataValueComparer.IsNumericScalar(kind);
 }
 
 /// <summary>

@@ -132,10 +132,7 @@ public sealed class ColumnInteractionCollector
         }
     }
 
-    private static bool IsNumericKind(DataKind kind)
-    {
-        return kind is DataKind.Float32 or DataKind.UInt8;
-    }
+    private static bool IsNumericKind(DataKind kind) => DataValueComparer.IsNumericScalar(kind);
 
     private static bool IsCategoricalKind(DataKind kind)
     {

@@ -6,15 +6,15 @@ using DatumIngest.Model;
 namespace DatumIngest.DatumFile.Encoding;
 
 /// <summary>
-/// Encodes fixed-width numeric columns (Int8, Int16, UInt16, Int32, UInt32, Int64, UInt64,
-/// Float64) using <see cref="DatumEncoding.Raw"/> with Zstd compression.
+/// Encodes fixed-width integer columns (UInt8, Int8, Int16, UInt16, Int32, UInt32, Int64, UInt64)
+/// using <see cref="DatumEncoding.Raw"/> with Zstd compression.
 /// </summary>
 /// <remarks>
 /// Layout of the uncompressed payload: <c>nullBitmap[ceil(N/8)] | values[N * bytesPerElement]</c>.
 /// Null rows store zeroed bytes in the value array. The null bitmap is the authoritative
 /// source of nullability.
 /// </remarks>
-internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
+internal sealed class IntegerColumnEncoder : DatumColumnEncoder
 {
     /// <inheritdoc/>
     public override DatumEncodedPage Encode(
@@ -81,17 +81,17 @@ internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
     }
 
     /// <summary>
-    /// Returns the number of bytes per element for the given numeric <see cref="DataKind"/>.
+    /// Returns the number of bytes per element for the given integer <see cref="DataKind"/>.
     /// </summary>
     internal static int BytesPerElement(DataKind kind)
     {
         return kind switch
         {
-            DataKind.Int8 => 1,
+            DataKind.UInt8 or DataKind.Int8 => 1,
             DataKind.Int16 or DataKind.UInt16 => 2,
             DataKind.Int32 or DataKind.UInt32 => 4,
-            DataKind.Int64 or DataKind.UInt64 or DataKind.Float64 => 8,
-            _ => throw new NotSupportedException($"FixedNumericColumnEncoder does not support DataKind.{kind}.")
+            DataKind.Int64 or DataKind.UInt64 => 8,
+            _ => throw new NotSupportedException($"IntegerColumnEncoder does not support DataKind.{kind}.")
         };
     }
 
@@ -103,6 +103,10 @@ internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
     {
         switch (kind)
         {
+            case DataKind.UInt8:
+                buffer[offset] = value.AsUInt8();
+                return value.AsUInt8();
+
             case DataKind.Int8:
                 buffer[offset] = unchecked((byte)value.AsInt8());
                 return value.AsInt8();
@@ -131,12 +135,8 @@ internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
                 BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), value.AsUInt64());
                 return value.AsUInt64();
 
-            case DataKind.Float64:
-                BinaryPrimitives.WriteDoubleLittleEndian(buffer.AsSpan(offset), value.AsFloat64());
-                return value.AsFloat64();
-
             default:
-                throw new NotSupportedException($"FixedNumericColumnEncoder does not support DataKind.{kind}.");
+                throw new NotSupportedException($"IntegerColumnEncoder does not support DataKind.{kind}.");
         }
     }
 
@@ -156,6 +156,7 @@ internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
     {
         return kind switch
         {
+            DataKind.UInt8 => DataValue.FromUInt8((byte)value),
             DataKind.Int8 => DataValue.FromInt8((sbyte)value),
             DataKind.Int16 => DataValue.FromInt16((short)value),
             DataKind.UInt16 => DataValue.FromUInt16((ushort)value),
@@ -163,8 +164,7 @@ internal sealed class FixedNumericColumnEncoder : DatumColumnEncoder
             DataKind.UInt32 => DataValue.FromUInt32((uint)value),
             DataKind.Int64 => DataValue.FromInt64((long)value),
             DataKind.UInt64 => DataValue.FromUInt64((ulong)value),
-            DataKind.Float64 => DataValue.FromFloat64(value),
-            _ => throw new NotSupportedException($"FixedNumericColumnEncoder does not support DataKind.{kind}.")
+            _ => throw new NotSupportedException($"IntegerColumnEncoder does not support DataKind.{kind}.")
         };
     }
 }

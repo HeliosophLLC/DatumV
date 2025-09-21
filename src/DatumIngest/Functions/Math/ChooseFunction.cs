@@ -19,7 +19,7 @@ public sealed class ChooseFunction : IScalarFunction
             throw new ArgumentException("choose() requires at least 2 arguments: index and one or more values.");
         }
 
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[0]))
         {
             throw new ArgumentException(
                 $"choose() first argument (index) must be numeric, got {argumentKinds[0]}.");
@@ -47,9 +47,7 @@ public sealed class ChooseFunction : IScalarFunction
             return DataValue.Null(arguments[1].Kind);
         }
 
-        int index = (int)(indexArgument.Kind is DataKind.UInt8
-            ? indexArgument.AsUInt8()
-            : indexArgument.AsFloat32());
+        int index = indexArgument.ToInt32();
 
         // 1-based: valid range is [1, arguments.Length - 1].
         if (index < 1 || index > arguments.Length - 1)

@@ -36,9 +36,7 @@ public sealed class DayOfYearFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        int dayOfYear = input.Kind == DataKind.Date
-            ? input.AsDate().DayOfYear
-            : input.AsDateTime().DayOfYear;
+        int dayOfYear = input.ToDateTimeOffset().DayOfYear;
 
         return DataValue.FromFloat32(dayOfYear);
     }

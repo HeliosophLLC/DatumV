@@ -1170,6 +1170,6 @@ public class ArrayFunctionTests
     {
         ArrayAvgFunction function = new();
         Assert.Throws<ArgumentException>(() =>
-            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.Boolean]));
+            function.ValidateArgumentsWithElementKinds([DataKind.Array], [DataKind.String]));
     }
 }

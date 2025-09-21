@@ -104,13 +104,13 @@ public sealed class CramerVAccumulator
 
     internal static string? ToCategorical(DataValue value)
     {
-        return value.Kind switch
-        {
-            DataKind.String => value.AsString(),
-            DataKind.JsonValue => value.AsJsonValue(),
-            DataKind.Date => value.AsDate().ToString("O"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            _ => null
-        };
+        // Numeric and composite kinds are not meaningful as categorical keys.
+        if (DataValueComparer.IsNumericScalar(value.Kind))
+            return null;
+        if (value.Kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor
+            or DataKind.UInt8Array or DataKind.Image or DataKind.Array or DataKind.Struct)
+            return null;
+
+        return value.ToDisplayString();
     }
 }

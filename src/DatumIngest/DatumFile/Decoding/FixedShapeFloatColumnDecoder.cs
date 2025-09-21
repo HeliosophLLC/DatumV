@@ -31,7 +31,7 @@ internal sealed class FixedShapeFloatColumnDecoder : DatumColumnDecoder
         int elementsPerRow = ResolveElementsPerRow(descriptor, raw, bitmapByteCount, rowCount);
 
         float[] allFloats = new float[rowCount * elementsPerRow];
-        FloatByteShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), allFloats);
+        ByteLaneShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), allFloats);
 
         DataValue[] result = new DataValue[rowCount];
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
@@ -69,7 +69,7 @@ internal sealed class FixedShapeFloatColumnDecoder : DatumColumnDecoder
         int elementsPerRow = ResolveElementsPerRow(descriptor, raw, bitmapByteCount, rowCount);
 
         float[] allFloats = new float[rowCount * elementsPerRow];
-        FloatByteShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), allFloats);
+        ByteLaneShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), allFloats);
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {

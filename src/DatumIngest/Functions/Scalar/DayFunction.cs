@@ -37,9 +37,7 @@ public sealed class DayFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        int day = input.Kind == DataKind.Date
-            ? input.AsDate().Day
-            : input.AsDateTime().Day;
+        int day = input.ToDateTimeOffset().Day;
 
         return DataValue.FromFloat32(day);
     }

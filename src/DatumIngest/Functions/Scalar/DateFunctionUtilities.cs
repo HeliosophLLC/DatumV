@@ -11,12 +11,8 @@ internal static class DateFunctionUtilities
     /// Extracts a <see cref="DateTimeOffset"/> from a Date or DateTime <see cref="DataValue"/>.
     /// Date values are converted to midnight UTC.
     /// </summary>
-    internal static DateTimeOffset ToDateTimeOffset(DataValue value)
-    {
-        return value.Kind == DataKind.Date
-            ? new DateTimeOffset(value.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
-            : value.AsDateTime();
-    }
+    internal static DateTimeOffset ToDateTimeOffset(DataValue value) =>
+        value.ToDateTimeOffset();
 
     /// <summary>
     /// Wraps a <see cref="DateTimeOffset"/> result back into the appropriate <see cref="DataValue"/>

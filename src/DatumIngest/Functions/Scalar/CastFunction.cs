@@ -231,16 +231,7 @@ public sealed class CastFunction : IScalarFunction
             $"Cannot convert string '{value}' to Boolean. Expected 'true', 'false', '1', or '0'.");
     }
 
-    /// <summary>
-    /// Returns true when <paramref name="kind"/> is one of the ten numeric DataKinds:
-    /// Int8, Int16, UInt16, Int32, UInt32, Int64, UInt64, Float32, Float64, UInt8.
-    /// </summary>
-    private static bool IsNumericKind(DataKind kind)
-    {
-        return kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64 or DataKind.UInt8;
-    }
+    private static bool IsNumericKind(DataKind kind) => DataValueComparer.IsNumericScalar(kind);
 
     private static bool TryExtractAsDouble(DataValue value, out double result) =>
         value.TryToDouble(out result);

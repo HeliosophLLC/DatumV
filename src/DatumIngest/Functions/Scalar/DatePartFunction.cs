@@ -52,9 +52,7 @@ public sealed class DatePartFunction : IScalarFunction
         string partName = partValue.AsString();
 
         // Normalize to a DateTime for uniform extraction.
-        DateTime dateTime = input.Kind == DataKind.Date
-            ? input.AsDate().ToDateTime(TimeOnly.MinValue)
-            : input.AsDateTime().DateTime;
+        DateTime dateTime = input.ToDateTimeOffset().DateTime;
 
         float result = partName.ToLowerInvariant() switch
         {

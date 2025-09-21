@@ -44,19 +44,9 @@ public sealed class DateSpanFunction : IScalarFunction
             return DataValue.Null(DataKind.Duration);
         }
 
-        DateTimeOffset startDateTime = ToDateTimeOffset(start);
-        DateTimeOffset endDateTime = ToDateTimeOffset(end);
+        DateTimeOffset startDateTime = start.ToDateTimeOffset();
+        DateTimeOffset endDateTime = end.ToDateTimeOffset();
 
         return DataValue.FromDuration(endDateTime - startDateTime);
-    }
-
-    private static DateTimeOffset ToDateTimeOffset(DataValue value)
-    {
-        if (value.Kind == DataKind.Date)
-        {
-            return new DateTimeOffset(value.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        }
-
-        return value.AsDateTime();
     }
 }

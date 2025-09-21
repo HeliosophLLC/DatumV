@@ -21,11 +21,7 @@ public sealed class MaxFunction : IAggregateFunction
         }
 
         DataKind kind = argumentKinds[0];
-        bool isComparable = kind is DataKind.Int8 or DataKind.Int16 or DataKind.UInt8 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Float32 or DataKind.Float64
-            or DataKind.String or DataKind.Date or DataKind.DateTime or DataKind.Time;
-        if (!isComparable)
+        if (!DataValueComparer.IsComparable(kind))
         {
             throw new ArgumentException($"MAX() requires a comparable argument, got {kind}.");
         }
@@ -81,26 +77,7 @@ public sealed class MaxFunction : IAggregateFunction
             _inputKind = DataKind.Float64;
         }
 
-        private static int CompareValues(DataValue left, DataValue right)
-        {
-            return left.Kind switch
-            {
-                DataKind.Int8 => left.AsInt8().CompareTo(right.AsInt8()),
-                DataKind.Int16 => left.AsInt16().CompareTo(right.AsInt16()),
-                DataKind.UInt8 => left.AsUInt8().CompareTo(right.AsUInt8()),
-                DataKind.UInt16 => left.AsUInt16().CompareTo(right.AsUInt16()),
-                DataKind.Int32 => left.AsInt32().CompareTo(right.AsInt32()),
-                DataKind.UInt32 => left.AsUInt32().CompareTo(right.AsUInt32()),
-                DataKind.Int64 => left.AsInt64().CompareTo(right.AsInt64()),
-                DataKind.UInt64 => left.AsUInt64().CompareTo(right.AsUInt64()),
-                DataKind.Float32 => left.AsFloat32().CompareTo(right.AsFloat32()),
-                DataKind.Float64 => left.AsFloat64().CompareTo(right.AsFloat64()),
-                DataKind.String => string.Compare(left.AsString(), right.AsString(), StringComparison.Ordinal),
-                DataKind.Date => left.AsDate().CompareTo(right.AsDate()),
-                DataKind.DateTime => left.AsDateTime().CompareTo(right.AsDateTime()),
-                DataKind.Time => left.AsTime().CompareTo(right.AsTime()),
-                _ => 0,
-            };
-        }
+        private static int CompareValues(DataValue left, DataValue right) =>
+            DataValueComparer.Compare(left, right);
     }
 }

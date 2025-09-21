@@ -1465,37 +1465,7 @@ static void PrintRow(Row row)
     Console.WriteLine(string.Join("\t", values));
 }
 
-static string FormatValue(DataValue value)
-{
-    return value.Kind switch
-    {
-        DataKind.Float32 => value.AsFloat32().ToString("G"),
-        DataKind.UInt8 => value.AsUInt8().ToString(),
-        DataKind.String => value.AsString(),
-        DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
-        DataKind.DateTime => value.AsDateTime().ToString("O"),
-        DataKind.JsonValue => value.AsJsonValue(),
-        DataKind.Vector => $"[{string.Join(", ", value.AsVector().Select(v => v.ToString("G")))}]",
-        DataKind.Matrix => $"Matrix[{FormatMatrixShape(value)}]",
-        DataKind.Tensor => $"Tensor[{FormatTensorShape(value)}]",
-        DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
-        DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
-        DataKind.Struct => $"{{{string.Join(", ", value.AsStruct().Select((v, i) => $"f{i}: {(v.IsNull ? "NULL" : v.ToString())}"))}}}",
-        _ => value.ToString() ?? ""
-    };
-}
-
-static string FormatMatrixShape(DataValue value)
-{
-    value.AsMatrix(out int rows, out int columns);
-    return $"{rows}x{columns}";
-}
-
-static string FormatTensorShape(DataValue value)
-{
-    value.AsTensor(out int[] shape);
-    return string.Join("x", shape);
-}
+static string FormatValue(DataValue value) => value.ToDisplayString();
 
 static string FormatStatResult(StatisticResult result)
 {

@@ -6,14 +6,14 @@ using DatumIngest.Model;
 namespace DatumIngest.DatumFile.Decoding;
 
 /// <summary>
-/// Decodes fixed-width numeric column pages (Int8, Int16, UInt16, Int32, UInt32, Int64,
-/// UInt64, Float64) produced by <see cref="FixedNumericColumnEncoder"/>.
+/// Decodes fixed-width integer column pages (UInt8, Int8, Int16, UInt16, Int32, UInt32, Int64,
+/// UInt64) produced by <see cref="IntegerColumnEncoder"/>.
 /// </summary>
 /// <remarks>
 /// Uncompressed layout: <c>nullBitmap[ceil(N/8)] | values[N * bytesPerElement]</c>.
 /// The stored zeroed bytes for null rows are never exposed to callers.
 /// </remarks>
-internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
+internal sealed class IntegerColumnDecoder : DatumColumnDecoder
 {
     /// <inheritdoc/>
     public override DataValue[] Decode(
@@ -28,7 +28,7 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
-        int bytesPerElement = FixedNumericColumnEncoder.BytesPerElement(descriptor.Kind);
+        int bytesPerElement = IntegerColumnEncoder.BytesPerElement(descriptor.Kind);
 
         DataValue[] result = new DataValue[rowCount];
 
@@ -74,7 +74,7 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
         }
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
-        int bytesPerElement = FixedNumericColumnEncoder.BytesPerElement(descriptor.Kind);
+        int bytesPerElement = IntegerColumnEncoder.BytesPerElement(descriptor.Kind);
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
@@ -106,7 +106,7 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
-        int bytesPerElement = FixedNumericColumnEncoder.BytesPerElement(descriptor.Kind);
+        int bytesPerElement = IntegerColumnEncoder.BytesPerElement(descriptor.Kind);
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
@@ -126,6 +126,7 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
     {
         return kind switch
         {
+            DataKind.UInt8 => DataValue.FromUInt8(buffer[offset]),
             DataKind.Int8 => DataValue.FromInt8(unchecked((sbyte)buffer[offset])),
             DataKind.Int16 => DataValue.FromInt16(BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset))),
             DataKind.UInt16 => DataValue.FromUInt16(BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset))),
@@ -133,8 +134,7 @@ internal sealed class FixedNumericColumnDecoder : DatumColumnDecoder
             DataKind.UInt32 => DataValue.FromUInt32(BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(offset))),
             DataKind.Int64 => DataValue.FromInt64(BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset))),
             DataKind.UInt64 => DataValue.FromUInt64(BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset))),
-            DataKind.Float64 => DataValue.FromFloat64(BinaryPrimitives.ReadDoubleLittleEndian(buffer.AsSpan(offset))),
-            _ => throw new NotSupportedException($"FixedNumericColumnDecoder does not support DataKind.{kind}.")
+            _ => throw new NotSupportedException($"IntegerColumnDecoder does not support DataKind.{kind}.")
         };
     }
 }

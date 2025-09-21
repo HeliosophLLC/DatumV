@@ -127,32 +127,19 @@ public sealed class CsvOutputWriter : IOutputWriter
             return "";
         }
 
-        return value.Kind switch
-        {
-            DataKind.Float32 => value.AsFloat32().ToString("G"),
-            DataKind.Float64 => value.AsFloat64().ToString("G"),
-            DataKind.UInt8 => value.AsUInt8().ToString(),
-            DataKind.Int8 => value.AsInt8().ToString(),
-            DataKind.Int16 => value.AsInt16().ToString(),
-            DataKind.UInt16 => value.AsUInt16().ToString(),
-            DataKind.Int32 => value.AsInt32().ToString(),
-            DataKind.UInt32 => value.AsUInt32().ToString(),
-            DataKind.Int64 => value.AsInt64().ToString(),
-            DataKind.UInt64 => value.AsUInt64().ToString(),
-            DataKind.String => value.AsString(),
-            DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            DataKind.JsonValue => value.AsJsonValue(),
-            DataKind.Vector => FormatVector(value.AsVector()),
-            DataKind.Uuid => value.AsUuid().ToString("D"),
-            DataKind.Boolean => value.AsBoolean() ? "true" : "false",
-            DataKind.Time => value.AsTime().ToString("HH:mm:ss"),
-            DataKind.Duration => value.AsDuration().ToString("c"),
-            DataKind.Array => FormatArray(value),
-            DataKind.Struct => FormatStruct(value),
-            _ => value.ToString() ?? ""
-        };
+        return value.ToDisplayString(CsvConverter);
     }
+
+    private static (bool, string?) CsvConverter(DataValue value) => value.Kind switch
+    {
+        // CSV uses compact JSON-style formatting for composite types.
+        DataKind.Vector => (true, FormatVector(value.AsVector())),
+        DataKind.Array  => (true, FormatJsonElements(value.AsArray())),
+        DataKind.Struct => (true, FormatJsonElements(value.AsStruct())),
+        // CSV Time omits sub-second fractions for cleaner output.
+        DataKind.Time   => (true, value.AsTime().ToString("HH:mm:ss")),
+        _ => (false, null),
+    };
 
     /// <summary>
     /// Formats a float vector as a bracketed comma-separated list without LINQ.
@@ -176,11 +163,11 @@ public sealed class CsvOutputWriter : IOutputWriter
     }
 
     /// <summary>
-    /// Formats a <see cref="DataKind.Array"/> value as a JSON array string.
+    /// Formats an array of <see cref="DataValue"/> as a JSON-style array with
+    /// quoting for string-like types.
     /// </summary>
-    private static string FormatArray(DataValue value)
+    private static string FormatJsonElements(DataValue[] elements)
     {
-        DataValue[] elements = value.AsArray();
         System.Text.StringBuilder builder = new();
         builder.Append('[');
         for (int index = 0; index < elements.Length; index++)
@@ -199,50 +186,12 @@ public sealed class CsvOutputWriter : IOutputWriter
                 or DataKind.Time or DataKind.Uuid or DataKind.Duration)
             {
                 builder.Append('"');
-                builder.Append(element.ToString()!.Replace("\"", "\\\""));
+                builder.Append(element.ToDisplayString().Replace("\"", "\\\""));
                 builder.Append('"');
             }
             else
             {
-                builder.Append(element.ToString());
-            }
-        }
-
-        builder.Append(']');
-        return builder.ToString();
-    }
-
-    /// <summary>
-    /// Formats a <see cref="DataKind.Struct"/> value as a positional JSON array string.
-    /// Field names are not included because they live in the column schema, not the value.
-    /// </summary>
-    private static string FormatStruct(DataValue value)
-    {
-        DataValue[] fields = value.AsStruct();
-        System.Text.StringBuilder builder = new();
-        builder.Append('[');
-        for (int index = 0; index < fields.Length; index++)
-        {
-            if (index > 0)
-            {
-                builder.Append(',');
-            }
-
-            DataValue field = fields[index];
-            if (field.IsNull)
-            {
-                builder.Append("null");
-            }
-            else if (field.Kind is DataKind.String or DataKind.Date or DataKind.DateTime
-                or DataKind.Time or DataKind.Uuid or DataKind.Duration)
-            {
-                builder.Append('"');
-                builder.Append(field.ToString()!.Replace("\"", "\\\""));
-                builder.Append('"');
-            }
-            else
-            {
-                builder.Append(field.ToString());
+                builder.Append(element.ToDisplayString());
             }
         }
 

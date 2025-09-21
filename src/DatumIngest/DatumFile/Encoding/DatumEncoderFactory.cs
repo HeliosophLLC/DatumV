@@ -14,9 +14,8 @@ namespace DatumIngest.DatumFile.Encoding;
 /// </remarks>
 public static class DatumEncoderFactory
 {
-    private static readonly ScalarColumnEncoder ScalarEncoder = new();
-    private static readonly UInt8ColumnEncoder UInt8Encoder = new();
-    private static readonly FixedNumericColumnEncoder FixedNumericEncoder = new();
+    private static readonly FloatColumnEncoder FloatScalarEncoder = new();
+    private static readonly IntegerColumnEncoder IntegerEncoder = new();
     private static readonly BooleanColumnEncoder BooleanEncoder = new();
     private static readonly DateColumnEncoder DateEncoder = new();
     private static readonly DateTimeColumnEncoder DateTimeEncoder = new();
@@ -49,16 +48,16 @@ public static class DatumEncoderFactory
 
         return descriptor.Kind switch
         {
-            DataKind.Float32 => ScalarEncoder,
-            DataKind.UInt8 => UInt8Encoder,
-            DataKind.Int8 => FixedNumericEncoder,
-            DataKind.Int16 => FixedNumericEncoder,
-            DataKind.UInt16 => FixedNumericEncoder,
-            DataKind.Int32 => FixedNumericEncoder,
-            DataKind.UInt32 => FixedNumericEncoder,
-            DataKind.Int64 => FixedNumericEncoder,
-            DataKind.UInt64 => FixedNumericEncoder,
-            DataKind.Float64 => FixedNumericEncoder,
+            DataKind.Float32 => FloatScalarEncoder,
+            DataKind.Float64 => FloatScalarEncoder,
+            DataKind.UInt8 => IntegerEncoder,
+            DataKind.Int8 => IntegerEncoder,
+            DataKind.Int16 => IntegerEncoder,
+            DataKind.UInt16 => IntegerEncoder,
+            DataKind.Int32 => IntegerEncoder,
+            DataKind.UInt32 => IntegerEncoder,
+            DataKind.Int64 => IntegerEncoder,
+            DataKind.UInt64 => IntegerEncoder,
             DataKind.Boolean => BooleanEncoder,
             DataKind.Date => DateEncoder,
             DataKind.DateTime => DateTimeEncoder,

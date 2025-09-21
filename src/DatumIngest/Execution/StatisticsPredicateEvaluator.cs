@@ -345,34 +345,6 @@ public static class StatisticsPredicateEvaluator
 
 
 
-    /// <summary>
-    /// Compares two <see cref="DataValue"/> instances using the same semantics
-    /// as <see cref="ExpressionEvaluator"/>: ordinal for strings, CompareTo for
-    /// dates, float coercion for numerics.
-    /// </summary>
-    internal static int CompareValues(DataValue left, DataValue right)
-    {
-        if (left.Kind == DataKind.String && right.Kind == DataKind.String)
-        {
-            return string.Compare(left.AsString(), right.AsString(), StringComparison.Ordinal);
-        }
-
-        if (left.Kind == DataKind.Date && right.Kind == DataKind.Date)
-        {
-            return left.AsDate().CompareTo(right.AsDate());
-        }
-
-        if (left.Kind == DataKind.DateTime && right.Kind == DataKind.DateTime)
-        {
-            return left.AsDateTime().CompareTo(right.AsDateTime());
-        }
-
-        // Numeric comparison via double coercion.
-        double leftDouble = ToDouble(left);
-        double rightDouble = ToDouble(right);
-        return leftDouble.CompareTo(rightDouble);
-    }
-
-    private static double ToDouble(DataValue value) =>
-        value.TryToDouble(out double d) ? d : 0.0;
+    internal static int CompareValues(DataValue left, DataValue right) =>
+        DataValueComparer.Compare(left, right);
 }

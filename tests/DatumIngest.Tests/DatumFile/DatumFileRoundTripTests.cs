@@ -60,6 +60,36 @@ public sealed class DatumFileRoundTripTests : IAsyncLifetime
         Assert.Equal(3f, columns[0][2].AsFloat32(), 0.0001f);
     }
 
+    // ──────────────────── Float64 ────────────────────
+
+    [Fact]
+    public async Task RoundTrip_Float64()
+    {
+        double[] expected = [1.0, -99.5, 0.0, double.MaxValue, 2.718281828];
+        DataValue[][] columns = await WriteAndRead("float64.datum",
+            [new ColumnInfo("v", DataKind.Float64, false)],
+            expected.Select(v => Row("v", DataValue.FromFloat64(v))));
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Assert.Equal(expected[i], columns[0][i].AsFloat64());
+        }
+    }
+
+    [Fact]
+    public async Task RoundTrip_Float64_WithNulls()
+    {
+        DataValue[] input = [DataValue.FromFloat64(1.0), DataValue.Null(DataKind.Float64), DataValue.FromFloat64(3.0)];
+        DataValue[][] columns = await WriteAndRead("float64_null.datum",
+            [new ColumnInfo("v", DataKind.Float64, nullable: true)],
+            input.Select(v => Row("v", v)));
+
+        Assert.Equal(1.0, columns[0][0].AsFloat64());
+        Assert.True(columns[0][1].IsNull);
+        Assert.Equal(DataKind.Float64, columns[0][1].Kind);
+        Assert.Equal(3.0, columns[0][2].AsFloat64());
+    }
+
     // ──────────────────── UInt8 ────────────────────
 
     [Fact]

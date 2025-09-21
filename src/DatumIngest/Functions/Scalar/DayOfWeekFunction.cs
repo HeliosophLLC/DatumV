@@ -37,9 +37,7 @@ public sealed class DayOfWeekFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        DayOfWeek dotnetDayOfWeek = input.Kind == DataKind.Date
-            ? input.AsDate().DayOfWeek
-            : input.AsDateTime().DayOfWeek;
+        DayOfWeek dotnetDayOfWeek = input.ToDateTimeOffset().DayOfWeek;
 
         // Convert from .NET convention (0=Sunday) to ISO 8601 (1=Monday, 7=Sunday).
         int isoDayOfWeek = dotnetDayOfWeek == System.DayOfWeek.Sunday ? 7 : (int)dotnetDayOfWeek;

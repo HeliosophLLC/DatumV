@@ -302,7 +302,7 @@ public sealed class DatumFileWriter : IDisposable
     {
         for (int columnIndex = 0; columnIndex < chunks.Length; columnIndex++)
         {
-            if (chunks[columnIndex].Encoding == DatumEncoding.FixedFloat32 &&
+            if (chunks[columnIndex].Encoding == DatumEncoding.FixedFloat &&
                 chunks[columnIndex].UncompressedByteLength > DatumFileConstants.LargePageAutoTuneThresholdBytes)
             {
                 _rowGroupSize = Math.Max(DatumFileConstants.MinimumRowGroupSize, _rowGroupSize / 2);

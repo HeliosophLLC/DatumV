@@ -6,7 +6,7 @@ namespace DatumIngest.DatumFile.Encoding;
 
 /// <summary>
 /// Encodes <see cref="DataKind.Vector"/>, <see cref="DataKind.Matrix"/>, and
-/// <see cref="DataKind.Tensor"/> column pages using <see cref="DatumEncoding.FixedFloat32"/>
+/// <see cref="DataKind.Tensor"/> column pages using <see cref="DatumEncoding.FixedFloat"/>
 /// with a byte-shuffle pre-filter and Zstd compression.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace DatumIngest.DatumFile.Encoding;
 /// <c>nullBitmap[ceil(N/8)] | float32[N * elementsPerRow]</c>.
 /// Null rows occupy <c>elementsPerRow</c> consecutive <c>float.NaN</c> values in the array,
 /// maintaining implicit positional indexing. The entire float block is passed through
-/// <see cref="FloatByteShuffle.Shuffle"/> before Zstd compression.
+/// <see cref="ByteLaneShuffle.Shuffle(ReadOnlySpan{float}, Span{byte})"/> before Zstd compression.
 /// </para>
 /// </remarks>
 internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
@@ -79,13 +79,13 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
             DatumZoneMap zoneMap = BuildZoneMap(nullCount, rowCount, minimum, maximum);
 
             Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
-            FloatByteShuffle.Shuffle(
+            ByteLaneShuffle.Shuffle(
                 floatData.AsSpan(0, totalFloats),
                 raw.AsSpan(bitmapLength, shuffledLength));
 
             byte[] compressed = DatumCompressor.Compress(raw.AsSpan(0, rawLength), DatumCompression.Zstd);
 
-            return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat32, DatumCompression.Zstd, rawLength, zoneMap);
+            return new DatumEncodedPage(compressed, DatumEncoding.FixedFloat, DatumCompression.Zstd, rawLength, zoneMap);
         }
         finally
         {

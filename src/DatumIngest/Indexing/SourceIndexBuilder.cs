@@ -1272,14 +1272,8 @@ public sealed class SourceIndexBuilder
                 or DataKind.String or DataKind.Date or DataKind.DateTime;
         }
 
-        /// <summary>
-        /// Reuses the same comparison semantics as
-        /// <see cref="StatisticsPredicateEvaluator.CompareValues"/>.
-        /// </summary>
-        private static int CompareValues(DataValue left, DataValue right)
-        {
-            return StatisticsPredicateEvaluator.CompareValues(left, right);
-        }
+        private static int CompareValues(DataValue left, DataValue right) =>
+            DataValueComparer.Compare(left, right);
     }
 }
 

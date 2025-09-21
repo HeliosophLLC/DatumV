@@ -37,9 +37,7 @@ public sealed class MonthFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        int month = input.Kind == DataKind.Date
-            ? input.AsDate().Month
-            : input.AsDateTime().Month;
+        int month = input.ToDateTimeOffset().Month;
 
         return DataValue.FromFloat32(month);
     }

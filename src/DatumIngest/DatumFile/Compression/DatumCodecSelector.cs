@@ -17,7 +17,8 @@ public static class DatumCodecSelector
     {
         return kind switch
         {
-            DataKind.Float32 => DatumEncoding.FixedFloat32,
+            DataKind.Float32 => DatumEncoding.FixedFloat,
+            DataKind.Float64 => DatumEncoding.FixedFloat,
             DataKind.UInt8 => DatumEncoding.Raw,
             DataKind.Int8 => DatumEncoding.Raw,
             DataKind.Int16 => DatumEncoding.Raw,
@@ -26,7 +27,6 @@ public static class DatumCodecSelector
             DataKind.UInt32 => DatumEncoding.Raw,
             DataKind.Int64 => DatumEncoding.Raw,
             DataKind.UInt64 => DatumEncoding.Raw,
-            DataKind.Float64 => DatumEncoding.Raw,
             DataKind.Boolean => DatumEncoding.BitPacked,
             DataKind.Date => DatumEncoding.DeltaInt32,
             DataKind.DateTime => DatumEncoding.DeltaInt64,
@@ -37,9 +37,9 @@ public static class DatumCodecSelector
             DataKind.JsonValue => DatumEncoding.VariableBytes,
             DataKind.UInt8Array => DatumEncoding.VariableBytes,
             DataKind.Image => DatumEncoding.VariableBytes,
-            DataKind.Vector => DatumEncoding.FixedFloat32,
-            DataKind.Matrix => DatumEncoding.FixedFloat32,
-            DataKind.Tensor => DatumEncoding.FixedFloat32,
+            DataKind.Vector => DatumEncoding.FixedFloat,
+            DataKind.Matrix => DatumEncoding.FixedFloat,
+            DataKind.Tensor => DatumEncoding.FixedFloat,
             DataKind.Array => DatumEncoding.VariableDataValue,
             DataKind.Struct => DatumEncoding.VariableDataValue,
             _ => throw new NotSupportedException($"No canonical encoding defined for DataKind.{kind}."),
@@ -64,20 +64,20 @@ public static class DatumCodecSelector
 
     /// <summary>
     /// Returns <c>true</c> if a byte-shuffle pre-filter should be applied before compression
-    /// for the given <paramref name="kind"/>. The shuffle re-orders the four byte lanes of
-    /// each <c>float32</c> to improve Zstd compression ratios on correlated float data.
+    /// for the given <paramref name="kind"/>. The shuffle re-orders byte lanes to improve
+    /// Zstd compression ratios on correlated float data.
     /// </summary>
     public static bool NeedsFloatShuffle(DataKind kind)
     {
-        return kind is DataKind.Float32 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
+        return kind is DataKind.Float32 or DataKind.Float64 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
     }
 
     /// <summary>
-    /// Returns <c>true</c> if the given kind stores values as a dense block of <c>float32</c> elements
-    /// (i.e., uses <see cref="DatumEncoding.FixedFloat32"/>).
+    /// Returns <c>true</c> if the given kind stores values as a dense block of float elements
+    /// (i.e., uses <see cref="DatumEncoding.FixedFloat"/>).
     /// </summary>
     public static bool IsFixedFloat(DataKind kind)
     {
-        return kind is DataKind.Float32 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
+        return kind is DataKind.Float32 or DataKind.Float64 or DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
     }
 }

@@ -54,15 +54,7 @@ public sealed class DateOffsetFunction : IScalarFunction
             return DataValue.FromTime(resultTime);
         }
 
-        DateTimeOffset baseDateTime;
-        if (dateValue.Kind == DataKind.Date)
-        {
-            baseDateTime = new DateTimeOffset(dateValue.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        }
-        else
-        {
-            baseDateTime = dateValue.AsDateTime();
-        }
+        DateTimeOffset baseDateTime = dateValue.ToDateTimeOffset();
 
         return DataValue.FromDateTime(baseDateTime + duration);
     }

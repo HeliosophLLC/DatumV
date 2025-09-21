@@ -1,18 +1,20 @@
+using System.Buffers.Binary;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile.Decoding;
 
 /// <summary>
-/// Decodes a <see cref="DataKind.Float32"/> column page produced by <c>ScalarColumnEncoder</c>.
+/// Decodes <see cref="DataKind.Float32"/> and <see cref="DataKind.Float64"/> scalar column pages
+/// produced by <c>FloatColumnEncoder</c>.
 /// </summary>
 /// <remarks>
-/// Uncompressed layout: <c>nullBitmap[ceil(N/8)] | shuffledFloat32[N*4]</c>.
-/// The byte-shuffle pre-filter applied before compression is undone by
-/// <see cref="FloatByteShuffle.Unshuffle"/> before values are converted to
-/// <see cref="DataValue"/> instances.
+/// Uncompressed layout: <c>nullBitmap[ceil(N/8)] | shuffledValues[N * bytesPerElement]</c>.
+/// The byte-lane shuffle applied before compression is reversed by
+/// <see cref="ByteLaneShuffle.Unshuffle(ReadOnlySpan{byte}, Span{byte}, int)"/> before values
+/// are converted to <see cref="DataValue"/> instances.
 /// </remarks>
-internal sealed class ScalarColumnDecoder : DatumColumnDecoder
+internal sealed class FloatColumnDecoder : DatumColumnDecoder
 {
     /// <inheritdoc/>
     public override DataValue[] Decode(
@@ -25,7 +27,7 @@ internal sealed class ScalarColumnDecoder : DatumColumnDecoder
         DatumDecoderContext context)
     {
         DataValue[] result = new DataValue[rowCount];
-        DecodeCore(payload, payload.Length, compression, uncompressedByteLength, rowCount, result, decompressedBuffer: null);
+        DecodeCore(payload, payload.Length, compression, uncompressedByteLength, rowCount, descriptor.Kind, result, decompressedBuffer: null);
         return result;
     }
 
@@ -43,7 +45,7 @@ internal sealed class ScalarColumnDecoder : DatumColumnDecoder
         byte[]? decompressedBuffer = null)
     {
         int effectiveLength = payloadLength >= 0 ? payloadLength : payload.Length;
-        DecodeCore(payload, effectiveLength, compression, uncompressedByteLength, rowCount, target, decompressedBuffer);
+        DecodeCore(payload, effectiveLength, compression, uncompressedByteLength, rowCount, descriptor.Kind, target, decompressedBuffer);
     }
 
     private void DecodeCore(
@@ -52,6 +54,7 @@ internal sealed class ScalarColumnDecoder : DatumColumnDecoder
         DatumCompression compression,
         int uncompressedByteLength,
         int rowCount,
+        DataKind kind,
         DataValue[] target,
         byte[]? decompressedBuffer)
     {
@@ -69,14 +72,13 @@ internal sealed class ScalarColumnDecoder : DatumColumnDecoder
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
 
-        float[] floats = new float[rowCount];
-        FloatByteShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), floats);
-
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        if (kind == DataKind.Float64)
         {
-            target[rowIndex] = nullBitmap.IsNull(rowIndex)
-                ? DataValue.Null(DataKind.Float32)
-                : DataValue.FromFloat32(floats[rowIndex]);
+            DecodeFloat64(raw, bitmapByteCount, rowCount, nullBitmap, target);
+        }
+        else
+        {
+            DecodeFloat32(raw, bitmapByteCount, rowCount, nullBitmap, target);
         }
     }
 
@@ -97,14 +99,49 @@ internal sealed class ScalarColumnDecoder : DatumColumnDecoder
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
         DatumNullBitmap nullBitmap = ReadNullBitmap(raw, rowCount);
 
+        if (descriptor.Kind == DataKind.Float64)
+        {
+            DecodeFloat64(raw, bitmapByteCount, rowCount, nullBitmap, target);
+        }
+        else
+        {
+            DecodeFloat32(raw, bitmapByteCount, rowCount, nullBitmap, target);
+        }
+    }
+
+    private static void DecodeFloat32(byte[] raw, int bitmapByteCount, int rowCount, DatumNullBitmap nullBitmap, DataValue[] target)
+    {
         float[] floats = new float[rowCount];
-        FloatByteShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), floats);
+        ByteLaneShuffle.Unshuffle(raw.AsSpan(bitmapByteCount), floats);
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
             target[rowIndex] = nullBitmap.IsNull(rowIndex)
                 ? DataValue.Null(DataKind.Float32)
                 : DataValue.FromFloat32(floats[rowIndex]);
+        }
+    }
+
+    private static void DecodeFloat64(byte[] raw, int bitmapByteCount, int rowCount, DatumNullBitmap nullBitmap, DataValue[] target)
+    {
+        int dataLength = rowCount * sizeof(double);
+        byte[] unshuffled = new byte[dataLength];
+        ByteLaneShuffle.Unshuffle(
+            raw.AsSpan(bitmapByteCount, dataLength),
+            unshuffled,
+            sizeof(double));
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            if (nullBitmap.IsNull(rowIndex))
+            {
+                target[rowIndex] = DataValue.Null(DataKind.Float64);
+            }
+            else
+            {
+                double d = BinaryPrimitives.ReadDoubleLittleEndian(unshuffled.AsSpan(rowIndex * sizeof(double)));
+                target[rowIndex] = DataValue.FromFloat64(d);
+            }
         }
     }
 }

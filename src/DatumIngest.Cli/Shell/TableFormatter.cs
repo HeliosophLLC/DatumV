@@ -84,7 +84,7 @@ internal sealed class TableFormatter
                 widths[i] = MaxColumnWidth;
             }
 
-            rightAlign[i] = schema.Columns[i].Kind is DataKind.Float32 or DataKind.UInt8;
+            rightAlign[i] = DataValueComparer.IsNumericScalar(schema.Columns[i].Kind);
         }
 
         // Write header.
@@ -159,41 +159,12 @@ internal sealed class TableFormatter
     /// </summary>
     internal static string FormatValue(DataValue value, IReadOnlyList<ColumnInfo>? structFields = null)
     {
-        return value.Kind switch
+        if (structFields is not null && value.Kind == DataKind.Struct)
         {
-            DataKind.Float32 => value.AsFloat32().ToString("G"),
-            DataKind.UInt8 => value.AsUInt8().ToString(),
-            DataKind.String => value.AsString(),
-            DataKind.Date => value.AsDate().ToString("yyyy-MM-dd"),
-            DataKind.DateTime => value.AsDateTime().ToString("O"),
-            DataKind.JsonValue => value.AsJsonValue(),
-            DataKind.Vector => $"[{string.Join(", ", value.AsVector().Select(v => v.ToString("G")))}]",
-            DataKind.Matrix => FormatMatrixShape(value),
-            DataKind.Tensor => FormatTensorShape(value),
-            DataKind.UInt8Array => $"UInt8Array[{value.AsUInt8Array().Length}]",
-            DataKind.Image => $"Image[{value.AsImage().Length} bytes]",
-            DataKind.Array => FormatArrayValue(value),
-            DataKind.Struct => FormatStructValue(value, structFields),
-            _ => value.ToString() ?? ""
-        };
-    }
+            return FormatStructValue(value, structFields);
+        }
 
-    private static string FormatMatrixShape(DataValue value)
-    {
-        float[] data = value.AsMatrix(out int rows, out int columns);
-        return $"Matrix[{rows}x{columns}]";
-    }
-
-    private static string FormatTensorShape(DataValue value)
-    {
-        float[] data = value.AsTensor(out int[] shape);
-        return $"Tensor[{string.Join("x", shape)}]";
-    }
-
-    private static string FormatArrayValue(DataValue value)
-    {
-        DataValue[] elements = value.AsArray();
-        return $"[{string.Join(", ", elements.Select(e => e.IsNull ? "NULL" : e.ToString()))}]";
+        return value.ToDisplayString();
     }
 
     private static string FormatStructValue(DataValue value, IReadOnlyList<ColumnInfo>? fields)
@@ -202,7 +173,7 @@ internal sealed class TableFormatter
         IEnumerable<string> parts = fieldValues.Select((fieldValue, index) =>
         {
             string name = fields is not null && index < fields.Count ? fields[index].Name : $"f{index}";
-            string formatted = fieldValue.IsNull ? "NULL" : FormatValue(fieldValue);
+            string formatted = fieldValue.ToDisplayString();
             return $"{name}: {formatted}";
         });
         return $"{{{string.Join(", ", parts)}}}";

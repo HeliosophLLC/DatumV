@@ -37,9 +37,7 @@ public sealed class YearFunction : IScalarFunction
             return DataValue.Null(DataKind.Float32);
         }
 
-        int year = input.Kind == DataKind.Date
-            ? input.AsDate().Year
-            : input.AsDateTime().Year;
+        int year = input.ToDateTimeOffset().Year;
 
         return DataValue.FromFloat32(year);
     }
