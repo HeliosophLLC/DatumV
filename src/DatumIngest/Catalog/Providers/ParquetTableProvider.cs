@@ -608,8 +608,8 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
         return value switch
         {
             DateTimeOffset dto => dto,
-            DateTime dt => new DateTimeOffset(dt, TimeSpan.Zero),
-            _ => new DateTimeOffset(Convert.ToDateTime(value), TimeSpan.Zero),
+            DateTime dt => new DateTimeOffset(dt.ToUniversalTime(), TimeSpan.Zero),
+            _ => new DateTimeOffset(Convert.ToDateTime(value).ToUniversalTime(), TimeSpan.Zero),
         };
     }
 
