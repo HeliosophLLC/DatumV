@@ -37,7 +37,8 @@ public static class ByteLaneShuffle
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Unshuffle(ReadOnlySpan<byte> input, Span<float> output)
     {
-        Unshuffle(input, System.Runtime.InteropServices.MemoryMarshal.AsBytes(output), sizeof(float));
+        int byteCount = output.Length * sizeof(float);
+        Unshuffle(input[..byteCount], System.Runtime.InteropServices.MemoryMarshal.AsBytes(output), sizeof(float));
     }
 
     /// <summary>
