@@ -689,12 +689,131 @@ public static class SqlParser
         select (Func<Expression, Expression>)(left =>
             new BinaryExpression(left, op, right));
 
+    /// <summary>
+    /// Parses a type-narrowing bind: <c>expr AS TypeKeyword name</c>.
+    /// Only valid as the left operand of AND. Desugars to an IS type guard
+    /// and inline CAST substitution:
+    /// <c>x AS Int32 y AND y &gt; 0</c> becomes <c>typeof(x) = Int32 AND CAST(x AS Int32) &gt; 0</c>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, (Expression Source, string TypeName, string BindingName)> TypeNarrowPrefix =
+        from source in NotExpression
+        from asKw in Token.EqualTo(SqlToken.As)
+        from typeKw in Token.EqualTo(SqlToken.TypeKeyword)
+        from bindingName in IdentifierLike
+        select (source, typeKw.ToStringValue(), GetTokenText(bindingName));
+
     /// <summary>AND expressions (binds tighter than OR but looser than NOT).</summary>
+    /// <remarks>
+    /// Supports optional type-narrowing binds on the left side of AND:
+    /// <c>x AS Int32 y AND y &gt; 0</c>. The bind is desugared into an IS type guard
+    /// plus inline CAST substitution before the AST reaches downstream consumers.
+    /// Standard AND chains without narrowing are parsed via the Chain combinator.
+    /// </remarks>
     private static readonly TokenListParser<SqlToken, Expression> AndExpression =
-        SP.Chain(
+        (from narrow in TypeNarrowPrefix
+         from andKw in Token.EqualTo(SqlToken.And)
+         from rest in SP.Ref(() => AndExpression!)
+         select DesugarTypeNarrow(narrow.Source, narrow.TypeName, narrow.BindingName, rest))
+        .Try()
+        .Or(SP.Chain(
             Token.EqualTo(SqlToken.And).Select(_ => BinaryOperator.And),
             NotExpression,
-            (op, left, right) => new BinaryExpression(left, op, right));
+            (op, left, right) => new BinaryExpression(left, op, right)));
+
+    /// <summary>
+    /// Desugars a type-narrowing bind into a <c>can_cast</c> guard ANDed with the body
+    /// where the binding name has been replaced with CAST(source AS type).
+    /// <c>x AS Int32 y AND y &gt; 0</c> becomes <c>can_cast(x, Int32) AND CAST(x AS Int32) &gt; 0</c>.
+    /// </summary>
+    private static Expression DesugarTypeNarrow(Expression source, string typeName, string bindingName, Expression body)
+    {
+        // Left side: can_cast(source, TypeLiteral)
+        Expression guard = new FunctionCallExpression("can_cast",
+            [source, new TypeLiteralExpression(typeName)]);
+
+        // Right side: body with bindingName → CAST(source AS typeName)
+        Expression cast = new CastExpression(source, typeName);
+        Expression substituted = SubstituteBinding(body, bindingName, cast);
+
+        return new BinaryExpression(guard, BinaryOperator.And, substituted);
+    }
+
+    /// <summary>
+    /// Recursively replaces all <see cref="ColumnReference"/> nodes whose unqualified
+    /// name matches <paramref name="bindingName"/> with <paramref name="replacement"/>.
+    /// Used by type-narrowing desugaring to inline CAST expressions.
+    /// </summary>
+    private static Expression SubstituteBinding(Expression expression, string bindingName, Expression replacement)
+    {
+        return expression switch
+        {
+            ColumnReference col when col.TableName is null
+                && string.Equals(col.ColumnName, bindingName, StringComparison.OrdinalIgnoreCase)
+                => replacement,
+
+            BinaryExpression bin => new BinaryExpression(
+                SubstituteBinding(bin.Left, bindingName, replacement),
+                bin.Operator,
+                SubstituteBinding(bin.Right, bindingName, replacement)),
+
+            UnaryExpression un => new UnaryExpression(
+                un.Operator,
+                SubstituteBinding(un.Operand, bindingName, replacement)),
+
+            FunctionCallExpression func => new FunctionCallExpression(
+                func.FunctionName,
+                func.Arguments.Select(a => SubstituteBinding(a, bindingName, replacement)).ToList(),
+                func.OrderBy,
+                func.Distinct,
+                func.Span),
+
+            CastExpression cast => new CastExpression(
+                SubstituteBinding(cast.Expression, bindingName, replacement),
+                cast.TargetType,
+                cast.Span),
+
+            InExpression inExpr => new InExpression(
+                SubstituteBinding(inExpr.Expression, bindingName, replacement),
+                inExpr.Values.Select(v => SubstituteBinding(v, bindingName, replacement)).ToList(),
+                inExpr.Negated),
+
+            BetweenExpression bet => new BetweenExpression(
+                SubstituteBinding(bet.Expression, bindingName, replacement),
+                SubstituteBinding(bet.Low, bindingName, replacement),
+                SubstituteBinding(bet.High, bindingName, replacement),
+                bet.Negated),
+
+            IsNullExpression isNull => new IsNullExpression(
+                SubstituteBinding(isNull.Expression, bindingName, replacement),
+                isNull.Negated),
+
+            CaseExpression caseExpr => new CaseExpression(
+                caseExpr.Operand is not null ? SubstituteBinding(caseExpr.Operand, bindingName, replacement) : null,
+                caseExpr.WhenClauses.Select(w => new WhenClause(
+                    SubstituteBinding(w.Condition, bindingName, replacement),
+                    SubstituteBinding(w.Result, bindingName, replacement))).ToList(),
+                caseExpr.ElseResult is not null ? SubstituteBinding(caseExpr.ElseResult, bindingName, replacement) : null,
+                caseExpr.Span),
+
+            LikeExpression like => new LikeExpression(
+                SubstituteBinding(like.Expression, bindingName, replacement),
+                SubstituteBinding(like.Pattern, bindingName, replacement),
+                SubstituteBinding(like.EscapeCharacter, bindingName, replacement),
+                like.CaseInsensitive),
+
+            IndexAccessExpression idx => new IndexAccessExpression(
+                SubstituteBinding(idx.Source, bindingName, replacement),
+                SubstituteBinding(idx.Index, bindingName, replacement),
+                idx.Span),
+
+            // Leaf nodes that cannot contain the binding name.
+            LiteralExpression or TypeLiteralExpression or ParameterExpression => expression,
+
+            // Anything else (subqueries, window functions, etc.) — pass through unchanged.
+            // Bindings cannot cross subquery boundaries by design.
+            _ => expression,
+        };
+    }
 
     /// <summary>OR expressions (lowest precedence binary operator).</summary>
     private static readonly TokenListParser<SqlToken, Expression> OrExpression =

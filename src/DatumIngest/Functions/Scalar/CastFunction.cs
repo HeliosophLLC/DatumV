@@ -17,15 +17,15 @@ public sealed class CastFunction : IScalarFunction
     {
         if (argumentKinds.Length != 2)
         {
-            throw new ArgumentException("cast() requires exactly 2 arguments: value and target kind name (as String).");
+            throw new ArgumentException("cast() requires exactly 2 arguments: value and target type.");
         }
 
-        if (argumentKinds[1] != DataKind.String)
+        if (argumentKinds[1] is not DataKind.String and not DataKind.Type)
         {
-            throw new ArgumentException("cast() second argument must be String (the target kind name).");
+            throw new ArgumentException("cast() second argument must be a type literal (e.g. Int32) or String (the target kind name).");
         }
 
-        // Cannot determine the output kind statically without the actual string value.
+        // Cannot determine the output kind statically without the actual value.
         // Return String as a placeholder; the actual kind is determined at runtime.
         return DataKind.String;
     }
@@ -34,7 +34,11 @@ public sealed class CastFunction : IScalarFunction
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         DataValue input = arguments[0];
-        string targetKindName = arguments[1].AsString();
+
+        // Accept both Type literals (cast(x, Int32)) and String names (CAST(x AS Int32) desugaring).
+        string targetKindName = arguments[1].Kind == DataKind.Type
+            ? arguments[1].AsType().ToString()
+            : arguments[1].AsString();
 
         if (!Enum.TryParse<DataKind>(targetKindName, ignoreCase: true, out DataKind targetKind))
         {
@@ -239,25 +243,11 @@ public sealed class CastFunction : IScalarFunction
     /// <summary>
     /// Creates a <see cref="DataValue"/> of the given numeric <paramref name="targetKind"/>
     /// from a double intermediate.  Returns null if <paramref name="targetKind"/> is not numeric.
-    /// UInt8 saturates at [0, 255]; all other integer types use truncating cast.
+    /// Delegates to <see cref="DataValueComparer.MakeNumeric"/> which is co-located with
+    /// <see cref="DataValueComparer.CanFitNumeric"/> so range semantics stay in sync.
     /// </summary>
-    private static DataValue? TryMakeNumeric(double value, DataKind targetKind)
-    {
-        return targetKind switch
-        {
-            DataKind.Int8 => DataValue.FromInt8((sbyte)value),
-            DataKind.Int16 => DataValue.FromInt16((short)value),
-            DataKind.UInt16 => DataValue.FromUInt16((ushort)value),
-            DataKind.Int32 => DataValue.FromInt32((int)value),
-            DataKind.UInt32 => DataValue.FromUInt32((uint)value),
-            DataKind.Int64 => DataValue.FromInt64((long)value),
-            DataKind.UInt64 => DataValue.FromUInt64((ulong)value),
-            DataKind.Float32 => DataValue.FromFloat32((float)value),
-            DataKind.Float64 => DataValue.FromFloat64(value),
-            DataKind.UInt8 => DataValue.FromUInt8((byte)System.Math.Clamp(value, 0.0, 255.0)),
-            _ => null,
-        };
-    }
+    private static DataValue? TryMakeNumeric(double value, DataKind targetKind) =>
+        DataValueComparer.MakeNumeric(value, targetKind);
 
     /// <summary>
     /// Formats a numeric <see cref="DataValue"/> as a string using its native type,
@@ -277,6 +267,7 @@ public sealed class CastFunction : IScalarFunction
             DataKind.Float32 => value.AsFloat32().ToString(CultureInfo.InvariantCulture),
             DataKind.Float64 => value.AsFloat64().ToString(CultureInfo.InvariantCulture),
             DataKind.UInt8 => value.AsUInt8().ToString(CultureInfo.InvariantCulture),
+            DataKind.Boolean => value.AsBoolean() ? "true" : "false",
             _ => throw new InvalidOperationException($"Not a numeric kind: {value.Kind}."),
         };
     }

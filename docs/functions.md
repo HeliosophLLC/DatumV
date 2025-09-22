@@ -116,9 +116,11 @@ Every function belongs to a single **category** that describes its operational d
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `cast` | `cast(val, targetKind)` | Explicit type conversion. Date→Float32 yields epoch days; DateTime→Float32 yields epoch seconds. Supports "uuid" and "bool" target types. | 1 |
+| `cast` | `cast(val, TargetType)` | Explicit type conversion. Accepts a type literal (`cast(x, Int32)`) or the `CAST(x AS Int32)` SQL syntax. Date→Float32 yields epoch days; DateTime→Float32 yields epoch seconds. | 1 |
 | `to_epoch` | `to_epoch(val)` | Convert Date to epoch days or DateTime to epoch seconds (since 1970-01-01) as Float32. | 1 |
 | `typeof` | `typeof(val)` | Returns the runtime DataKind of a value as a Type tag. Use with type literals for type-oriented comparisons: `typeof(x) = Int32`. | 1 |
+| `can_cast` | `can_cast(val, TargetType)` | Returns whether CAST would succeed for this value. Allows truncation (matches CAST semantics); returns false only on overflow, parse failure, or unsupported conversion pair. | 1 |
+| `try_cast` | `try_cast(val, TargetType)` | Attempts to cast a value to the target type. Returns NULL on failure instead of throwing. Follows CAST semantics (including truncation) on success. | 1 |
 
 ### typeof examples
 
@@ -156,13 +158,29 @@ FROM mixed_data
 
 -- Data quality: find rows where a column has an unexpected type
 SELECT * FROM raw_data WHERE value IS NOT Float64
+
+-- can_cast: will CAST succeed? (allows truncation, rejects overflow)
+SELECT * FROM t WHERE can_cast(x, Int32) AND CAST(x AS Int32) > 0
+SELECT * FROM t WHERE can_cast(x, UInt8)   -- false for 5000, true for 3.14
+
+-- try_cast: cast or NULL on failure (allows truncation, unlike can_cast)
+SELECT try_cast(x, Int32) FROM t           -- NULL if x can't be parsed/converted
+SELECT COALESCE(try_cast(x, Float64), 0.0) FROM t  -- default on failure
+
+-- Type-narrowing bind: combines can_cast + CAST in one expression
+SELECT * FROM t WHERE x AS Int32 y AND y > 0
+-- Desugars to: WHERE can_cast(x, Int32) AND CAST(x AS Int32) > 0
+
+-- Avoids repeating complex expressions
+SELECT * FROM t WHERE json_value(data, '$.score') AS Float64 score AND score > 0.5
 ```
 
 Type literals (`Int32`, `Float64`, `String`, etc.) are reserved keywords in
 expression position. They produce a `Type` value that can be compared with
 `typeof()` results using `=`, `!=`, `IN`, `CASE`, and `IS`. See
 [Type Literals and typeof()](sql.md#type-literals-and-typeof) in the SQL
-Reference for the full list of type names and escaping rules.
+Reference for the full list of type names, escaping rules, and the
+type-narrowing bind syntax.
 
 ## UUID
 
@@ -524,8 +542,9 @@ SELECT id, get_filename(file_path) AS name FROM files WHERE len(file_path) > 10
 -- Reshape vectors
 SELECT reshape(embedding, 16, 16) AS matrix_embed FROM features
 
--- Type casting
-SELECT id, cast(score, 'UInt8') AS byte_score FROM data
+-- Type casting (type literal or CAST syntax)
+SELECT id, cast(score, UInt8) AS byte_score FROM data
+SELECT id, CAST(score AS UInt8) AS byte_score FROM data  -- equivalent
 
 -- Math functions
 SELECT abs(delta), sqrt(variance), pow(base_val, 2) FROM metrics

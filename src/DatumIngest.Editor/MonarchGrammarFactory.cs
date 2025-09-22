@@ -216,7 +216,7 @@ internal static class MonarchGrammarFactory
         "duration_hours", "duration_days",
 
         // Type conversion / introspection functions
-        "to_epoch", "date_part", "cyclical_encode", "typeof",
+        "to_epoch", "date_part", "cyclical_encode", "typeof", "can_cast", "try_cast",
 
         // JSON functions
         "json_value", "json_query", "json_exists", "json_array_length",

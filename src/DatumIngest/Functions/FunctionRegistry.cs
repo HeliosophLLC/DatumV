@@ -475,6 +475,8 @@ public sealed class FunctionRegistry
 
         // Type introspection
         registry.RegisterScalar(new Scalar.TypeofFunction());
+        registry.RegisterScalar(new Scalar.CanCastFunction());
+        registry.RegisterScalar(new Scalar.TryCastFunction());
 
         // Table-valued
         registry.RegisterTableValued(new TableValued.UnnestFunction());

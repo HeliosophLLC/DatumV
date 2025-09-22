@@ -348,9 +348,9 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "cast",
-            Parameters = [Parameter("value", "Any"), Parameter("target_type", "String")],
+            Parameters = [Parameter("value", "any"), Parameter("target_type", "Type")],
             ReturnType = null,
-            Description = "Explicit type conversion between DataKind types. Target type is a DataKind name.",
+            Description = "Explicit type conversion. Accepts a type literal: cast(x, Int32). Also available as CAST(x AS Int32).",
             Category = FunctionCategory.Conversion,
         });
         Register(new FunctionSignature
@@ -384,6 +384,24 @@ public static class FunctionDocumentation
             Parameters = [Parameter("value", "any")],
             ReturnType = "Type",
             Description = "Returns the runtime type of a value as a Type tag. Use with type literals for type-oriented comparisons: typeof(x) == Int32.",
+            Category = FunctionCategory.Conversion,
+        });
+
+        Register(new FunctionSignature
+        {
+            Name = "can_cast",
+            Parameters = [Parameter("value", "any"), Parameter("target_type", "Type")],
+            ReturnType = "Boolean",
+            Description = "Returns whether a value can be safely cast to the target type without data loss, overflow, or parse failure. Use with type literals: can_cast(x, Int32).",
+            Category = FunctionCategory.Conversion,
+        });
+
+        Register(new FunctionSignature
+        {
+            Name = "try_cast",
+            Parameters = [Parameter("value", "any"), Parameter("target_type", "Type")],
+            ReturnType = "any",
+            Description = "Attempts to cast a value to the target type. Returns NULL on failure instead of throwing. Follows CAST semantics (including truncation) on success.",
             Category = FunctionCategory.Conversion,
         });
 

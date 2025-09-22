@@ -1656,6 +1656,50 @@ SELECT * FROM mixed_data WHERE typeof(value) = Int32
 SELECT * FROM t WHERE typeof(col) IN (Int32, Int64, Float32, Float64)
 ```
 
+#### can_cast()
+
+`can_cast(expr, Type)` returns whether a value can be safely cast to the target
+type without data loss, overflow, or parse failure. Unlike `typeof()` which
+checks type identity, `can_cast` checks value representability:
+
+```sql
+-- typeof checks identity: is x already an Int32?
+SELECT * FROM t WHERE typeof(x) = Int32
+
+-- can_cast checks castability: will CAST succeed without error?
+SELECT * FROM t WHERE can_cast(x, UInt8)       -- false for 5000, true for 200
+SELECT * FROM t WHERE can_cast(x, Int32)       -- true for 3.14 (truncates to 3)
+SELECT * FROM t WHERE can_cast(name, Date)     -- false for "abc", true for "2024-06-15"
+```
+
+`can_cast` matches CAST semantics: truncation of fractional parts is allowed
+(it's not data loss — it's expected CAST behavior). Only overflow (value outside
+the target range) and parse failures return false. Widening conversions (e.g.,
+Int32 → Float64) always return true. Unsupported pairs (e.g., Vector → Int32)
+return false.
+
+#### try_cast()
+
+`try_cast(expr, Type)` attempts the same conversion as `CAST`, but returns NULL
+on failure instead of throwing. It follows CAST semantics on success — including
+numeric truncation (e.g., `try_cast(3.99, Int32)` returns `3`).
+
+```sql
+-- Returns NULL for unparseable strings instead of erroring
+SELECT try_cast(raw_value, Int32) AS parsed_int FROM raw_data
+
+-- Combine with COALESCE for defaults
+SELECT COALESCE(try_cast(score, Float64), 0.0) AS safe_score FROM t
+
+-- Filter rows that can be converted (similar to can_cast but gives you the value)
+SELECT try_cast(x, Date) AS parsed_date FROM t WHERE try_cast(x, Date) IS NOT NULL
+```
+
+**can_cast vs try_cast:** Both follow CAST semantics — truncation is allowed
+(e.g., `can_cast(3.14, Int32)` returns true because `CAST(3.14 AS Int32)`
+succeeds with value 3). Only overflow and parse failures return false/NULL.
+`can_cast` returns Boolean; `try_cast` returns the converted value or NULL.
+
 #### IS [NOT] Type
 
 The `IS` predicate provides a concise shorthand for type checks. It desugars to
@@ -1672,6 +1716,43 @@ SELECT * FROM t WHERE typeof(x) != String
 
 `IS NULL` / `IS NOT NULL` continue to work unchanged — `NULL` is a distinct
 keyword, so there is no ambiguity.
+
+#### Type-narrowing bind
+
+When you need to both check a type and use the narrowed value, the
+`expr AS Type name AND ...` syntax combines both in a single expression:
+
+```sql
+-- Check that x can be safely cast to Int32, then use the typed value
+WHERE x AS Int32 y AND y > 0
+
+-- Desugars to:
+WHERE can_cast(x, Int32) AND CAST(x AS Int32) > 0
+```
+
+The guard uses `can_cast()`, not `typeof()` — it checks *value representability*,
+not just type identity. For example, `5000 AS UInt8 y` fails because 5000 doesn't
+fit in a UInt8, even though 5000 is a valid Int32. This prevents silent data loss
+from overflow and truncation.
+
+The binding name (`y`) is scoped to the right side of the same `AND` — it is
+replaced with `CAST(source AS Type)` during parsing. The name does not exist in
+SELECT, ORDER BY, or any other clause.
+
+```sql
+-- Compound conditions — y is substituted in all right-side predicates
+WHERE x AS Int32 y AND y > 0 AND y < 100
+
+-- OR branches — each bind is independent
+WHERE (x AS Int32 y AND y > 0) OR (x AS String z AND len(z) > 3)
+
+-- Complex source expressions — avoids repeating the expression
+WHERE json_value(data, '$.score') AS Float64 score AND score > 0.5
+```
+
+The pattern is restricted: `AS Type name` must appear as the left operand of
+`AND`. Using it standalone, in `OR` directly, or referencing the name outside
+the AND body is a parse error.
 
 #### CASE on type
 
@@ -1708,18 +1789,53 @@ table names after `FROM`) are accepted without quoting.
 
 ### Type conversions
 
-Implicit widening (automatic):
-- `UInt8` → `Float32`
-- `Float32` → `Vector[1]`
-- `Vector` → `Tensor` (rank 1)
-- `Matrix` → `Tensor` (rank 2)
+#### Implicit widening
 
-Explicit narrowing via `CAST(value AS type)`:
-- `Float32` → `UInt8` (truncates)
-- `Tensor` → `Vector` (requires rank 1)
-- `Tensor` → `Matrix` (requires rank 2)
-- `Date` → `Float32` (epoch days since 1970-01-01)
-- `DateTime` → `Float32` (epoch seconds since 1970-01-01T00:00:00Z, float32)
+When an operator or function receives mixed types, the engine automatically
+widens both sides to the narrowest common type. The widening chain is:
+
+```
+Boolean → UInt8 ─→ Int16 ─→ Int32 ─→ Int64 ─→ Float64 → Vector → Tensor
+           Int8 ↗    UInt16 ↗   UInt32 ↗   UInt64 ↗
+                                             Float32 ↗
+                                            Duration ↗
+                                      Matrix ──────────→ Tensor
+```
+
+Widening is transitive — `UInt8` can reach `Float64` by following the chain
+through `Int16 → Int32 → Int64 → Float64`. Same-kind is always a no-op.
+
+#### Explicit conversion (CAST)
+
+`CAST` converts between any supported type pair. Two equivalent syntaxes:
+
+```sql
+CAST(x AS Int32)     -- SQL-standard syntax
+cast(x, Int32)       -- function-call syntax with type literal
+```
+
+Supported conversions include:
+
+- **Any numeric ↔ any numeric** — truncates fractional parts, wraps on integer
+  overflow (UInt8 saturates at 0–255 instead of wrapping).
+- **Any numeric ↔ Boolean** — zero = false, non-zero = true.
+- **Any numeric/Boolean/Date/DateTime/Time/Duration/Uuid ↔ String** — formats or parses.
+- **Date ↔ DateTime** — midnight UTC or drop time component.
+- **DateTime → Time** — extract time-of-day.
+- **Date/DateTime → numeric** — epoch days or epoch seconds.
+- **Time/Duration ↔ numeric** — seconds since midnight or total seconds.
+- **String ↔ JsonValue** — text reinterpretation.
+- **UInt8Array ↔ Image** — byte reinterpretation.
+
+Use `can_cast(x, Type)` to check if a conversion is lossless before casting, or
+`try_cast(x, Type)` to get NULL on failure instead of an error. The function-call
+syntax composes naturally with both:
+
+```sql
+-- Safe conversion pipeline
+SELECT try_cast(raw_value, Float64) AS parsed FROM t
+SELECT * FROM t WHERE can_cast(score, Int32) AND cast(score, Int32) > 0
+```
 
 ### AT TIME ZONE
 

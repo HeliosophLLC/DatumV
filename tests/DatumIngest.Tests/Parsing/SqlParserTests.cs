@@ -2104,4 +2104,107 @@ public class SqlParserTests
         IsNullExpression isNull = Assert.IsType<IsNullExpression>(result.Where);
         Assert.True(isNull.Negated);
     }
+
+    // ───────────────────── Type-narrowing bind (x AS Int32 y AND ...) ─────────────────────
+
+    [Fact]
+    public void TypeNarrow_DesugarsToCanCastAndCast()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE x AS Int32 y AND y > 0");
+
+        // Top-level: can_cast(x, Int32) AND CAST(x AS Int32) > 0
+        BinaryExpression and = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.And, and.Operator);
+
+        // Left: can_cast(x, Int32)
+        FunctionCallExpression canCast = Assert.IsType<FunctionCallExpression>(and.Left);
+        Assert.Equal("can_cast", canCast.FunctionName);
+        Assert.Equal(2, canCast.Arguments.Count);
+        ColumnReference guardCol = Assert.IsType<ColumnReference>(canCast.Arguments[0]);
+        Assert.Equal("x", guardCol.ColumnName);
+        TypeLiteralExpression guardType = Assert.IsType<TypeLiteralExpression>(canCast.Arguments[1]);
+        Assert.Equal("Int32", guardType.TypeName);
+
+        // Right: CAST(x AS Int32) > 0
+        BinaryExpression cmp = Assert.IsType<BinaryExpression>(and.Right);
+        Assert.Equal(BinaryOperator.GreaterThan, cmp.Operator);
+        CastExpression cast = Assert.IsType<CastExpression>(cmp.Left);
+        Assert.Equal("Int32", cast.TargetType);
+        ColumnReference castCol = Assert.IsType<ColumnReference>(cast.Expression);
+        Assert.Equal("x", castCol.ColumnName);
+    }
+
+    [Fact]
+    public void TypeNarrow_CompoundRight_SubstitutesAllOccurrences()
+    {
+        SelectStatement result = Parse("SELECT * FROM t WHERE x AS Int32 y AND y > 0 AND y < 100");
+
+        // Should be: typeof(x) = Int32 AND (CAST(x AS Int32) > 0 AND CAST(x AS Int32) < 100)
+        BinaryExpression topAnd = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.And, topAnd.Operator);
+
+        // Right side is another AND with both y references substituted
+        BinaryExpression innerAnd = Assert.IsType<BinaryExpression>(topAnd.Right);
+        Assert.Equal(BinaryOperator.And, innerAnd.Operator);
+
+        BinaryExpression left = Assert.IsType<BinaryExpression>(innerAnd.Left);
+        Assert.IsType<CastExpression>(left.Left);
+
+        BinaryExpression right = Assert.IsType<BinaryExpression>(innerAnd.Right);
+        Assert.IsType<CastExpression>(right.Left);
+    }
+
+    [Fact]
+    public void TypeNarrow_InOrBranches_EachBranchIndependent()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM t WHERE (x AS Int32 y AND y > 0) OR (x AS String z AND len(z) > 3)");
+
+        BinaryExpression or = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.Or, or.Operator);
+
+        // Left branch: typeof(x) = Int32 AND CAST(x AS Int32) > 0
+        BinaryExpression leftAnd = Assert.IsType<BinaryExpression>(or.Left);
+        Assert.Equal(BinaryOperator.And, leftAnd.Operator);
+
+        // Right branch: typeof(x) = String AND len(CAST(x AS String)) > 3
+        BinaryExpression rightAnd = Assert.IsType<BinaryExpression>(or.Right);
+        Assert.Equal(BinaryOperator.And, rightAnd.Operator);
+
+        BinaryExpression lenCmp = Assert.IsType<BinaryExpression>(rightAnd.Right);
+        FunctionCallExpression lenCall = Assert.IsType<FunctionCallExpression>(lenCmp.Left);
+        Assert.Equal("len", lenCall.FunctionName);
+        Assert.IsType<CastExpression>(lenCall.Arguments[0]);
+    }
+
+    [Fact]
+    public void TypeNarrow_ComplexSource_DuplicatesExpression()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM t WHERE json_value(data, '$.x') AS Float64 score AND score > 0.5");
+
+        BinaryExpression and = Assert.IsType<BinaryExpression>(result.Where);
+
+        // Guard: can_cast(json_value(data, '$.x'), Float64)
+        FunctionCallExpression canCast = Assert.IsType<FunctionCallExpression>(and.Left);
+        Assert.Equal("can_cast", canCast.FunctionName);
+        FunctionCallExpression jsonCall = Assert.IsType<FunctionCallExpression>(canCast.Arguments[0]);
+        Assert.Equal("json_value", jsonCall.FunctionName);
+
+        // Body: CAST(json_value(data, '$.x') AS Float64) > 0.5
+        BinaryExpression cmp = Assert.IsType<BinaryExpression>(and.Right);
+        CastExpression cast = Assert.IsType<CastExpression>(cmp.Left);
+        FunctionCallExpression castSource = Assert.IsType<FunctionCallExpression>(cast.Expression);
+        Assert.Equal("json_value", castSource.FunctionName);
+    }
+
+    [Fact]
+    public void TypeNarrow_StandardAndStillWorks()
+    {
+        // Plain AND without narrowing must still parse correctly
+        SelectStatement result = Parse("SELECT * FROM t WHERE a > 1 AND b < 2");
+
+        BinaryExpression and = Assert.IsType<BinaryExpression>(result.Where);
+        Assert.Equal(BinaryOperator.And, and.Operator);
+    }
 }

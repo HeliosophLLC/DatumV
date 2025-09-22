@@ -1634,4 +1634,253 @@ public class ExpressionEvaluatorTests
 
         Assert.True(result.AsBoolean());
     }
+
+    // ─────────────── can_cast() ───────────────
+
+    [Fact]
+    public void CanCast_SameType_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        Assert.True(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_IntFitsInUInt8_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(200)));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]);
+
+        Assert.True(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_IntOverflowsUInt8_ReturnsFalse()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(5000)));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]);
+
+        Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_NegativeToUnsigned_ReturnsFalse()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(-1)));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]);
+
+        Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_FloatToInt_WithFraction_ReturnsTrue()
+    {
+        // Truncation is allowed — only overflow returns false.
+        // can_cast(3.14, Int32) is true because CAST(3.14 AS Int32) succeeds (returns 3).
+        Row row = MakeRow(("x", DataValue.FromFloat64(3.14)));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        Assert.True(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_FloatToInt_WholeNumber_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromFloat64(42.0)));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        Assert.True(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_ValidDateString_ReturnsTrue()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("2024-06-15")));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
+
+        Assert.True(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_InvalidDateString_ReturnsFalse()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("not-a-date")));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
+
+        Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void CanCast_UnsupportedPair_ReturnsFalse()
+    {
+        Row row = MakeRow(("x", DataValue.FromVector([1f, 2f, 3f])));
+        Expression expr = new FunctionCallExpression("can_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    // ─────────────── try_cast() ───────────────
+
+    [Fact]
+    public void TryCast_ValidConversion_ReturnsValue()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Float64")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.Equal(DataKind.Float64, result.Kind);
+        Assert.Equal(42.0, result.AsFloat64());
+    }
+
+    [Fact]
+    public void TryCast_InvalidStringToInt_ReturnsNull()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("not_a_number")));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Int32, result.Kind);
+    }
+
+    [Fact]
+    public void TryCast_ValidStringToDate_ReturnsDate()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("2024-06-15")));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.False(result.IsNull);
+        Assert.Equal(DataKind.Date, result.Kind);
+        Assert.Equal(new DateOnly(2024, 6, 15), result.AsDate());
+    }
+
+    [Fact]
+    public void TryCast_InvalidStringToDate_ReturnsNull()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("garbage")));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Date")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Date, result.Kind);
+    }
+
+    [Fact]
+    public void TryCast_NumericTruncation_Succeeds()
+    {
+        // try_cast follows CAST semantics — truncation is allowed
+        Row row = MakeRow(("x", DataValue.FromFloat64(3.99)));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.False(result.IsNull);
+        Assert.Equal(DataKind.Int32, result.Kind);
+        Assert.Equal(3, result.AsInt32());
+    }
+
+    [Fact]
+    public void TryCast_UnsupportedPair_ReturnsNull()
+    {
+        Row row = MakeRow(("x", DataValue.FromVector([1f, 2f, 3f])));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void TryCast_NullInput_ReturnsTypedNull()
+    {
+        Row row = MakeRow(("x", DataValue.Null(DataKind.String)));
+        Expression expr = new FunctionCallExpression("try_cast",
+            [new ColumnReference("x"), new TypeLiteralExpression("Int32")]);
+
+        DataValue result = _evaluator.Evaluate(expr, row);
+
+        Assert.True(result.IsNull);
+        Assert.Equal(DataKind.Int32, result.Kind);
+    }
+
+    // ─────────────── Type-narrowing bind (desugared with can_cast) ───────────────
+
+    [Fact]
+    public void TypeNarrow_MatchingType_GuardPassesAndCastApplies()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(42)));
+
+        // x AS Int32 y AND y > 0 desugars to:
+        // can_cast(x, Int32) AND CAST(x AS Int32) > 0
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("can_cast",
+                [new ColumnReference("x"), new TypeLiteralExpression("Int32")]),
+            BinaryOperator.And,
+            new BinaryExpression(
+                new CastExpression(new ColumnReference("x"), "Int32"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(0)));
+
+        Assert.True(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void TypeNarrow_WrongType_GuardFailsAndShortCircuits()
+    {
+        Row row = MakeRow(("x", DataValue.FromString("hello")));
+
+        // can_cast(x, Int32) AND CAST(x AS Int32) > 0
+        // The guard fails ("hello" can't be cast to Int32), AND short-circuits
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("can_cast",
+                [new ColumnReference("x"), new TypeLiteralExpression("Int32")]),
+            BinaryOperator.And,
+            new BinaryExpression(
+                new CastExpression(new ColumnReference("x"), "Int32"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(0)));
+
+        Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
+    }
+
+    [Fact]
+    public void TypeNarrow_ValueOutOfRange_GuardFailsAndShortCircuits()
+    {
+        Row row = MakeRow(("x", DataValue.FromInt32(5000)));
+
+        // x AS UInt8 y AND y > 0 desugars to:
+        // can_cast(x, UInt8) AND CAST(x AS UInt8) > 0
+        // 5000 doesn't fit in UInt8, so can_cast returns false
+        Expression expr = new BinaryExpression(
+            new FunctionCallExpression("can_cast",
+                [new ColumnReference("x"), new TypeLiteralExpression("UInt8")]),
+            BinaryOperator.And,
+            new BinaryExpression(
+                new CastExpression(new ColumnReference("x"), "UInt8"),
+                BinaryOperator.GreaterThan,
+                new LiteralExpression(0)));
+
+        Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
+    }
 }

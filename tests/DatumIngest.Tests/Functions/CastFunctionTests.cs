@@ -350,4 +350,105 @@ public class CastFunctionTests
         ]);
         Assert.Equal(3.141592653589793, result.AsFloat64(), 14);
     }
+
+    // ─────────────── cast(x, TypeLiteral) ───────────────
+
+    [Fact]
+    public void Cast_WithTypeLiteral_Works()
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromInt32(42),
+            DataValue.FromType(DataKind.Float64)
+        ]);
+        Assert.Equal(DataKind.Float64, result.Kind);
+        Assert.Equal(42.0, result.AsFloat64());
+    }
+
+    [Fact]
+    public void ValidateArguments_AcceptsTypeLiteral()
+    {
+        DataKind result = _function.ValidateArguments([DataKind.Int32, DataKind.Type]);
+        Assert.Equal(DataKind.String, result); // Placeholder — runtime determines actual kind.
+    }
+
+    // ─────────────── FormatNumericAsString (all numeric types) ───────────────
+
+    [Theory]
+    [InlineData(DataKind.UInt8, "42")]
+    [InlineData(DataKind.Int8, "-7")]
+    [InlineData(DataKind.Int16, "-1234")]
+    [InlineData(DataKind.UInt16, "5678")]
+    [InlineData(DataKind.Int32, "-100000")]
+    [InlineData(DataKind.UInt32, "200000")]
+    [InlineData(DataKind.Int64, "-9000000000")]
+    [InlineData(DataKind.UInt64, "18000000000")]
+    [InlineData(DataKind.Float32, "3.14")]
+    [InlineData(DataKind.Float64, "2.718281828")]
+    public void Cast_NumericToString_FormatsCorrectly(DataKind kind, string expected)
+    {
+        DataValue input = kind switch
+        {
+            DataKind.UInt8 => DataValue.FromUInt8(42),
+            DataKind.Int8 => DataValue.FromInt8(-7),
+            DataKind.Int16 => DataValue.FromInt16(-1234),
+            DataKind.UInt16 => DataValue.FromUInt16(5678),
+            DataKind.Int32 => DataValue.FromInt32(-100000),
+            DataKind.UInt32 => DataValue.FromUInt32(200000),
+            DataKind.Int64 => DataValue.FromInt64(-9000000000L),
+            DataKind.UInt64 => DataValue.FromUInt64(18000000000UL),
+            DataKind.Float32 => DataValue.FromFloat32(3.14f),
+            DataKind.Float64 => DataValue.FromFloat64(2.718281828),
+            _ => throw new ArgumentException($"Unexpected kind: {kind}"),
+        };
+
+        DataValue result = _function.Execute([input, DataValue.FromString("String")]);
+
+        Assert.Equal(DataKind.String, result.Kind);
+        Assert.Equal(expected, result.AsString());
+    }
+
+    [Fact]
+    public void Cast_BooleanToString()
+    {
+        DataValue trueResult = _function.Execute([DataValue.FromBoolean(true), DataValue.FromString("String")]);
+        DataValue falseResult = _function.Execute([DataValue.FromBoolean(false), DataValue.FromString("String")]);
+
+        Assert.Equal("true", trueResult.AsString());
+        Assert.Equal("false", falseResult.AsString());
+    }
+
+    // ─────────────── ParseStringToNumeric (all numeric types) ───────────────
+
+    [Theory]
+    [InlineData("42", DataKind.UInt8)]
+    [InlineData("-7", DataKind.Int8)]
+    [InlineData("-1234", DataKind.Int16)]
+    [InlineData("5678", DataKind.UInt16)]
+    [InlineData("-100000", DataKind.Int32)]
+    [InlineData("200000", DataKind.UInt32)]
+    [InlineData("-9000000000", DataKind.Int64)]
+    [InlineData("18000000000", DataKind.UInt64)]
+    [InlineData("3.14", DataKind.Float32)]
+    [InlineData("2.718281828", DataKind.Float64)]
+    public void Cast_StringToNumeric_ParsesCorrectly(string input, DataKind targetKind)
+    {
+        DataValue result = _function.Execute([
+            DataValue.FromString(input),
+            DataValue.FromString(targetKind.ToString())
+        ]);
+
+        Assert.Equal(targetKind, result.Kind);
+        Assert.False(result.IsNull);
+    }
+
+    [Theory]
+    [InlineData("abc", "Int32")]
+    [InlineData("3.14", "Int32")]
+    [InlineData("-1", "UInt8")]
+    [InlineData("999", "Int8")]
+    public void Cast_StringToNumeric_InvalidInput_Throws(string input, string targetKind)
+    {
+        Assert.ThrowsAny<Exception>(() =>
+            _function.Execute([DataValue.FromString(input), DataValue.FromString(targetKind)]));
+    }
 }
