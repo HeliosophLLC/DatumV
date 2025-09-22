@@ -3113,6 +3113,8 @@ public sealed class QueryPlanner
         // Recurse into sub-expressions.
         return expression switch
         {
+            FunctionCallExpression scalarFunc => RewriteScalarFunctionArguments(
+                scalarFunc, functionRegistry, aggregateColumns),
             BinaryExpression bin => new BinaryExpression(
                 RewriteAggregateExpression(bin.Left, functionRegistry, aggregateColumns),
                 bin.Operator,
@@ -3126,6 +3128,33 @@ public sealed class QueryPlanner
             CaseExpression caseExpr => RewriteCaseAggregateExpression(caseExpr, functionRegistry, aggregateColumns),
             _ => expression,
         };
+    }
+
+    /// <summary>
+    /// Rewrites the arguments of a non-aggregate <see cref="FunctionCallExpression"/>
+    /// so that nested aggregate calls (e.g. <c>DATE_DIFF('day', MIN(x), MAX(x))</c>)
+    /// are replaced with column references to the <see cref="GroupByOperator"/> output.
+    /// </summary>
+    private static Expression RewriteScalarFunctionArguments(
+        FunctionCallExpression func,
+        FunctionRegistry functionRegistry,
+        List<AggregateColumn> aggregateColumns)
+    {
+        bool changed = false;
+        Expression[] rewrittenArgs = new Expression[func.Arguments.Count];
+        for (int i = 0; i < func.Arguments.Count; i++)
+        {
+            rewrittenArgs[i] = RewriteAggregateExpression(
+                func.Arguments[i], functionRegistry, aggregateColumns);
+            if (!ReferenceEquals(rewrittenArgs[i], func.Arguments[i]))
+            {
+                changed = true;
+            }
+        }
+
+        return changed
+            ? new FunctionCallExpression(func.FunctionName, rewrittenArgs, func.OrderBy, func.Distinct)
+            : func;
     }
 
     /// <summary>

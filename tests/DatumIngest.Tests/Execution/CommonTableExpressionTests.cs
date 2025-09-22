@@ -704,6 +704,60 @@ public sealed class CommonTableExpressionTests
         Assert.Contains(schema.Columns, column => column.ColumnName == "product_id");
     }
 
+    // ─────────────── Aggregates nested inside scalar functions ───────────────
+
+    /// <summary>
+    /// Aggregates nested inside scalar function arguments (e.g. DATE_DIFF wrapping MIN/MAX)
+    /// must be rewritten to column references so the evaluator does not treat them as
+    /// unknown scalar functions.
+    /// </summary>
+    [Fact]
+    public async Task Execute_AggregateNestedInsideScalarFunction_RewritesCorrectly()
+    {
+        Row[] rows =
+        [
+            MakeRow(("x", DataValue.FromFloat32(10)), ("y", DataValue.FromFloat32(1))),
+            MakeRow(("x", DataValue.FromFloat32(20)), ("y", DataValue.FromFloat32(2))),
+            MakeRow(("x", DataValue.FromFloat32(30)), ("y", DataValue.FromFloat32(3))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t", rows));
+
+        // ROUND wraps MIN and MAX — these are aggregates nested inside a scalar function.
+        List<Row> result = await ExecuteQueryAsync(
+            "SELECT ROUND(MIN(x) + MAX(y), 0) AS val FROM t",
+            catalog);
+
+        Assert.Single(result);
+        Assert.Equal(13.0f, result[0]["val"].AsFloat32());
+    }
+
+    /// <summary>
+    /// A CTE whose SELECT list wraps aggregates inside scalar functions should
+    /// plan and execute without "Unknown function" errors.
+    /// </summary>
+    [Fact]
+    public async Task Execute_CteWithAggregateInsideScalarFunction_Succeeds()
+    {
+        Row[] rows =
+        [
+            MakeRow(("v", DataValue.FromFloat32(5))),
+            MakeRow(("v", DataValue.FromFloat32(15))),
+            MakeRow(("v", DataValue.FromFloat32(25))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t", rows));
+
+        List<Row> result = await ExecuteQueryAsync(
+            "WITH stats AS (SELECT ROUND(MIN(v), 0) AS lo, ROUND(MAX(v), 0) AS hi FROM t) " +
+            "SELECT lo, hi FROM stats",
+            catalog);
+
+        Assert.Single(result);
+        Assert.Equal(5.0f, result[0]["lo"].AsFloat32());
+        Assert.Equal(25.0f, result[0]["hi"].AsFloat32());
+    }
+
     // ─────────────── Helper infrastructure ───────────────
 
     private static Row MakeRow(params (string Name, DataValue Value)[] columns)
