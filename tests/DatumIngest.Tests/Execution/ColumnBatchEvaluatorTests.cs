@@ -720,4 +720,55 @@ public sealed class ColumnBatchEvaluatorTests
             Assert.Equal(rowResults[index].AsFloat32(), columnResults[index].AsFloat32(), 0.0001f);
         }
     }
+
+    // ─────────────── Source span error enrichment ───────────────
+
+    [Fact]
+    public void Error_IncludesSourceSpan_WhenExpressionHasSpan()
+    {
+        var span = new SourceSpan(14, 5, 20);
+        var expr = new CastExpression(
+            new LiteralExpression("not_a_number"), "Int32", span);
+
+        ColumnBatch batch = SingleColumnBatch("dummy", DataValue.FromInt32(1));
+        using ColumnBatchEvaluator evaluator = new(_functions);
+
+        var ex = Assert.Throws<ExpressionEvaluationException>(
+            () => evaluator.EvaluateColumn(expr, batch));
+
+        Assert.Equal(span, ex.Span);
+        Assert.Contains("Line 14", ex.Message);
+        Assert.Contains("Col 5", ex.Message);
+    }
+
+    [Fact]
+    public void Error_FallsBackToChildSpan_ForBinaryExpression()
+    {
+        var childSpan = new SourceSpan(3, 10, 5);
+        var expr = new BinaryExpression(
+            new ColumnReference(null, "missing_col", childSpan),
+            BinaryOperator.Add,
+            new LiteralExpression(1));
+
+        ColumnBatch batch = SingleColumnBatch("dummy", DataValue.FromInt32(1));
+        using ColumnBatchEvaluator evaluator = new(_functions);
+
+        var ex = Assert.Throws<ExpressionEvaluationException>(
+            () => evaluator.EvaluateColumn(expr, batch));
+
+        Assert.Equal(childSpan, ex.Span);
+        Assert.Contains("Line 3", ex.Message);
+    }
+
+    [Fact]
+    public void Error_RethrowsUnchanged_WhenNoSpanAvailable()
+    {
+        var expr = new LiteralExpression(new object());
+
+        ColumnBatch batch = SingleColumnBatch("dummy", DataValue.FromInt32(1));
+        using ColumnBatchEvaluator evaluator = new(_functions);
+
+        Assert.Throws<InvalidOperationException>(
+            () => evaluator.EvaluateColumn(expr, batch));
+    }
 }

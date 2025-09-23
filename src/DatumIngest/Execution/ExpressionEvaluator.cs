@@ -98,43 +98,57 @@ public sealed class ExpressionEvaluator
     /// <returns>The computed result.</returns>
     public DataValue Evaluate(Expression expression, Row row)
     {
-        return expression switch
+        try
         {
-            LiteralExpression literal => EvaluateLiteral(literal),
-            ColumnReference column => EvaluateColumn(column, row, _outerRow),
-            BinaryExpression binary => EvaluateBinary(binary, row),
-            UnaryExpression unary => EvaluateUnary(unary, row),
-            FunctionCallExpression function => EvaluateFunction(function, row),
-            InExpression inExpr => EvaluateIn(inExpr, row),
-            BetweenExpression between => EvaluateBetween(between, row),
-            IsNullExpression isNull => EvaluateIsNull(isNull, row),
-            CastExpression cast => EvaluateCast(cast, row),
-            AtTimeZoneExpression atz => EvaluateAtTimeZone(atz, row),
-            CaseExpression caseExpr => EvaluateCase(caseExpr, row),
-            LikeExpression like => EvaluateLikeEscape(like, row),
-            WindowFunctionCallExpression window => throw new InvalidOperationException(
-                $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
-                "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
-            ScanExpression => throw new InvalidOperationException(
-                "SCAN expression was not rewritten by the query planner. " +
-                "SCAN expressions must appear in SELECT or LET bindings."),
-            SubqueryExpression => throw new InvalidOperationException(
-                "Subquery expression was not rewritten by the query planner."),
-            InSubqueryExpression => throw new InvalidOperationException(
-                "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
-            ExistsExpression => throw new InvalidOperationException(
-                "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
-            ParameterExpression parameter => throw new InvalidOperationException(
-                $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
-            LambdaExpression => throw new InvalidOperationException(
-                "Lambda expressions cannot be evaluated as standalone values. " +
-                "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
-            StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, row),
-            IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, row),
-            TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
-            _ => throw new InvalidOperationException(
-                $"Unsupported expression type: {expression.GetType().Name}.")
-        };
+            return expression switch
+            {
+                LiteralExpression literal => EvaluateLiteral(literal),
+                ColumnReference column => EvaluateColumn(column, row, _outerRow),
+                BinaryExpression binary => EvaluateBinary(binary, row),
+                UnaryExpression unary => EvaluateUnary(unary, row),
+                FunctionCallExpression function => EvaluateFunction(function, row),
+                InExpression inExpr => EvaluateIn(inExpr, row),
+                BetweenExpression between => EvaluateBetween(between, row),
+                IsNullExpression isNull => EvaluateIsNull(isNull, row),
+                CastExpression cast => EvaluateCast(cast, row),
+                AtTimeZoneExpression atz => EvaluateAtTimeZone(atz, row),
+                CaseExpression caseExpr => EvaluateCase(caseExpr, row),
+                LikeExpression like => EvaluateLikeEscape(like, row),
+                WindowFunctionCallExpression window => throw new InvalidOperationException(
+                    $"Window function '{window.FunctionName}' was not rewritten by the query planner. " +
+                    "Window functions must be used with an OVER clause and are only allowed in SELECT and ORDER BY."),
+                ScanExpression => throw new InvalidOperationException(
+                    "SCAN expression was not rewritten by the query planner. " +
+                    "SCAN expressions must appear in SELECT or LET bindings."),
+                SubqueryExpression => throw new InvalidOperationException(
+                    "Subquery expression was not rewritten by the query planner."),
+                InSubqueryExpression => throw new InvalidOperationException(
+                    "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
+                ExistsExpression => throw new InvalidOperationException(
+                    "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
+                ParameterExpression parameter => throw new InvalidOperationException(
+                    $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
+                LambdaExpression => throw new InvalidOperationException(
+                    "Lambda expressions cannot be evaluated as standalone values. " +
+                    "They must appear as arguments to higher-order functions such as array_transform or array_filter."),
+                StructLiteralExpression structLiteral => EvaluateStructLiteral(structLiteral, row),
+                IndexAccessExpression indexAccess => EvaluateIndexAccess(indexAccess, row),
+                TypeLiteralExpression typeLiteral => EvaluateTypeLiteral(typeLiteral),
+                _ => throw new InvalidOperationException(
+                    $"Unsupported expression type: {expression.GetType().Name}.")
+            };
+        }
+        catch (Exception ex) when (ex is not ExpressionEvaluationException)
+        {
+            SourceSpan? span = expression.TryGetSourceSpan();
+            if (span is not null)
+            {
+                throw new ExpressionEvaluationException(
+                    $"[Line {span.Line}, Col {span.Column}] {ex.Message}", span, ex);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>

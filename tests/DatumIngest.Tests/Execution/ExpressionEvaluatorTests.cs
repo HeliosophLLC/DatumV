@@ -1883,4 +1883,94 @@ public class ExpressionEvaluatorTests
 
         Assert.False(_evaluator.EvaluateAsBoolean(expr, row));
     }
+
+    // ─────────────── Source span error enrichment ───────────────
+
+    [Fact]
+    public void Error_IncludesSourceSpan_WhenExpressionHasSpan()
+    {
+        // A CAST expression with a known span that will fail at runtime
+        // (casting a string that isn't a valid number to Int32).
+        var span = new SourceSpan(14, 5, 20);
+        var expr = new CastExpression(
+            new LiteralExpression("not_a_number"), "Int32", span);
+
+        var ex = Assert.Throws<ExpressionEvaluationException>(
+            () => _evaluator.Evaluate(expr, MakeRow()));
+
+        Assert.Equal(span, ex.Span);
+        Assert.Contains("Line 14", ex.Message);
+        Assert.Contains("Col 5", ex.Message);
+    }
+
+    [Fact]
+    public void Error_IncludesSourceSpan_FromFunctionCall()
+    {
+        // date_add() with an Int32 amount — triggers "Cannot read Int32 as Float32".
+        var span = new SourceSpan(7, 12, 30);
+        var expr = new FunctionCallExpression("date_add",
+            [
+                new LiteralExpression("day"),
+                new LiteralExpression(42),       // parsed as int → DataKind.Int32
+                new LiteralExpression(DataValue.FromDate(new DateOnly(2026, 1, 15))),
+            ],
+            Span: span);
+
+        var ex = Assert.Throws<ExpressionEvaluationException>(
+            () => _evaluator.Evaluate(expr, MakeRow()));
+
+        Assert.Equal(span, ex.Span);
+        Assert.Contains("Line 7", ex.Message);
+        Assert.Contains("Col 12", ex.Message);
+        Assert.NotNull(ex.InnerException);
+    }
+
+    [Fact]
+    public void Error_FallsBackToChildSpan_ForBinaryExpression()
+    {
+        // BinaryExpression has no span itself — the enrichment should
+        // walk to the left child's span.
+        var childSpan = new SourceSpan(3, 10, 5);
+        var expr = new BinaryExpression(
+            new ColumnReference(null, "missing_col", childSpan),
+            BinaryOperator.Add,
+            new LiteralExpression(1));
+
+        var ex = Assert.Throws<ExpressionEvaluationException>(
+            () => _evaluator.Evaluate(expr, MakeRow()));
+
+        Assert.Equal(childSpan, ex.Span);
+        Assert.Contains("Line 3", ex.Message);
+        Assert.Contains("Col 10", ex.Message);
+    }
+
+    [Fact]
+    public void Error_DoesNotDoubleWrap_OnRecursiveEvaluation()
+    {
+        // A nested expression where the inner node has a span and the outer
+        // node also has a span — should only wrap once (the innermost catch).
+        var innerSpan = new SourceSpan(5, 1, 10);
+        var expr = new CastExpression(
+            new CastExpression(
+                new LiteralExpression("not_a_number"), "Int32", innerSpan),
+            "Float32",
+            new SourceSpan(5, 20, 15));
+
+        var ex = Assert.Throws<ExpressionEvaluationException>(
+            () => _evaluator.Evaluate(expr, MakeRow()));
+
+        // The innermost span should be the one reported.
+        Assert.Equal(innerSpan, ex.Span);
+    }
+
+    [Fact]
+    public void Error_RethrowsUnchanged_WhenNoSpanAvailable()
+    {
+        // LiteralExpression has no span, and the value type (a bare object)
+        // is unsupported — should throw without wrapping.
+        var expr = new LiteralExpression(new object());
+
+        Assert.Throws<InvalidOperationException>(
+            () => _evaluator.Evaluate(expr, MakeRow()));
+    }
 }

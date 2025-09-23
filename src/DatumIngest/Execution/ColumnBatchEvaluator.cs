@@ -61,34 +61,48 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// </returns>
     public DataValue[] EvaluateColumn(Expression expression, ColumnBatch batch)
     {
-        return expression switch
+        try
         {
-            LiteralExpression literal => EvaluateLiteralColumn(literal, batch.RowCount),
-            ColumnReference column => EvaluateColumnReference(column, batch),
-            BinaryExpression binary => EvaluateBinaryColumn(binary, batch),
-            UnaryExpression unary => EvaluateUnaryColumn(unary, batch),
-            FunctionCallExpression function => EvaluateFunctionColumn(function, batch),
-            InExpression inExpression => EvaluateInColumn(inExpression, batch),
-            BetweenExpression between => EvaluateBetweenColumn(between, batch),
-            IsNullExpression isNull => EvaluateIsNullColumn(isNull, batch),
-            CastExpression cast => EvaluateCastColumn(cast, batch),
-            AtTimeZoneExpression atz => EvaluateAtTimeZoneColumn(atz, batch),
-            CaseExpression caseExpression => EvaluateCaseColumn(caseExpression, batch),
-            LikeExpression like => EvaluateLikeColumn(like, batch),
-            WindowFunctionCallExpression window => throw new InvalidOperationException(
-                $"Window function '{window.FunctionName}' was not rewritten by the query planner."),
-            SubqueryExpression => throw new InvalidOperationException(
-                "Subquery expression was not rewritten by the query planner."),
-            InSubqueryExpression => throw new InvalidOperationException(
-                "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
-            ExistsExpression => throw new InvalidOperationException(
-                "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
-            ParameterExpression parameter => throw new InvalidOperationException(
-                $"Unbound parameter '${parameter.Name}'."),
-            TypeLiteralExpression typeLiteral => EvaluateTypeLiteralColumn(typeLiteral, batch.RowCount),
-            _ => throw new InvalidOperationException(
-                $"Unsupported expression type: {expression.GetType().Name}."),
-        };
+            return expression switch
+            {
+                LiteralExpression literal => EvaluateLiteralColumn(literal, batch.RowCount),
+                ColumnReference column => EvaluateColumnReference(column, batch),
+                BinaryExpression binary => EvaluateBinaryColumn(binary, batch),
+                UnaryExpression unary => EvaluateUnaryColumn(unary, batch),
+                FunctionCallExpression function => EvaluateFunctionColumn(function, batch),
+                InExpression inExpression => EvaluateInColumn(inExpression, batch),
+                BetweenExpression between => EvaluateBetweenColumn(between, batch),
+                IsNullExpression isNull => EvaluateIsNullColumn(isNull, batch),
+                CastExpression cast => EvaluateCastColumn(cast, batch),
+                AtTimeZoneExpression atz => EvaluateAtTimeZoneColumn(atz, batch),
+                CaseExpression caseExpression => EvaluateCaseColumn(caseExpression, batch),
+                LikeExpression like => EvaluateLikeColumn(like, batch),
+                WindowFunctionCallExpression window => throw new InvalidOperationException(
+                    $"Window function '{window.FunctionName}' was not rewritten by the query planner."),
+                SubqueryExpression => throw new InvalidOperationException(
+                    "Subquery expression was not rewritten by the query planner."),
+                InSubqueryExpression => throw new InvalidOperationException(
+                    "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
+                ExistsExpression => throw new InvalidOperationException(
+                    "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
+                ParameterExpression parameter => throw new InvalidOperationException(
+                    $"Unbound parameter '${parameter.Name}'."),
+                TypeLiteralExpression typeLiteral => EvaluateTypeLiteralColumn(typeLiteral, batch.RowCount),
+                _ => throw new InvalidOperationException(
+                    $"Unsupported expression type: {expression.GetType().Name}."),
+            };
+        }
+        catch (Exception ex) when (ex is not ExpressionEvaluationException)
+        {
+            SourceSpan? span = expression.TryGetSourceSpan();
+            if (span is not null)
+            {
+                throw new ExpressionEvaluationException(
+                    $"[Line {span.Line}, Col {span.Column}] {ex.Message}", span, ex);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>

@@ -378,7 +378,40 @@ public enum SortDirection
 /// <summary>
 /// Base type for all expression nodes in the AST.
 /// </summary>
-public abstract record Expression;
+public abstract record Expression
+{
+    /// <summary>
+    /// Returns the source span for this expression if available, either directly
+    /// from the node itself or from the nearest child that carries one.
+    /// </summary>
+    public SourceSpan? TryGetSourceSpan()
+    {
+        return this switch
+        {
+            ColumnReference e => e.Span,
+            FunctionCallExpression e => e.Span,
+            CastExpression e => e.Span,
+            CaseExpression e => e.Span,
+            AtTimeZoneExpression e => e.Span,
+            LambdaExpression e => e.Span,
+            WindowFunctionCallExpression e => e.Span,
+            ErrorExpression e => e.Span,
+            TypeLiteralExpression e => e.Span,
+            ParameterExpression e => e.Span,
+            StructLiteralExpression e => e.Span,
+            IndexAccessExpression e => e.Span,
+            ScanExpression e => e.Span,
+            // Nodes without their own span — try the nearest child.
+            BinaryExpression e => e.Left.TryGetSourceSpan() ?? e.Right.TryGetSourceSpan(),
+            UnaryExpression e => e.Operand.TryGetSourceSpan(),
+            InExpression e => e.Expression.TryGetSourceSpan(),
+            BetweenExpression e => e.Expression.TryGetSourceSpan(),
+            IsNullExpression e => e.Expression.TryGetSourceSpan(),
+            LikeExpression e => e.Expression.TryGetSourceSpan(),
+            _ => null,
+        };
+    }
+}
 
 /// <summary>
 /// A reference to a column, optionally qualified with a table name.
