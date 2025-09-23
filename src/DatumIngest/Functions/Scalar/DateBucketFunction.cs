@@ -31,9 +31,9 @@ public sealed class DateBucketFunction : IScalarFunction
             throw new ArgumentException("date_bucket() first argument must be a String (date part name).");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            throw new ArgumentException($"date_bucket() second argument must be Scalar (bucket width), got {argumentKinds[1]}.");
+            throw new ArgumentException($"date_bucket() second argument must be numeric (bucket width), got {argumentKinds[1]}.");
         }
 
         if (argumentKinds[2] is not (DataKind.Date or DataKind.DateTime))
@@ -62,7 +62,7 @@ public sealed class DateBucketFunction : IScalarFunction
         }
 
         DatePartName part = DatePartParser.Parse(partValue.AsString());
-        int width = (int)widthValue.AsFloat32();
+        int width = widthValue.ToInt32();
 
         if (width <= 0)
         {

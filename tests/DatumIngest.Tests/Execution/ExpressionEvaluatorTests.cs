@@ -1906,12 +1906,12 @@ public class ExpressionEvaluatorTests
     [Fact]
     public void Error_IncludesSourceSpan_FromFunctionCall()
     {
-        // date_add() with an Int32 amount — triggers "Cannot read Int32 as Float32".
+        // date_add() with a String amount — not numeric, triggers validation error.
         var span = new SourceSpan(7, 12, 30);
         var expr = new FunctionCallExpression("date_add",
             [
                 new LiteralExpression("day"),
-                new LiteralExpression(42),       // parsed as int → DataKind.Int32
+                new LiteralExpression("not_a_number"),
                 new LiteralExpression(DataValue.FromDate(new DateOnly(2026, 1, 15))),
             ],
             Span: span);

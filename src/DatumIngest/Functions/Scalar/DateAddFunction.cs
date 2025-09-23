@@ -27,9 +27,9 @@ public sealed class DateAddFunction : IScalarFunction
             throw new ArgumentException("date_add() first argument must be a String (date part name).");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValueComparer.IsNumericScalar(argumentKinds[1]))
         {
-            throw new ArgumentException($"date_add() second argument must be Scalar (amount to add), got {argumentKinds[1]}.");
+            throw new ArgumentException($"date_add() second argument must be numeric (amount to add), got {argumentKinds[1]}.");
         }
 
         if (argumentKinds[2] is not (DataKind.Date or DataKind.DateTime))
@@ -53,7 +53,7 @@ public sealed class DateAddFunction : IScalarFunction
         }
 
         DatePartName part = DatePartParser.Parse(partValue.AsString());
-        int amount = (int)amountValue.AsFloat32();
+        int amount = amountValue.ToInt32();
         DateTimeOffset original = DateFunctionUtilities.ToDateTimeOffset(dateValue);
 
         DateTimeOffset result = part switch
