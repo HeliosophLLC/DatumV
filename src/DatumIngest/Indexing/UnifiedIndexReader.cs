@@ -449,34 +449,79 @@ internal static class UnifiedIndexReader
                 chunkRowCounts[chunkIndex] = reader.ReadInt32();
             }
 
-            Dictionary<DataValue, BitmapColumnIndex.ChunkLocation[]> chunkLocations = new(distinctValueCount);
-
-            for (int valueIndex = 0; valueIndex < distinctValueCount; valueIndex++)
+            if (distinctValueCount == 0)
             {
-                DataValue value = IndexReader.ReadDataValue(reader);
-                BitmapColumnIndex.ChunkLocation[] locations =
-                    new BitmapColumnIndex.ChunkLocation[chunkCount];
-
-                for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
-                {
-                    int bitmapLength = reader.ReadInt32();
-                    long bitmapOffset = entry.Offset + stream.Position;
-                    locations[chunkIndex] = new BitmapColumnIndex.ChunkLocation(bitmapOffset, bitmapLength);
-
-                    if (bitmapLength > 0)
-                    {
-                        stream.Seek(bitmapLength, SeekOrigin.Current);
-                    }
-                }
-
-                chunkLocations[value] = locations;
+                indexes[columnName] = new BitmapColumnIndex(
+                    sharedAccessor,
+                    new Dictionary<DataValue, BitmapColumnIndex.ChunkLocation[]>(),
+                    chunkCount, chunkRowCounts);
+                continue;
             }
 
-            indexes[columnName] = new BitmapColumnIndex(
-                sharedAccessor, chunkLocations, chunkCount, chunkRowCounts);
+            // Peek at the first key's DataKind to determine string vs non-string path.
+            DataKind firstKind = (DataKind)reader.ReadByte();
+
+            if (firstKind is DataKind.String or DataKind.JsonValue)
+            {
+                // String-keyed: read keys as raw strings, bypassing ReferenceStore.
+                Dictionary<string, BitmapColumnIndex.ChunkLocation[]> stringLocations = new(distinctValueCount, StringComparer.Ordinal);
+
+                // Read the first key (kind byte already consumed).
+                string firstKey = reader.ReadString();
+                stringLocations[firstKey] = ReadChunkLocations(reader, stream, entry.Offset, chunkCount);
+
+                for (int valueIndex = 1; valueIndex < distinctValueCount; valueIndex++)
+                {
+                    reader.ReadByte(); // skip kind byte (same as firstKind)
+                    string key = reader.ReadString();
+                    stringLocations[key] = ReadChunkLocations(reader, stream, entry.Offset, chunkCount);
+                }
+
+                indexes[columnName] = new BitmapColumnIndex(
+                    sharedAccessor, firstKind, stringLocations, chunkCount, chunkRowCounts);
+            }
+            else
+            {
+                // Non-string: read keys as DataValues (scope-safe for non-reference types).
+                Dictionary<DataValue, BitmapColumnIndex.ChunkLocation[]> chunkLocations = new(distinctValueCount);
+
+                // Reconstruct the first key from its kind byte + remaining bytes.
+                DataValue firstValue = IndexReader.ReadDataValueBody(reader, firstKind);
+                chunkLocations[firstValue] = ReadChunkLocations(reader, stream, entry.Offset, chunkCount);
+
+                for (int valueIndex = 1; valueIndex < distinctValueCount; valueIndex++)
+                {
+                    DataValue value = IndexReader.ReadDataValue(reader);
+                    chunkLocations[value] = ReadChunkLocations(reader, stream, entry.Offset, chunkCount);
+                }
+
+                indexes[columnName] = new BitmapColumnIndex(
+                    sharedAccessor, chunkLocations, chunkCount, chunkRowCounts);
+            }
         }
 
         return new BitmapIndexSet(indexes);
+    }
+
+    private static BitmapColumnIndex.ChunkLocation[] ReadChunkLocations(
+        BinaryReader reader, MemoryMappedViewStream stream, long sectionOffset, int chunkCount)
+    {
+        BitmapColumnIndex.ChunkLocation[] locations =
+            new BitmapColumnIndex.ChunkLocation[chunkCount];
+
+        for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+        {
+            int bitmapLength = reader.ReadInt32();
+            long bitmapOffset = sectionOffset + stream.Position;
+            locations[chunkIndex] = new BitmapColumnIndex.ChunkLocation(bitmapOffset, bitmapLength);
+
+            if (bitmapLength > 0)
+            {
+                stream.Seek(bitmapLength, SeekOrigin.Current);
+            }
+        }
+
+        return locations;
     }
 
     // ───────────────────────── Internal types ─────────────────────────

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.IO.MemoryMappedFiles;
 using DatumIngest.Model;
 
@@ -10,34 +9,36 @@ namespace DatumIngest.Indexing.Bitmap;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The internal structure is a dictionary mapping each distinct <see cref="DataValue"/> to an
-/// array of compressed byte arrays, one per chunk. <see cref="GetChunkBitmap"/> decompresses
-/// on demand. For a column with cardinality <c>C</c> across <c>K</c> chunks, this stores
+/// The internal structure is a dictionary mapping each distinct value to an array of
+/// compressed byte arrays, one per chunk. <see cref="GetChunkBitmap"/> decompresses on
+/// demand. For a column with cardinality <c>C</c> across <c>K</c> chunks, this stores
 /// <c>C × K</c> compressed bitsets, each representing which rows in a given chunk contain
 /// the corresponding value.
 /// </para>
 /// <para>
-/// String-keyed bitmap indexes maintain a parallel <see cref="string"/>-keyed dictionary
-/// so that lookups remain correct even when the <see cref="ReferenceStore"/> scope active
-/// during a query differs from the scope that was active when the index was loaded. This
-/// is necessary because the index is cached long-term in the catalog while query scopes
-/// are per-request.
+/// String and JSON-keyed bitmap indexes use <see cref="string"/>-keyed dictionaries so
+/// that lookups are independent of <see cref="ReferenceStore"/> scope. This is necessary
+/// because the index is cached long-term in the catalog while query scopes are per-request.
+/// Non-string keys (boolean, numeric, date, etc.) use <see cref="DataValue"/>-keyed
+/// dictionaries since their equality and hashing use only inline bit fields.
 /// </para>
 /// </remarks>
 internal sealed class BitmapColumnIndex : IBitmapColumnIndex
 {
+    // Non-string heap path (boolean, numeric, date keys).
     private readonly Dictionary<DataValue, byte[][]>? _compressedBitmaps;
-    private readonly MemoryMappedViewAccessor? _accessor;
+    // Non-string mapped path.
     private readonly Dictionary<DataValue, ChunkLocation[]>? _chunkLocations;
+
+    // String/JSON heap path — scope-independent.
+    private readonly Dictionary<string, byte[][]>? _stringCompressedBitmaps;
+    // String/JSON mapped path — scope-independent.
+    private readonly Dictionary<string, ChunkLocation[]>? _stringChunkLocations;
+
+    private readonly MemoryMappedViewAccessor? _accessor;
     private readonly int _chunkCount;
     private readonly int[] _chunkRowCounts;
     private readonly DataKind? _keyKind;
-
-    // Scope-independent lookup structures for string/JSON keys. Built at construction
-    // time from the DataValue dictionary while the original ReferenceStore is still
-    // active, ensuring the actual string values are captured before the scope changes.
-    private readonly Dictionary<string, byte[][]>? _stringHeapLookup;
-    private readonly Dictionary<string, ChunkLocation[]>? _stringMappedLookup;
 
     /// <summary>
     /// Describes the position and size of a single compressed bitmap payload within a
@@ -77,11 +78,34 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         int chunkCount,
         int[] chunkRowCounts)
     {
-        _compressedBitmaps = compressedBitmaps;
         _chunkCount = chunkCount;
         _chunkRowCounts = chunkRowCounts;
         _keyKind = InferKeyKind(compressedBitmaps.Keys);
-        _stringHeapLookup = BuildStringLookup(compressedBitmaps);
+
+        if (_keyKind is DataKind.String or DataKind.JsonValue)
+        {
+            _stringCompressedBitmaps = ConvertToStringKeys(compressedBitmaps);
+        }
+        else
+        {
+            _compressedBitmaps = compressedBitmaps;
+        }
+    }
+
+    /// <summary>
+    /// Creates a bitmap column index from string-keyed pre-compressed bitsets.
+    /// Used when the caller already has string keys (e.g. deserialization).
+    /// </summary>
+    internal BitmapColumnIndex(
+        DataKind keyKind,
+        Dictionary<string, byte[][]> stringCompressedBitmaps,
+        int chunkCount,
+        int[] chunkRowCounts)
+    {
+        _chunkCount = chunkCount;
+        _chunkRowCounts = chunkRowCounts;
+        _keyKind = keyKind;
+        _stringCompressedBitmaps = stringCompressedBitmaps;
     }
 
     /// <summary>
@@ -105,18 +129,59 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         int[] chunkRowCounts)
     {
         _accessor = accessor;
-        _chunkLocations = chunkLocations;
         _chunkCount = chunkCount;
         _chunkRowCounts = chunkRowCounts;
         _keyKind = InferKeyKind(chunkLocations.Keys);
-        _stringMappedLookup = BuildStringLookup(chunkLocations);
+
+        if (_keyKind is DataKind.String or DataKind.JsonValue)
+        {
+            _stringChunkLocations = ConvertToStringKeys(chunkLocations);
+        }
+        else
+        {
+            _chunkLocations = chunkLocations;
+        }
+    }
+
+    /// <summary>
+    /// Creates a memory-mapped bitmap column index from string-keyed chunk locations.
+    /// Used when the caller already has string keys (e.g. deserialization).
+    /// </summary>
+    internal BitmapColumnIndex(
+        MemoryMappedViewAccessor accessor,
+        DataKind keyKind,
+        Dictionary<string, ChunkLocation[]> stringChunkLocations,
+        int chunkCount,
+        int[] chunkRowCounts)
+    {
+        _accessor = accessor;
+        _chunkCount = chunkCount;
+        _chunkRowCounts = chunkRowCounts;
+        _keyKind = keyKind;
+        _stringChunkLocations = stringChunkLocations;
     }
 
     /// <inheritdoc/>
-    public IReadOnlyCollection<DataValue> DistinctValues =>
-        _compressedBitmaps is not null
-            ? _compressedBitmaps.Keys
-            : _chunkLocations!.Keys;
+    public IReadOnlyCollection<DataValue> DistinctValues
+    {
+        get
+        {
+            if (_compressedBitmaps is not null)
+                return _compressedBitmaps.Keys;
+            if (_chunkLocations is not null)
+                return _chunkLocations.Keys;
+
+            // Reconstruct DataValues from string keys. Only used by the writer
+            // (inside a query scope) and tests — allocation is acceptable here.
+            IEnumerable<string> keys = _stringCompressedBitmaps is not null
+                ? _stringCompressedBitmaps.Keys
+                : _stringChunkLocations!.Keys;
+
+            return keys.Select(s => _keyKind == DataKind.JsonValue
+                ? DataValue.FromJsonValue(s)
+                : DataValue.FromString(s)).ToList();
+        }
+    }
 
     /// <inheritdoc/>
     public int ChunkCount => _chunkCount;
@@ -129,6 +194,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     /// <summary>
     /// The underlying compressed bitmap data for serialization. For memory-mapped
     /// indexes, reads all compressed payloads from the accessor into newly allocated arrays.
+    /// For string-keyed indexes, reconstructs <see cref="DataValue"/> keys on the fly.
     /// </summary>
     internal IReadOnlyDictionary<DataValue, byte[][]> CompressedBitmaps
     {
@@ -139,33 +205,74 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
                 return _compressedBitmaps;
             }
 
-            Dictionary<DataValue, byte[][]> result = new(_chunkLocations!.Count);
-
-            foreach (KeyValuePair<DataValue, ChunkLocation[]> entry in _chunkLocations)
+            if (_stringCompressedBitmaps is not null)
             {
-                byte[][] chunkBitmaps = new byte[entry.Value.Length][];
-
-                for (int chunkIndex = 0; chunkIndex < entry.Value.Length; chunkIndex++)
-                {
-                    ChunkLocation location = entry.Value[chunkIndex];
-
-                    if (location.Length == 0)
-                    {
-                        chunkBitmaps[chunkIndex] = [];
-                    }
-                    else
-                    {
-                        byte[] compressed = new byte[location.Length];
-                        _accessor!.ReadArray(location.Offset, compressed.AsSpan());
-                        chunkBitmaps[chunkIndex] = compressed;
-                    }
-                }
-
-                result[entry.Key] = chunkBitmaps;
+                return ReconstructDataValueKeys(_stringCompressedBitmaps);
             }
 
-            return result;
+            if (_chunkLocations is not null)
+            {
+                return ReadAllFromAccessor(_chunkLocations);
+            }
+
+            return ReadAllFromAccessor(_stringChunkLocations!);
         }
+    }
+
+    private Dictionary<DataValue, byte[][]> ReconstructDataValueKeys(
+        Dictionary<string, byte[][]> source)
+    {
+        Dictionary<DataValue, byte[][]> result = new(source.Count);
+
+        foreach (KeyValuePair<string, byte[][]> entry in source)
+        {
+            DataValue key = _keyKind == DataKind.JsonValue
+                ? DataValue.FromJsonValue(entry.Key)
+                : DataValue.FromString(entry.Key);
+            result[key] = entry.Value;
+        }
+
+        return result;
+    }
+
+    private Dictionary<DataValue, byte[][]> ReadAllFromAccessor<TKey>(
+        Dictionary<TKey, ChunkLocation[]> locations) where TKey : notnull
+    {
+        Dictionary<DataValue, byte[][]> result = new(locations.Count);
+
+        foreach (KeyValuePair<TKey, ChunkLocation[]> entry in locations)
+        {
+            byte[][] chunkBitmaps = new byte[entry.Value.Length][];
+
+            for (int chunkIndex = 0; chunkIndex < entry.Value.Length; chunkIndex++)
+            {
+                ChunkLocation location = entry.Value[chunkIndex];
+
+                if (location.Length == 0)
+                {
+                    chunkBitmaps[chunkIndex] = [];
+                }
+                else
+                {
+                    byte[] compressed = new byte[location.Length];
+                    _accessor!.ReadArray(location.Offset, compressed.AsSpan());
+                    chunkBitmaps[chunkIndex] = compressed;
+                }
+            }
+
+            DataValue key = entry.Key switch
+            {
+                DataValue dv => dv,
+                string s => _keyKind == DataKind.JsonValue
+                    ? DataValue.FromJsonValue(s)
+                    : DataValue.FromString(s),
+                _ => throw new InvalidOperationException("Unexpected key type."),
+            };
+
+            result[key] = chunkBitmaps;
+        }
+
+        return result;
     }
 
     /// <inheritdoc/>
@@ -178,66 +285,78 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
 
         DataValue normalized = NormalizeKey(value);
 
+        if (_stringCompressedBitmaps is not null)
+        {
+            return GetChunkBitmapFromStringHeap(normalized.AsString(), chunkIndex);
+        }
+
         if (_compressedBitmaps is not null)
         {
             return GetChunkBitmapFromHeap(normalized, chunkIndex);
         }
 
+        if (_stringChunkLocations is not null)
+        {
+            return GetChunkBitmapFromStringAccessor(normalized.AsString(), chunkIndex);
+        }
+
         return GetChunkBitmapFromAccessor(normalized, chunkIndex);
     }
 
-    /// <summary>
-    /// Retrieves a chunk bitmap from the in-memory compressed bitmap dictionary.
-    /// </summary>
+    private ChunkBitmap GetChunkBitmapFromStringHeap(string key, int chunkIndex)
+    {
+        if (!_stringCompressedBitmaps!.TryGetValue(key, out byte[][]? chunkBitmaps)
+            || chunkIndex >= chunkBitmaps.Length)
+        {
+            return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
+        }
+
+        byte[] compressed = chunkBitmaps[chunkIndex];
+        return compressed.Length == 0
+            ? ChunkBitmap.Create(_chunkRowCounts[chunkIndex])
+            : ChunkBitmap.FromCompressed(compressed, _chunkRowCounts[chunkIndex]);
+    }
+
     private ChunkBitmap GetChunkBitmapFromHeap(DataValue value, int chunkIndex)
     {
         if (!_compressedBitmaps!.TryGetValue(value, out byte[][]? chunkBitmaps)
             || chunkIndex >= chunkBitmaps.Length)
         {
-            // DataValue lookup failed — try the string fallback for cross-scope resilience.
-            if (_stringHeapLookup is not null
-                && TryGetString(value, out string? str)
-                && _stringHeapLookup.TryGetValue(str, out chunkBitmaps)
-                && chunkIndex < chunkBitmaps.Length)
-            {
-                // Fall through to decompress below.
-            }
-            else
-            {
-                return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
-            }
+            return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
         }
 
         byte[] compressed = chunkBitmaps[chunkIndex];
+        return compressed.Length == 0
+            ? ChunkBitmap.Create(_chunkRowCounts[chunkIndex])
+            : ChunkBitmap.FromCompressed(compressed, _chunkRowCounts[chunkIndex]);
+    }
 
-        if (compressed.Length == 0)
+    private ChunkBitmap GetChunkBitmapFromStringAccessor(string key, int chunkIndex)
+    {
+        if (!_stringChunkLocations!.TryGetValue(key, out ChunkLocation[]? locations)
+            || chunkIndex >= locations.Length)
         {
             return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
         }
 
+        ChunkLocation location = locations[chunkIndex];
+
+        if (location.Length == 0)
+        {
+            return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
+        }
+
+        byte[] compressed = new byte[location.Length];
+        _accessor!.ReadArray(location.Offset, compressed.AsSpan());
         return ChunkBitmap.FromCompressed(compressed, _chunkRowCounts[chunkIndex]);
     }
 
-    /// <summary>
-    /// Retrieves a chunk bitmap by reading compressed bytes from the memory-mapped accessor.
-    /// </summary>
     private ChunkBitmap GetChunkBitmapFromAccessor(DataValue value, int chunkIndex)
     {
         if (!_chunkLocations!.TryGetValue(value, out ChunkLocation[]? locations)
             || chunkIndex >= locations.Length)
         {
-            // DataValue lookup failed — try the string fallback.
-            if (_stringMappedLookup is not null
-                && TryGetString(value, out string? str)
-                && _stringMappedLookup.TryGetValue(str, out locations)
-                && chunkIndex < locations.Length)
-            {
-                // Fall through to read below.
-            }
-            else
-            {
-                return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
-            }
+            return ChunkBitmap.Create(_chunkRowCounts[chunkIndex]);
         }
 
         ChunkLocation location = locations[chunkIndex];
@@ -255,42 +374,41 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     /// <inheritdoc/>
     public bool ChunkContainsValue(DataValue value, int chunkIndex)
     {
+        if (chunkIndex < 0 || chunkIndex >= _chunkCount)
+        {
+            return false;
+        }
+
         DataValue normalized = NormalizeKey(value);
+
+        if (_stringCompressedBitmaps is not null)
+        {
+            return ChunkContainsValueFromDict(_stringCompressedBitmaps, normalized.AsString(), chunkIndex);
+        }
 
         if (_compressedBitmaps is not null)
         {
-            return ChunkContainsValueFromHeap(normalized, chunkIndex);
+            return ChunkContainsValueFromDict(_compressedBitmaps, normalized, chunkIndex);
         }
 
-        return ChunkContainsValueFromAccessor(normalized, chunkIndex);
+        if (_stringChunkLocations is not null)
+        {
+            return ChunkContainsValueFromAccessor(_stringChunkLocations, normalized.AsString(), chunkIndex);
+        }
+
+        return ChunkContainsValueFromAccessor(_chunkLocations!, normalized, chunkIndex);
     }
 
-    /// <summary>
-    /// Checks value presence in a chunk using the in-memory compressed bitmap dictionary.
-    /// </summary>
-    private bool ChunkContainsValueFromHeap(DataValue value, int chunkIndex)
+    private bool ChunkContainsValueFromDict<TKey>(
+        Dictionary<TKey, byte[][]> dict, TKey key, int chunkIndex) where TKey : notnull
     {
-        if (!_compressedBitmaps!.TryGetValue(value, out byte[][]? chunkBitmaps)
-            || chunkIndex < 0
+        if (!dict.TryGetValue(key, out byte[][]? chunkBitmaps)
             || chunkIndex >= chunkBitmaps.Length)
         {
-            // DataValue lookup failed — try the string fallback for cross-scope resilience.
-            if (_stringHeapLookup is not null
-                && TryGetString(value, out string? str)
-                && _stringHeapLookup.TryGetValue(str, out chunkBitmaps)
-                && chunkIndex >= 0
-                && chunkIndex < chunkBitmaps.Length)
-            {
-                // Fall through to check below.
-            }
-            else
-            {
-                return false;
-            }
+            return false;
         }
 
         byte[] compressed = chunkBitmaps[chunkIndex];
-
         if (compressed.Length == 0)
         {
             return false;
@@ -300,32 +418,16 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         return !bitmap.IsEmpty;
     }
 
-    /// <summary>
-    /// Checks value presence in a chunk by reading compressed bytes from the memory-mapped accessor.
-    /// </summary>
-    private bool ChunkContainsValueFromAccessor(DataValue value, int chunkIndex)
+    private bool ChunkContainsValueFromAccessor<TKey>(
+        Dictionary<TKey, ChunkLocation[]> dict, TKey key, int chunkIndex) where TKey : notnull
     {
-        if (!_chunkLocations!.TryGetValue(value, out ChunkLocation[]? locations)
-            || chunkIndex < 0
+        if (!dict.TryGetValue(key, out ChunkLocation[]? locations)
             || chunkIndex >= locations.Length)
         {
-            // DataValue lookup failed — try the string fallback.
-            if (_stringMappedLookup is not null
-                && TryGetString(value, out string? str)
-                && _stringMappedLookup.TryGetValue(str, out locations)
-                && chunkIndex >= 0
-                && chunkIndex < locations.Length)
-            {
-                // Fall through to check below.
-            }
-            else
-            {
-                return false;
-            }
+            return false;
         }
 
         ChunkLocation location = locations[chunkIndex];
-
         if (location.Length == 0)
         {
             return false;
@@ -343,66 +445,74 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
         DataValue normalized = NormalizeKey(value);
         HashSet<int> chunks = new();
 
-        if (_compressedBitmaps is not null)
+        if (_stringCompressedBitmaps is not null)
         {
-            if (!_compressedBitmaps.TryGetValue(normalized, out byte[][]? chunkBitmaps))
-            {
-                // DataValue lookup failed — try the string fallback.
-                if (_stringHeapLookup is null
-                    || !TryGetString(normalized, out string? str)
-                    || !_stringHeapLookup.TryGetValue(str, out chunkBitmaps))
-                {
-                    return chunks;
-                }
-            }
-
-            for (int chunkIndex = 0; chunkIndex < chunkBitmaps.Length; chunkIndex++)
-            {
-                if (chunkBitmaps[chunkIndex].Length > 0)
-                {
-                    ChunkBitmap bitmap = ChunkBitmap.FromCompressed(
-                        chunkBitmaps[chunkIndex], _chunkRowCounts[chunkIndex]);
-
-                    if (!bitmap.IsEmpty)
-                    {
-                        chunks.Add(chunkIndex);
-                    }
-                }
-            }
+            FindChunksFromDict(_stringCompressedBitmaps, normalized.AsString(), chunks);
+        }
+        else if (_compressedBitmaps is not null)
+        {
+            FindChunksFromDict(_compressedBitmaps, normalized, chunks);
+        }
+        else if (_stringChunkLocations is not null)
+        {
+            FindChunksFromAccessor(_stringChunkLocations, normalized.AsString(), chunks);
         }
         else
         {
-            if (!_chunkLocations!.TryGetValue(normalized, out ChunkLocation[]? locations))
-            {
-                // DataValue lookup failed — try the string fallback.
-                if (_stringMappedLookup is null
-                    || !TryGetString(normalized, out string? str)
-                    || !_stringMappedLookup.TryGetValue(str, out locations))
-                {
-                    return chunks;
-                }
-            }
-
-            for (int chunkIndex = 0; chunkIndex < locations.Length; chunkIndex++)
-            {
-                ChunkLocation location = locations[chunkIndex];
-
-                if (location.Length > 0)
-                {
-                    byte[] compressed = new byte[location.Length];
-                    _accessor!.ReadArray(location.Offset, compressed.AsSpan());
-                    ChunkBitmap bitmap = ChunkBitmap.FromCompressed(
-                        compressed, _chunkRowCounts[chunkIndex]);
-
-                    if (!bitmap.IsEmpty)
-                    {
-                        chunks.Add(chunkIndex);
-                    }
-                }
-            }
+            FindChunksFromAccessor(_chunkLocations!, normalized, chunks);
         }
 
         return chunks;
+    }
+
+    private void FindChunksFromDict<TKey>(
+        Dictionary<TKey, byte[][]> dict, TKey key, HashSet<int> chunks) where TKey : notnull
+    {
+        if (!dict.TryGetValue(key, out byte[][]? chunkBitmaps))
+        {
+            return;
+        }
+
+        for (int chunkIndex = 0; chunkIndex < chunkBitmaps.Length; chunkIndex++)
+        {
+            if (chunkBitmaps[chunkIndex].Length > 0)
+            {
+                ChunkBitmap bitmap = ChunkBitmap.FromCompressed(
+                    chunkBitmaps[chunkIndex], _chunkRowCounts[chunkIndex]);
+
+                if (!bitmap.IsEmpty)
+                {
+                    chunks.Add(chunkIndex);
+                }
+            }
+        }
+    }
+
+    private void FindChunksFromAccessor<TKey>(
+        Dictionary<TKey, ChunkLocation[]> dict, TKey key, HashSet<int> chunks) where TKey : notnull
+    {
+        if (!dict.TryGetValue(key, out ChunkLocation[]? locations))
+        {
+            return;
+        }
+
+        for (int chunkIndex = 0; chunkIndex < locations.Length; chunkIndex++)
+        {
+            ChunkLocation location = locations[chunkIndex];
+
+            if (location.Length > 0)
+            {
+                byte[] compressed = new byte[location.Length];
+                _accessor!.ReadArray(location.Offset, compressed.AsSpan());
+                ChunkBitmap bitmap = ChunkBitmap.FromCompressed(
+                    compressed, _chunkRowCounts[chunkIndex]);
+
+                if (!bitmap.IsEmpty)
+                {
+                    chunks.Add(chunkIndex);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -432,58 +542,20 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
     }
 
     /// <summary>
-    /// Builds a scope-independent <see cref="string"/>-keyed dictionary from a
-    /// <see cref="DataValue"/>-keyed source. Must be called at construction time
-    /// while the <see cref="ReferenceStore"/> that holds the key strings is still
-    /// active. Returns <c>null</c> for non-string key kinds.
+    /// Converts a <see cref="DataValue"/>-keyed dictionary to a <see cref="string"/>-keyed
+    /// dictionary. Must be called at construction time while the <see cref="ReferenceStore"/>
+    /// that holds the key strings is still active.
     /// </summary>
-    private static Dictionary<string, TValue>? BuildStringLookup<TValue>(
+    private static Dictionary<string, TValue> ConvertToStringKeys<TValue>(
         Dictionary<DataValue, TValue> source)
     {
-        if (source.Count == 0)
-        {
-            return null;
-        }
-
-        // Check first key to determine if this is a string-keyed index.
-        using IEnumerator<KeyValuePair<DataValue, TValue>> enumerator = source.GetEnumerator();
-        if (!enumerator.MoveNext())
-        {
-            return null;
-        }
-
-        DataKind kind = enumerator.Current.Key.Kind;
-        if (kind is not (DataKind.String or DataKind.JsonValue))
-        {
-            return null;
-        }
-
         Dictionary<string, TValue> result = new(source.Count, StringComparer.Ordinal);
 
-        // Re-enumerate from the start. The first entry was consumed only to check the kind.
         foreach (KeyValuePair<DataValue, TValue> entry in source)
         {
-            // At construction time the ReferenceStore is correct, so AsString() works.
             result[entry.Key.AsString()] = entry.Value;
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Extracts the string from a <see cref="DataValue"/> for use as a lookup key
-    /// in the scope-independent string dictionary. Returns <c>false</c> for
-    /// non-string values.
-    /// </summary>
-    private static bool TryGetString(DataValue value, [NotNullWhen(true)] out string? result)
-    {
-        if (value.Kind is DataKind.String or DataKind.JsonValue)
-        {
-            result = value.AsString();
-            return true;
-        }
-
-        result = null;
-        return false;
     }
 }

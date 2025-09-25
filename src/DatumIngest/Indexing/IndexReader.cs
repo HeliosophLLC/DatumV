@@ -31,7 +31,15 @@ internal static class IndexReader
     internal static DataValue ReadDataValue(BinaryReader reader)
     {
         DataKind kind = (DataKind)reader.ReadByte();
+        return ReadDataValueBody(reader, kind);
+    }
 
+    /// <summary>
+    /// Reads a <see cref="DataValue"/> body when the leading <see cref="DataKind"/> byte
+    /// has already been consumed by the caller.
+    /// </summary>
+    internal static DataValue ReadDataValueBody(BinaryReader reader, DataKind kind)
+    {
         return kind switch
         {
             DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
