@@ -360,6 +360,7 @@ public sealed class ProtoConverterTests
         // reconstruct them (the gRPC client SDK handles deserialization).
         HashSet<DataKind> clientOnlyKinds =
         [
+            DataKind.Unknown,
             DataKind.Vector, DataKind.Matrix, DataKind.Tensor,
             DataKind.UInt8Array, DataKind.Image,
         ];

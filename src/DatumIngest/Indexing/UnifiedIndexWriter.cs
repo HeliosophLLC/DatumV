@@ -29,8 +29,8 @@ internal static class UnifiedIndexWriter
     /// <summary>Magic bytes identifying a unified index file: ASCII "DXIX".</summary>
     internal static ReadOnlySpan<byte> MagicBytes => "DXIX"u8;
 
-    /// <summary>Format version for the v5 unified layout.</summary>
-    internal const int FormatVersion = 5;
+    /// <summary>Format version for the v6 unified layout.</summary>
+    internal const int FormatVersion = 6;
 
     /// <summary>Size of the fixed file header in bytes.</summary>
     internal const int HeaderSize = 24;

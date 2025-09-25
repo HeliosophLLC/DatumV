@@ -17,6 +17,7 @@ public sealed class IndexWriterRoundTripTests
     /// </summary>
     private static readonly HashSet<DataKind> UnsupportedKinds =
     [
+        DataKind.Unknown,
         DataKind.Array,
         DataKind.Struct,
     ];
@@ -121,6 +122,7 @@ public sealed class IndexWriterRoundTripTests
     /// </summary>
     internal static DataValue CreateSampleValue(DataKind kind) => kind switch
     {
+        DataKind.Unknown  => default,
         DataKind.Float32  => DataValue.FromFloat32(3.14f),
         DataKind.Float64  => DataValue.FromFloat64(2.718281828),
         DataKind.UInt8    => DataValue.FromUInt8(42),

@@ -28,8 +28,8 @@ internal static class MappedSortedIndexWriter
     /// <summary>Magic bytes identifying a v4 mapped sorted index file.</summary>
     internal static ReadOnlySpan<byte> MagicBytes => "DXIX"u8;
 
-    /// <summary>Format version for the v4 fixed-width layout.</summary>
-    internal const int FormatVersion = 4;
+    /// <summary>Format version for the v5 fixed-width layout.</summary>
+    internal const int FormatVersion = 5;
 
     /// <summary>
     /// Writes the v4 mapped sorted index file for the specified columns.

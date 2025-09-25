@@ -159,13 +159,16 @@ internal static class MonarchGrammarFactory
     /// </summary>
     internal static string[] TypeKeywords() =>
     [
-        "Boolean", "Int8", "Int16", "Int32", "Int64",
-        "UInt8", "UInt16", "UInt32", "UInt64",
-        "Float32", "Float64",
-        "String", "Date", "DateTime", "Time", "Duration",
-        "Uuid", "JsonValue", "Vector", "Matrix", "Tensor",
-        "Array", "Struct", "Image", "UInt8Array",
+        "Unknown",
         "Type",
+        "Boolean",
+        "UInt8", "UInt16", "UInt32", "UInt64",
+        "Int8", "Int16", "Int32", "Int64",
+        "Float32", "Float64",
+        "Date", "Time", "DateTime", "Duration",
+        "String", "JsonValue", "Uuid",
+        "UInt8Array", "Image",
+        "Vector", "Matrix", "Tensor", "Array", "Struct",
     ];
 
     /// <summary>

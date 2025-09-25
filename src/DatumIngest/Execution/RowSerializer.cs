@@ -114,6 +114,9 @@ internal static class RowSerializer
 
         switch (value.Kind)
         {
+            case DataKind.Unknown:
+                break; // no payload — sentinel kind
+
             case DataKind.Float32:
                 writer.Write(value.AsFloat32());
                 break;
@@ -285,6 +288,7 @@ internal static class RowSerializer
 
         return kind switch
         {
+            DataKind.Unknown => default,
             DataKind.Float32 => DataValue.FromFloat32(reader.ReadSingle()),
             DataKind.Float64 => DataValue.FromFloat64(reader.ReadDouble()),
             DataKind.UInt8 => DataValue.FromUInt8(reader.ReadByte()),

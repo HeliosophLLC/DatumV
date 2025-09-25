@@ -963,7 +963,7 @@ public sealed class ExpressionEvaluator
             LiteralExpression { Value: float } => DataKind.Float32,
             LiteralExpression { Value: double } => DataKind.Float64,
             LiteralExpression { Value: bool } => DataKind.Boolean,
-            LiteralExpression { Value: null } => DataKind.Float32,
+            LiteralExpression { Value: null } => DataKind.Unknown,
             CastExpression cast => ExpressionTypeResolver.ResolveCastTargetKind(cast.TargetType),
             BinaryExpression => DataKind.Float32,
             UnaryExpression => DataKind.Float32,

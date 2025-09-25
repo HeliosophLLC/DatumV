@@ -56,10 +56,10 @@ public sealed class DatumFileCorruptionTests : IDisposable
     [Fact]
     public void Open_InvalidTailMagic_ThrowsInvalidDataException()
     {
-        // Valid header magic + version 1, but garbage tail.
+        // Valid header magic + current version, but garbage tail.
         byte[] data = new byte[64];
         "DTMF"u8.CopyTo(data);
-        data[4] = 1; // version = 1 (little-endian)
+        data[4] = (byte)DatumFileConstants.FormatVersion; // current version (little-endian)
 
         string path = WriteTempFile("bad_tail.datum", data);
 

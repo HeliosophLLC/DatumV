@@ -22,9 +22,9 @@ namespace DatumIngest.Model;
 /// Arena-backed strings bypass the store entirely, using offset/length in the inline fields.
 /// </para>
 /// <para>
-/// <c>default(DataValue)</c> is equivalent to <c>DataValue.FromUInt8(0)</c>
-/// (<see cref="DataKind.UInt8"/> = 0, not null). Always use factory methods or <see cref="Null"/>
-/// to construct intentional values.
+/// <c>default(DataValue)</c> has <see cref="DataKind.Unknown"/> (= 0) and is not null.
+/// It represents an uninitialized or untyped value. Always use factory methods or
+/// <see cref="Null"/> to construct intentional values.
 /// </para>
 /// </remarks>
 public readonly struct DataValue : IEquatable<DataValue>
@@ -69,10 +69,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     private static readonly DataValue Float32Zero = new(DataKind.Float32, numericBits: 0L, bits1: 0L, flags: 0);
     private static readonly DataValue Float32One = new(DataKind.Float32, numericBits: BitConverter.SingleToInt32Bits(1f), bits1: 0L, flags: 0);
-    private static readonly DataValue NullFloat32 = new(DataKind.Float32, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
-    private static readonly DataValue NullInt32 = new(DataKind.Int32, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
-    private static readonly DataValue NullInt64 = new(DataKind.Int64, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
-    private static readonly DataValue NullFloat64 = new(DataKind.Float64, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
+    private static readonly DataValue NullUnknown = new(DataKind.Unknown, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
     private static readonly DataValue BooleanTrue = new(DataKind.Boolean, numericBits: 1L, bits1: 0L, flags: 0);
     private static readonly DataValue BooleanFalse = new(DataKind.Boolean, numericBits: 0L, bits1: 0L, flags: 0);
 
@@ -339,16 +336,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
-    {
-        return kind switch
-        {
-            DataKind.Float32 => NullFloat32,
-            DataKind.Int32 => NullInt32,
-            DataKind.Int64 => NullInt64,
-            DataKind.Float64 => NullFloat64,
-            _ => new(kind, numericBits: 0L, bits1: 0L, flags: FlagIsNull),
-        };
-    }
+        => new(kind, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
 
     /// <summary>
     /// Creates a null value whose type is not statically known.
@@ -356,13 +344,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <remarks>
     /// SQL NULL has no inherent type. When a NULL literal appears outside a typed context
     /// (e.g. <c>SELECT NULL</c>), neither the parser nor the evaluator can determine its
-    /// kind. This factory produces a <see cref="DataKind.Float32"/> null — chosen because
-    /// Float32 is the engine's default numeric kind and widens to Float64 via
-    /// <see cref="TypeCoercion"/>. Downstream consumers (aggregations, output writers,
-    /// CASE coercion) resolve the actual kind from context. Call sites should prefer a
-    /// typed <see cref="Null(DataKind)"/> when the expected kind is known.
+    /// kind. This factory produces a <see cref="DataKind.Unknown"/> null. Downstream
+    /// consumers (aggregations, output writers, CASE coercion) resolve the actual kind
+    /// from context. Call sites should prefer a typed <see cref="Null(DataKind)"/> when
+    /// the expected kind is known.
     /// </remarks>
-    public static DataValue UnknownNull() => NullFloat32;
+    public static DataValue UnknownNull() => NullUnknown;
 
     // ───────────────────────── Literal conversion ─────────────────────────
 
@@ -1185,6 +1172,9 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
+            // Unknown sentinel: no payload, so non-null Unknown values are always equal.
+            DataKind.Unknown => true,
+
             // Fixed-size integer types: compare bits directly (no -0 ambiguity for integers).
             DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
             or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64

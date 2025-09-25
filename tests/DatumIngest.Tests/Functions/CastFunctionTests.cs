@@ -154,7 +154,7 @@ public class CastFunctionTests
     {
         Assert.Throws<ArgumentException>(() => _function.Execute([
             DataValue.FromFloat32(42),
-            DataValue.FromString("Unknown")
+            DataValue.FromString("NotAType")
         ]));
     }
 

@@ -388,6 +388,7 @@ public sealed class HoverProvider
     internal static readonly Dictionary<string, string> TypeDescriptions =
         new(StringComparer.OrdinalIgnoreCase)
         {
+            ["Unknown"] = "**Unknown** — Untyped or uninitialized value. Used internally for untyped SQL NULLs.",
             ["Boolean"] = "**Boolean** — True or false. Aliases: `bool`.",
             ["Int8"] = "**Int8** — Signed 8-bit integer (−128 to 127).",
             ["Int16"] = "**Int16** — Signed 16-bit integer (−32,768 to 32,767).",

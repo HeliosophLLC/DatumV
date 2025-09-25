@@ -16,7 +16,7 @@ public static class DatumFileConstants
     public static ReadOnlySpan<byte> TailMagic => "FMTD"u8;
 
     /// <summary>Current format version. Incremented only on backwards-incompatible changes.</summary>
-    public const ushort FormatVersion = 1;
+    public const ushort FormatVersion = 2;
 
     /// <summary>
     /// Size of the fixed file header in bytes.
