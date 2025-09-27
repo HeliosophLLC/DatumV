@@ -181,6 +181,7 @@ public static class SqlTokenizer
             .Match(Span.EqualToIgnoreCase("DESC"), SqlToken.Desc, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("LIMIT"), SqlToken.Limit, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CAST"), SqlToken.Cast, requireDelimiters: true)
+            .Match(Span.EqualToIgnoreCase("EXTRACT"), SqlToken.Extract, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("TRUE"), SqlToken.True, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("FALSE"), SqlToken.False, requireDelimiters: true)
             .Match(Span.EqualToIgnoreCase("CASE"), SqlToken.Case, requireDelimiters: true)

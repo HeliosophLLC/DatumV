@@ -351,6 +351,23 @@ public static class SqlParser
         from close in Token.EqualTo(SqlToken.RightParen)
         select (Expression)new CastExpression(expression, GetTokenText(targetType), ToSpan(cast, close));
 
+    /// <summary>
+    /// EXTRACT( field FROM expression ) — desugared to <c>date_part('field', expression)</c>.
+    /// The field token may be an identifier or a keyword that overlaps with field names (e.g. <c>TIME</c>).
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, Expression> ExtractCall =
+        from extract in Token.EqualTo(SqlToken.Extract)
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from field in Token.EqualTo(SqlToken.Identifier)
+            .Or(Token.EqualTo(SqlToken.Time))
+        from fromKw in Token.EqualTo(SqlToken.From)
+        from source in SP.Ref(() => ExpressionParser!)
+        from close in Token.EqualTo(SqlToken.RightParen)
+        select (Expression)new FunctionCallExpression(
+            "date_part",
+            [new LiteralExpression(GetTokenText(field).ToLowerInvariant()), source],
+            Span: ToSpan(extract, close));
+
     /// <summary>Parenthesized expression or subquery.</summary>
     private static readonly TokenListParser<SqlToken, Expression> ParenExpression =
         from open in Token.EqualTo(SqlToken.LeftParen)
@@ -459,6 +476,7 @@ public static class SqlParser
             .Or(ExistsCall.Try())
             .Or(CaseCall.Try())
             .Or(CastCall.Try())
+            .Or(ExtractCall.Try())
             .Or(FunctionCall.Try())
             .Or(QualifiedColumn)
             .Or(TypeLiteral)

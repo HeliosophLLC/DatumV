@@ -120,7 +120,7 @@ internal static class MonarchGrammarFactory
         "CROSS", "INNER", "LATERAL", "APPLY", "ON", "WHERE", "AND", "OR",
         "NOT", "IN", "BETWEEN", "LIKE", "ILIKE", "REGEXP", "ESCAPE", "IS",
         "AS", "SHARD", "GROUP", "HAVING", "QUALIFY", "ORDER", "BY", "ASC",
-        "DESC", "LIMIT", "OFFSET", "CAST", "AT", "TIME", "ZONE",
+        "DESC", "LIMIT", "OFFSET", "CAST", "EXTRACT", "AT", "TIME", "ZONE",
 
         // Conditional expressions
         "CASE", "WHEN", "THEN", "ELSE", "END",

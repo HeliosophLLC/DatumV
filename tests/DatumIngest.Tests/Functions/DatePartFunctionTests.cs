@@ -75,6 +75,14 @@ public class DatePartFunctionTests
     }
 
     [Fact]
+    public void DatePart_Second_Fractional()
+    {
+        // 45 seconds + 500ms = 45.5 (PostgreSQL returns fractional seconds)
+        DataValue result = _function.Execute([DataValue.FromString("second"), DataValue.FromDateTime(new DateTimeOffset(2026, 3, 16, 14, 30, 45, 500, TimeSpan.Zero))]);
+        Assert.Equal(45.5f, result.AsFloat32());
+    }
+
+    [Fact]
     public void DatePart_Hour_FromDate_ReturnsZero()
     {
         DataValue result = _function.Execute([DataValue.FromString("hour"), DataValue.FromDate(new DateOnly(2026, 3, 16))]);
@@ -173,6 +181,162 @@ public class DatePartFunctionTests
     public void ValidateArguments_RejectsWrongArgumentCount()
     {
         Assert.Throws<ArgumentException>(() => _function.ValidateArguments([DataKind.String]));
+    }
+
+    [Fact]
+    public void ValidateArguments_AcceptsTimeInput()
+    {
+        DataKind result = _function.ValidateArguments([DataKind.String, DataKind.Time]);
+        Assert.Equal(DataKind.Float32, result);
+    }
+
+    // ───────────────────── PostgreSQL aliases ─────────────────────
+
+    [Fact]
+    public void DatePart_Dow_MatchesDayOfWeek()
+    {
+        // 2026-03-15 is a Sunday → dow = 0
+        DataValue result = _function.Execute([DataValue.FromString("dow"), DataValue.FromDate(new DateOnly(2026, 3, 15))]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Doy_MatchesDayOfYear()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("doy"), DataValue.FromDate(new DateOnly(2026, 3, 16))]);
+        Assert.Equal(75f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Week_MatchesWeekOfYear()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("week"), DataValue.FromDate(new DateOnly(2026, 3, 16))]);
+        Assert.Equal(12f, result.AsFloat32());
+    }
+
+    // ───────────────────── new PostgreSQL fields ─────────────────────
+
+    [Fact]
+    public void DatePart_Century()
+    {
+        // Year 2001 is century 21 (ceil(2001/100) = 21)
+        DataValue result = _function.Execute([DataValue.FromString("century"), DataValue.FromDate(new DateOnly(2001, 1, 1))]);
+        Assert.Equal(21f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Century_Year2000()
+    {
+        // Year 2000 is century 20 (ceil(2000/100) = 20)
+        DataValue result = _function.Execute([DataValue.FromString("century"), DataValue.FromDate(new DateOnly(2000, 12, 31))]);
+        Assert.Equal(20f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Decade()
+    {
+        // 2026 / 10 = 202
+        DataValue result = _function.Execute([DataValue.FromString("decade"), DataValue.FromDate(new DateOnly(2026, 3, 16))]);
+        Assert.Equal(202f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Millennium()
+    {
+        // Year 2001 is millennium 3 (ceil(2001/1000) = 3)
+        DataValue result = _function.Execute([DataValue.FromString("millennium"), DataValue.FromDate(new DateOnly(2001, 1, 1))]);
+        Assert.Equal(3f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Isodow_Sunday()
+    {
+        // 2026-03-15 is Sunday → isodow = 7 (ISO: 1=Mon, 7=Sun)
+        DataValue result = _function.Execute([DataValue.FromString("isodow"), DataValue.FromDate(new DateOnly(2026, 3, 15))]);
+        Assert.Equal(7f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Isodow_Monday()
+    {
+        // 2026-03-16 is Monday → isodow = 1
+        DataValue result = _function.Execute([DataValue.FromString("isodow"), DataValue.FromDate(new DateOnly(2026, 3, 16))]);
+        Assert.Equal(1f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Isoyear()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("isoyear"), DataValue.FromDate(new DateOnly(2026, 1, 1))]);
+        Assert.Equal(2026f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Epoch_UnixEpoch()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("epoch"), DataValue.FromDateTime(new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero))]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Epoch_KnownValue()
+    {
+        // 2020-01-01 00:00:00 UTC = 1577836800 seconds since epoch
+        DataValue result = _function.Execute([DataValue.FromString("epoch"), DataValue.FromDateTime(new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero))]);
+        Assert.Equal(1577836800f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Julian_J2000()
+    {
+        // 2000-01-01 12:00 (J2000.0) -> Julian day 2451545.0
+        DataValue result = _function.Execute([DataValue.FromString("julian"), DataValue.FromDateTime(new DateTimeOffset(2000, 1, 1, 12, 0, 0, TimeSpan.Zero))]);
+        Assert.Equal(2451545.0f, result.AsFloat32(), 0.5f);
+    }
+
+    [Fact]
+    public void DatePart_Millisecond()
+    {
+        // 45 seconds + 500ms -> 45500 milliseconds
+        DataValue result = _function.Execute([DataValue.FromString("millisecond"), DataValue.FromDateTime(new DateTimeOffset(2026, 3, 16, 14, 30, 45, 500, TimeSpan.Zero))]);
+        Assert.Equal(45500f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Microsecond()
+    {
+        // 45 seconds + 500ms -> 45500000 microseconds
+        DataValue result = _function.Execute([DataValue.FromString("microsecond"), DataValue.FromDateTime(new DateTimeOffset(2026, 3, 16, 14, 30, 45, 500, TimeSpan.Zero))]);
+        Assert.Equal(45500000f, result.AsFloat32());
+    }
+
+    // ───────────────────── Time inputs ─────────────────────
+
+    [Fact]
+    public void DatePart_Hour_FromTime()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("hour"), DataValue.FromTime(new TimeOnly(14, 30, 45))]);
+        Assert.Equal(14f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Minute_FromTime()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("minute"), DataValue.FromTime(new TimeOnly(14, 30, 45))]);
+        Assert.Equal(30f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Second_FromTime()
+    {
+        DataValue result = _function.Execute([DataValue.FromString("second"), DataValue.FromTime(new TimeOnly(14, 30, 45))]);
+        Assert.Equal(45f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void DatePart_Year_FromTime_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => _function.Execute([DataValue.FromString("year"), DataValue.FromTime(new TimeOnly(14, 30, 45))]));
     }
 
     // ───────────────────── timezone parts ─────────────────────

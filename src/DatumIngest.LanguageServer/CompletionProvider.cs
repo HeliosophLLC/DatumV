@@ -41,7 +41,7 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET", "SCAN", "ASSERT", "DEFINE", "DISTINCT", "WITHIN GROUP"]);
+                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET", "SCAN", "ASSERT", "DEFINE", "DISTINCT", "WITHIN GROUP", "EXTRACT"]);
                 break;
 
             case CompletionZoneKind.AfterFrom:
@@ -391,7 +391,7 @@ public sealed class CompletionProvider
     private static readonly string[] ExpressionKeywords =
     [
         "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
-        "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT",
+        "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT", "EXTRACT",
         "AT TIME ZONE",
     ];
 

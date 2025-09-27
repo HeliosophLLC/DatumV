@@ -119,6 +119,9 @@ public enum SqlToken
     /// <summary>The CAST keyword (explicit type conversion).</summary>
     Cast,
 
+    /// <summary>The EXTRACT keyword (date/time field extraction).</summary>
+    Extract,
+
     /// <summary>The TRUE keyword (boolean literal).</summary>
     True,
 
