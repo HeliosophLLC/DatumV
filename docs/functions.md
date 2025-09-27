@@ -392,6 +392,7 @@ Shorthand functions for extracting individual components from Date, DateTime, or
 | `date_add` | `date_add(part, amount, date)` | Add amount of the specified part to a date. Preserves input kind. | 1 |
 | `date_trunc` | `date_trunc(part, date)` | Truncate to the specified precision. Week uses ISO 8601 (Monday start). Preserves input kind. | 1 |
 | `date_bucket` | `date_bucket(part, width, date [, origin])` | Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind. | 1 |
+| `date_bin` | `date_bin(interval, source, origin)` | PostgreSQL-compatible binning. Interval is a string like `'15 minutes'` or `'1 hour'`. Preserves input kind. | 1 |
 | `make_time` | `make_time(hour, minute, second)` | Construct a Time from components (all Float32). | 1 |
 | `current_time` | `current_time()` | Current UTC time of day as Time. | 1 |
 | `date_span` | `date_span(start, end)` | Elapsed Duration between two Date or DateTime values. | 1 |
@@ -451,8 +452,11 @@ SELECT date_diff('day', hire_date, now()) AS tenure_days FROM employees
 -- Truncation for grouping
 SELECT date_trunc('month', sale_date) AS period, SUM(amount) FROM sales GROUP BY period
 
--- 15-minute bucketing
+-- 15-minute bucketing (DatumIngest style)
 SELECT date_bucket('minute', 15, event_time) AS bucket, COUNT(*) FROM logs GROUP BY bucket
+
+-- 15-minute bucketing (PostgreSQL style)
+SELECT date_bin('15 minutes', event_time, DATETIME '2001-01-01') AS bucket, COUNT(*) FROM logs GROUP BY bucket
 
 -- Construct dates from components
 SELECT make_date(year_col, month_col, 1) AS first_of_month FROM data

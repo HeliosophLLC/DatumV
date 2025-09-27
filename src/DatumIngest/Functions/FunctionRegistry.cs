@@ -215,6 +215,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.DateAddFunction());
         registry.RegisterScalar(new Scalar.DateTruncFunction());
         registry.RegisterScalar(new Scalar.DateBucketFunction());
+        registry.RegisterScalar(new Scalar.DateBinFunction());
         registry.RegisterScalar(new Scalar.DateSpanFunction());
         registry.RegisterScalar(new Scalar.DateOffsetFunction());
         registry.RegisterScalar(new Scalar.TimeDiffFunction());

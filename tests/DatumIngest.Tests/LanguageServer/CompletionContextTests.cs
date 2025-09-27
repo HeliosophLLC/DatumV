@@ -191,6 +191,23 @@ public sealed class CompletionContextTests
         Assert.Equal(CompletionZoneKind.InFunctionArguments, zone.Kind);
     }
 
+    [Fact]
+    public void Classify_InsideExtract_ReturnsInsideExtract()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT EXTRACT(", 15);
+
+        Assert.Equal(CompletionZoneKind.InsideExtract, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideExtract_WithPrefix_ReturnsInsideExtract()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT EXTRACT(YE", 18);
+
+        Assert.Equal(CompletionZoneKind.InsideExtract, zone.Kind);
+        Assert.Equal("YE", zone.Prefix);
+    }
+
     // ───────────────────── Prefix extraction ─────────────────────
 
     [Fact]

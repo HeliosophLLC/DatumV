@@ -475,6 +475,14 @@ public static class FunctionDocumentation
             Description = "Buckets a date into fixed-width intervals of the specified date part.",
             Category = FunctionCategory.Temporal,
         });
+        Register(new FunctionSignature
+        {
+            Name = "date_bin",
+            Parameters = [Parameter("interval", "String"), Parameter("source", "DateTime"), Parameter("origin", "DateTime")],
+            ReturnType = "DateTime",
+            Description = "PostgreSQL-compatible timestamp binning. Buckets into fixed-width intervals specified as an interval string (e.g., '15 minutes', '1 hour').",
+            Category = FunctionCategory.Temporal,
+        });
 
         // ── Date/Time — Formatting & Probing ──
 
