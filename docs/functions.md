@@ -274,29 +274,53 @@ FROM users
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `date_part` | `date_part(part, val)` | Extract a named component from a Date or DateTime as Float32. | 1 |
+| `date_part` | `date_part(part, val)` | Extract a named component from a Date, DateTime, or Time as Float32. | 1 |
+| `EXTRACT` | `EXTRACT(field FROM source)` | PostgreSQL-standard syntax; desugars to `date_part('field', source)` at parse time. | 1 |
 | `cyclical_encode` | `cyclical_encode(val, period)` | Encode a Float32 as a 2-element Vector `[sin(2π·val/period), cos(2π·val/period)]`. | 1 |
 
-### `date_part` supported parts
+### `date_part` / `EXTRACT` supported parts
 
-| Part Name | Returns | Example |
-|-----------|---------|----------|
-| `year` | Year number | 2026 |
-| `month` | 1–12 | 3 |
-| `day` | 1–31 | 16 |
-| `day_of_week` | 0 (Sunday) – 6 (Saturday) | 1 (Monday) |
-| `hour` | 0–23 (Date returns 0) | 14 |
-| `minute` | 0–59 (Date returns 0) | 30 |
-| `second` | 0–59 (Date returns 0) | 45 |
-| `day_of_year` | 1–366 | 75 |
-| `week_of_year` | 1–53 (ISO 8601) | 12 |
-| `quarter` | 1–4 | 1 |
-| `is_weekend` | 0 or 1 | 0 |
-| `timezone` | UTC offset in seconds (e.g. `-18000` for EST) | -18000 |
-| `timezone_hour` | Signed hour component of UTC offset | -5 |
-| `timezone_minute` | Minute component of UTC offset (useful for `+05:30` zones) | 30 |
+PostgreSQL-compatible fields:
+
+| Part Name | Returns | Example | Time input? |
+|-----------|---------|----------|:-----------:|
+| `year` | Year number | 2026 | |
+| `month` | 1–12 | 3 | |
+| `day` | 1–31 | 16 | |
+| `hour` | 0–23 (Date returns 0) | 14 | Yes |
+| `minute` | 0–59 (Date returns 0) | 30 | Yes |
+| `second` | Fractional seconds (includes ms) | 45.5 | Yes |
+| `quarter` | 1–4 | 1 | |
+| `dow` | Day of week: 0 (Sunday) – 6 (Saturday) | 0 | |
+| `doy` | Day of year: 1–366 | 75 | |
+| `week` | ISO 8601 week number: 1–53 | 12 | |
+| `isodow` | ISO day of week: 1 (Monday) – 7 (Sunday) | 7 | |
+| `isoyear` | ISO 8601 week-numbering year | 2026 | |
+| `epoch` | Seconds since 1970-01-01 UTC (fractional) | 1577836800 | Yes |
+| `century` | Century (1-based): year 2001 → 21 | 21 | |
+| `decade` | Year / 10 (truncated) | 202 | |
+| `millennium` | Millennium (1-based): year 2001 → 3 | 3 | |
+| `julian` | Julian day number | 2451545 | |
+| `millisecond` | Seconds × 1000 (includes whole seconds) | 45500 | Yes |
+| `microsecond` | Seconds × 1000000 (includes whole seconds) | 45500000 | Yes |
+| `timezone` | UTC offset in seconds (e.g. `-18000` for EST) | -18000 | |
+| `timezone_hour` | Signed hour component of UTC offset | -5 | |
+| `timezone_minute` | Minute component of UTC offset (useful for `+05:30` zones) | 30 | |
+
+Backward-compatible aliases (DatumIngest extensions):
+
+| Alias | Equivalent to |
+|-------|---------------|
+| `day_of_week` | `dow` |
+| `day_of_year` | `doy` |
+| `week_of_year` | `week` |
+| `is_weekend` | Returns 0 or 1 (no PostgreSQL equivalent) |
+
+> **Note:** `second` returns fractional seconds (e.g. 45.5 for 45s 500ms), matching PostgreSQL behavior. Use `millisecond` or `microsecond` for integer-scaled sub-second precision.
 
 > **Note:** `timezone`, `timezone_hour`, and `timezone_minute` reflect the UTC offset stored in the value. Use `AT TIME ZONE` first to convert a UTC timestamp to a specific zone before extracting these parts.
+
+> **Note:** `dow` uses the PostgreSQL convention (0=Sunday, 6=Saturday). The standalone `dayofweek()` function uses ISO 8601 (1=Monday, 7=Sunday). Use `isodow` for ISO convention via `date_part`/`EXTRACT`.
 
 ### Temporal ML encoding examples
 
@@ -307,10 +331,22 @@ SELECT to_epoch(date_col) AS epoch_days FROM data
 -- Equivalent via CAST
 SELECT CAST(date_col AS Float32) AS epoch_days FROM data
 
--- Extract individual components
+-- Extract individual components using EXTRACT (PostgreSQL syntax)
+SELECT EXTRACT(YEAR FROM date_col) AS year,
+       EXTRACT(MONTH FROM date_col) AS month,
+       EXTRACT(DOW FROM date_col) AS dow
+FROM data
+
+-- Same thing using date_part (function syntax)
 SELECT date_part('year', date_col) AS year,
        date_part('month', date_col) AS month,
-       date_part('day_of_week', date_col) AS dow
+       date_part('dow', date_col) AS dow
+FROM data
+
+-- Extract from Time values
+SELECT EXTRACT(HOUR FROM time_col) AS h,
+       EXTRACT(MINUTE FROM time_col) AS m,
+       EXTRACT(SECOND FROM time_col) AS s  -- fractional: includes milliseconds
 FROM data
 
 -- Cyclical encoding for periodic features (preserves month 12 → 1 proximity)
@@ -320,9 +356,9 @@ FROM data
 
 -- Full temporal feature vector via concatenation
 SELECT vec_concat(
-    cyclical_encode(date_part('month', d), 12),
-    cyclical_encode(date_part('day_of_week', d), 7),
-    cyclical_encode(date_part('hour', d), 24)
+    cyclical_encode(EXTRACT(MONTH FROM d), 12),
+    cyclical_encode(EXTRACT(ISODOW FROM d), 7),
+    cyclical_encode(EXTRACT(HOUR FROM d), 24)
 ) AS temporal_features
 FROM data
 ```
@@ -343,7 +379,7 @@ Shorthand functions for extracting individual components from Date, DateTime, or
 | `dayofweek` | `dayofweek(date)` | ISO 8601 day of week: 1 (Monday) through 7 (Sunday). | 1 |
 | `dayofyear` | `dayofyear(date)` | Day of year (1–366). | 1 |
 
-> **Note:** `dayofweek()` uses ISO 8601 convention (1=Monday, 7=Sunday). The older `date_part('day_of_week', ...)` uses .NET convention (0=Sunday, 6=Saturday). Prefer `dayofweek()` for new code.
+> **Note:** `dayofweek()` uses ISO 8601 convention (1=Monday, 7=Sunday). `date_part('dow', ...)` / `EXTRACT(DOW FROM ...)` uses PostgreSQL convention (0=Sunday, 6=Saturday). Use `EXTRACT(ISODOW FROM ...)` for ISO convention via `date_part`/`EXTRACT`.
 
 ## Date/Time — Construction & Arithmetic (12)
 
@@ -364,19 +400,23 @@ Shorthand functions for extracting individual components from Date, DateTime, or
 
 ### Supported date parts
 
-All date part arguments accept these names (case-insensitive) with aliases:
+All date arithmetic and truncation functions (`date_add`, `date_diff`, `date_trunc`, `date_bucket`) accept these names (case-insensitive) with aliases:
 
-| Part | Aliases |
-|------|---------|
-| `year` | `years`, `y` |
-| `quarter` | `quarters`, `q` |
-| `month` | `months`, `m` |
-| `week` | `weeks`, `w` |
-| `day` | `days`, `d` |
-| `hour` | `hours`, `h` |
-| `minute` | `minutes`, `min` |
-| `second` | `seconds`, `s` |
-| `millisecond` | `milliseconds`, `ms` |
+| Part | Aliases | `date_trunc` |
+|------|---------|:------------:|
+| `year` | `years`, `y` | Yes |
+| `quarter` | `quarters`, `q` | Yes |
+| `month` | `months`, `m` | Yes |
+| `week` | `weeks`, `w` | Yes (ISO Monday) |
+| `day` | `days`, `d` | Yes |
+| `hour` | `hours`, `h` | Yes |
+| `minute` | `minutes`, `min` | Yes |
+| `second` | `seconds`, `s` | Yes |
+| `millisecond` | `milliseconds`, `ms` | Yes |
+| `microsecond` | `microseconds`, `us` | Yes |
+| `decade` | `decades` | Yes (e.g. 2026 → 2020-01-01) |
+| `century` | `centuries` | Yes (1-based: 2026 → 2001-01-01) |
+| `millennium` | `millennia` | Yes (1-based: 2026 → 2001-01-01) |
 
 ## Duration (5)
 

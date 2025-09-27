@@ -104,6 +104,10 @@ public sealed class CompletionProvider
                 AddKeywords(items, ["PARTITION BY", "ORDER BY", "ROWS BETWEEN"]);
                 break;
 
+            case CompletionZoneKind.InsideExtract:
+                AddKeywords(items, DatePartFieldNames);
+                break;
+
             case CompletionZoneKind.AfterDot:
                 if (zone.TableQualifier is not null)
                 {
@@ -393,6 +397,20 @@ public sealed class CompletionProvider
         "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
         "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT", "EXTRACT",
         "AT TIME ZONE",
+    ];
+
+    /// <summary>
+    /// Date part field names offered inside <c>EXTRACT(</c> completions.
+    /// PostgreSQL-compatible fields plus DatumIngest extensions.
+    /// </summary>
+    internal static readonly string[] DatePartFieldNames =
+    [
+        "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND",
+        "QUARTER", "WEEK", "DOW", "DOY",
+        "ISODOW", "ISOYEAR",
+        "EPOCH", "CENTURY", "DECADE", "MILLENNIUM", "JULIAN",
+        "MILLISECOND", "MICROSECOND",
+        "TIMEZONE", "TIMEZONE_HOUR", "TIMEZONE_MINUTE",
     ];
 
     internal static readonly string[] ColumnTypeKeywords =

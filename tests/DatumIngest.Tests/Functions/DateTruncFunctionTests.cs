@@ -170,6 +170,76 @@ public class DateTruncFunctionTests
         Assert.Equal(DataKind.DateTime, result.Kind);
     }
 
+    // ───────────────────── new PostgreSQL precisions ─────────────────────
+
+    [Fact]
+    public void DateTrunc_Decade()
+    {
+        // 2026 → 2020-01-01
+        DataValue result = _function.Execute([
+            DataValue.FromString("decade"),
+            DataValue.FromDate(new DateOnly(2026, 6, 15))
+        ]);
+        Assert.Equal(new DateOnly(2020, 1, 1), result.AsDate());
+    }
+
+    [Fact]
+    public void DateTrunc_Decade_ExactBoundary()
+    {
+        // 2020 → 2020-01-01 (already at decade boundary)
+        DataValue result = _function.Execute([
+            DataValue.FromString("decade"),
+            DataValue.FromDate(new DateOnly(2020, 1, 1))
+        ]);
+        Assert.Equal(new DateOnly(2020, 1, 1), result.AsDate());
+    }
+
+    [Fact]
+    public void DateTrunc_Century()
+    {
+        // 2026 → 2001-01-01 (21st century starts at 2001)
+        DataValue result = _function.Execute([
+            DataValue.FromString("century"),
+            DataValue.FromDate(new DateOnly(2026, 6, 15))
+        ]);
+        Assert.Equal(new DateOnly(2001, 1, 1), result.AsDate());
+    }
+
+    [Fact]
+    public void DateTrunc_Century_Year2000()
+    {
+        // 2000 → 1901-01-01 (20th century)
+        DataValue result = _function.Execute([
+            DataValue.FromString("century"),
+            DataValue.FromDate(new DateOnly(2000, 12, 31))
+        ]);
+        Assert.Equal(new DateOnly(1901, 1, 1), result.AsDate());
+    }
+
+    [Fact]
+    public void DateTrunc_Millennium()
+    {
+        // 2026 → 2001-01-01 (3rd millennium starts at 2001)
+        DataValue result = _function.Execute([
+            DataValue.FromString("millennium"),
+            DataValue.FromDate(new DateOnly(2026, 6, 15))
+        ]);
+        Assert.Equal(new DateOnly(2001, 1, 1), result.AsDate());
+    }
+
+    [Fact]
+    public void DateTrunc_Millennium_Year2000()
+    {
+        // 2000 → 1001-01-01 (2nd millennium)
+        DataValue result = _function.Execute([
+            DataValue.FromString("millennium"),
+            DataValue.FromDate(new DateOnly(2000, 12, 31))
+        ]);
+        Assert.Equal(new DateOnly(1001, 1, 1), result.AsDate());
+    }
+
+    // ───────────────────── validation ─────────────────────
+
     [Fact]
     public void ValidateArguments_RejectsWrongCount()
     {

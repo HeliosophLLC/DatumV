@@ -31,6 +31,18 @@ internal enum DatePartName
 
     /// <summary>Millisecond component.</summary>
     Millisecond,
+
+    /// <summary>Microsecond component.</summary>
+    Microsecond,
+
+    /// <summary>Decade (year / 10).</summary>
+    Decade,
+
+    /// <summary>Century (1-based, e.g. 2001–2100 is century 21).</summary>
+    Century,
+
+    /// <summary>Millennium (1-based, e.g. 2001–3000 is millennium 3).</summary>
+    Millennium,
 }
 
 /// <summary>
@@ -55,8 +67,12 @@ internal static class DatePartParser
             "minute" or "minutes" or "min" => DatePartName.Minute,
             "second" or "seconds" or "s" => DatePartName.Second,
             "millisecond" or "milliseconds" or "ms" => DatePartName.Millisecond,
+            "microsecond" or "microseconds" or "us" => DatePartName.Microsecond,
+            "decade" or "decades" => DatePartName.Decade,
+            "century" or "centuries" => DatePartName.Century,
+            "millennium" or "millennia" => DatePartName.Millennium,
             _ => throw new ArgumentException(
-                $"Unknown date part '{partName}'. Supported: year, quarter, month, week, day, hour, minute, second, millisecond."),
+                $"Unknown date part '{partName}'. Supported: year, quarter, month, week, day, hour, minute, second, millisecond, microsecond, decade, century, millennium."),
         };
     }
 }

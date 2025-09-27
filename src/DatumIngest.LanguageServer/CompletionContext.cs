@@ -168,6 +168,12 @@ public static class CompletionContext
                     return CompletionZoneKind.InsideOver;
                 }
 
+                // Check if this is an EXTRACT( paren — offer date part field names.
+                if (index > 0 && tokens[index - 1].Kind == SqlToken.Extract)
+                {
+                    return CompletionZoneKind.InsideExtract;
+                }
+
                 // Check if this is a CREATE TABLE paren — walk back past the table name
                 // to find TABLE [TEMP/TEMPORARY] CREATE.
                 if (index > 0 && IsCreateTableParen(tokens, index))
@@ -500,6 +506,9 @@ public enum CompletionZoneKind
 
     /// <summary>Inside OVER clause — offer PARTITION BY, ORDER BY, ROWS BETWEEN.</summary>
     InsideOver,
+
+    /// <summary>Inside EXTRACT( — offer date part field names (YEAR, MONTH, DOW, etc.).</summary>
+    InsideExtract,
 
     /// <summary>After UNION, INTERSECT, or EXCEPT — offer ALL and SELECT.</summary>
     AfterSetOperation,

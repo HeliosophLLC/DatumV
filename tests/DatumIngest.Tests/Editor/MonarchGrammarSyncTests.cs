@@ -2,6 +2,7 @@ namespace DatumIngest.Tests.Editor;
 
 using DatumIngest.Editor;
 using DatumIngest.Functions;
+using DatumIngest.Functions.Scalar;
 using DatumIngest.LanguageServer;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -175,5 +176,73 @@ public sealed class MonarchGrammarSyncTests
             stale.Count == 0,
             $"The following entries in MonarchGrammarFactory.BuiltinFunctions() are not in FunctionDocumentation: " +
             $"{string.Join(", ", stale)}. Remove them or add documentation.");
+    }
+
+    // ───────────────────── Date part keyword sync ─────────────────────
+
+    /// <summary>
+    /// Every name in <see cref="MonarchGrammarFactory.DatePartKeywords"/> and
+    /// <see cref="CompletionProvider.DatePartFieldNames"/> must be accepted by
+    /// <see cref="DatePartFunction"/> without throwing. This detects drift when
+    /// a field name is added to highlighting/completions but not to the runtime,
+    /// or vice versa.
+    /// </summary>
+    [Fact]
+    public void DatePartKeywords_AllAcceptedByDatePartFunction()
+    {
+        DatePartFunction function = new();
+
+        // Use a DateTime with non-zero components so all fields produce meaningful results.
+        DataValue dateTime = DataValue.FromDateTime(
+            new DateTimeOffset(2026, 6, 15, 14, 30, 45, 500, TimeSpan.FromHours(5)));
+
+        HashSet<string> allNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in MonarchGrammarFactory.DatePartKeywords())
+            allNames.Add(name);
+        foreach (string name in CompletionProvider.DatePartFieldNames)
+            allNames.Add(name);
+
+        List<string> rejected = [];
+        foreach (string name in allNames)
+        {
+            try
+            {
+                function.Execute([DataValue.FromString(name), dateTime]);
+            }
+            catch (ArgumentException)
+            {
+                rejected.Add(name);
+            }
+        }
+
+        Assert.True(
+            rejected.Count == 0,
+            $"The following date part names are in DatePartKeywords/DatePartFieldNames but rejected by DatePartFunction: " +
+            $"{string.Join(", ", rejected)}. Add them to DatePartFunction or remove them from the keyword lists.");
+    }
+
+    /// <summary>
+    /// Ensures <see cref="CompletionProvider.DatePartFieldNames"/> is a superset of
+    /// <see cref="MonarchGrammarFactory.DatePartKeywords"/> — every highlighted name
+    /// should also be offered in autocomplete.
+    /// </summary>
+    [Fact]
+    public void DatePartKeywords_AllInCompletionProvider()
+    {
+        HashSet<string> completions = new(CompletionProvider.DatePartFieldNames, StringComparer.OrdinalIgnoreCase);
+
+        List<string> missing = [];
+        foreach (string name in MonarchGrammarFactory.DatePartKeywords())
+        {
+            if (!completions.Contains(name))
+            {
+                missing.Add(name);
+            }
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            $"The following Monarch DatePartKeywords are missing from CompletionProvider.DatePartFieldNames: " +
+            $"{string.Join(", ", missing)}. Add them so they appear in EXTRACT autocomplete.");
     }
 }

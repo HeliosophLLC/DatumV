@@ -60,6 +60,22 @@ public class DatePartParserTests
         Assert.Equal(canonicalResult.AsDate(), aliasResult.AsDate());
     }
 
+    [Theory]
+    [InlineData("microsecond", "microsecond")]
+    [InlineData("microseconds", "microsecond")]
+    [InlineData("us", "microsecond")]
+    [InlineData("decade", "decade")]
+    [InlineData("decades", "decade")]
+    [InlineData("century", "century")]
+    [InlineData("centuries", "century")]
+    [InlineData("millennium", "millennium")]
+    [InlineData("millennia", "millennium")]
+    public void Parse_RecognizesNewParts(string input, string expectedCanonical)
+    {
+        // Both should resolve to the same DatePartName value.
+        Assert.Equal(DatePartParser.Parse(expectedCanonical), DatePartParser.Parse(input));
+    }
+
     [Fact]
     public void Parse_IsCaseInsensitive()
     {

@@ -62,6 +62,11 @@ public sealed class DateTruncFunction : IScalarFunction
             DatePartName.Minute => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, 0, original.Offset),
             DatePartName.Second => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, original.Second, original.Offset),
             DatePartName.Millisecond => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, original.Second, original.Millisecond, original.Offset),
+            DatePartName.Microsecond => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, original.Second, original.Millisecond, original.Offset)
+                .AddTicks(original.Microsecond * TimeSpan.TicksPerMicrosecond),
+            DatePartName.Decade => new DateTimeOffset(original.Year - original.Year % 10, 1, 1, 0, 0, 0, original.Offset),
+            DatePartName.Century => new DateTimeOffset((original.Year - 1) / 100 * 100 + 1, 1, 1, 0, 0, 0, original.Offset),
+            DatePartName.Millennium => new DateTimeOffset((original.Year - 1) / 1000 * 1000 + 1, 1, 1, 0, 0, 0, original.Offset),
             _ => throw new ArgumentException($"Unsupported date part for date_trunc: {part}."),
         };
 

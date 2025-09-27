@@ -1837,6 +1837,37 @@ SELECT try_cast(raw_value, Float64) AS parsed FROM t
 SELECT * FROM t WHERE can_cast(score, Int32) AND cast(score, Int32) > 0
 ```
 
+### EXTRACT
+
+PostgreSQL-standard syntax for extracting date/time fields. Desugars to `date_part()` at parse time.
+
+```sql
+EXTRACT(field FROM source)
+```
+
+`field` is a bare keyword (not a string) — any field supported by `date_part()`. `source` is a Date, DateTime, or Time expression.
+
+```sql
+-- Extract year and month
+SELECT EXTRACT(YEAR FROM order_date) AS y,
+       EXTRACT(MONTH FROM order_date) AS m
+FROM orders
+
+-- ISO day of week (1=Monday, 7=Sunday)
+SELECT EXTRACT(ISODOW FROM event_date) AS dow FROM events
+
+-- Unix epoch seconds
+SELECT EXTRACT(EPOCH FROM created_at) AS epoch_secs FROM logs
+
+-- Century and millennium
+SELECT EXTRACT(CENTURY FROM birth_date) AS century FROM people
+
+-- Works with Time values
+SELECT EXTRACT(HOUR FROM start_time) AS h FROM schedule
+```
+
+`EXTRACT(YEAR FROM x)` is exactly equivalent to `date_part('year', x)` — use whichever reads better in context. See the [full field list](functions.md#date_part--extract-supported-parts) in the functions reference.
+
 ### AT TIME ZONE
 
 Converts a `DateTime` value to a specific timezone. The instant in time is preserved — only the UTC offset (and therefore the displayed local time) changes. Uses IANA timezone names.

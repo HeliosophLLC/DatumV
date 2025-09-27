@@ -39,6 +39,7 @@ internal static class MonarchGrammarFactory
         keywords = ClauseKeywords(),
         boolNullKeywords = new[] { "TRUE", "FALSE", "NULL" },
         typeKeywords = TypeKeywords(),
+        datePartKeywords = DatePartKeywords(),
         builtinFunctions = BuiltinFunctions(),
         tokenizer = new
         {
@@ -72,6 +73,7 @@ internal static class MonarchGrammarFactory
                         {
                             ["@boolNullKeywords"] = "keyword.constant",
                             ["@typeKeywords"] = "type.identifier",
+                            ["@datePartKeywords"] = "attribute.name",
                             ["@keywords"] = "keyword",
                             ["@builtinFunctions"] = "predefined.function",
                             ["@default"] = "identifier",
@@ -151,6 +153,23 @@ internal static class MonarchGrammarFactory
 
         // DML keywords
         "INSERT", "VALUES", "UPDATE", "SET", "DELETE",
+    ];
+
+    /// <summary>
+    /// Returns date part field names used with <c>EXTRACT(field FROM source)</c> and
+    /// <c>date_part('field', source)</c>. Tokenized as <c>attribute.name</c> so they
+    /// are visually distinct from plain identifiers. Names that overlap with SQL keywords
+    /// or built-in functions (e.g. <c>YEAR</c>, <c>MONTH</c>) are excluded — they already
+    /// get keyword or function coloring via earlier case rules.
+    /// </summary>
+    internal static string[] DatePartKeywords() =>
+    [
+        // PostgreSQL EXTRACT fields not already covered by keywords or built-in functions
+        "DOW", "DOY", "ISODOW", "ISOYEAR",
+        "EPOCH", "JULIAN",
+        "CENTURY", "DECADE", "MILLENNIUM",
+        "MICROSECOND", "MILLISECOND",
+        "TIMEZONE", "TIMEZONE_HOUR", "TIMEZONE_MINUTE",
     ];
 
     /// <summary>
