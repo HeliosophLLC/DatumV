@@ -122,6 +122,21 @@ public enum SqlToken
     /// <summary>The EXTRACT keyword (date/time field extraction).</summary>
     Extract,
 
+    /// <summary>The CURRENT_DATE keyword (transaction-stable date constant).</summary>
+    CurrentDate,
+
+    /// <summary>The CURRENT_TIME keyword (transaction-stable time constant).</summary>
+    CurrentTime,
+
+    /// <summary>The CURRENT_TIMESTAMP keyword (transaction-stable timestamp constant).</summary>
+    CurrentTimestamp,
+
+    /// <summary>The LOCALTIME keyword (transaction-stable local time constant).</summary>
+    LocalTime,
+
+    /// <summary>The LOCALTIMESTAMP keyword (transaction-stable local timestamp constant).</summary>
+    LocalTimestamp,
+
     /// <summary>The TRUE keyword (boolean literal).</summary>
     True,
 

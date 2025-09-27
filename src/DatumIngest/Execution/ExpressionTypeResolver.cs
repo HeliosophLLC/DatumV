@@ -36,6 +36,13 @@ public static class ExpressionTypeResolver
             LikeExpression => DataKind.Boolean,
             CastExpression cast => ResolveCast(cast),
             AtTimeZoneExpression => DataKind.DateTime,
+            CurrentTimestampExpression ct => ct.Kind switch
+            {
+                CurrentTimestampKind.CurrentDate => DataKind.Date,
+                CurrentTimestampKind.CurrentTime => DataKind.Time,
+                CurrentTimestampKind.CurrentTimestamp => DataKind.DateTime,
+                _ => null,
+            },
             CaseExpression caseExpr => ResolveCaseExpression(caseExpr, sourceSchema, functions),
             WindowFunctionCallExpression window => ResolveWindowFunction(window, sourceSchema, functions),
             LambdaExpression => null, // Not a value — only valid as an argument to IHigherOrderFunction.

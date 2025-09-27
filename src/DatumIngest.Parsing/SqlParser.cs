@@ -368,6 +368,57 @@ public static class SqlParser
             [new LiteralExpression(GetTokenText(field).ToLowerInvariant()), source],
             Span: ToSpan(extract, close));
 
+    // ───────────────────── Transaction-stable temporal constants ─────────────────────
+
+    /// <summary>CURRENT_DATE — bare keyword, no parentheses.</summary>
+    private static readonly TokenListParser<SqlToken, Expression> CurrentDateExpr =
+        Token.EqualTo(SqlToken.CurrentDate)
+            .Select(_ => (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentDate));
+
+    /// <summary>CURRENT_TIME or CURRENT_TIME(precision).</summary>
+    private static readonly TokenListParser<SqlToken, Expression> CurrentTimeExpr =
+        (from kw in Token.EqualTo(SqlToken.CurrentTime)
+         from open in Token.EqualTo(SqlToken.LeftParen)
+         from precision in Token.EqualTo(SqlToken.NumberLiteral)
+         from close in Token.EqualTo(SqlToken.RightParen)
+         select (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTime, int.Parse(GetTokenText(precision))))
+        .Try()
+        .Or(Token.EqualTo(SqlToken.CurrentTime)
+            .Select(_ => (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTime)));
+
+    /// <summary>CURRENT_TIMESTAMP or CURRENT_TIMESTAMP(precision).</summary>
+    private static readonly TokenListParser<SqlToken, Expression> CurrentTimestampExpr =
+        (from kw in Token.EqualTo(SqlToken.CurrentTimestamp)
+         from open in Token.EqualTo(SqlToken.LeftParen)
+         from precision in Token.EqualTo(SqlToken.NumberLiteral)
+         from close in Token.EqualTo(SqlToken.RightParen)
+         select (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp, int.Parse(GetTokenText(precision))))
+        .Try()
+        .Or(Token.EqualTo(SqlToken.CurrentTimestamp)
+            .Select(_ => (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp)));
+
+    /// <summary>LOCALTIME or LOCALTIME(precision).</summary>
+    private static readonly TokenListParser<SqlToken, Expression> LocalTimeExpr =
+        (from kw in Token.EqualTo(SqlToken.LocalTime)
+         from open in Token.EqualTo(SqlToken.LeftParen)
+         from precision in Token.EqualTo(SqlToken.NumberLiteral)
+         from close in Token.EqualTo(SqlToken.RightParen)
+         select (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTime, int.Parse(GetTokenText(precision))))
+        .Try()
+        .Or(Token.EqualTo(SqlToken.LocalTime)
+            .Select(_ => (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTime)));
+
+    /// <summary>LOCALTIMESTAMP or LOCALTIMESTAMP(precision).</summary>
+    private static readonly TokenListParser<SqlToken, Expression> LocalTimestampExpr =
+        (from kw in Token.EqualTo(SqlToken.LocalTimestamp)
+         from open in Token.EqualTo(SqlToken.LeftParen)
+         from precision in Token.EqualTo(SqlToken.NumberLiteral)
+         from close in Token.EqualTo(SqlToken.RightParen)
+         select (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp, int.Parse(GetTokenText(precision))))
+        .Try()
+        .Or(Token.EqualTo(SqlToken.LocalTimestamp)
+            .Select(_ => (Expression)new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp)));
+
     /// <summary>Parenthesized expression or subquery.</summary>
     private static readonly TokenListParser<SqlToken, Expression> ParenExpression =
         from open in Token.EqualTo(SqlToken.LeftParen)
@@ -477,6 +528,11 @@ public static class SqlParser
             .Or(CaseCall.Try())
             .Or(CastCall.Try())
             .Or(ExtractCall.Try())
+            .Or(CurrentDateExpr.Try())
+            .Or(CurrentTimestampExpr.Try())
+            .Or(CurrentTimeExpr.Try())
+            .Or(LocalTimestampExpr.Try())
+            .Or(LocalTimeExpr.Try())
             .Or(FunctionCall.Try())
             .Or(QualifiedColumn)
             .Or(TypeLiteral)

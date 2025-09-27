@@ -248,6 +248,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 : governor.MaxOutputRows;
             int? throttleMilliseconds = governor.ThrottleDelayMilliseconds;
 
+            // Capture a single batch clock so all statements in this batch share the same
+            // CURRENT_TIMESTAMP / now() value, matching PostgreSQL's transaction-stable semantics.
+            DateTimeOffset batchClock = DateTimeOffset.UtcNow;
+
             try
             {
                 for (int statementIndex = 0; statementIndex < statements.Count; statementIndex++)
@@ -256,7 +260,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
                     ExecutionTracer.Write($"GRPC dispatching statement #{statementIndex}  sql={request.Sql[..Math.Min(request.Sql.Length, 120)]}");
                     CommandResult result = await _dispatcher.DispatchStatementAsync(
-                        session, queryContext, statements[statementIndex], cancellationToken, meter, parameters).ConfigureAwait(false);
+                        session, queryContext, statements[statementIndex], cancellationToken, meter, parameters, batchClock).ConfigureAwait(false);
                     ExecutionTracer.Write($"GRPC dispatch returned  kind={result.Kind}  success={result.IsSuccess}");
 
                     if (!result.IsSuccess)

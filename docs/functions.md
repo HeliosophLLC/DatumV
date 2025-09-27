@@ -391,11 +391,40 @@ Shorthand functions for extracting individual components from Date, DateTime, or
 
 > **Note:** `dayofweek()` uses ISO 8601 convention (1=Monday, 7=Sunday). `date_part('dow', ...)` / `EXTRACT(DOW FROM ...)` uses PostgreSQL convention (0=Sunday, 6=Saturday). Use `EXTRACT(ISODOW FROM ...)` for ISO convention via `date_part`/`EXTRACT`.
 
+## Date/Time — Transaction-Stable Constants
+
+PostgreSQL-compatible temporal constants that return the same value for all references within a statement batch (matching PostgreSQL's "transaction start time" semantics). These are **keywords**, not function calls — no parentheses for the base forms.
+
+| Keyword | Returns | Description |
+|---------|---------|-------------|
+| `CURRENT_DATE` | Date | Current UTC date. |
+| `CURRENT_TIME` | Time | Current UTC time-of-day. |
+| `CURRENT_TIME(p)` | Time | Current UTC time, truncated to `p` fractional-second digits (0–6). |
+| `CURRENT_TIMESTAMP` | DateTime | Current UTC timestamp. |
+| `CURRENT_TIMESTAMP(p)` | DateTime | Current UTC timestamp, truncated to `p` fractional-second digits. |
+| `LOCALTIME` | Time | Same as `CURRENT_TIME` (no session timezone). |
+| `LOCALTIME(p)` | Time | Same as `CURRENT_TIME(p)`. |
+| `LOCALTIMESTAMP` | DateTime | Same as `CURRENT_TIMESTAMP`. |
+| `LOCALTIMESTAMP(p)` | DateTime | Same as `CURRENT_TIMESTAMP(p)`. |
+
+> **Note:** `now()` and `current_time()` are also transaction-stable — they return the same constant value as `CURRENT_TIMESTAMP` and `CURRENT_TIME` respectively. All temporal constants within a batch are resolved to the batch start time before execution.
+
+```sql
+-- All return the same timestamp within a single batch
+SELECT CURRENT_TIMESTAMP, now(), CURRENT_TIMESTAMP(3)
+
+-- Use in WHERE clauses
+SELECT * FROM events WHERE event_date = CURRENT_DATE
+
+-- Truncate to whole seconds
+SELECT CURRENT_TIMESTAMP(0) AS ts_no_fractional
+```
+
 ## Date/Time — Construction & Arithmetic (12)
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `now` | `now()` | Current UTC timestamp as DateTime. | 1 |
+| `now` | `now()` | Current UTC timestamp as DateTime. Transaction-stable: returns the same value for all calls within a batch. | 1 |
 | `make_date` | `make_date(year, month, day)` | Construct a Date from components (all Float32). | 1 |
 | `make_timestamp` | `make_timestamp(y, m, d, h, min, s)` | Construct a DateTime (UTC) from components (all Float32). | 1 |
 | `date_diff` | `date_diff(part, start, end)` | Count of part boundaries crossed between two dates. Returns Float32. | 1 |
@@ -404,7 +433,7 @@ Shorthand functions for extracting individual components from Date, DateTime, or
 | `date_bucket` | `date_bucket(part, width, date [, origin])` | Bucket into fixed-width intervals. Default origin is 2000-01-01. Preserves input kind. | 1 |
 | `date_bin` | `date_bin(interval, source, origin)` | PostgreSQL-compatible binning. Interval is a string like `'15 minutes'` or `'1 hour'`. Preserves input kind. | 1 |
 | `make_time` | `make_time(hour, minute, second)` | Construct a Time from components (all Float32). | 1 |
-| `current_time` | `current_time()` | Current UTC time of day as Time. | 1 |
+| `current_time` | `current_time()` | Current UTC time of day as Time. Transaction-stable. | 1 |
 | `date_span` | `date_span(start, end)` | Elapsed Duration between two Date or DateTime values. | 1 |
 | `date_offset` | `date_offset(date, duration)` | Add a Duration to a Date, DateTime, or Time. Returns DateTime for Date/DateTime, Time for Time. | 1 |
 | `time_diff` | `time_diff(start, end)` | Duration between two Time values (wraps forward through midnight). | 1 |

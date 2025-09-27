@@ -1021,6 +1021,86 @@ public class SqlParserTests
         Assert.Equal("Float32", cast.TargetType);
     }
 
+    // ───────────────────── Temporal constants ─────────────────────
+
+    [Fact]
+    public void CurrentDate_ParsesAsTemporalConstant()
+    {
+        SelectStatement result = Parse("SELECT CURRENT_DATE FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentDate, expr.Kind);
+        Assert.Null(expr.Precision);
+    }
+
+    [Fact]
+    public void CurrentTimestamp_ParsesAsTemporalConstant()
+    {
+        SelectStatement result = Parse("SELECT CURRENT_TIMESTAMP FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTimestamp, expr.Kind);
+        Assert.Null(expr.Precision);
+    }
+
+    [Fact]
+    public void CurrentTimestamp_WithPrecision()
+    {
+        SelectStatement result = Parse("SELECT CURRENT_TIMESTAMP(3) FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTimestamp, expr.Kind);
+        Assert.Equal(3, expr.Precision);
+    }
+
+    [Fact]
+    public void CurrentTime_ParsesAsTemporalConstant()
+    {
+        SelectStatement result = Parse("SELECT CURRENT_TIME FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTime, expr.Kind);
+        Assert.Null(expr.Precision);
+    }
+
+    [Fact]
+    public void CurrentTime_WithPrecision()
+    {
+        SelectStatement result = Parse("SELECT CURRENT_TIME(0) FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTime, expr.Kind);
+        Assert.Equal(0, expr.Precision);
+    }
+
+    [Fact]
+    public void LocalTime_ParsesAsTemporalConstant()
+    {
+        SelectStatement result = Parse("SELECT LOCALTIME FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTime, expr.Kind);
+    }
+
+    [Fact]
+    public void LocalTimestamp_ParsesAsTemporalConstant()
+    {
+        SelectStatement result = Parse("SELECT LOCALTIMESTAMP FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTimestamp, expr.Kind);
+    }
+
+    [Fact]
+    public void LocalTimestamp_WithPrecision()
+    {
+        SelectStatement result = Parse("SELECT LOCALTIMESTAMP(6) FROM t");
+        CurrentTimestampExpression expr = Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+        Assert.Equal(CurrentTimestampKind.CurrentTimestamp, expr.Kind);
+        Assert.Equal(6, expr.Precision);
+    }
+
+    [Fact]
+    public void CurrentTimestamp_WithAlias()
+    {
+        SelectStatement result = Parse("SELECT CURRENT_TIMESTAMP AS ts FROM t");
+        Assert.Equal("ts", result.Columns[0].Alias);
+        Assert.IsType<CurrentTimestampExpression>(result.Columns[0].Expression);
+    }
+
     // ───────────────────── Complex queries ─────────────────────
 
     [Fact]

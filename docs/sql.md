@@ -1837,6 +1837,35 @@ SELECT try_cast(raw_value, Float64) AS parsed FROM t
 SELECT * FROM t WHERE can_cast(score, Int32) AND cast(score, Int32) > 0
 ```
 
+### Transaction-Stable Temporal Constants
+
+PostgreSQL-compatible keywords that return the current date/time. All references within a statement batch resolve to the **same value** (the batch start time), matching PostgreSQL's transaction-stable semantics.
+
+```sql
+CURRENT_DATE                -- Date (UTC)
+CURRENT_TIME                -- Time (UTC)
+CURRENT_TIME(precision)     -- Time truncated to p fractional-second digits (0–6)
+CURRENT_TIMESTAMP           -- DateTime (UTC)
+CURRENT_TIMESTAMP(precision)-- DateTime truncated to p fractional-second digits
+LOCALTIME                   -- Same as CURRENT_TIME (no session timezone)
+LOCALTIME(precision)        -- Same as CURRENT_TIME(precision)
+LOCALTIMESTAMP               -- Same as CURRENT_TIMESTAMP
+LOCALTIMESTAMP(precision)   -- Same as CURRENT_TIMESTAMP(precision)
+```
+
+```sql
+-- Filter to today's rows
+SELECT * FROM orders WHERE order_date = CURRENT_DATE
+
+-- Timestamp with millisecond precision
+SELECT CURRENT_TIMESTAMP(3) AS ts
+
+-- Both columns are identical (batch-stable)
+SELECT CURRENT_TIMESTAMP AS a, CURRENT_TIMESTAMP AS b
+```
+
+`now()` and `current_time()` are also batch-stable — they resolve to the same constant at plan time. `LOCALTIME` / `LOCALTIMESTAMP` behave identically to `CURRENT_TIME` / `CURRENT_TIMESTAMP` because DatumIngest has no session timezone setting (all times are UTC).
+
 ### EXTRACT
 
 PostgreSQL-standard syntax for extracting date/time fields. Desugars to `date_part()` at parse time.

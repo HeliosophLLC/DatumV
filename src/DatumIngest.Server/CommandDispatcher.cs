@@ -155,10 +155,11 @@ public sealed class CommandDispatcher
     /// <param name="cancellationToken">Cancellation token for this operation.</param>
     /// <param name="queryMeter">Optional meter for accumulating Query Unit costs.</param>
     /// <param name="parameters">Optional named parameter bindings.</param>
+    /// <param name="batchClock">Optional batch start time for transaction-stable temporal constants. Falls back to <see cref="DateTimeOffset.UtcNow"/>.</param>
     /// <returns>The result of the statement execution.</returns>
     internal async Task<CommandResult> DispatchStatementAsync(
         Session session, QueryContext queryContext, Statement statement, CancellationToken cancellationToken, QueryMeter? queryMeter = null,
-        IReadOnlyDictionary<string, DataValue>? parameters = null)
+        IReadOnlyDictionary<string, DataValue>? parameters = null, DateTimeOffset? batchClock = null)
     {
         // DDL/DML statements are routed to the statement executor.
         if (statement is not QueryStatement queryStatement)
@@ -174,6 +175,10 @@ public sealed class CommandDispatcher
         {
             query = ParameterBinder.Bind(query, parameters);
         }
+
+        // Fold transaction-stable temporal constants (CURRENT_TIMESTAMP, now(), etc.)
+        // to literals using the batch clock so all statements in a batch share the same time.
+        query = TemporalConstantFolder.Fold(query, batchClock ?? DateTimeOffset.UtcNow);
 
         QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();

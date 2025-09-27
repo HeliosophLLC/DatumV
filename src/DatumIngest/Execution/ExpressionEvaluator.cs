@@ -126,6 +126,7 @@ public sealed class ExpressionEvaluator
                     "IN (SELECT ...) was not rewritten by the query planner into a semi-join."),
                 ExistsExpression => throw new InvalidOperationException(
                     "[NOT] EXISTS (SELECT ...) was not rewritten by the query planner into a semi-join."),
+                CurrentTimestampExpression ct => EvaluateTemporalConstant(ct),
                 ParameterExpression parameter => throw new InvalidOperationException(
                     $"Unbound parameter '${parameter.Name}'. Parameters must be bound before evaluation."),
                 LambdaExpression => throw new InvalidOperationException(
@@ -212,6 +213,23 @@ public sealed class ExpressionEvaluator
         }
 
         return DataValue.FromType(kind);
+    }
+
+    /// <summary>
+    /// Fallback evaluation for <see cref="CurrentTimestampExpression"/> when the
+    /// <see cref="TemporalConstantFolder"/> pass has not been applied (e.g. direct
+    /// programmatic API usage). Uses <see cref="DateTimeOffset.UtcNow"/> as the clock.
+    /// </summary>
+    private static DataValue EvaluateTemporalConstant(CurrentTimestampExpression ct)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return ct.Kind switch
+        {
+            CurrentTimestampKind.CurrentDate => DataValue.FromDate(DateOnly.FromDateTime(now.UtcDateTime)),
+            CurrentTimestampKind.CurrentTime => DataValue.FromTime(TimeOnly.FromTimeSpan(now.TimeOfDay)),
+            CurrentTimestampKind.CurrentTimestamp => DataValue.FromDateTime(now),
+            _ => throw new InvalidOperationException($"Unknown CurrentTimestampKind: {ct.Kind}"),
+        };
     }
 
     private static DataValue EvaluateColumn(ColumnReference column, Row row, Row? outerRow)

@@ -627,6 +627,33 @@ public sealed record AtTimeZoneExpression(
     SourceSpan? Span = null) : Expression;
 
 /// <summary>
+/// The kind of temporal constant represented by a <see cref="CurrentTimestampExpression"/>.
+/// </summary>
+public enum CurrentTimestampKind
+{
+    /// <summary><c>CURRENT_DATE</c> — returns Date.</summary>
+    CurrentDate,
+
+    /// <summary><c>CURRENT_TIME</c> / <c>LOCALTIME</c> — returns Time.</summary>
+    CurrentTime,
+
+    /// <summary><c>CURRENT_TIMESTAMP</c> / <c>LOCALTIMESTAMP</c> — returns DateTime.</summary>
+    CurrentTimestamp,
+}
+
+/// <summary>
+/// A PostgreSQL-compatible temporal constant expression: <c>CURRENT_DATE</c>,
+/// <c>CURRENT_TIME[(p)]</c>, <c>CURRENT_TIMESTAMP[(p)]</c>, <c>LOCALTIME[(p)]</c>,
+/// or <c>LOCALTIMESTAMP[(p)]</c>. These resolve to a single constant value at plan time
+/// (the batch/transaction start time), not at per-row evaluation time.
+/// </summary>
+/// <param name="Kind">Which temporal constant this represents.</param>
+/// <param name="Precision">Optional fractional-second precision (0–6). Null means full precision.</param>
+public sealed record CurrentTimestampExpression(
+    CurrentTimestampKind Kind,
+    int? Precision = null) : Expression;
+
+/// <summary>
 /// Placeholder expression inserted by the error-recovering parser where
 /// unparseable input was skipped. Downstream consumers (semantic analysis,
 /// expression evaluation) should treat this as opaque and skip validation.
