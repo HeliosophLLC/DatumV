@@ -325,8 +325,8 @@ internal static class MonarchGrammarFactory
         "hex_encode", "hex_decode",
 
         // UUID functions
-        "uuid4", "uuid7", "is_uuid",
-        "uuid_str", "uuid_bytes", "uuid_version", "uuid_timestamp",
+        "uuidv4", "gen_random_uuid", "uuidv7", "is_uuid",
+        "uuid_str", "uuid_bytes", "uuid_extract_version", "uuid_extract_timestamp",
 
         // Image — Metadata
         "width", "height", "channels", "pixel_count", "dimensions",

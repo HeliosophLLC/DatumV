@@ -164,11 +164,11 @@ The source expression is evaluated **once per row** regardless of how many names
 
 #### Memoization
 
-LET expressions are computed once per row. This is value caching, not textual macro expansion. Functions with side-effects like `uuid4()` produce a single value that is reused for all references within the same row:
+LET expressions are computed once per row. This is value caching, not textual macro expansion. Functions with side-effects like `uuidv4()` produce a single value that is reused for all references within the same row:
 
 ```sql
 SELECT
-  LET id = uuid4(),
+  LET id = uuidv4(),
   uuid_str(id) AS first,
   uuid_str(id) AS second
 FROM data

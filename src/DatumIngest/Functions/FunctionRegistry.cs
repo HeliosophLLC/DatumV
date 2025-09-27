@@ -24,6 +24,18 @@ public sealed class FunctionRegistry
     }
 
     /// <summary>
+    /// Registers an existing scalar function under an additional alias name.
+    /// </summary>
+    /// <exception cref="ArgumentException">A function with the alias name is already registered.</exception>
+    public void RegisterScalarAlias(string alias, IScalarFunction function)
+    {
+        if (!_scalarFunctions.TryAdd(alias, function))
+        {
+            throw new ArgumentException($"Scalar function '{alias}' is already registered.");
+        }
+    }
+
+    /// <summary>
     /// Registers a table-valued function.
     /// </summary>
     /// <exception cref="ArgumentException">A function with the same name is already registered.</exception>
@@ -225,13 +237,15 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.IsDateFunction());
 
         // UUID
-        registry.RegisterScalar(new Scalar.Uuid4Function());
-        registry.RegisterScalar(new Scalar.Uuid7Function());
+        var uuidv4 = new Scalar.Uuidv4Function();
+        registry.RegisterScalar(uuidv4);
+        registry.RegisterScalarAlias("gen_random_uuid", uuidv4);
+        registry.RegisterScalar(new Scalar.Uuidv7Function());
         registry.RegisterScalar(new Scalar.IsUuidFunction());
         registry.RegisterScalar(new Scalar.UuidStrFunction());
         registry.RegisterScalar(new Scalar.UuidBytesFunction());
-        registry.RegisterScalar(new Scalar.UuidVersionFunction());
-        registry.RegisterScalar(new Scalar.UuidTimestampFunction());
+        registry.RegisterScalar(new Scalar.UuidExtractVersionFunction());
+        registry.RegisterScalar(new Scalar.UuidExtractTimestampFunction());
 
         // JSON
         registry.RegisterScalar(new Scalar.JsonValueFunction());

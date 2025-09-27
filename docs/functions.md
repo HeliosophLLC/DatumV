@@ -186,25 +186,35 @@ type-narrowing bind syntax.
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `uuid4` | `uuid4()` | Generate a random version 4 UUID. | 1 |
-| `uuid7` | `uuid7()` | Generate a time-ordered version 7 UUID (monotonically increasing). | 1 |
+| `uuidv4` | `uuidv4()` | Generate a random version 4 UUID (PG 18). | 1 |
+| `gen_random_uuid` | `gen_random_uuid()` | Alias for `uuidv4()`. | 1 |
+| `uuidv7` | `uuidv7([shift])` | Generate a time-ordered version 7 UUID. Optional Duration shift offsets the embedded timestamp (PG 18). | 1 |
 | `is_uuid` | `is_uuid(str)` | Returns Boolean — whether the string is a valid UUID. | 1 |
 | `uuid_str` | `uuid_str(uuid)` | Format UUID as lowercase hyphenated string. | 1 |
 | `uuid_bytes` | `uuid_bytes(uuid)` | Extract UUID as 16-byte UInt8Array (big-endian). | 1 |
-| `uuid_version` | `uuid_version(uuid)` | Extract version number as Float32 (4 for random, 7 for time-ordered). | 1 |
-| `uuid_timestamp` | `uuid_timestamp(uuid)` | Extract embedded timestamp from v7 UUID as DateTime. Returns null for non-v7. | 1 |
+| `uuid_extract_version` | `uuid_extract_version(uuid)` | Extract version number as Int16 from an RFC 9562 UUID. Returns null for non-RFC 9562 variants (PG 18). | 1 |
+| `uuid_extract_timestamp` | `uuid_extract_timestamp(uuid)` | Extract embedded timestamp from a v1 or v7 UUID as DateTime. Returns null for other versions (PG 18). | 1 |
 
 ### UUID examples
 
 ```sql
 -- Generate identifiers
-SELECT uuid4() AS random_id, uuid7() AS time_ordered_id FROM data
+SELECT uuidv4() AS random_id, uuidv7() AS time_ordered_id FROM data
+
+-- gen_random_uuid() is an alias for uuidv4()
+SELECT gen_random_uuid() AS id FROM data
+
+-- Generate a UUID with a timestamp shifted 1 hour into the future
+SELECT uuidv7(make_duration(0, 1, 0, 0)) AS future_id FROM data
 
 -- Parse UUID strings from source data
 SELECT CAST(id_column AS Uuid) AS id FROM raw_data WHERE is_uuid(id_column)
 
 -- Extract timestamp from v7 UUIDs for temporal analysis
-SELECT uuid_timestamp(event_id) AS created_at FROM events
+SELECT uuid_extract_timestamp(event_id) AS created_at FROM events
+
+-- Extract version from a UUID
+SELECT uuid_extract_version(event_id) AS uuid_ver FROM events
 
 -- Hash composite keys using UUID bytes
 SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash FROM joins

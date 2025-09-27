@@ -1584,18 +1584,26 @@ public static class FunctionDocumentation
 
         Register(new FunctionSignature
         {
-            Name = "uuid4",
+            Name = "uuidv4",
             Parameters = [],
             ReturnType = "Uuid",
-            Description = "Generates a random version-4 UUID (RFC 9562).",
+            Description = "Generates a random version-4 UUID (RFC 9562). PostgreSQL 18 compatible.",
             Category = FunctionCategory.Encoding,
         });
         Register(new FunctionSignature
         {
-            Name = "uuid7",
+            Name = "gen_random_uuid",
             Parameters = [],
             ReturnType = "Uuid",
-            Description = "Generates a time-ordered version-7 UUID (RFC 9562) with an embedded millisecond timestamp.",
+            Description = "Generates a random version-4 UUID (RFC 9562). Alias for uuidv4().",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "uuidv7",
+            Parameters = [Parameter("shift", "Duration", isOptional: true)],
+            ReturnType = "Uuid",
+            Description = "Generates a time-ordered version-7 UUID (RFC 9562). Optional shift offsets the embedded timestamp. PostgreSQL 18 compatible.",
             Category = FunctionCategory.Encoding,
         });
         Register(new FunctionSignature
@@ -1624,18 +1632,18 @@ public static class FunctionDocumentation
         });
         Register(new FunctionSignature
         {
-            Name = "uuid_version",
+            Name = "uuid_extract_version",
             Parameters = [Parameter("input", "Uuid")],
-            ReturnType = "Float32",
-            Description = "Extracts the version number from a UUID.",
+            ReturnType = "Int16",
+            Description = "Extracts the version number from an RFC 9562 UUID; returns null for non-RFC 9562 variants. PostgreSQL 18 compatible.",
             Category = FunctionCategory.Encoding,
         });
         Register(new FunctionSignature
         {
-            Name = "uuid_timestamp",
+            Name = "uuid_extract_timestamp",
             Parameters = [Parameter("input", "Uuid")],
             ReturnType = "DateTime",
-            Description = "Extracts the embedded timestamp from a version-7 UUID; returns null for non-v7 UUIDs.",
+            Description = "Extracts the embedded timestamp from a version-1 or version-7 UUID; returns null for other versions. PostgreSQL 18 compatible.",
             Category = FunctionCategory.Encoding,
         });
 

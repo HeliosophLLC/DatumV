@@ -352,7 +352,7 @@ public sealed class LetBindingTests
 
     /// <summary>
     /// The source expression is evaluated exactly once per row even when multiple names are
-    /// extracted. Verified using a function with observable side-effects (uuid4 changes per call).
+    /// extracted. Verified using a function with observable side-effects (uuidv4 changes per call).
     /// </summary>
     [Fact]
     public async Task EndToEnd_Destructuring_SourceExpressionEvaluatedOncePerRow()
@@ -530,7 +530,7 @@ public sealed class LetBindingTests
 
     /// <summary>
     /// LET binding referenced multiple times produces identical values per row,
-    /// proving memoization. Uses <c>uuid4()</c> which returns a different value
+    /// proving memoization. Uses <c>uuidv4()</c> which returns a different value
     /// each time it is called; memoization means the LET expression is evaluated
     /// once and both references see the same UUID.
     /// </summary>
@@ -544,7 +544,7 @@ public sealed class LetBindingTests
         TableCatalog catalog = CreateCatalog(("t", data));
 
         List<Row> results = await ExecuteQueryAsync(
-            "SELECT LET u = uuid4(), uuid_str(u) AS first, uuid_str(u) AS second FROM t",
+            "SELECT LET u = uuidv4(), uuid_str(u) AS first, uuid_str(u) AS second FROM t",
             catalog);
 
         Assert.Single(results);

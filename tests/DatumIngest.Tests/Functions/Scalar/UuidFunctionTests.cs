@@ -5,74 +5,135 @@ namespace DatumIngest.Tests.Functions.Scalar;
 
 /// <summary>
 /// Tests for all UUID-related scalar functions:
-/// <see cref="Uuid4Function"/>, <see cref="Uuid7Function"/>, <see cref="IsUuidFunction"/>,
+/// <see cref="Uuidv4Function"/>, <see cref="Uuidv7Function"/>, <see cref="IsUuidFunction"/>,
 /// <see cref="UuidStrFunction"/>, <see cref="UuidBytesFunction"/>,
-/// <see cref="UuidVersionFunction"/>, and <see cref="UuidTimestampFunction"/>.
+/// <see cref="UuidExtractVersionFunction"/>, and <see cref="UuidExtractTimestampFunction"/>.
 /// </summary>
 public class UuidFunctionTests
 {
-    // ───────────────── Uuid4Function ─────────────────
+    // ───────────────── Uuidv4Function ─────────────────
 
     [Fact]
-    public void Uuid4Function_ReturnsUuid()
+    public void Uuidv4Function_ReturnsUuid()
     {
-        Uuid4Function function = new();
+        Uuidv4Function function = new();
         DataValue result = function.Execute([]);
         Assert.Equal(DataKind.Uuid, result.Kind);
         Assert.False(result.IsNull);
     }
 
     [Fact]
-    public void Uuid4Function_GeneratesDistinctValues()
+    public void Uuidv4Function_GeneratesDistinctValues()
     {
-        Uuid4Function function = new();
+        Uuidv4Function function = new();
         DataValue first = function.Execute([]);
         DataValue second = function.Execute([]);
         Assert.NotEqual(first.AsUuid(), second.AsUuid());
     }
 
     [Fact]
-    public void Uuid4Function_ValidateArguments_ReturnsUuidKind()
+    public void Uuidv4Function_ValidateArguments_ReturnsUuidKind()
     {
-        Uuid4Function function = new();
+        Uuidv4Function function = new();
         DataKind result = function.ValidateArguments([]);
         Assert.Equal(DataKind.Uuid, result);
     }
 
     [Fact]
-    public void Uuid4Function_ValidateArguments_ExtraArgs_Throws()
+    public void Uuidv4Function_ValidateArguments_ExtraArgs_Throws()
     {
-        Uuid4Function function = new();
+        Uuidv4Function function = new();
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.String]));
     }
 
-    // ───────────────── Uuid7Function ─────────────────
+    // ───────────────── Uuidv7Function ─────────────────
 
     [Fact]
-    public void Uuid7Function_ReturnsUuid()
+    public void Uuidv7Function_NoArgs_ReturnsUuid()
     {
-        Uuid7Function function = new();
+        Uuidv7Function function = new();
         DataValue result = function.Execute([]);
         Assert.Equal(DataKind.Uuid, result.Kind);
         Assert.False(result.IsNull);
     }
 
     [Fact]
-    public void Uuid7Function_GeneratesDistinctValues()
+    public void Uuidv7Function_GeneratesDistinctValues()
     {
-        Uuid7Function function = new();
+        Uuidv7Function function = new();
         DataValue first = function.Execute([]);
         DataValue second = function.Execute([]);
         Assert.NotEqual(first.AsUuid(), second.AsUuid());
     }
 
     [Fact]
-    public void Uuid7Function_ValidateArguments_ExtraArgs_Throws()
+    public void Uuidv7Function_ValidateArguments_NoArgs_ReturnsUuidKind()
     {
-        Uuid7Function function = new();
+        Uuidv7Function function = new();
+        DataKind result = function.ValidateArguments([]);
+        Assert.Equal(DataKind.Uuid, result);
+    }
+
+    [Fact]
+    public void Uuidv7Function_ValidateArguments_DurationArg_ReturnsUuidKind()
+    {
+        Uuidv7Function function = new();
+        DataKind result = function.ValidateArguments([DataKind.Duration]);
+        Assert.Equal(DataKind.Uuid, result);
+    }
+
+    [Fact]
+    public void Uuidv7Function_ValidateArguments_WrongType_Throws()
+    {
+        Uuidv7Function function = new();
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.Float32]));
+    }
+
+    [Fact]
+    public void Uuidv7Function_ValidateArguments_TooManyArgs_Throws()
+    {
+        Uuidv7Function function = new();
+        Assert.Throws<ArgumentException>(() =>
+            function.ValidateArguments([DataKind.Duration, DataKind.Duration]));
+    }
+
+    [Fact]
+    public void Uuidv7Function_WithShift_ReturnsUuid()
+    {
+        Uuidv7Function function = new();
+        DataValue shift = DataValue.FromDuration(TimeSpan.FromHours(1));
+        DataValue result = function.Execute([shift]);
+        Assert.Equal(DataKind.Uuid, result.Kind);
+        Assert.False(result.IsNull);
+    }
+
+    [Fact]
+    public void Uuidv7Function_WithShift_TimestampReflectsOffset()
+    {
+        Uuidv7Function generator = new();
+        UuidExtractTimestampFunction extractor = new();
+
+        DataValue noShift = generator.Execute([]);
+        DataValue withShift = generator.Execute([DataValue.FromDuration(TimeSpan.FromHours(1))]);
+
+        DateTimeOffset baseTime = extractor.Execute([noShift]).AsDateTime();
+        DateTimeOffset shiftedTime = extractor.Execute([withShift]).AsDateTime();
+
+        // The shifted UUID timestamp should be roughly 1 hour ahead.
+        TimeSpan diff = shiftedTime - baseTime;
+        Assert.InRange(diff.TotalMinutes, 55, 65);
+    }
+
+    [Fact]
+    public void Uuidv7Function_WithNullShift_ReturnsUuid()
+    {
+        Uuidv7Function function = new();
+        DataValue nullShift = DataValue.Null(DataKind.Duration);
+        DataValue result = function.Execute([nullShift]);
+        Assert.Equal(DataKind.Uuid, result.Kind);
+        Assert.False(result.IsNull);
     }
 
     // ───────────────── IsUuidFunction ─────────────────
@@ -149,7 +210,7 @@ public class UuidFunctionTests
     [Fact]
     public void UuidBytesFunction_Returns16Bytes()
     {
-        Uuid4Function generator = new();
+        Uuidv4Function generator = new();
         DataValue uuid = generator.Execute([]);
 
         UuidBytesFunction function = new();
@@ -173,73 +234,104 @@ public class UuidFunctionTests
             function.ValidateArguments([DataKind.String]));
     }
 
-    // ───────────────── UuidVersionFunction ─────────────────
+    // ───────────────── UuidExtractVersionFunction ─────────────────
 
     [Fact]
-    public void UuidVersionFunction_V4_Returns4()
+    public void UuidExtractVersionFunction_V4_Returns4()
     {
-        Uuid4Function generator = new();
+        Uuidv4Function generator = new();
         DataValue uuid = generator.Execute([]);
 
-        UuidVersionFunction function = new();
+        UuidExtractVersionFunction function = new();
         DataValue result = function.Execute([uuid]);
-        Assert.Equal(4f, result.AsFloat32());
+        Assert.Equal((short)4, result.AsInt16());
     }
 
     [Fact]
-    public void UuidVersionFunction_NullInput_ReturnsNull()
+    public void UuidExtractVersionFunction_V7_Returns7()
     {
-        UuidVersionFunction function = new();
+        Uuidv7Function generator = new();
+        DataValue uuid = generator.Execute([]);
+
+        UuidExtractVersionFunction function = new();
+        DataValue result = function.Execute([uuid]);
+        Assert.Equal((short)7, result.AsInt16());
+    }
+
+    [Fact]
+    public void UuidExtractVersionFunction_NullInput_ReturnsNull()
+    {
+        UuidExtractVersionFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Uuid)]);
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void UuidVersionFunction_ValidateArguments_WrongArgCount_Throws()
+    public void UuidExtractVersionFunction_ValidateArguments_ReturnsInt16()
     {
-        UuidVersionFunction function = new();
+        UuidExtractVersionFunction function = new();
+        DataKind result = function.ValidateArguments([DataKind.Uuid]);
+        Assert.Equal(DataKind.Int16, result);
+    }
+
+    [Fact]
+    public void UuidExtractVersionFunction_ValidateArguments_WrongArgCount_Throws()
+    {
+        UuidExtractVersionFunction function = new();
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([]));
     }
 
-    // ───────────────── UuidTimestampFunction ─────────────────
+    // ───────────────── UuidExtractTimestampFunction ─────────────────
 
     [Fact]
-    public void UuidTimestampFunction_V7_ReturnsDateTime()
+    public void UuidExtractTimestampFunction_V7_ReturnsDateTime()
     {
-        Uuid7Function generator = new();
+        Uuidv7Function generator = new();
         DataValue uuid = generator.Execute([]);
 
-        UuidTimestampFunction function = new();
+        UuidExtractTimestampFunction function = new();
         DataValue result = function.Execute([uuid]);
         Assert.Equal(DataKind.DateTime, result.Kind);
         Assert.False(result.IsNull);
     }
 
     [Fact]
-    public void UuidTimestampFunction_V4_ReturnsNull()
+    public void UuidExtractTimestampFunction_V4_ReturnsNull()
     {
-        Uuid4Function generator = new();
+        Uuidv4Function generator = new();
         DataValue uuid = generator.Execute([]);
 
-        UuidTimestampFunction function = new();
+        UuidExtractTimestampFunction function = new();
         DataValue result = function.Execute([uuid]);
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void UuidTimestampFunction_NullInput_ReturnsNull()
+    public void UuidExtractTimestampFunction_NullInput_ReturnsNull()
     {
-        UuidTimestampFunction function = new();
+        UuidExtractTimestampFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.Uuid)]);
         Assert.True(result.IsNull);
     }
 
     [Fact]
-    public void UuidTimestampFunction_ValidateArguments_WrongType_Throws()
+    public void UuidExtractTimestampFunction_ValidateArguments_WrongType_Throws()
     {
-        UuidTimestampFunction function = new();
+        UuidExtractTimestampFunction function = new();
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.String]));
+    }
+
+    [Fact]
+    public void UuidExtractTimestampFunction_V7_TimestampIsRecent()
+    {
+        Uuidv7Function generator = new();
+        DataValue uuid = generator.Execute([]);
+
+        UuidExtractTimestampFunction function = new();
+        DateTimeOffset extracted = function.Execute([uuid]).AsDateTime();
+        TimeSpan age = DateTimeOffset.UtcNow - extracted;
+        Assert.InRange(age.TotalSeconds, -1, 5);
     }
 }

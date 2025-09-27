@@ -149,7 +149,7 @@ public sealed class FunctionDocumentationTests
     [InlineData("json_value", FunctionCategory.Json)]
     [InlineData("sha256", FunctionCategory.Encoding)]
     [InlineData("base64_encode", FunctionCategory.Encoding)]
-    [InlineData("uuid4", FunctionCategory.Encoding)]
+    [InlineData("uuidv4", FunctionCategory.Encoding)]
     [InlineData("cast", FunctionCategory.Conversion)]
     [InlineData("coalesce", FunctionCategory.Utility)]
     [InlineData("unnest", FunctionCategory.Table)]
