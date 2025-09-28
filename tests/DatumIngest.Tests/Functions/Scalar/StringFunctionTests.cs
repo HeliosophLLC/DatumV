@@ -1,3 +1,4 @@
+using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
 using DatumIngest.Model;
 
@@ -57,6 +58,17 @@ public class StringFunctionTests
     }
 
     [Fact]
+    public void TrimFunction_WithCharSet_TrimsSpecifiedChars()
+    {
+        TrimFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("yxTomxx"),
+            DataValue.FromString("xyz")
+        ]);
+        Assert.Equal("Tom", result.AsString());
+    }
+
+    [Fact]
     public void TrimFunction_NullInput_ReturnsNull()
     {
         TrimFunction function = new();
@@ -75,6 +87,17 @@ public class StringFunctionTests
     }
 
     [Fact]
+    public void LtrimFunction_WithCharSet_TrimsSpecifiedChars()
+    {
+        LtrimFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("zzzytest"),
+            DataValue.FromString("xyz")
+        ]);
+        Assert.Equal("test", result.AsString());
+    }
+
+    [Fact]
     public void LtrimFunction_NullInput_ReturnsNull()
     {
         LtrimFunction function = new();
@@ -90,6 +113,17 @@ public class StringFunctionTests
         RtrimFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("  hello  ")]);
         Assert.Equal("  hello", result.AsString());
+    }
+
+    [Fact]
+    public void RtrimFunction_WithCharSet_TrimsSpecifiedChars()
+    {
+        RtrimFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("testxxzx"),
+            DataValue.FromString("xyz")
+        ]);
+        Assert.Equal("test", result.AsString());
     }
 
     [Fact]
@@ -337,6 +371,28 @@ public class StringFunctionTests
     }
 
     [Fact]
+    public void LeftFunction_NegativeN_ReturnsAllButLastN()
+    {
+        LeftFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abcde"),
+            DataValue.FromFloat32(-2)
+        ]);
+        Assert.Equal("abc", result.AsString());
+    }
+
+    [Fact]
+    public void LeftFunction_NegativeN_ExceedsLength_ReturnsEmpty()
+    {
+        LeftFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("ab"),
+            DataValue.FromFloat32(-5)
+        ]);
+        Assert.Equal("", result.AsString());
+    }
+
+    [Fact]
     public void LeftFunction_NullInput_ReturnsNull()
     {
         LeftFunction function = new();
@@ -358,6 +414,28 @@ public class StringFunctionTests
             DataValue.FromFloat32(3)
         ]);
         Assert.Equal("llo", result.AsString());
+    }
+
+    [Fact]
+    public void RightFunction_NegativeN_ReturnsAllButFirstN()
+    {
+        RightFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abcde"),
+            DataValue.FromFloat32(-2)
+        ]);
+        Assert.Equal("cde", result.AsString());
+    }
+
+    [Fact]
+    public void RightFunction_NegativeN_ExceedsLength_ReturnsEmpty()
+    {
+        RightFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("ab"),
+            DataValue.FromFloat32(-5)
+        ]);
+        Assert.Equal("", result.AsString());
     }
 
     [Fact]
@@ -383,6 +461,29 @@ public class StringFunctionTests
             DataValue.FromString("x")
         ]);
         Assert.Equal("xxxhi", result.AsString());
+    }
+
+    [Fact]
+    public void LpadFunction_DefaultFill_PadsWithSpaces()
+    {
+        LpadFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hi"),
+            DataValue.FromFloat32(5)
+        ]);
+        Assert.Equal("   hi", result.AsString());
+    }
+
+    [Fact]
+    public void LpadFunction_MultiFill_CyclesPadding()
+    {
+        LpadFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hi"),
+            DataValue.FromFloat32(5),
+            DataValue.FromString("xy")
+        ]);
+        Assert.Equal("xyxhi", result.AsString());
     }
 
     [Fact]
@@ -412,6 +513,29 @@ public class StringFunctionTests
     }
 
     [Fact]
+    public void RpadFunction_DefaultFill_PadsWithSpaces()
+    {
+        RpadFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hi"),
+            DataValue.FromFloat32(5)
+        ]);
+        Assert.Equal("hi   ", result.AsString());
+    }
+
+    [Fact]
+    public void RpadFunction_MultiFill_CyclesPadding()
+    {
+        RpadFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hi"),
+            DataValue.FromFloat32(5),
+            DataValue.FromString("xy")
+        ]);
+        Assert.Equal("hixyx", result.AsString());
+    }
+
+    [Fact]
     public void RpadFunction_NullInput_ReturnsNull()
     {
         RpadFunction function = new();
@@ -421,6 +545,17 @@ public class StringFunctionTests
             DataValue.FromString("x")
         ]);
         Assert.True(result.IsNull);
+    }
+
+    // ───────────────── Length aliases ─────────────────
+
+    [Fact]
+    public void LengthAlias_RegisteredInRegistry()
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+        Assert.Contains("length", registry.ScalarFunctionNames);
+        Assert.Contains("char_length", registry.ScalarFunctionNames);
+        Assert.Contains("character_length", registry.ScalarFunctionNames);
     }
 
     // ───────────────── RegexpExtractFunction ─────────────────

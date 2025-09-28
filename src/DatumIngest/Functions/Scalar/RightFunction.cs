@@ -5,6 +5,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <summary>
 /// Returns the rightmost characters of a string.
 /// <c>right(string, n)</c> returns the last <c>n</c> characters from the input string.
+/// When <c>n</c> is negative, returns all but the first <c>|n|</c> characters.
 /// </summary>
 public sealed class RightFunction : IScalarFunction
 {
@@ -45,6 +46,13 @@ public sealed class RightFunction : IScalarFunction
 
         string inputString = input.AsString();
         int count = (int)countValue.AsFloat32();
+
+        if (count < 0)
+        {
+            int start = System.Math.Abs(count);
+            return DataValue.FromString(start >= inputString.Length ? string.Empty : inputString[start..]);
+        }
+
         string result = inputString[System.Math.Max(0, inputString.Length - count)..];
         return DataValue.FromString(result);
     }

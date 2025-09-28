@@ -88,6 +88,30 @@ public static class FunctionDocumentation
         });
         Register(new FunctionSignature
         {
+            Name = "length",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the number of characters in a string. Alias for len().",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "char_length",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the number of characters in a string. SQL standard alias for len().",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "character_length",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the number of characters in a string. SQL standard alias for len().",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
             Name = "mid",
             Parameters = [Parameter("value", "String"), Parameter("start", "Float32"), Parameter("length", "Float32")],
             ReturnType = "String",
@@ -153,33 +177,33 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "trim",
-            Parameters = [Parameter("value", "String")],
+            Parameters = [Parameter("value", "String"), Parameter("characters", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Removes leading and trailing whitespace from a string.",
+            Description = "Removes leading and trailing characters from a string. Strips whitespace by default, or the specified character set.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "ltrim",
-            Parameters = [Parameter("value", "String")],
+            Parameters = [Parameter("value", "String"), Parameter("characters", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Removes leading whitespace from a string.",
+            Description = "Removes leading characters from a string. Strips whitespace by default, or the specified character set.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "rtrim",
-            Parameters = [Parameter("value", "String")],
+            Parameters = [Parameter("value", "String"), Parameter("characters", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Removes trailing whitespace from a string.",
+            Description = "Removes trailing characters from a string. Strips whitespace by default, or the specified character set.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "btrim",
-            Parameters = [Parameter("value", "String")],
+            Parameters = [Parameter("value", "String"), Parameter("characters", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Removes leading and trailing whitespace from a string. Alias for trim.",
+            Description = "Removes leading and trailing characters from a string. Strips whitespace by default, or the specified character set.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
@@ -257,33 +281,33 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "left",
-            Parameters = [Parameter("value", "String"), Parameter("length", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("n", "Float32")],
             ReturnType = "String",
-            Description = "Returns the leftmost N characters of a string.",
+            Description = "Returns the first n characters. When n is negative, returns all but the last |n| characters.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "right",
-            Parameters = [Parameter("value", "String"), Parameter("length", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("n", "Float32")],
             ReturnType = "String",
-            Description = "Returns the rightmost N characters of a string.",
+            Description = "Returns the last n characters. When n is negative, returns all but the first |n| characters.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "lpad",
-            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String")],
+            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Left-pads a string to the specified length with a fill character.",
+            Description = "Left-pads a string to the specified length with a fill string (default space). Truncates from the right if already longer.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "rpad",
-            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String")],
+            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Right-pads a string to the specified length with a fill character.",
+            Description = "Right-pads a string to the specified length with a fill string (default space). Truncates if already longer.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature

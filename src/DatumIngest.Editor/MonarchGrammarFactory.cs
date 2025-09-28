@@ -217,7 +217,8 @@ internal static class MonarchGrammarFactory
         "UNNEST",
 
         // String functions
-        "len", "mid", "substring", "upper", "lower",
+        "len", "length", "char_length", "character_length",
+        "mid", "substring", "upper", "lower",
         "trim", "ltrim", "rtrim", "btrim",
         "contains", "starts_with", "ends_with", "position", "replace",
         "concat", "concat_ws", "repeat", "reverse",

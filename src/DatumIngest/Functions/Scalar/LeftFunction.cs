@@ -5,6 +5,7 @@ namespace DatumIngest.Functions.Scalar;
 /// <summary>
 /// Returns the leftmost characters of a string.
 /// <c>left(string, n)</c> returns the first <c>n</c> characters from the input string.
+/// When <c>n</c> is negative, returns all but the last <c>|n|</c> characters.
 /// </summary>
 public sealed class LeftFunction : IScalarFunction
 {
@@ -45,6 +46,13 @@ public sealed class LeftFunction : IScalarFunction
 
         string inputString = input.AsString();
         int count = (int)countValue.AsFloat32();
+
+        if (count < 0)
+        {
+            int end = inputString.Length + count;
+            return DataValue.FromString(end <= 0 ? string.Empty : inputString[..end]);
+        }
+
         string result = inputString[..System.Math.Min(count, inputString.Length)];
         return DataValue.FromString(result);
     }

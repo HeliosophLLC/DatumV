@@ -1600,6 +1600,124 @@ map<string, DataValueMessage> parameters = 3;
 
 See [Compute Backend — Query](compute.md#query-server-streaming) for details.
 
+## String Functions
+
+PostgreSQL-compatible string functions. All functions return NULL when any required argument is NULL.
+
+### Length
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `len(s)` | Float32 | Number of characters in `s`. Also works on Vector, UInt8Array, Matrix, Tensor, JsonValue, and Array. |
+| `length(s)` | Float32 | Alias for `len()`. |
+| `char_length(s)` | Float32 | SQL standard alias for `len()`. |
+| `character_length(s)` | Float32 | SQL standard alias for `len()`. |
+
+### Case Conversion
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `upper(s)` | String | Converts to upper case. |
+| `lower(s)` | String | Converts to lower case. |
+| `initcap(s)` | String | Capitalises the first letter of each word; non-alphanumeric characters are word boundaries. |
+
+### Substring Extraction
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `substring(s, start [, length])` | String | Extracts substring from 1-based `start`. Optional `length` limits the result. |
+| `mid(s, start, length)` | String | Extracts substring from 1-based `start` with explicit `length`. |
+| `left(s, n)` | String | First `n` characters. When `n` is negative, returns all but the last \|n\| characters. |
+| `right(s, n)` | String | Last `n` characters. When `n` is negative, returns all but the first \|n\| characters. |
+
+### Trimming
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `trim(s [, characters])` | String | Removes leading and trailing characters. Default: whitespace. |
+| `ltrim(s [, characters])` | String | Removes leading characters. Default: whitespace. |
+| `rtrim(s [, characters])` | String | Removes trailing characters. Default: whitespace. |
+| `btrim(s [, characters])` | String | Same as `trim()`. PostgreSQL alias. |
+
+```sql
+-- Trim whitespace (default)
+SELECT trim('  hello  ')           -- 'hello'
+
+-- Trim specific characters
+SELECT trim('xyxtrimyyx', 'xyz')   -- 'trim'
+SELECT ltrim('zzzytest', 'xyz')    -- 'test'
+SELECT rtrim('testxxzx', 'xyz')    -- 'test'
+```
+
+### Padding
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `lpad(s, length [, fill])` | String | Left-pads to `length` with `fill` (default space). Truncates from the right if `s` is already longer. |
+| `rpad(s, length [, fill])` | String | Right-pads to `length` with `fill` (default space). Truncates if `s` is already longer. |
+
+```sql
+SELECT lpad('hi', 5)          -- '   hi'
+SELECT lpad('hi', 5, 'xy')   -- 'xyxhi'
+SELECT rpad('hi', 5)          -- 'hi   '
+SELECT rpad('hi', 5, 'xy')   -- 'hixyx'
+```
+
+### Search
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `position(string, substring)` | Float32 | 1-based index of first occurrence, or 0 if not found. |
+| `contains(s, search)` | Boolean | True if `s` contains `search`. |
+| `starts_with(s, prefix)` | Boolean | True if `s` starts with `prefix`. |
+| `ends_with(s, suffix)` | Boolean | True if `s` ends with `suffix`. |
+
+### Replacement
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `replace(s, from, to)` | String | Replaces all occurrences of `from` with `to`. |
+| `translate(s, from, to)` | String | Character-level mapping: each character in `from` is replaced by the corresponding character in `to`. Extra `from` characters are deleted. |
+| `regexp_replace(s, pattern, replacement [, flags])` | String | Replaces matches of a POSIX regex. Default replaces all; pass `'i'` for first-only case-insensitive, `'g'` for global, `'gi'` for both. |
+
+### Concatenation
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `concat(s1, s2 [, ...])` | String | Concatenates two or more strings. NULL arguments are treated as empty. |
+| `concat_ws(separator, s1 [, ...])` | String | Concatenates with separator, skipping NULL values. |
+| `repeat(s, count)` | String | Repeats `s` the specified number of times. |
+
+### Splitting
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `split_part(s, delimiter, n)` | String | Splits by `delimiter` and returns the `n`-th part (1-based). Negative `n` counts from the end. |
+
+### Character Codes
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `ascii(s)` | Float32 | Returns the Unicode code point of the first character. |
+| `chr(code)` | String | Returns the character for the given code point. |
+
+### Regular Expressions
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `regexp_extract(s, pattern [, group])` | String | Extracts the first match. With `group` (1-based), returns a specific capture group. Returns NULL if no match. |
+| `regexp_replace(s, pattern, replacement [, flags])` | String | See Replacement section above. |
+
+### Other
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `reverse(s)` | String | Reverses the characters. |
+| `word_count(s)` | Float32 | Number of whitespace-delimited words. |
+| `get_filename(path)` | String | Extracts the file name (with extension) from a path. |
+| `get_file_extension(path)` | String | Extracts the extension (including dot) from a path. |
+| `get_path(path)` | String | Extracts the directory from a path. |
+
 ## Type System
 
 ### DataKind values

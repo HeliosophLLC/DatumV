@@ -3,8 +3,9 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
-/// Removes leading whitespace from a string.
-/// <c>ltrim(string)</c> returns the input with whitespace stripped from the start.
+/// Removes leading characters from a string.
+/// <c>ltrim(string)</c> removes leading whitespace.
+/// <c>ltrim(string, characters)</c> removes leading characters that appear in the set.
 /// </summary>
 public sealed class LtrimFunction : IScalarFunction
 {
@@ -14,14 +15,20 @@ public sealed class LtrimFunction : IScalarFunction
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length != 1)
+        if (argumentKinds.Length is not (1 or 2))
         {
-            throw new ArgumentException("ltrim() requires exactly 1 argument.");
+            throw new ArgumentException("ltrim() requires 1 or 2 arguments: string [, characters].");
         }
 
         if (argumentKinds[0] != DataKind.String)
         {
-            throw new ArgumentException($"ltrim() requires a String argument, got {argumentKinds[0]}.");
+            throw new ArgumentException($"ltrim() first argument must be String, got {argumentKinds[0]}.");
+        }
+
+        if (argumentKinds.Length == 2 && argumentKinds[1] != DataKind.String)
+        {
+            throw new ArgumentException(
+                $"ltrim() second argument (characters) must be String, got {argumentKinds[1]}.");
         }
 
         return DataKind.String;
@@ -36,6 +43,14 @@ public sealed class LtrimFunction : IScalarFunction
             return DataValue.Null(DataKind.String);
         }
 
-        return DataValue.FromString(input.AsString().TrimStart());
+        string text = input.AsString();
+
+        if (arguments.Length == 1 || arguments[1].IsNull)
+        {
+            return DataValue.FromString(text.TrimStart());
+        }
+
+        char[] trimChars = arguments[1].AsString().ToCharArray();
+        return DataValue.FromString(text.TrimStart(trimChars));
     }
 }

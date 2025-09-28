@@ -166,7 +166,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.ReshapeFunction());
 
         // String
-        registry.RegisterScalar(new Scalar.LenFunction());
+        var len = new Scalar.LenFunction();
+        registry.RegisterScalar(len);
+        registry.RegisterScalarAlias("length", len);
+        registry.RegisterScalarAlias("char_length", len);
+        registry.RegisterScalarAlias("character_length", len);
         registry.RegisterScalar(new Scalar.MidFunction());
         registry.RegisterScalar(new Scalar.SubstringFunction());
         registry.RegisterScalar(new Scalar.GetFilenameFunction());

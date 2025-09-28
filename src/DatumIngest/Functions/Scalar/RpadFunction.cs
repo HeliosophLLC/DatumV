@@ -15,9 +15,9 @@ public sealed class RpadFunction : IScalarFunction
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length != 3)
+        if (argumentKinds.Length is not (2 or 3))
         {
-            throw new ArgumentException("rpad() requires exactly 3 arguments.");
+            throw new ArgumentException("rpad() requires 2 or 3 arguments: string, length [, fill].");
         }
 
         if (argumentKinds[0] != DataKind.String)
@@ -30,7 +30,7 @@ public sealed class RpadFunction : IScalarFunction
             throw new ArgumentException($"rpad() requires a Scalar as the second argument, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds[2] != DataKind.String)
+        if (argumentKinds.Length == 3 && argumentKinds[2] != DataKind.String)
         {
             throw new ArgumentException($"rpad() requires a String as the third argument, got {argumentKinds[2]}.");
         }
@@ -43,21 +43,25 @@ public sealed class RpadFunction : IScalarFunction
     {
         DataValue input = arguments[0];
         DataValue lengthValue = arguments[1];
-        DataValue fill = arguments[2];
 
         if (input.IsNull)
         {
             return DataValue.Null(DataKind.String);
         }
 
-        if (lengthValue.IsNull || fill.IsNull)
+        if (lengthValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        if (arguments.Length == 3 && arguments[2].IsNull)
         {
             return DataValue.Null(DataKind.String);
         }
 
         string inputString = input.AsString();
         int targetLength = (int)lengthValue.AsFloat32();
-        string fillString = fill.AsString();
+        string fillString = arguments.Length == 3 ? arguments[2].AsString() : " ";
 
         if (targetLength <= 0)
         {
