@@ -520,6 +520,38 @@ public static class FunctionDocumentation
         });
         Register(new FunctionSignature
         {
+            Name = "transaction_timestamp",
+            Parameters = [],
+            ReturnType = "DateTime",
+            Description = "Returns the batch (transaction) start time. Same as now() and CURRENT_TIMESTAMP.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "statement_timestamp",
+            Parameters = [],
+            ReturnType = "DateTime",
+            Description = "Returns the current statement start time. May differ from transaction_timestamp() in multi-statement batches.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "clock_timestamp",
+            Parameters = [],
+            ReturnType = "DateTime",
+            Description = "Returns the actual wall-clock time. Changes even within a single statement. NOT batch-stable.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "timeofday",
+            Parameters = [],
+            ReturnType = "String",
+            Description = "Returns the actual wall-clock time as a formatted ISO 8601 string. NOT batch-stable.",
+            Category = FunctionCategory.Temporal,
+        });
+        Register(new FunctionSignature
+        {
             Name = "date_span",
             Parameters = [Parameter("start", "DateTime"), Parameter("end", "DateTime")],
             ReturnType = "Duration",

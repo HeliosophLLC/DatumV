@@ -178,7 +178,10 @@ public sealed class CommandDispatcher
 
         // Fold transaction-stable temporal constants (CURRENT_TIMESTAMP, now(), etc.)
         // to literals using the batch clock so all statements in a batch share the same time.
-        query = TemporalConstantFolder.Fold(query, batchClock ?? DateTimeOffset.UtcNow);
+        // statement_timestamp() uses a per-statement clock captured at dispatch time.
+        DateTimeOffset effectiveBatchClock = batchClock ?? DateTimeOffset.UtcNow;
+        DateTimeOffset statementClock = DateTimeOffset.UtcNow;
+        query = TemporalConstantFolder.Fold(query, effectiveBatchClock, statementClock);
 
         QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
         LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();

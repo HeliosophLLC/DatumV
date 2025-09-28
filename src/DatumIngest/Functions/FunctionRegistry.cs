@@ -223,6 +223,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.MakeTimestampFunction());
         registry.RegisterScalar(new Scalar.MakeTimeFunction());
         registry.RegisterScalar(new Scalar.CurrentTimeFunction());
+        registry.RegisterScalar(new Scalar.TransactionTimestampFunction());
+        registry.RegisterScalar(new Scalar.StatementTimestampFunction());
+        registry.RegisterScalar(new Scalar.ClockTimestampFunction());
+        registry.RegisterScalar(new Scalar.TimeofdayFunction());
         registry.RegisterScalar(new Scalar.DateDiffFunction());
         registry.RegisterScalar(new Scalar.DateAddFunction());
         registry.RegisterScalar(new Scalar.DateTruncFunction());

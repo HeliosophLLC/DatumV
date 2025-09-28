@@ -1866,6 +1866,29 @@ SELECT CURRENT_TIMESTAMP AS a, CURRENT_TIMESTAMP AS b
 
 `now()` and `current_time()` are also batch-stable — they resolve to the same constant at plan time. `LOCALTIME` / `LOCALTIMESTAMP` behave identically to `CURRENT_TIME` / `CURRENT_TIMESTAMP` because DatumIngest has no session timezone setting (all times are UTC).
 
+#### Non-SQL-standard time functions
+
+| Function | Stability | Description |
+|----------|-----------|-------------|
+| `transaction_timestamp()` | Batch | Same as `CURRENT_TIMESTAMP` / `now()`. Named to clearly reflect what it returns. |
+| `statement_timestamp()` | Statement | Start time of the current statement. Same as `transaction_timestamp()` for the first statement in a batch; may differ for subsequent statements. |
+| `clock_timestamp()` | None | Actual wall-clock time. Changes even within a single SQL statement. |
+| `timeofday()` | None | Like `clock_timestamp()`, but returns a formatted String instead of DateTime. |
+
+```sql
+-- transaction_timestamp() = now() = CURRENT_TIMESTAMP within a batch
+SELECT transaction_timestamp(), now(), CURRENT_TIMESTAMP
+
+-- statement_timestamp() may differ from transaction_timestamp() in multi-statement batches
+SELECT statement_timestamp()
+
+-- clock_timestamp() changes between calls — useful for measuring elapsed time
+SELECT clock_timestamp() AS before_work, clock_timestamp() AS after_work
+
+-- timeofday() returns a human-readable string
+SELECT timeofday()  -- e.g. '2026-04-15T14:30:45.1234567+00:00'
+```
+
 ### EXTRACT
 
 PostgreSQL-standard syntax for extracting date/time fields. Desugars to `date_part()` at parse time.

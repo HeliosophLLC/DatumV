@@ -5,33 +5,48 @@ namespace DatumIngest.Execution;
 /// <summary>
 /// Replaces transaction-stable temporal expressions (<c>CURRENT_DATE</c>, <c>CURRENT_TIMESTAMP</c>,
 /// <c>CURRENT_TIME</c>, <c>LOCALTIME</c>, <c>LOCALTIMESTAMP</c>) and the <c>now()</c> /
-/// <c>current_time()</c> functions with constant <see cref="CastExpression"/> nodes that evaluate
-/// to the batch clock time. This ensures all references within a batch share the same timestamp,
-/// matching PostgreSQL's transaction-stable semantics.
+/// <c>current_time()</c> / <c>transaction_timestamp()</c> / <c>statement_timestamp()</c>
+/// functions with constant <see cref="CastExpression"/> nodes. This ensures all references
+/// within a batch/statement share the same timestamp, matching PostgreSQL semantics.
 /// </summary>
 /// <remarks>
-/// This pass runs after parameter binding and before query planning, so the optimizer sees
-/// only literal values. The pattern mirrors <see cref="ParameterBinder"/>.
+/// <para>
+/// Two clock values are used:
+/// <list type="bullet">
+///   <item><c>batchClock</c> — captured once per batch; used by <c>CURRENT_TIMESTAMP</c>,
+///   <c>now()</c>, <c>transaction_timestamp()</c>, and friends.</item>
+///   <item><c>statementClock</c> — captured once per statement; used by <c>statement_timestamp()</c>.
+///   For the first statement in a batch these are identical.</item>
+/// </list>
+/// </para>
+/// <para>
+/// <c>clock_timestamp()</c> and <c>timeofday()</c> are NOT folded — they remain as runtime
+/// functions that call <see cref="DateTimeOffset.UtcNow"/> on every row.
+/// </para>
+/// <para>This pass runs after parameter binding and before query planning.</para>
 /// </remarks>
 public static class TemporalConstantFolder
 {
     /// <summary>
-    /// Folds all temporal constants in a <see cref="QueryExpression"/> to literals
-    /// derived from <paramref name="batchClock"/>.
+    /// Folds all temporal constants in a <see cref="QueryExpression"/> to literals.
     /// </summary>
-    public static QueryExpression Fold(QueryExpression query, DateTimeOffset batchClock)
+    /// <param name="query">The parsed query expression.</param>
+    /// <param name="batchClock">Batch (transaction) start time — shared across all statements in a batch.</param>
+    /// <param name="statementClock">Statement start time — unique per statement. Defaults to <paramref name="batchClock"/> if null.</param>
+    public static QueryExpression Fold(QueryExpression query, DateTimeOffset batchClock, DateTimeOffset? statementClock = null)
     {
+        DateTimeOffset stmtClock = statementClock ?? batchClock;
         return query switch
         {
             SelectQueryExpression select =>
-                new SelectQueryExpression(FoldStatement(select.Statement, batchClock)),
+                new SelectQueryExpression(FoldStatement(select.Statement, batchClock, stmtClock)),
             CompoundQueryExpression compound =>
                 compound with
                 {
-                    Left = Fold(compound.Left, batchClock),
-                    Right = Fold(compound.Right, batchClock),
+                    Left = Fold(compound.Left, batchClock, stmtClock),
+                    Right = Fold(compound.Right, batchClock, stmtClock),
                     OrderBy = compound.OrderBy is not null
-                        ? FoldOrderBy(compound.OrderBy, batchClock)
+                        ? FoldOrderBy(compound.OrderBy, batchClock, stmtClock)
                         : null,
                 },
             _ => query,
@@ -41,18 +56,19 @@ public static class TemporalConstantFolder
     /// <summary>
     /// Folds all temporal constants in a <see cref="SelectStatement"/> to literals.
     /// </summary>
-    public static SelectStatement FoldStatement(SelectStatement statement, DateTimeOffset batchClock)
+    public static SelectStatement FoldStatement(SelectStatement statement, DateTimeOffset batchClock, DateTimeOffset? statementClock = null)
     {
+        DateTimeOffset stmtClock = statementClock ?? batchClock;
         bool hasAny = ContainsTemporalConstant(statement);
         if (!hasAny)
         {
             return statement;
         }
 
-        IReadOnlyList<SelectColumn> columns = FoldSelectColumns(statement.Columns, batchClock);
-        Expression? where = statement.Where is not null ? FoldExpression(statement.Where, batchClock) : null;
-        Expression? having = statement.Having is not null ? FoldExpression(statement.Having, batchClock) : null;
-        Expression? qualify = statement.Qualify is not null ? FoldExpression(statement.Qualify, batchClock) : null;
+        IReadOnlyList<SelectColumn> columns = FoldSelectColumns(statement.Columns, batchClock, stmtClock);
+        Expression? where = statement.Where is not null ? FoldExpression(statement.Where, batchClock, stmtClock) : null;
+        Expression? having = statement.Having is not null ? FoldExpression(statement.Having, batchClock, stmtClock) : null;
+        Expression? qualify = statement.Qualify is not null ? FoldExpression(statement.Qualify, batchClock, stmtClock) : null;
 
         IReadOnlyList<JoinClause>? joins = null;
         if (statement.Joins is not null)
@@ -62,9 +78,9 @@ public static class TemporalConstantFolder
             {
                 JoinClause join = statement.Joins[i];
                 Expression? onCondition = join.OnCondition is not null
-                    ? FoldExpression(join.OnCondition, batchClock)
+                    ? FoldExpression(join.OnCondition, batchClock, stmtClock)
                     : null;
-                TableSource source = FoldTableSource(join.Source, batchClock);
+                TableSource source = FoldTableSource(join.Source, batchClock, stmtClock);
                 foldedJoins[i] = new JoinClause(join.Type, source, onCondition);
             }
 
@@ -72,7 +88,7 @@ public static class TemporalConstantFolder
         }
 
         FromClause? from = statement.From is not null
-            ? new FromClause(FoldTableSource(statement.From.Source, batchClock))
+            ? new FromClause(FoldTableSource(statement.From.Source, batchClock, stmtClock))
             : null;
 
         GroupByClause? groupBy = null;
@@ -81,14 +97,14 @@ public static class TemporalConstantFolder
             Expression[] groupExpressions = new Expression[statement.GroupBy.Expressions.Count];
             for (int i = 0; i < statement.GroupBy.Expressions.Count; i++)
             {
-                groupExpressions[i] = FoldExpression(statement.GroupBy.Expressions[i], batchClock);
+                groupExpressions[i] = FoldExpression(statement.GroupBy.Expressions[i], batchClock, stmtClock);
             }
 
             groupBy = new GroupByClause(groupExpressions);
         }
 
         OrderByClause? orderBy = statement.OrderBy is not null
-            ? FoldOrderBy(statement.OrderBy, batchClock)
+            ? FoldOrderBy(statement.OrderBy, batchClock, stmtClock)
             : null;
 
         return new SelectStatement(
@@ -110,7 +126,7 @@ public static class TemporalConstantFolder
 
     // ───────────────────── Expression folding ─────────────────────
 
-    internal static Expression FoldExpression(Expression expression, DateTimeOffset batchClock)
+    internal static Expression FoldExpression(Expression expression, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         return expression switch
         {
@@ -119,35 +135,39 @@ public static class TemporalConstantFolder
                 MakeTimestampLiteral(batchClock, precision: null),
             FunctionCallExpression { FunctionName: "current_time", Arguments.Count: 0 } =>
                 MakeTimeLiteral(batchClock, precision: null),
+            FunctionCallExpression { FunctionName: "transaction_timestamp", Arguments.Count: 0 } =>
+                MakeTimestampLiteral(batchClock, precision: null),
+            FunctionCallExpression { FunctionName: "statement_timestamp", Arguments.Count: 0 } =>
+                MakeTimestampLiteral(stmtClock, precision: null),
             BinaryExpression binary => new BinaryExpression(
-                FoldExpression(binary.Left, batchClock),
+                FoldExpression(binary.Left, batchClock, stmtClock),
                 binary.Operator,
-                FoldExpression(binary.Right, batchClock)),
+                FoldExpression(binary.Right, batchClock, stmtClock)),
             LikeExpression like => new LikeExpression(
-                FoldExpression(like.Expression, batchClock),
-                FoldExpression(like.Pattern, batchClock),
-                FoldExpression(like.EscapeCharacter, batchClock),
+                FoldExpression(like.Expression, batchClock, stmtClock),
+                FoldExpression(like.Pattern, batchClock, stmtClock),
+                FoldExpression(like.EscapeCharacter, batchClock, stmtClock),
                 like.CaseInsensitive),
             UnaryExpression unary => new UnaryExpression(
                 unary.Operator,
-                FoldExpression(unary.Operand, batchClock)),
-            FunctionCallExpression function => FoldFunctionCall(function, batchClock),
-            InExpression inExpr => FoldInExpression(inExpr, batchClock),
+                FoldExpression(unary.Operand, batchClock, stmtClock)),
+            FunctionCallExpression function => FoldFunctionCall(function, batchClock, stmtClock),
+            InExpression inExpr => FoldInExpression(inExpr, batchClock, stmtClock),
             BetweenExpression between => new BetweenExpression(
-                FoldExpression(between.Expression, batchClock),
-                FoldExpression(between.Low, batchClock),
-                FoldExpression(between.High, batchClock),
+                FoldExpression(between.Expression, batchClock, stmtClock),
+                FoldExpression(between.Low, batchClock, stmtClock),
+                FoldExpression(between.High, batchClock, stmtClock),
                 between.Negated),
             IsNullExpression isNull => new IsNullExpression(
-                FoldExpression(isNull.Expression, batchClock),
+                FoldExpression(isNull.Expression, batchClock, stmtClock),
                 isNull.Negated),
             CastExpression cast => new CastExpression(
-                FoldExpression(cast.Expression, batchClock),
+                FoldExpression(cast.Expression, batchClock, stmtClock),
                 cast.TargetType,
                 cast.Span),
-            CaseExpression caseExpr => FoldCaseExpression(caseExpr, batchClock),
+            CaseExpression caseExpr => FoldCaseExpression(caseExpr, batchClock, stmtClock),
             SubqueryExpression subquery => new SubqueryExpression(
-                FoldStatement(subquery.Query, batchClock)),
+                FoldStatement(subquery.Query, batchClock, stmtClock)),
             _ => expression,
         };
     }
@@ -256,6 +276,8 @@ public static class TemporalConstantFolder
             CurrentTimestampExpression => true,
             FunctionCallExpression { FunctionName: "now", Arguments.Count: 0 } => true,
             FunctionCallExpression { FunctionName: "current_time", Arguments.Count: 0 } => true,
+            FunctionCallExpression { FunctionName: "transaction_timestamp", Arguments.Count: 0 } => true,
+            FunctionCallExpression { FunctionName: "statement_timestamp", Arguments.Count: 0 } => true,
             BinaryExpression binary => ContainsTemporalExpr(binary.Left) || ContainsTemporalExpr(binary.Right),
             UnaryExpression unary => ContainsTemporalExpr(unary.Operand),
             FunctionCallExpression function => function.Arguments.Any(ContainsTemporalExpr),
@@ -276,7 +298,7 @@ public static class TemporalConstantFolder
     // ───────────────────── Structural helpers ─────────────────────
 
     private static IReadOnlyList<SelectColumn> FoldSelectColumns(
-        IReadOnlyList<SelectColumn> columns, DateTimeOffset batchClock)
+        IReadOnlyList<SelectColumn> columns, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         SelectColumn[] result = new SelectColumn[columns.Count];
         for (int i = 0; i < columns.Count; i++)
@@ -284,20 +306,20 @@ public static class TemporalConstantFolder
             SelectColumn column = columns[i];
             result[i] = column is SelectAllColumns or SelectTableColumns
                 ? column
-                : new SelectColumn(FoldExpression(column.Expression, batchClock), column.Alias);
+                : new SelectColumn(FoldExpression(column.Expression, batchClock, stmtClock), column.Alias);
         }
 
         return result;
     }
 
-    private static TableSource FoldTableSource(TableSource source, DateTimeOffset batchClock)
+    private static TableSource FoldTableSource(TableSource source, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         if (source is FunctionSource functionSource)
         {
             Expression[] arguments = new Expression[functionSource.Arguments.Count];
             for (int i = 0; i < functionSource.Arguments.Count; i++)
             {
-                arguments[i] = FoldExpression(functionSource.Arguments[i], batchClock);
+                arguments[i] = FoldExpression(functionSource.Arguments[i], batchClock, stmtClock);
             }
 
             return new FunctionSource(functionSource.FunctionName, arguments, functionSource.Alias, functionSource.Span);
@@ -305,42 +327,42 @@ public static class TemporalConstantFolder
 
         if (source is SubquerySource subquerySource)
         {
-            return new SubquerySource(FoldStatement(subquerySource.Query, batchClock), subquerySource.Alias);
+            return new SubquerySource(FoldStatement(subquerySource.Query, batchClock, stmtClock), subquerySource.Alias);
         }
 
         return source;
     }
 
     private static FunctionCallExpression FoldFunctionCall(
-        FunctionCallExpression function, DateTimeOffset batchClock)
+        FunctionCallExpression function, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         Expression[] arguments = new Expression[function.Arguments.Count];
         for (int i = 0; i < function.Arguments.Count; i++)
         {
-            arguments[i] = FoldExpression(function.Arguments[i], batchClock);
+            arguments[i] = FoldExpression(function.Arguments[i], batchClock, stmtClock);
         }
 
         return new FunctionCallExpression(function.FunctionName, arguments, function.OrderBy, function.Distinct, function.Span);
     }
 
-    private static InExpression FoldInExpression(InExpression inExpr, DateTimeOffset batchClock)
+    private static InExpression FoldInExpression(InExpression inExpr, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         Expression[] values = new Expression[inExpr.Values.Count];
         for (int i = 0; i < inExpr.Values.Count; i++)
         {
-            values[i] = FoldExpression(inExpr.Values[i], batchClock);
+            values[i] = FoldExpression(inExpr.Values[i], batchClock, stmtClock);
         }
 
         return new InExpression(
-            FoldExpression(inExpr.Expression, batchClock),
+            FoldExpression(inExpr.Expression, batchClock, stmtClock),
             values,
             inExpr.Negated);
     }
 
-    private static CaseExpression FoldCaseExpression(CaseExpression caseExpr, DateTimeOffset batchClock)
+    private static CaseExpression FoldCaseExpression(CaseExpression caseExpr, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         Expression? operand = caseExpr.Operand is not null
-            ? FoldExpression(caseExpr.Operand, batchClock)
+            ? FoldExpression(caseExpr.Operand, batchClock, stmtClock)
             : null;
 
         WhenClause[] whenClauses = new WhenClause[caseExpr.WhenClauses.Count];
@@ -348,24 +370,24 @@ public static class TemporalConstantFolder
         {
             WhenClause clause = caseExpr.WhenClauses[i];
             whenClauses[i] = new WhenClause(
-                FoldExpression(clause.Condition, batchClock),
-                FoldExpression(clause.Result, batchClock));
+                FoldExpression(clause.Condition, batchClock, stmtClock),
+                FoldExpression(clause.Result, batchClock, stmtClock));
         }
 
         Expression? elseResult = caseExpr.ElseResult is not null
-            ? FoldExpression(caseExpr.ElseResult, batchClock)
+            ? FoldExpression(caseExpr.ElseResult, batchClock, stmtClock)
             : null;
 
         return new CaseExpression(operand, whenClauses, elseResult, caseExpr.Span);
     }
 
-    private static OrderByClause FoldOrderBy(OrderByClause orderBy, DateTimeOffset batchClock)
+    private static OrderByClause FoldOrderBy(OrderByClause orderBy, DateTimeOffset batchClock, DateTimeOffset stmtClock)
     {
         OrderByItem[] items = new OrderByItem[orderBy.Items.Count];
         for (int i = 0; i < orderBy.Items.Count; i++)
         {
             OrderByItem item = orderBy.Items[i];
-            items[i] = new OrderByItem(FoldExpression(item.Expression, batchClock), item.Direction);
+            items[i] = new OrderByItem(FoldExpression(item.Expression, batchClock, stmtClock), item.Direction);
         }
 
         return new OrderByClause(items);

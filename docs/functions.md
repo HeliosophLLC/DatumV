@@ -424,7 +424,11 @@ SELECT CURRENT_TIMESTAMP(0) AS ts_no_fractional
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `now` | `now()` | Current UTC timestamp as DateTime. Transaction-stable: returns the same value for all calls within a batch. | 1 |
+| `now` | `now()` | Current UTC timestamp as DateTime. Transaction-stable (= `CURRENT_TIMESTAMP`). | 1 |
+| `transaction_timestamp` | `transaction_timestamp()` | Same as `now()`. Named to clearly reflect what it returns. | 1 |
+| `statement_timestamp` | `statement_timestamp()` | Start time of the current statement. Same as `transaction_timestamp()` for the first statement in a batch; may differ for subsequent statements. | 1 |
+| `clock_timestamp` | `clock_timestamp()` | Actual wall-clock time. Changes even within a single statement — NOT batch-stable. | 1 |
+| `timeofday` | `timeofday()` | Actual wall-clock time as a formatted String (ISO 8601). NOT batch-stable. | 1 |
 | `make_date` | `make_date(year, month, day)` | Construct a Date from components (all Float32). | 1 |
 | `make_timestamp` | `make_timestamp(y, m, d, h, min, s)` | Construct a DateTime (UTC) from components (all Float32). | 1 |
 | `date_diff` | `date_diff(part, start, end)` | Count of part boundaries crossed between two dates. Returns Float32. | 1 |

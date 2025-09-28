@@ -18,7 +18,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentDate_ToCastDateLiteral()
     {
         Expression input = new CurrentTimestampExpression(CurrentTimestampKind.CurrentDate);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         Assert.Equal("Date", cast.TargetType);
@@ -30,7 +30,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentTimestamp_ToCastDateTimeLiteral()
     {
         Expression input = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         Assert.Equal("DateTime", cast.TargetType);
@@ -44,7 +44,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentTime_ToCastTimeLiteral()
     {
         Expression input = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTime);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         Assert.Equal("Time", cast.TargetType);
@@ -59,7 +59,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentTimestamp_Precision0_TruncatesToWholeSeconds()
     {
         Expression input = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp, Precision: 0);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         LiteralExpression literal = Assert.IsType<LiteralExpression>(cast.Expression);
@@ -72,7 +72,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentTimestamp_Precision3_TruncatesToMilliseconds()
     {
         Expression input = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp, Precision: 3);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         LiteralExpression literal = Assert.IsType<LiteralExpression>(cast.Expression);
@@ -84,7 +84,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentTime_Precision0_TruncatesToWholeSeconds()
     {
         Expression input = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTime, Precision: 0);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         LiteralExpression literal = Assert.IsType<LiteralExpression>(cast.Expression);
@@ -98,7 +98,7 @@ public class TemporalConstantFolderTests
     public void Fold_NowFunction_ToTimestampLiteral()
     {
         Expression input = new FunctionCallExpression("now", []);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         Assert.Equal("DateTime", cast.TargetType);
@@ -108,7 +108,7 @@ public class TemporalConstantFolderTests
     public void Fold_CurrentTimeFunction_ToTimeLiteral()
     {
         Expression input = new FunctionCallExpression("current_time", []);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         CastExpression cast = Assert.IsType<CastExpression>(result);
         Assert.Equal("Time", cast.TargetType);
@@ -119,7 +119,7 @@ public class TemporalConstantFolderTests
     {
         // now() with arguments should NOT be folded (it's a different function or an error).
         Expression input = new FunctionCallExpression("now", [new LiteralExpression(1.0)]);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         Assert.IsType<FunctionCallExpression>(result);
     }
@@ -130,7 +130,7 @@ public class TemporalConstantFolderTests
     public void Fold_RegularFunction_Unchanged()
     {
         Expression input = new FunctionCallExpression("upper", [new LiteralExpression("hello")]);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         FunctionCallExpression func = Assert.IsType<FunctionCallExpression>(result);
         Assert.Equal("upper", func.FunctionName);
@@ -140,7 +140,7 @@ public class TemporalConstantFolderTests
     public void Fold_Literal_Unchanged()
     {
         Expression input = new LiteralExpression(42.0);
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         Assert.Same(input, result);
     }
@@ -153,8 +153,8 @@ public class TemporalConstantFolderTests
         Expression ts1 = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp);
         Expression ts2 = new CurrentTimestampExpression(CurrentTimestampKind.CurrentTimestamp);
 
-        Expression result1 = TemporalConstantFolder.FoldExpression(ts1, TestClock);
-        Expression result2 = TemporalConstantFolder.FoldExpression(ts2, TestClock);
+        Expression result1 = TemporalConstantFolder.FoldExpression(ts1, TestClock, TestClock);
+        Expression result2 = TemporalConstantFolder.FoldExpression(ts2, TestClock, TestClock);
 
         CastExpression cast1 = Assert.IsType<CastExpression>(result1);
         CastExpression cast2 = Assert.IsType<CastExpression>(result2);
@@ -163,6 +163,58 @@ public class TemporalConstantFolderTests
         LiteralExpression lit2 = Assert.IsType<LiteralExpression>(cast2.Expression);
 
         Assert.Equal(lit1.Value, lit2.Value);
+    }
+
+    // ───────────────────── transaction_timestamp() and statement_timestamp() ─────────────────────
+
+    [Fact]
+    public void Fold_TransactionTimestamp_UsesBatchClock()
+    {
+        Expression input = new FunctionCallExpression("transaction_timestamp", []);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
+
+        CastExpression cast = Assert.IsType<CastExpression>(result);
+        Assert.Equal("DateTime", cast.TargetType);
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(cast.Expression);
+        string value = Assert.IsType<string>(literal.Value);
+        Assert.Contains("2026-04-15", value);
+    }
+
+    [Fact]
+    public void Fold_StatementTimestamp_UsesStatementClock()
+    {
+        DateTimeOffset stmtClock = new(2026, 4, 15, 15, 0, 0, TimeSpan.Zero);
+        Expression input = new FunctionCallExpression("statement_timestamp", []);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, stmtClock);
+
+        CastExpression cast = Assert.IsType<CastExpression>(result);
+        Assert.Equal("DateTime", cast.TargetType);
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(cast.Expression);
+        string value = Assert.IsType<string>(literal.Value);
+        // statement_timestamp uses stmtClock (15:00), not batchClock (14:30)
+        Assert.Contains("15:00:00", value);
+    }
+
+    [Fact]
+    public void Fold_ClockTimestamp_NotFolded()
+    {
+        Expression input = new FunctionCallExpression("clock_timestamp", []);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
+
+        // clock_timestamp() is a runtime function — should NOT be folded
+        FunctionCallExpression func = Assert.IsType<FunctionCallExpression>(result);
+        Assert.Equal("clock_timestamp", func.FunctionName);
+    }
+
+    [Fact]
+    public void Fold_Timeofday_NotFolded()
+    {
+        Expression input = new FunctionCallExpression("timeofday", []);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
+
+        // timeofday() is a runtime function — should NOT be folded
+        FunctionCallExpression func = Assert.IsType<FunctionCallExpression>(result);
+        Assert.Equal("timeofday", func.FunctionName);
     }
 
     // ───────────────────── Nested expression folding ─────────────────────
@@ -175,7 +227,7 @@ public class TemporalConstantFolderTests
             BinaryOperator.Equal,
             new ColumnReference(null, "d"));
 
-        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock);
+        Expression result = TemporalConstantFolder.FoldExpression(input, TestClock, TestClock);
 
         BinaryExpression binary = Assert.IsType<BinaryExpression>(result);
         Assert.IsType<CastExpression>(binary.Left);

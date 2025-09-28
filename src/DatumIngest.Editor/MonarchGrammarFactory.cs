@@ -230,6 +230,7 @@ internal static class MonarchGrammarFactory
         "now", "year", "month", "day", "hour", "minute", "second",
         "quarter", "dayofweek", "dayofyear",
         "make_date", "make_timestamp", "make_time", "current_time",
+        "transaction_timestamp", "statement_timestamp", "clock_timestamp", "timeofday",
         "date_diff", "date_add", "date_trunc", "date_bucket", "date_bin",
         "date_span", "date_offset", "time_diff",
         "strftime", "is_date",
