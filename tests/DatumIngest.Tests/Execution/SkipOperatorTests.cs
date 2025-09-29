@@ -92,14 +92,6 @@ public sealed class SkipOperatorTests
     private static async Task<List<Row>> CollectAsync(IQueryOperator op)
     {
         ExecutionContext context = CreateContext();
-        List<Row> rows = new();
-        await foreach (RowBatch batch in op.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-        return rows;
+        return await op.CollectRowsAsync(context);
     }
 }

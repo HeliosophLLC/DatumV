@@ -39,16 +39,7 @@ public sealed class QualifyTests
     private static async Task<List<Row>> CollectAsync(IQueryOperator operatorNode, ExecutionContext? context = null)
     {
         context ??= CreateContext();
-        List<Row> rows = [];
-        await foreach (RowBatch batch in operatorNode.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await operatorNode.CollectRowsAsync(context);
     }
 
     private static TableCatalog CreateCatalog(params (string Name, Row[] Rows)[] tables)
@@ -71,16 +62,7 @@ public sealed class QualifyTests
         ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         IQueryOperator plan = planner.Plan(query);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     // ─────────────── Parsing ───────────────

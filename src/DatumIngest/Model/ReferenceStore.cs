@@ -11,23 +11,14 @@ namespace DatumIngest.Model;
 /// keeping the struct fully blittable and invisible to the garbage collector.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A global fallback store handles unscoped usage (tests, one-off allocations).
 /// Call <see cref="BeginQueryScope"/> before a query to install an isolated store
 /// for the current async execution context; all child continuations inherit it
 /// automatically.  Call <see cref="EndQueryScope"/> after result consumption to
-/// reset and discard the scoped store.
-/// </para>
-/// <para>
-/// This design lets concurrent queries (e.g. parallel gRPC streams) each carry
-/// their own isolated store without interfering with one another, while code
-/// that never calls <see cref="BeginQueryScope"/> — including all unit tests —
-/// falls back to the shared global store and continues to work unchanged.
-/// </para>
+/// reset and discard the scoped store.  Every code path that creates reference-backed
+/// <see cref="DataValue"/> instances must run inside an active scope.
 /// </remarks>
 internal sealed class ReferenceStore
 {
-    private static readonly ReferenceStore _globalFallback = new();
     private static readonly AsyncLocal<ReferenceStore?> _current = new();
 
     private volatile object?[] _items;
@@ -45,11 +36,15 @@ internal sealed class ReferenceStore
     }
 
     /// <summary>
-    /// Returns the store for the current query scope, or the global fallback
-    /// store when no scope has been established via <see cref="BeginQueryScope"/>.
+    /// Returns the store for the current query scope.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when no scope has been established via <see cref="BeginQueryScope"/>.
+    /// </exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static ReferenceStore CurrentOrCreate() => _current.Value ?? _globalFallback;
+    internal static ReferenceStore Current() =>
+        _current.Value ?? throw new InvalidOperationException(
+            "No ReferenceStore scope is active. Call ReferenceStore.BeginQueryScope() before creating reference-backed DataValues.");
 
     /// <summary>
     /// Starts a new isolated store for the current async query context.

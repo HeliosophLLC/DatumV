@@ -240,16 +240,7 @@ public sealed class LateralJoinTests
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     /// <summary>

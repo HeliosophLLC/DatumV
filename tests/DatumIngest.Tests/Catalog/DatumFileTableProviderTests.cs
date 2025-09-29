@@ -441,20 +441,11 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         IReadOnlySet<string>? requiredColumns,
         Expression? filter = null)
     {
-        List<Row> rows = new();
         IAsyncEnumerable<RowBatch> source = filter is not null
             ? provider.OpenAsync(descriptor, requiredColumns, filter, CancellationToken.None)
             : provider.OpenAsync(descriptor, requiredColumns, CancellationToken.None);
 
-        await foreach (RowBatch batch in source)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await source.CollectRowsAsync();
     }
 
     private static async Task<List<Row>> ReadRange(
@@ -464,15 +455,9 @@ public sealed class DatumFileTableProviderTests : IAsyncLifetime
         long startRow,
         int count)
     {
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.ReadRowRangeAsync(
-            descriptor, requiredColumns, startRow, count, CancellationToken.None))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
+        List<Row> rows = await provider.ReadRowRangeAsync(
+            descriptor, requiredColumns, startRow, count, CancellationToken.None)
+            .CollectRowsAsync();
 
         // Dispose closes the cached DatumFileReader so the file is not held open
         // when the test teardown deletes the temp directory.

@@ -346,16 +346,7 @@ public sealed class VirtualSchemaTests
 
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     /// <summary>

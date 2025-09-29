@@ -340,14 +340,7 @@ public class QueryPlannerTests
                 FunctionRegistry.CreateDefault(),
                 catalog, new LocalBufferPool());
 
-            List<Row> rows = new();
-            await foreach (RowBatch batch in plan.ExecuteAsync(context))
-            {
-                for (int i = 0; i < batch.Count; i++)
-                {
-                    rows.Add(batch[i]);
-                }
-            }
+            List<Row> rows = await plan.CollectRowsAsync(context);
 
             Assert.Equal(2, rows.Count);
             // Age values are strings from CSV, but comparison works via float parsing.
@@ -391,14 +384,7 @@ public class QueryPlannerTests
                 FunctionRegistry.CreateDefault(),
                 catalog, new LocalBufferPool());
 
-            List<Row> rows = new();
-            await foreach (RowBatch batch in plan.ExecuteAsync(context))
-            {
-                for (int i = 0; i < batch.Count; i++)
-                {
-                    rows.Add(batch[i]);
-                }
-            }
+            List<Row> rows = await plan.CollectRowsAsync(context);
 
             Assert.Equal(3, rows.Count);
             // CSV infers all integer columns as Int32 minimum to avoid silent truncation.

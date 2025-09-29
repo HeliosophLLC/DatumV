@@ -80,7 +80,7 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
 
         bool isJson = descriptor.Kind == DataKind.JsonValue;
         DataKind nullKind = isJson ? DataKind.JsonValue : DataKind.String;
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {

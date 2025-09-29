@@ -125,14 +125,7 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
         DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await provider.OpenAsync(descriptor, null, CancellationToken.None).CollectRowsAsync();
 
         Assert.Equal(2, rows.Count);
         Assert.Equal(95.5f, rows[0]["score"].AsFloat32(), 0.01f);
@@ -381,14 +374,7 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         Assert.Equal(DataKind.Int32, arrayColumn.ArrayElementKind);
 
         // Verify row values.
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await provider.OpenAsync(descriptor, null, CancellationToken.None).CollectRowsAsync();
 
         Assert.Equal(2, rows.Count);
 
@@ -433,14 +419,7 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
         DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await provider.OpenAsync(descriptor, null, CancellationToken.None).CollectRowsAsync();
 
         Assert.Equal(4, rows.Count);
 
@@ -485,14 +464,7 @@ public sealed class ParquetOutputWriterTests : IAsyncLifetime
         DatumIngest.Catalog.Providers.ParquetTableProvider provider = new();
         DatumIngest.Catalog.TableDescriptor descriptor = new("parquet", "test", path, new Dictionary<string, string>());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await provider.OpenAsync(descriptor, null, CancellationToken.None).CollectRowsAsync();
 
         Assert.Equal(2, rows.Count);
 

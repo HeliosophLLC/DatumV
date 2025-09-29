@@ -219,7 +219,7 @@ internal sealed class GraceHashJoinExecutor
                 int spilledPartitions = 0;
                 foreach (SpillPartition p in partitions) if (p.IsBuildSpilled) spilledPartitions++;
                 long processMemory = GC.GetTotalMemory(forceFullCollection: false);
-                int refStoreCount = ReferenceStore.CurrentOrCreate().Count;
+                int refStoreCount = ReferenceStore.Current().Count;
                 ExecutionTracer.Write($"JOIN Phase1a done   build_rows={buildRowCount:N0}  in_memory={inMemoryRowCount:N0}  estimated_total={ExecutionTracer.FormatBytes(buildEstimator.EstimateTotalBytes())}  estimated_inmem={ExecutionTracer.FormatBytes(buildEstimator.EstimateBytesForRowCount(inMemoryRowCount))}  spilled={spilledPartitions}/{partitionCount}  process_mem={ExecutionTracer.FormatBytes(processMemory)}  refstore={refStoreCount:N0}  elapsed={Stopwatch.GetElapsedTime(ph1aStart).TotalMilliseconds:F0}ms");
             }
 
@@ -352,7 +352,7 @@ internal sealed class GraceHashJoinExecutor
             if (ExecutionTracer.IsEnabled)
             {
                 long probeProcessMemory = GC.GetTotalMemory(forceFullCollection: false);
-                int probeRefStoreCount = ReferenceStore.CurrentOrCreate().Count;
+                int probeRefStoreCount = ReferenceStore.Current().Count;
                 ExecutionTracer.Write($"JOIN Phase1b done   probe_rows={phase1bProbeCount:N0}  process_mem={ExecutionTracer.FormatBytes(probeProcessMemory)}  refstore={probeRefStoreCount:N0}  elapsed={Stopwatch.GetElapsedTime(ph1bStart).TotalMilliseconds:F0}ms");
             }
 

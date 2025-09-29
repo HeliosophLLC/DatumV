@@ -53,16 +53,7 @@ public sealed class GzipProviderTests : IDisposable
 
     private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<RowBatch> source)
     {
-        List<Row> rows = new();
-        await foreach (RowBatch batch in source)
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await source.CollectRowsAsync();
     }
 
     // ──────────────────────────────────────────────

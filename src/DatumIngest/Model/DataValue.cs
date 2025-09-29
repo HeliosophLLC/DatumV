@@ -122,14 +122,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from a byte array.</summary>
     public static DataValue FromUInt8Array(byte[] value)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(value);
+        int index = ReferenceStore.Current().Add(value);
         return new(DataKind.UInt8Array, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 
     /// <summary>Creates a value from a text string.</summary>
     public static DataValue FromString(string value)
     {
-        int index = ReferenceStore.CurrentOrCreate().InternString(value);
+        int index = ReferenceStore.Current().InternString(value);
         return new(DataKind.String, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 
@@ -158,7 +158,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
     public static DataValue FromVector(float[] value)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(value);
+        int index = ReferenceStore.Current().Add(value);
         return new(DataKind.Vector, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 
@@ -174,7 +174,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 $"Data length {data.Length} does not match shape {rows}x{columns}.");
         }
 
-        int index = ReferenceStore.CurrentOrCreate().Add(data);
+        int index = ReferenceStore.Current().Add(data);
         return new DataValue(DataKind.Matrix, numericBits: (long)rows | ((long)columns << 32),
                              bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
@@ -197,7 +197,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 $"Data length {data.Length} does not match shape [{string.Join(", ", shape)}].");
         }
 
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
         int index = store.AddPair(data, shape);
         return new DataValue(DataKind.Tensor, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
@@ -205,7 +205,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from encoded image bytes.</summary>
     public static DataValue FromImage(byte[] value)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(value);
+        int index = ReferenceStore.Current().Add(value);
         return new(DataKind.Image, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 
@@ -216,7 +216,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     internal static DataValue FromImageHandle(ImageHandle handle)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(handle);
+        int index = ReferenceStore.Current().Add(handle);
         return new(DataKind.Image, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 
@@ -231,7 +231,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Creates a value from a raw JSON string.</summary>
     public static DataValue FromJsonValue(string value)
     {
-        int index = ReferenceStore.CurrentOrCreate().InternString(value);
+        int index = ReferenceStore.Current().InternString(value);
         return new(DataKind.JsonValue, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
     }
 
@@ -306,7 +306,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="elements">The array of element values.</param>
     public static DataValue FromArray(DataKind elementKind, DataValue[] elements)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(elements);
+        int index = ReferenceStore.Current().Add(elements);
         return new(DataKind.Array, numericBits: 0L, bits1: 0L, flags: FlagHasReference,
                    meta: (short)elementKind, referenceIndex: index);
     }
@@ -325,7 +325,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="fields">Positional field values, one entry per field in declaration order.</param>
     public static DataValue FromStruct(short fieldCount, DataValue[] fields)
     {
-        int index = ReferenceStore.CurrentOrCreate().Add(fields);
+        int index = ReferenceStore.Current().Add(fields);
         return new(DataKind.Struct, numericBits: 0L, bits1: 0L, flags: FlagHasReference,
                    meta: fieldCount, referenceIndex: index);
     }
@@ -847,7 +847,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public byte[] AsUInt8Array()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8Array);
-        return ReferenceStore.CurrentOrCreate().Get<byte[]>(_referenceIndex);
+        return ReferenceStore.Current().Get<byte[]>(_referenceIndex);
     }
 
     /// <summary>Returns the text string payload.</summary>
@@ -861,7 +861,7 @@ public readonly struct DataValue : IEquatable<DataValue>
                 "This string value is arena-backed. Use AsString(StringArena) to materialise it.");
         }
 
-        return ReferenceStore.CurrentOrCreate().Get<string>(_referenceIndex);
+        return ReferenceStore.Current().Get<string>(_referenceIndex);
     }
 
     /// <summary>
@@ -877,7 +877,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if ((_flags & FlagHasReference) != 0)
         {
-            return ReferenceStore.CurrentOrCreate().Get<string>(_referenceIndex);
+            return ReferenceStore.Current().Get<string>(_referenceIndex);
         }
 
         return arena.GetString((int)_numericBits, (int)_bits1);
@@ -900,7 +900,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public float[] AsVector()
     {
         ThrowIfNullOrWrongKind(DataKind.Vector);
-        return ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex);
+        return ReferenceStore.Current().Get<float[]>(_referenceIndex);
     }
 
     /// <summary>Returns the matrix (rank-2) flat float array and its dimensions.</summary>
@@ -910,7 +910,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.Matrix);
         rows = (int)_numericBits;
         columns = (int)(_numericBits >> 32);
-        return ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex);
+        return ReferenceStore.Current().Get<float[]>(_referenceIndex);
     }
 
     /// <summary>Returns the tensor flat float array and its shape.</summary>
@@ -918,7 +918,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public float[] AsTensor(out int[] shape)
     {
         ThrowIfNullOrWrongKind(DataKind.Tensor);
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
         float[] data = store.Get<float[]>(_referenceIndex);
         shape = store.Get<int[]>(_referenceIndex + 1);
         return data;
@@ -933,7 +933,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public byte[] AsImage()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
-        object payload = ReferenceStore.CurrentOrCreate().Get(_referenceIndex);
+        object payload = ReferenceStore.Current().Get(_referenceIndex);
 
         if (payload is ImageHandle handle)
         {
@@ -952,7 +952,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal ImageHandle GetImageHandle()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
-        object payload = ReferenceStore.CurrentOrCreate().Get(_referenceIndex);
+        object payload = ReferenceStore.Current().Get(_referenceIndex);
 
         if (payload is ImageHandle handle)
         {
@@ -970,7 +970,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     internal ImageHandle? TryGetOwnedImageHandle()
     {
-        return ReferenceStore.CurrentOrCreate().Get(_referenceIndex) as ImageHandle;
+        return ReferenceStore.Current().Get(_referenceIndex) as ImageHandle;
     }
 
     /// <summary>Returns the calendar date payload.</summary>
@@ -994,7 +994,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsJsonValue()
     {
         ThrowIfNullOrWrongKind(DataKind.JsonValue);
-        return ReferenceStore.CurrentOrCreate().Get<string>(_referenceIndex);
+        return ReferenceStore.Current().Get<string>(_referenceIndex);
     }
 
     /// <summary>Returns the UUID payload.</summary>
@@ -1045,7 +1045,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataValue[] AsArray()
     {
         ThrowIfNullOrWrongKind(DataKind.Array);
-        return ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex);
+        return ReferenceStore.Current().Get<DataValue[]>(_referenceIndex);
     }
 
     /// <summary>
@@ -1072,7 +1072,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataValue[] AsStruct()
     {
         ThrowIfNullOrWrongKind(DataKind.Struct);
-        return ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex);
+        return ReferenceStore.Current().Get<DataValue[]>(_referenceIndex);
     }
 
     /// <summary>
@@ -1106,11 +1106,11 @@ public readonly struct DataValue : IEquatable<DataValue>
         return _kind switch
         {
             DataKind.Vector =>
-                FromTensor(ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex),
-                           [ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex).Length]),
+                FromTensor(ReferenceStore.Current().Get<float[]>(_referenceIndex),
+                           [ReferenceStore.Current().Get<float[]>(_referenceIndex).Length]),
 
             DataKind.Matrix =>
-                FromTensor(ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex),
+                FromTensor(ReferenceStore.Current().Get<float[]>(_referenceIndex),
                            [(int)_numericBits, (int)(_numericBits >> 32)]),
 
             _ => throw new InvalidOperationException(
@@ -1126,7 +1126,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataValue ToVector()
     {
         ThrowIfNullOrWrongKind(DataKind.Tensor);
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
         int[] shape = store.Get<int[]>(_referenceIndex + 1);
 
         if (shape.Length != 1)
@@ -1146,7 +1146,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataValue ToMatrix()
     {
         ThrowIfNullOrWrongKind(DataKind.Tensor);
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
         int[] shape = store.Get<int[]>(_referenceIndex + 1);
 
         if (shape.Length != 2)
@@ -1196,27 +1196,27 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.DateTime
                 => _numericBits == other._numericBits && _bits1 == other._bits1,
             DataKind.Vector
-                => ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex).AsSpan()
-                       .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<float[]>(other._referenceIndex)),
+                => ReferenceStore.Current().Get<float[]>(_referenceIndex).AsSpan()
+                       .SequenceEqual(ReferenceStore.Current().Get<float[]>(other._referenceIndex)),
             DataKind.Matrix
                 => _numericBits == other._numericBits
-                   && ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex).AsSpan()
-                          .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<float[]>(other._referenceIndex)),
+                   && ReferenceStore.Current().Get<float[]>(_referenceIndex).AsSpan()
+                          .SequenceEqual(ReferenceStore.Current().Get<float[]>(other._referenceIndex)),
             DataKind.Tensor
                 => CompareTensors(in this, in other),
             DataKind.UInt8Array
-                => ReferenceStore.CurrentOrCreate().Get<byte[]>(_referenceIndex).AsSpan()
-                       .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<byte[]>(other._referenceIndex)),
+                => ReferenceStore.Current().Get<byte[]>(_referenceIndex).AsSpan()
+                       .SequenceEqual(ReferenceStore.Current().Get<byte[]>(other._referenceIndex)),
             DataKind.Image
                 => AsImage().AsSpan().SequenceEqual(other.AsImage()),
             DataKind.Array
                 => _meta == other._meta
-                   && ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex).AsSpan()
-                          .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<DataValue[]>(other._referenceIndex)),
+                   && ReferenceStore.Current().Get<DataValue[]>(_referenceIndex).AsSpan()
+                          .SequenceEqual(ReferenceStore.Current().Get<DataValue[]>(other._referenceIndex)),
             DataKind.Struct
                 => _meta == other._meta
-                   && ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex).AsSpan()
-                          .SequenceEqual(ReferenceStore.CurrentOrCreate().Get<DataValue[]>(other._referenceIndex)),
+                   && ReferenceStore.Current().Get<DataValue[]>(_referenceIndex).AsSpan()
+                          .SequenceEqual(ReferenceStore.Current().Get<DataValue[]>(other._referenceIndex)),
             _ => false,
         };
     }
@@ -1244,26 +1244,26 @@ public readonly struct DataValue : IEquatable<DataValue>
             // Reference types:
             DataKind.String or DataKind.JsonValue
                 => (_flags & FlagHasReference) != 0
-                    ? HashCode.Combine(_kind, ReferenceStore.CurrentOrCreate().Get<string>(_referenceIndex))
+                    ? HashCode.Combine(_kind, ReferenceStore.Current().Get<string>(_referenceIndex))
                     : HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.DateTime
                 => HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.Uuid
                 => HashCode.Combine(_kind, _numericBits, _bits1),
             DataKind.Vector
-                => CombineFloatArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex)),
+                => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex)),
             DataKind.Matrix
-                => CombineFloatArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex), _numericBits),
+                => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex), _numericBits),
             DataKind.Tensor
                 => CombineTensorHash(_kind, _referenceIndex),
             DataKind.UInt8Array
-                => CombineByteArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<byte[]>(_referenceIndex)),
+                => CombineByteArrayHash(_kind, ReferenceStore.Current().Get<byte[]>(_referenceIndex)),
             DataKind.Image
                 => CombineByteArrayHash(_kind, AsImage()),
             DataKind.Array
-                => CombineArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex), _meta),
+                => CombineArrayHash(_kind, ReferenceStore.Current().Get<DataValue[]>(_referenceIndex), _meta),
             DataKind.Struct
-                => CombineArrayHash(_kind, ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex), _meta),
+                => CombineArrayHash(_kind, ReferenceStore.Current().Get<DataValue[]>(_referenceIndex), _meta),
             _ => HashCode.Combine(_kind),
         };
     }
@@ -1289,7 +1289,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         if (!leftArena && !rightArena)
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
             return (string)store.Get(left._referenceIndex) == (string)store.Get(right._referenceIndex);
         }
 
@@ -1310,7 +1310,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     private static bool CompareTensors(in DataValue left, in DataValue right)
     {
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
         int[] leftShape = store.Get<int[]>(left._referenceIndex + 1);
         int[] rightShape = store.Get<int[]>(right._referenceIndex + 1);
 
@@ -1373,7 +1373,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     private static int CombineTensorHash(DataKind kind, int referenceIndex)
     {
-        ReferenceStore store = ReferenceStore.CurrentOrCreate();
+        ReferenceStore store = ReferenceStore.Current();
         float[] data = store.Get<float[]>(referenceIndex);
         int[] shape = store.Get<int[]>(referenceIndex + 1);
 
@@ -1440,24 +1440,24 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt64 => unchecked((ulong)_numericBits).ToString(),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(_numericBits).ToString("G"),
             DataKind.String => (_flags & FlagHasReference) != 0
-                ? ReferenceStore.CurrentOrCreate().Get<string>(_referenceIndex)
+                ? ReferenceStore.Current().Get<string>(_referenceIndex)
                 : $"String[arena@{_numericBits}+{_bits1}]",
             DataKind.Date => DateOnly.FromDayNumber((int)_numericBits).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.JsonValue => (_flags & FlagHasReference) != 0
-                ? ReferenceStore.CurrentOrCreate().Get<string>(_referenceIndex)
+                ? ReferenceStore.Current().Get<string>(_referenceIndex)
                 : $"JsonValue[arena@{_numericBits}+{_bits1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _numericBits != 0L ? "true" : "false",
             DataKind.Time => new TimeOnly(_numericBits).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(_numericBits).ToString("c"),
-            DataKind.Vector => $"Vector[{ReferenceStore.CurrentOrCreate().Get<float[]>(_referenceIndex).Length}]",
+            DataKind.Vector => $"Vector[{ReferenceStore.Current().Get<float[]>(_referenceIndex).Length}]",
             DataKind.Matrix => $"Matrix[{(int)_numericBits}x{(int)(_numericBits >> 32)}]",
-            DataKind.Tensor => $"Tensor[{string.Join("x", ReferenceStore.CurrentOrCreate().Get<int[]>(_referenceIndex + 1))}]",
-            DataKind.UInt8Array => $"UInt8Array[{ReferenceStore.CurrentOrCreate().Get<byte[]>(_referenceIndex).Length}]",
+            DataKind.Tensor => $"Tensor[{string.Join("x", ReferenceStore.Current().Get<int[]>(_referenceIndex + 1))}]",
+            DataKind.UInt8Array => $"UInt8Array[{ReferenceStore.Current().Get<byte[]>(_referenceIndex).Length}]",
             DataKind.Image => $"Image[{AsImage().Length} bytes]",
-            DataKind.Array => $"Array<{(DataKind)_meta}>[{ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex).Length}]",
-            DataKind.Struct => $"Struct({_meta}){{{FormatStructFields(ReferenceStore.CurrentOrCreate().Get<DataValue[]>(_referenceIndex))}}}",
+            DataKind.Array => $"Array<{(DataKind)_meta}>[{ReferenceStore.Current().Get<DataValue[]>(_referenceIndex).Length}]",
+            DataKind.Struct => $"Struct({_meta}){{{FormatStructFields(ReferenceStore.Current().Get<DataValue[]>(_referenceIndex))}}}",
             _ => _kind.ToString(),
         };
     }

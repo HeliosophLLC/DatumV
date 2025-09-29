@@ -55,18 +55,8 @@ public sealed class StatementExecutorTests : IDisposable
 
     private async Task<List<Row>> CollectRowsAsync(CommandResult result)
     {
-        List<Row> rows = new();
-        if (result.Rows is null) return rows;
-
-        await foreach (RowBatch batch in result.Rows)
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        if (result.Rows is null) return [];
+        return await result.Rows.CollectRowsAsync();
     }
 
     // ──────────────────── CREATE TEMP TABLE ────────────────────

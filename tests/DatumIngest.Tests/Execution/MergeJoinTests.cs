@@ -414,15 +414,6 @@ public sealed class MergeJoinTests
             new TableCatalog(),
             new LocalBufferPool());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in op.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await op.CollectRowsAsync(context);
     }
 }

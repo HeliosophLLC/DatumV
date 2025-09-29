@@ -38,15 +38,7 @@ public sealed class Hdf5TableProviderTests : IDisposable
 
     private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<RowBatch> source)
     {
-        List<Row> rows = new();
-        await foreach (RowBatch batch in source)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-        return rows;
+        return await source.CollectRowsAsync();
     }
 
     private static Row CreateProviderRow(params (string Name, DataValue Value)[] columns)

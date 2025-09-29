@@ -157,14 +157,7 @@ public sealed class ShardingOutputWriterTests : IAsyncLifetime
         DatumIngest.Catalog.Providers.CsvTableProvider provider = new();
         DatumIngest.Catalog.TableDescriptor descriptor = new("csv", "test", summary.FilesCreated[0], new Dictionary<string, string>());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await provider.OpenAsync(descriptor, null, CancellationToken.None).CollectRowsAsync();
 
         Assert.Equal(3, rows.Count);
     }

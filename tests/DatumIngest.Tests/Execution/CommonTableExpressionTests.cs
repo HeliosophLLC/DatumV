@@ -803,30 +803,12 @@ public sealed class CommonTableExpressionTests
 
         IQueryOperator plan = planner.Plan(query);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext context)
     {
-        List<Row> rows = [];
-        await foreach (RowBatch batch in op.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await op.CollectRowsAsync(context);
     }
 
     /// <summary>

@@ -1051,30 +1051,12 @@ public sealed class IndexNestedLoopJoinTests
 
     private static async Task<List<Row>> CollectAsync(IAsyncEnumerable<RowBatch> source)
     {
-        List<Row> rows = new();
-        await foreach (RowBatch batch in source)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await source.CollectRowsAsync();
     }
 
     private static async Task<List<Row>> CollectAsync(IQueryOperator queryOperator, ExecutionContext context)
     {
-        List<Row> rows = new();
-        await foreach (RowBatch batch in queryOperator.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await queryOperator.CollectRowsAsync(context);
     }
 
     /// <summary>

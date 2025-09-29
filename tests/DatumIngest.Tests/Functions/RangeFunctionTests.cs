@@ -182,14 +182,7 @@ public class RangeFunctionTests
 
     private async Task<List<Row>> CollectRows(DataValue[] arguments)
     {
-        List<Row> rows = [];
-        await foreach (RowBatch batch in _function.ExecuteAsync(arguments, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await _function.ExecuteAsync(arguments, CancellationToken.None).CollectRowsAsync();
         return rows;
     }
 }

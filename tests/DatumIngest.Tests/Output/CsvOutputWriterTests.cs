@@ -118,14 +118,7 @@ public sealed class CsvOutputWriterTests : IAsyncLifetime
         DatumIngest.Catalog.Providers.CsvTableProvider provider = new();
         DatumIngest.Catalog.TableDescriptor descriptor = new("csv", "test", path, new Dictionary<string, string>());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in provider.OpenAsync(descriptor, null, CancellationToken.None))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
+        List<Row> rows = await provider.OpenAsync(descriptor, null, CancellationToken.None).CollectRowsAsync();
 
         Assert.Equal(2, rows.Count);
         Assert.Equal(1, rows[0]["id"].AsInt32());

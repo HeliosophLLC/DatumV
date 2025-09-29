@@ -530,16 +530,7 @@ public class LambdaEvaluationTests
         ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         IQueryOperator plan = planner.Plan(query);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     /// <summary>

@@ -93,16 +93,7 @@ public class OperatorTests
     private static async Task<List<Row>> CollectAsync(IQueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateContext();
-        List<Row> rows = new();
-        await foreach (RowBatch batch in op.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await op.CollectRowsAsync(context);
     }
 
     // ─────────────── FilterOperator tests ───────────────

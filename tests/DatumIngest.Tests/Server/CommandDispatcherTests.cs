@@ -493,14 +493,7 @@ public sealed class CommandDispatcherTests : IDisposable
         // Schema should list departments columns first (SQL-text order).
         List<string> schemaNames = result.Schema!.Columns.Select(column => column.Name).ToList();
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in result.Rows!)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
+        List<Row> rows = await result.Rows!.CollectRowsAsync();
 
         Assert.Single(rows);
         Row joined = rows[0];
@@ -553,14 +546,7 @@ public sealed class CommandDispatcherTests : IDisposable
         Assert.NotNull(result.Schema);
         Assert.Equal(2, result.Schema!.Columns.Count);
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in result.Rows!)
-        {
-            for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
-            {
-                rows.Add(batch[rowIndex]);
-            }
-        }
+        List<Row> rows = await result.Rows!.CollectRowsAsync();
 
         Assert.Single(rows);
         Assert.Equal(2, rows[0].FieldCount);

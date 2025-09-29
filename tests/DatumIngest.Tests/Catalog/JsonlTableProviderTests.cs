@@ -23,15 +23,7 @@ public sealed class JsonlTableProviderTests
 
     private static async Task<List<Row>> ReadAllAsync(IAsyncEnumerable<RowBatch> source)
     {
-        List<Row> rows = new();
-        await foreach (RowBatch batch in source)
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-        return rows;
+        return await source.CollectRowsAsync();
     }
 
     // ───────────────────── Schema inference ─────────────────────

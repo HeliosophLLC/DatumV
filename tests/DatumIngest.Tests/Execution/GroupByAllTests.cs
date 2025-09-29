@@ -216,16 +216,7 @@ public sealed class GroupByAllTests
         ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
         IQueryOperator plan = planner.Plan(query);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     /// <summary>

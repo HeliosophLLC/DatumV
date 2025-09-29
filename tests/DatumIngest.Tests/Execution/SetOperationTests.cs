@@ -37,16 +37,7 @@ public sealed class SetOperationTests
         IQueryOperator op, ExecutionContext? context = null)
     {
         context ??= CreateContext();
-        List<Row> rows = [];
-        await foreach (RowBatch batch in op.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await op.CollectRowsAsync(context);
     }
 
     private static Row R(float value)

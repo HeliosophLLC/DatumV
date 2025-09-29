@@ -642,16 +642,7 @@ public sealed class BitmapPruningTests
     {
         ExecutionContext context = new(CancellationToken.None, DefaultFunctions, catalog, new LocalBufferPool());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in scan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                rows.Add(batch[i]);
-            }
-        }
-
-        return rows;
+        return await scan.CollectRowsAsync(context);
     }
 
     /// <summary>

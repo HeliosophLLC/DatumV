@@ -50,16 +50,7 @@ public sealed class DefineBlockTests
         };
         IQueryOperator plan = planner.Plan(query);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     private static SelectStatement ParseStatement(string sql)

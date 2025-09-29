@@ -106,14 +106,7 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         // Act
-        List<Row> results = new();
-        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
         // Assert: only row with id=3 should match.
         Assert.Single(results);
@@ -180,14 +173,7 @@ public sealed class BloomJoinPruningTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        List<Row> results = new();
-        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
         Assert.Single(results);
         Assert.Equal(1, scanOperator.TotalIndexChunks);
@@ -239,14 +225,7 @@ public sealed class BloomJoinPruningTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        List<Row> results = new();
-        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
         Assert.Empty(results);
         // No bloom filters → no bloom pruning (stats would remain 0).
@@ -327,14 +306,7 @@ public sealed class BloomJoinPruningTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        List<Row> results = new();
-        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
         Assert.Single(results);
         Assert.Equal(2, scanOperator.TotalIndexChunks);
@@ -437,14 +409,7 @@ public sealed class BloomJoinPruningTests
             catalog, new LocalBufferPool());
 
         // Act
-        List<Row> results = new();
-        await foreach (RowBatch batch in outerJoin.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await outerJoin.ExecuteAsync(context).CollectRowsAsync();
 
         // Assert: the orders scan should show bloom pruning from the outer join's build side.
         // product_id=3.0 exists only in chunk 1, so chunk 0 should be pruned.
@@ -580,14 +545,7 @@ public sealed class BloomJoinPruningTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        List<Row> results = new();
-        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
         // Only row with id=4 should match.
         Assert.Single(results);
@@ -673,14 +631,7 @@ public sealed class BloomJoinPruningTests
             FunctionRegistry.CreateDefault(),
             catalog, new LocalBufferPool());
 
-        List<Row> results = new();
-        await foreach (RowBatch batch in join.ExecuteAsync(context).ConfigureAwait(false))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                results.Add(batch[i]);
-            }
-        }
+        List<Row> results = await join.ExecuteAsync(context).CollectRowsAsync();
 
         Assert.Equal(2, results.Count);
         Assert.Equal(2, scanOperator.TotalIndexChunks);

@@ -17,7 +17,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
 
             int first = store.InternString("hello");
             int second = store.InternString("hello");
@@ -36,7 +36,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
 
             int a = store.InternString("alpha");
             int b = store.InternString("beta");
@@ -55,7 +55,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
             int countBefore = store.Count;
 
             string[] values = ["prior", "train", "test"];
@@ -82,7 +82,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
 
             int index = store.InternString("world");
 
@@ -102,7 +102,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
             byte[] utf8 = Encoding.UTF8.GetBytes("hello");
 
             int first = store.InternStringFromUtf8(utf8);
@@ -122,7 +122,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
 
             int fromString = store.InternString("café");
             int fromUtf8 = store.InternStringFromUtf8(Encoding.UTF8.GetBytes("café"));
@@ -142,7 +142,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
             int countBefore = store.Count;
 
             byte[][] utf8Values =
@@ -173,7 +173,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
 
             // Create a string longer than the 256-char stackalloc threshold.
             string longValue = new('x', 500);
@@ -201,7 +201,7 @@ public sealed class ReferenceStoreTests
         int indexInScope1;
         try
         {
-            indexInScope1 = ReferenceStore.CurrentOrCreate().InternString("hello");
+            indexInScope1 = ReferenceStore.Current().InternString("hello");
         }
         finally
         {
@@ -213,12 +213,12 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            int indexInScope2 = ReferenceStore.CurrentOrCreate().InternString("hello");
+            int indexInScope2 = ReferenceStore.Current().InternString("hello");
 
             // Both scopes assign index 0 (first entry), but in different stores.
             // The key assertion: after EndQueryScope, the old store is cleared,
             // and the new scope starts fresh.
-            Assert.Equal("hello", ReferenceStore.CurrentOrCreate().Get<string>(indexInScope2));
+            Assert.Equal("hello", ReferenceStore.Current().Get<string>(indexInScope2));
         }
         finally
         {
@@ -234,7 +234,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            ReferenceStore store = ReferenceStore.CurrentOrCreate();
+            ReferenceStore store = ReferenceStore.Current();
 
             store.InternString("hello");
             Assert.Equal(1, store.Count);
@@ -261,7 +261,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            int countBefore = ReferenceStore.CurrentOrCreate().Count;
+            int countBefore = ReferenceStore.Current().Count;
 
             // Create 1,000 DataValues from the same 3 strings.
             for (int i = 0; i < 1_000; i++)
@@ -271,7 +271,7 @@ public sealed class ReferenceStoreTests
                 _ = DataValue.FromString("gamma");
             }
 
-            int newEntries = ReferenceStore.CurrentOrCreate().Count - countBefore;
+            int newEntries = ReferenceStore.Current().Count - countBefore;
 
             Assert.Equal(3, newEntries);
         }
@@ -287,7 +287,7 @@ public sealed class ReferenceStoreTests
         ReferenceStore.BeginQueryScope();
         try
         {
-            int countBefore = ReferenceStore.CurrentOrCreate().Count;
+            int countBefore = ReferenceStore.Current().Count;
 
             for (int i = 0; i < 500; i++)
             {
@@ -295,7 +295,7 @@ public sealed class ReferenceStoreTests
                 _ = DataValue.FromJsonValue("{\"key\":2}");
             }
 
-            int newEntries = ReferenceStore.CurrentOrCreate().Count - countBefore;
+            int newEntries = ReferenceStore.Current().Count - countBefore;
 
             Assert.Equal(2, newEntries);
         }

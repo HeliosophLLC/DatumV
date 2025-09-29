@@ -577,7 +577,7 @@ public sealed class GraceHashJoinTests
                     ("l.val", DataValue.FromFloat32(i * 10))))
                 .ToArray();
 
-            int refCountBefore = ReferenceStore.CurrentOrCreate().Count;
+            int refCountBefore = ReferenceStore.Current().Count;
 
             JoinOperator join = new(
                 new MockOperator(probeRows),
@@ -590,7 +590,7 @@ public sealed class GraceHashJoinTests
 
             List<Row> results = await CollectAsync(join, CreateContext(TinyBudget));
 
-            int refCountAfter = ReferenceStore.CurrentOrCreate().Count;
+            int refCountAfter = ReferenceStore.Current().Count;
             int newEntries = refCountAfter - refCountBefore;
 
             // With interning, 10,000 rows × 1 low-cardinality string column should
@@ -638,15 +638,6 @@ public sealed class GraceHashJoinTests
             new TableCatalog(),
             new LocalBufferPool());
 
-        List<Row> rows = new();
-        await foreach (RowBatch batch in op.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await op.CollectRowsAsync(context);
     }
 }

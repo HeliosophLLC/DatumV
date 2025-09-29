@@ -67,16 +67,7 @@ public sealed class AssertClauseTests
         };
         IQueryOperator plan = planner.Plan(query);
 
-        List<Row> rows = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                rows.Add(batch[index]);
-            }
-        }
-
-        return rows;
+        return await plan.CollectRowsAsync(context);
     }
 
     private static SelectStatement ParseStatement(string sql)
@@ -467,14 +458,7 @@ public sealed class AssertClauseTests
         };
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
 
-        List<Row> result = [];
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int index = 0; index < batch.Count; index++)
-            {
-                result.Add(batch[index]);
-            }
-        }
+        List<Row> result = await plan.CollectRowsAsync(context);
 
         // All 3 rows pass through (WARN keeps rows); rows 2 and 3 (reordered = true) WARN.
         Assert.Equal(3, result.Count);
