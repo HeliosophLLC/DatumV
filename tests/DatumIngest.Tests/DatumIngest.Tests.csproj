@@ -3,6 +3,7 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DefineConstants>$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

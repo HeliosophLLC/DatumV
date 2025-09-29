@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
@@ -97,6 +98,35 @@ public static class GlobalBufferPool
     /// </summary>
     private static int _maxItemsPerBucket = 8_192;
 
+#if POOL_DIAGNOSTICS
+    /// <summary>
+    /// Maps each <see cref="DataValue"/> array that has ever passed through the pool to
+    /// its <see cref="PooledBuffer"/> tracker. Uses <see cref="ConditionalWeakTable{TKey,TValue}"/>
+    /// so entries are automatically removed when the buffer is garbage-collected — no leaks,
+    /// no identity-hash collisions from address reuse.
+    /// </summary>
+    private static readonly ConditionalWeakTable<DataValue[], PooledBuffer> Trackers = new();
+
+    /// <summary>
+    /// Returns the <see cref="PooledBuffer"/> tracker for a buffer, or <see langword="null"/>
+    /// if the buffer was never pooled (e.g. test-constructed rows).
+    /// </summary>
+    internal static PooledBuffer? GetTracker(DataValue[] buffer) =>
+        Trackers.TryGetValue(buffer, out PooledBuffer? tracker) ? tracker : null;
+
+    /// <summary>
+    /// Throws if the buffer has been returned to the pool and not yet re-rented.
+    /// No-op for buffers that were never pooled. Only active under POOL_DIAGNOSTICS.
+    /// </summary>
+    internal static void AssertNotReturned(DataValue[] buffer, string context = "")
+    {
+        if (Trackers.TryGetValue(buffer, out PooledBuffer? tracker))
+        {
+            tracker.AssertNotReturned(context);
+        }
+    }
+#endif
+
     /// <summary>
     /// Configures the maximum number of items retained per bucket. Must be called before
     /// any pooling activity. Values above zero are accepted; zero or negative values are ignored.
@@ -135,12 +165,22 @@ public static class GlobalBufferPool
     /// <summary>
     /// Rents a <see cref="DataValue"/> array of exactly <paramref name="length"/> elements.
     /// Returns a previously returned buffer when one is available; allocates otherwise.
+    /// Callers must overwrite every slot before reading — the buffer may contain stale
+    /// values from a previous query. Correctness is enforced at development time by the
+    /// <c>PooledBuffer</c> tracker (<c>POOL_DIAGNOSTICS</c>), which prevents any access
+    /// to a returned buffer until it is re-rented.
     /// </summary>
     public static DataValue[] Rent(int length)
     {
         if (ArrayPools.TryGetValue(length, out CountedPool<DataValue[]>? pool)
             && pool.TryDequeue(out DataValue[]? buffer))
         {
+#if POOL_DIAGNOSTICS
+            if (Trackers.TryGetValue(buffer, out PooledBuffer? tracker))
+            {
+                tracker.MarkRented();
+            }
+#endif
             return buffer;
         }
 
@@ -153,6 +193,12 @@ public static class GlobalBufferPool
     /// </summary>
     public static void Return(DataValue[] buffer)
     {
+#if POOL_DIAGNOSTICS
+        PooledBuffer tracker = Trackers.GetOrCreateValue(buffer);
+        tracker.AssertNotDoubleReturned();
+        tracker.MarkReturned();
+#endif
+
         CountedPool<DataValue[]> pool = ArrayPools.GetOrAdd(buffer.Length, static _ => new CountedPool<DataValue[]>());
         pool.EnqueueIfUnderLimit(buffer, _maxItemsPerBucket);
     }

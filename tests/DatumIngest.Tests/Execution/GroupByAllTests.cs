@@ -275,7 +275,7 @@ public sealed class GroupByAllTests
                     batch = RowBatch.Rent(64);
                 }
 
-                batch.Add(row);
+                batch.Add(row.Clone());
             }
 
             if (batch.Count > 0)

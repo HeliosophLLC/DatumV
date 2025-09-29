@@ -9,6 +9,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsTrimmable>true</IsTrimmable>
+    <DefineConstants Condition="'$(Configuration)' == 'Debug'">$(DefineConstants);POOL_DIAGNOSTICS</DefineConstants>
     <IsPackable>true</IsPackable>
     <PackageId>DatumIngest</PackageId>
     <Description>High-performance dataset query engine for ML ETL pipelines.</Description>

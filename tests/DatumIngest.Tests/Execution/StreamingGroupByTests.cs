@@ -106,13 +106,13 @@ public sealed class StreamingGroupByTests
         ];
 
         GroupByOperator hashGroupBy = new(
-            new MockOperator(rows),
+            new MockOperator(rows.Select(r => r.Clone()).ToArray()),
             groupByKeys,
             aggregates,
             streamingSorted: false);
 
         GroupByOperator streamingGroupBy = new(
-            new MockOperator(rows),
+            new MockOperator(rows.Select(r => r.Clone()).ToArray()),
             groupByKeys,
             aggregates,
             streamingSorted: true);

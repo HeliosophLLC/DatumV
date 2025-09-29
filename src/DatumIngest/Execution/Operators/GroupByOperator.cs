@@ -200,76 +200,76 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         {
             for (int i = 0; i < inputBatch.Count; i++)
             {
-            Row row = inputBatch[i];
-            context.CancellationToken.ThrowIfCancellationRequested();
-            context.QueryMeter?.ThrowIfExceeded();
+                Row row = inputBatch[i];
+                context.CancellationToken.ThrowIfCancellationRequested();
+                context.QueryMeter?.ThrowIfExceeded();
 
-            // Evaluate group keys and detect key change.
-            if (useSingleKey)
-            {
-                DataValue key = evaluator.Evaluate(_groupByExpressions[0], row);
-
-                if (currentGroup is not null && !key.Equals(currentSingleKey!))
+                // Evaluate group keys and detect key change.
+                if (useSingleKey)
                 {
-                    FlushOrderedBuffersForGroup(currentGroup, context);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                        ref outputNames, ref outputNameIndex));
-                    GlobalBufferPool.ReturnGroupState(currentGroup);
-                    currentGroup = null;
-                    if (outputBatch.IsFull)
+                    DataValue key = evaluator.Evaluate(_groupByExpressions[0], row);
+
+                    if (currentGroup is not null && !key.Equals(currentSingleKey!))
                     {
-                        yield return outputBatch;
-                        outputBatch = null;
+                        FlushOrderedBuffersForGroup(currentGroup, context);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
+                            ref outputNames, ref outputNameIndex));
+                        GlobalBufferPool.ReturnGroupState(currentGroup);
+                        currentGroup = null;
+                        if (outputBatch.IsFull)
+                        {
+                            yield return outputBatch;
+                            outputBatch = null;
+                        }
+                    }
+
+                    if (currentGroup is null)
+                    {
+                        currentGroup = CreateGroupState();
+                        currentGroup.KeyValues = [key];
+                        currentSingleKey = key;
+                    }
+                }
+                else
+                {
+                    for (int index = 0; index < keyCount; index++)
+                    {
+                        compositeKeyScratch![index] = evaluator.Evaluate(_groupByExpressions[index], row);
+                    }
+
+                    if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
+                    {
+                        FlushOrderedBuffersForGroup(currentGroup, context);
+                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
+                            ref outputNames, ref outputNameIndex));
+                        GlobalBufferPool.ReturnGroupState(currentGroup);
+                        currentGroup = null;
+                        if (outputBatch.IsFull)
+                        {
+                            yield return outputBatch;
+                            outputBatch = null;
+                        }
+                    }
+
+                    if (currentGroup is null)
+                    {
+                        // Copy scratch into permanent storage only at group boundaries.
+                        DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
+                        currentGroup = CreateGroupState();
+                        currentGroup.KeyValues = permanentKey;
+                        currentKeyValues = permanentKey;
                     }
                 }
 
-                if (currentGroup is null)
-                {
-                    currentGroup = CreateGroupState();
-                    currentGroup.KeyValues = [key];
-                    currentSingleKey = key;
-                }
-            }
-            else
-            {
-                for (int index = 0; index < keyCount; index++)
-                {
-                    compositeKeyScratch![index] = evaluator.Evaluate(_groupByExpressions[index], row);
-                }
+                // Evaluate and accumulate aggregate arguments using reusable scratch buffers.
+                EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
+                AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context);
 
-                if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
-                {
-                    FlushOrderedBuffersForGroup(currentGroup, context);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
-                    outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
-                        ref outputNames, ref outputNameIndex));
-                    GlobalBufferPool.ReturnGroupState(currentGroup);
-                    currentGroup = null;
-                    if (outputBatch.IsFull)
-                    {
-                        yield return outputBatch;
-                        outputBatch = null;
-                    }
-                }
-
-                if (currentGroup is null)
-                {
-                    // Copy scratch into permanent storage only at group boundaries.
-                    DataValue[] permanentKey = compositeKeyScratch!.AsSpan(0, keyCount).ToArray();
-                    currentGroup = CreateGroupState();
-                    currentGroup.KeyValues = permanentKey;
-                    currentKeyValues = permanentKey;
-                }
-            }
-
-            // Evaluate and accumulate aggregate arguments using reusable scratch buffers.
-            EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
-            AccumulateRow(currentGroup, argumentScratch, sortKeyScratch, context);
-
-            // Row values have been fully extracted — return the row to
-            // the pool so the upstream operator can reuse it.
-            context.LocalBufferPool.ReturnValues(row);
+                // Row values have been fully extracted — return the row to
+                // the pool so the upstream operator can reuse it.
+                context.LocalBufferPool.ReturnValues(row);
             }
 
             inputBatch.Return();

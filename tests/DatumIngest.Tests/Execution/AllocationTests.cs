@@ -20,6 +20,7 @@ namespace DatumIngest.Tests.Execution;
 /// boxing in a hot loop.
 /// </summary>
 [Trait("Category", "Allocation")]
+[Collection("Allocation")]
 public sealed class AllocationTests : IDisposable
 {
     private const int RowCount = 20_000;

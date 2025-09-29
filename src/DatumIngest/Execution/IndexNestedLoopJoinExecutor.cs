@@ -203,7 +203,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     foreach (ValueIndexEntry entry in matches)
                     {
-                        Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
+                        Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, bufferPool, cancellationToken)
                             .ConfigureAwait(false);
 
                         if (rawBuildRow is null)
@@ -243,7 +243,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                 // INNER join: fetch each matching build row and yield combined rows.
                 foreach (ValueIndexEntry entry in matches)
                 {
-                    Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, cancellationToken)
+                    Row? rawBuildRow = await FetchBuildRowAsync(seekable, entry, bufferPool, cancellationToken)
                         .ConfigureAwait(false);
 
                     if (rawBuildRow is null)
@@ -312,6 +312,7 @@ internal sealed class IndexNestedLoopJoinExecutor
     private async Task<Row?> FetchBuildRowAsync(
         ISeekableTableProvider seekable,
         ValueIndexEntry entry,
+        LocalBufferPool bufferPool,
         CancellationToken cancellationToken)
     {
         long absoluteRow = _buildChunks[entry.ChunkIndex].RowOffset + entry.RowOffsetInChunk;
@@ -322,7 +323,10 @@ internal sealed class IndexNestedLoopJoinExecutor
         {
             if (batch.Count > 0)
             {
-                Row row = batch[0];
+                Row src = batch[0];
+                DataValue[] owned = bufferPool.Rent(src.FieldCount);
+                Array.Copy(src.RawValues, owned, src.FieldCount);
+                Row row = new(src.RawNames, owned, src.RawNameIndex);
                 batch.Return();
                 return row;
             }
