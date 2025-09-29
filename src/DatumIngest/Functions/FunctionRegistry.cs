@@ -214,6 +214,19 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.BtrimFunction());
         registry.RegisterScalar(new Scalar.OctetLengthFunction());
         registry.RegisterScalar(new Scalar.BitLengthFunction());
+        registry.RegisterScalar(new Scalar.FormatFunction());
+        registry.RegisterScalar(new Scalar.StringToArrayFunction());
+        registry.RegisterScalar(new Scalar.RegexpSplitToArrayFunction());
+        registry.RegisterScalar(new Scalar.ToHexFunction());
+        registry.RegisterScalar(new Scalar.ToBinFunction());
+        registry.RegisterScalar(new Scalar.ToOctFunction());
+        registry.RegisterScalar(new Scalar.ToAsciiFunction());
+        registry.RegisterScalar(new Scalar.UnistrFunction());
+        registry.RegisterScalar(new Scalar.CasefoldFunction());
+        registry.RegisterScalar(new Scalar.QuoteIdentFunction());
+        registry.RegisterScalar(new Scalar.QuoteLiteralFunction());
+        registry.RegisterScalar(new Scalar.QuoteNullableFunction());
+        registry.RegisterScalar(new Scalar.ParseIdentFunction());
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());

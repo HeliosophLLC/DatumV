@@ -227,6 +227,9 @@ internal static class MonarchGrammarFactory
         "regexp_substr", "regexp_instr",
         "word_count", "split_part", "initcap", "translate",
         "ascii", "chr", "octet_length", "bit_length",
+        "format", "string_to_array", "regexp_split_to_array",
+        "to_hex", "to_bin", "to_oct", "to_ascii", "unistr", "casefold",
+        "quote_ident", "quote_literal", "quote_nullable", "parse_ident",
         "get_filename", "get_file_extension", "get_path",
 
         // Date/Time functions

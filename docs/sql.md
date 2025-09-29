@@ -1737,6 +1737,54 @@ SELECT regexp_substr('abc123def456', '\d+', 1, 2)   -- '456'
 SELECT regexp_instr('ABCDEF', 'c(.)(..)', 1, 1, 0, 'i')  -- 3
 ```
 
+### Formatting
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `format(formatstr, ...)` | String | sprintf-style formatting. `%s` for string, `%I` for SQL identifier, `%L` for SQL literal, `%%` for literal `%`. Positional: `%1$s`. |
+
+```sql
+SELECT format('Hello %s, %1$s', 'World')  -- 'Hello World, World'
+SELECT format('INSERT INTO %I VALUES (%L)', 'my_table', 'O''Reilly')
+```
+
+### Array Splitting
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `string_to_array(s, delimiter [, null_string])` | Array | Splits by delimiter. NULL delimiter splits into characters. Fields matching `null_string` become NULL. |
+| `regexp_split_to_array(s, pattern [, flags])` | Array | Splits by regex delimiter. |
+
+```sql
+SELECT string_to_array('xx~~yy~~zz', '~~', 'yy')  -- ['xx', NULL, 'zz']
+SELECT regexp_split_to_array('hello world', '\s+')  -- ['hello', 'world']
+```
+
+### Base Conversion
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `to_hex(n)` | String | Hexadecimal representation. |
+| `to_bin(n)` | String | Binary representation. |
+| `to_oct(n)` | String | Octal representation. |
+
+### Unicode
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `to_ascii(s)` | String | Transliterates to ASCII by removing diacritical marks. |
+| `unistr(s)` | String | Evaluates Unicode escapes: `\XXXX`, `\+XXXXXX`, `\uXXXX`, `\UXXXXXXXX`. `\\` for literal backslash. |
+| `casefold(s)` | String | Unicode case folding for case-insensitive comparison. |
+
+### SQL Quoting
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `quote_ident(s)` | String | Quotes as a SQL identifier (double-quoted) when necessary. |
+| `quote_literal(s)` | String | Quotes as a SQL string literal (single-quoted). NULL on NULL input. |
+| `quote_nullable(s)` | String | Like `quote_literal`, but returns the string `'NULL'` for NULL input. |
+| `parse_ident(s [, strict])` | Array | Splits a qualified identifier into parts, removing quotes and folding to lowercase. |
+
 ### Other
 
 | Function | Return | Description |

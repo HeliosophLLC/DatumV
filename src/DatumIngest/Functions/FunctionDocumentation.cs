@@ -446,6 +446,110 @@ public static class FunctionDocumentation
             Description = "Returns the number of bits in the string (8 × octet_length).",
             Category = FunctionCategory.String,
         });
+        Register(new FunctionSignature
+        {
+            Name = "format",
+            Parameters = [Parameter("formatstr", "String"), Parameter("args", "Any")],
+            ReturnType = "String",
+            Description = "Formats arguments according to a format string. Supports %s, %I (identifier), %L (literal), and positional %n$s.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "string_to_array",
+            Parameters = [Parameter("string", "String"), Parameter("delimiter", "String"), Parameter("null_string", "String", isOptional: true)],
+            ReturnType = "Array",
+            Description = "Splits a string by delimiter into an array. NULL delimiter splits into characters. Fields matching null_string become NULL.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_split_to_array",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("flags", "String", isOptional: true)],
+            ReturnType = "Array",
+            Description = "Splits a string using a regex as the delimiter, producing an array.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "to_hex",
+            Parameters = [Parameter("value", "Float32")],
+            ReturnType = "String",
+            Description = "Converts a number to its hexadecimal string representation.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "to_bin",
+            Parameters = [Parameter("value", "Float32")],
+            ReturnType = "String",
+            Description = "Converts a number to its binary string representation.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "to_oct",
+            Parameters = [Parameter("value", "Float32")],
+            ReturnType = "String",
+            Description = "Converts a number to its octal string representation.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "to_ascii",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Converts a string to ASCII by removing diacritical marks (accents).",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "unistr",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Evaluates Unicode escape sequences (\\XXXX, \\+XXXXXX, \\uXXXX, \\UXXXXXXXX). \\\\ produces a literal backslash.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "casefold",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Performs Unicode case folding for case-insensitive matching.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "quote_ident",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "String",
+            Description = "Returns the string quoted as a SQL identifier (double-quoted). Only adds quotes when necessary.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "quote_literal",
+            Parameters = [Parameter("value", "Any")],
+            ReturnType = "String",
+            Description = "Returns the value quoted as a SQL string literal (single-quoted). Returns NULL on NULL input.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "quote_nullable",
+            Parameters = [Parameter("value", "Any")],
+            ReturnType = "String",
+            Description = "Like quote_literal, but returns the string 'NULL' for NULL input.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "parse_ident",
+            Parameters = [Parameter("qualified_identifier", "String"), Parameter("strict_mode", "Boolean", isOptional: true)],
+            ReturnType = "Array",
+            Description = "Splits a qualified SQL identifier into an array of identifiers, removing quoting and folding unquoted names to lowercase.",
+            Category = FunctionCategory.String,
+        });
 
         // ── Type Conversion ──
 

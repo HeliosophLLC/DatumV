@@ -736,4 +736,372 @@ public class NewStringFunctionTests
         ]);
         Assert.True(result.IsNull);
     }
+
+    // ───────────────── FormatFunction ─────────────────
+
+    [Fact]
+    public void Format_BasicSubstitution()
+    {
+        FormatFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("Hello %s"),
+            DataValue.FromString("World")
+        ]);
+        Assert.Equal("Hello World", result.AsString());
+    }
+
+    [Fact]
+    public void Format_Positional()
+    {
+        FormatFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("Hello %s, %1$s"),
+            DataValue.FromString("World")
+        ]);
+        Assert.Equal("Hello World, World", result.AsString());
+    }
+
+    [Fact]
+    public void Format_EscapedPercent()
+    {
+        FormatFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("100%%")
+        ]);
+        Assert.Equal("100%", result.AsString());
+    }
+
+    [Fact]
+    public void Format_IdentQuoting()
+    {
+        FormatFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("SELECT * FROM %I"),
+            DataValue.FromString("my table")
+        ]);
+        Assert.Equal("SELECT * FROM \"my table\"", result.AsString());
+    }
+
+    [Fact]
+    public void Format_LiteralQuoting()
+    {
+        FormatFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("WHERE name = %L"),
+            DataValue.FromString("O'Reilly")
+        ]);
+        Assert.Equal("WHERE name = 'O''Reilly'", result.AsString());
+    }
+
+    [Fact]
+    public void Format_NullInput_ReturnsNull()
+    {
+        FormatFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── StringToArrayFunction ─────────────────
+
+    [Fact]
+    public void StringToArray_BasicSplit()
+    {
+        StringToArrayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("a,b,c"),
+            DataValue.FromString(",")
+        ]);
+        DataValue[] arr = result.AsArray();
+        Assert.Equal(3, arr.Length);
+        Assert.Equal("a", arr[0].AsString());
+        Assert.Equal("b", arr[1].AsString());
+        Assert.Equal("c", arr[2].AsString());
+    }
+
+    [Fact]
+    public void StringToArray_WithNullString()
+    {
+        StringToArrayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("xx~~yy~~zz"),
+            DataValue.FromString("~~"),
+            DataValue.FromString("yy")
+        ]);
+        DataValue[] arr = result.AsArray();
+        Assert.Equal(3, arr.Length);
+        Assert.Equal("xx", arr[0].AsString());
+        Assert.True(arr[1].IsNull);
+        Assert.Equal("zz", arr[2].AsString());
+    }
+
+    [Fact]
+    public void StringToArray_NullDelimiter_SplitsChars()
+    {
+        StringToArrayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abc"),
+            DataValue.Null(DataKind.String)
+        ]);
+        DataValue[] arr = result.AsArray();
+        Assert.Equal(3, arr.Length);
+        Assert.Equal("a", arr[0].AsString());
+        Assert.Equal("b", arr[1].AsString());
+        Assert.Equal("c", arr[2].AsString());
+    }
+
+    // ───────────────── RegexpSplitToArrayFunction ─────────────────
+
+    [Fact]
+    public void RegexpSplitToArray_BasicSplit()
+    {
+        RegexpSplitToArrayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello world"),
+            DataValue.FromString("\\s+")
+        ]);
+        DataValue[] arr = result.AsArray();
+        Assert.Equal(2, arr.Length);
+        Assert.Equal("hello", arr[0].AsString());
+        Assert.Equal("world", arr[1].AsString());
+    }
+
+    [Fact]
+    public void RegexpSplitToArray_NullInput_ReturnsNull()
+    {
+        RegexpSplitToArrayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("\\s+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── ToHexFunction ─────────────────
+
+    [Fact]
+    public void ToHex_ConvertsToHex()
+    {
+        ToHexFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat32(255)]);
+        Assert.Equal("ff", result.AsString());
+    }
+
+    [Fact]
+    public void ToHex_NullInput_ReturnsNull()
+    {
+        ToHexFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── ToBinFunction ─────────────────
+
+    [Fact]
+    public void ToBin_ConvertsToBinary()
+    {
+        ToBinFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat32(10)]);
+        Assert.Equal("1010", result.AsString());
+    }
+
+    [Fact]
+    public void ToBin_NullInput_ReturnsNull()
+    {
+        ToBinFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── ToOctFunction ─────────────────
+
+    [Fact]
+    public void ToOct_ConvertsToOctal()
+    {
+        ToOctFunction function = new();
+        DataValue result = function.Execute([DataValue.FromFloat32(8)]);
+        Assert.Equal("10", result.AsString());
+    }
+
+    [Fact]
+    public void ToOct_NullInput_ReturnsNull()
+    {
+        ToOctFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.Float32)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── ToAsciiFunction ─────────────────
+
+    [Fact]
+    public void ToAscii_RemovesDiacritics()
+    {
+        ToAsciiFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("Karél")]);
+        Assert.Equal("Karel", result.AsString());
+    }
+
+    [Fact]
+    public void ToAscii_AsciiUnchanged()
+    {
+        ToAsciiFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("hello")]);
+        Assert.Equal("hello", result.AsString());
+    }
+
+    [Fact]
+    public void ToAscii_NullInput_ReturnsNull()
+    {
+        ToAsciiFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── UnistrFunction ─────────────────
+
+    [Fact]
+    public void Unistr_FourDigitEscape()
+    {
+        UnistrFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("d\\0061t\\0061")]);
+        Assert.Equal("data", result.AsString());
+    }
+
+    [Fact]
+    public void Unistr_UnicodeU_Escape()
+    {
+        UnistrFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("d\\u0061t\\u0061")]);
+        Assert.Equal("data", result.AsString());
+    }
+
+    [Fact]
+    public void Unistr_EscapedBackslash()
+    {
+        UnistrFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("a\\\\b")]);
+        Assert.Equal("a\\b", result.AsString());
+    }
+
+    [Fact]
+    public void Unistr_NullInput_ReturnsNull()
+    {
+        UnistrFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── CasefoldFunction ─────────────────
+
+    [Fact]
+    public void Casefold_FoldsToLower()
+    {
+        CasefoldFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("Hello WORLD")]);
+        Assert.Equal("hello world", result.AsString());
+    }
+
+    [Fact]
+    public void Casefold_NullInput_ReturnsNull()
+    {
+        CasefoldFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── QuoteIdentFunction ─────────────────
+
+    [Fact]
+    public void QuoteIdent_SimpleIdentifier_NoQuotes()
+    {
+        QuoteIdentFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("foo_bar")]);
+        Assert.Equal("foo_bar", result.AsString());
+    }
+
+    [Fact]
+    public void QuoteIdent_SpecialChars_AddQuotes()
+    {
+        QuoteIdentFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("Foo bar")]);
+        Assert.Equal("\"Foo bar\"", result.AsString());
+    }
+
+    [Fact]
+    public void QuoteIdent_EscapesDoubleQuotes()
+    {
+        QuoteIdentFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("has\"quote")]);
+        Assert.Equal("\"has\"\"quote\"", result.AsString());
+    }
+
+    // ───────────────── QuoteLiteralFunction ─────────────────
+
+    [Fact]
+    public void QuoteLiteral_QuotesString()
+    {
+        QuoteLiteralFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("O'Reilly")]);
+        Assert.Equal("'O''Reilly'", result.AsString());
+    }
+
+    [Fact]
+    public void QuoteLiteral_NullInput_ReturnsNull()
+    {
+        QuoteLiteralFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── QuoteNullableFunction ─────────────────
+
+    [Fact]
+    public void QuoteNullable_NullInput_ReturnsNullString()
+    {
+        QuoteNullableFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.Equal("NULL", result.AsString());
+    }
+
+    [Fact]
+    public void QuoteNullable_NonNull_QuotesLikeQuoteLiteral()
+    {
+        QuoteNullableFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("hello")]);
+        Assert.Equal("'hello'", result.AsString());
+    }
+
+    // ───────────────── ParseIdentFunction ─────────────────
+
+    [Fact]
+    public void ParseIdent_QuotedIdentifier()
+    {
+        ParseIdentFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("\"SomeSchema\".sometable")
+        ]);
+        DataValue[] arr = result.AsArray();
+        Assert.Equal(2, arr.Length);
+        Assert.Equal("SomeSchema", arr[0].AsString());
+        Assert.Equal("sometable", arr[1].AsString());
+    }
+
+    [Fact]
+    public void ParseIdent_UnquotedFoldsToLower()
+    {
+        ParseIdentFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("MyTable")
+        ]);
+        DataValue[] arr = result.AsArray();
+        Assert.Single(arr);
+        Assert.Equal("mytable", arr[0].AsString());
+    }
+
+    [Fact]
+    public void ParseIdent_NullInput_ReturnsNull()
+    {
+        ParseIdentFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
 }
