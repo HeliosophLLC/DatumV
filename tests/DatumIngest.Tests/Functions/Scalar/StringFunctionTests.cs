@@ -647,4 +647,139 @@ public class StringFunctionTests
         Assert.Throws<ArgumentException>(() =>
             function.ValidateArguments([DataKind.String]));
     }
+
+    // ───────────────── OverlayFunction ─────────────────
+
+    [Fact]
+    public void Overlay_ReplacesAtPosition()
+    {
+        OverlayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("Txxxxas"),
+            DataValue.FromString("hom"),
+            DataValue.FromFloat32(2),
+            DataValue.FromFloat32(4)
+        ]);
+        Assert.Equal("Thomas", result.AsString());
+    }
+
+    [Fact]
+    public void Overlay_DefaultCount_UsesReplacementLength()
+    {
+        OverlayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abcdef"),
+            DataValue.FromString("XY"),
+            DataValue.FromFloat32(3)
+        ]);
+        Assert.Equal("abXYef", result.AsString());
+    }
+
+    [Fact]
+    public void Overlay_NullInput_ReturnsNull()
+    {
+        OverlayFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("x"),
+            DataValue.FromFloat32(1)
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── StrposFunction ─────────────────
+
+    [Fact]
+    public void Strpos_Found_ReturnsIndex()
+    {
+        StrposFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("high"),
+            DataValue.FromString("ig")
+        ]);
+        Assert.Equal(2f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Strpos_NotFound_ReturnsZero()
+    {
+        StrposFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.FromString("xyz")
+        ]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void Strpos_NullInput_ReturnsNull()
+    {
+        StrposFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("x")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── SubstrAlias ─────────────────
+
+    [Fact]
+    public void SubstrAlias_RegisteredInRegistry()
+    {
+        FunctionRegistry registry = FunctionRegistry.CreateDefault();
+        Assert.Contains("substr", registry.ScalarFunctionNames);
+    }
+
+    // ───────────────── OctetLengthFunction ─────────────────
+
+    [Fact]
+    public void OctetLength_AsciiString()
+    {
+        OctetLengthFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("jose")]);
+        Assert.Equal(4f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void OctetLength_Utf8String()
+    {
+        OctetLengthFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("josé")]);
+        Assert.Equal(5f, result.AsFloat32()); // é is 2 bytes in UTF-8
+    }
+
+    [Fact]
+    public void OctetLength_NullInput_ReturnsNull()
+    {
+        OctetLengthFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── BitLengthFunction ─────────────────
+
+    [Fact]
+    public void BitLength_AsciiString()
+    {
+        BitLengthFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("jose")]);
+        Assert.Equal(32f, result.AsFloat32()); // 4 bytes * 8
+    }
+
+    [Fact]
+    public void BitLength_Utf8String()
+    {
+        BitLengthFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("josé")]);
+        Assert.Equal(40f, result.AsFloat32()); // 5 bytes * 8
+    }
+
+    [Fact]
+    public void BitLength_NullInput_ReturnsNull()
+    {
+        BitLengthFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
 }

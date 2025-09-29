@@ -1612,6 +1612,8 @@ PostgreSQL-compatible string functions. All functions return NULL when any requi
 | `length(s)` | Float32 | Alias for `len()`. |
 | `char_length(s)` | Float32 | SQL standard alias for `len()`. |
 | `character_length(s)` | Float32 | SQL standard alias for `len()`. |
+| `octet_length(s)` | Float32 | Number of bytes in `s` (UTF-8 encoded). |
+| `bit_length(s)` | Float32 | Number of bits in `s` (8 × `octet_length`). |
 
 ### Case Conversion
 
@@ -1626,9 +1628,11 @@ PostgreSQL-compatible string functions. All functions return NULL when any requi
 | Function | Return | Description |
 |----------|--------|-------------|
 | `substring(s, start [, length])` | String | Extracts substring from 1-based `start`. Optional `length` limits the result. |
+| `substr(s, start [, length])` | String | Alias for `substring()`. |
 | `mid(s, start, length)` | String | Extracts substring from 1-based `start` with explicit `length`. |
 | `left(s, n)` | String | First `n` characters. When `n` is negative, returns all but the last \|n\| characters. |
 | `right(s, n)` | String | Last `n` characters. When `n` is negative, returns all but the first \|n\| characters. |
+| `overlay(s, newsubstring, start [, count])` | String | Replaces `count` characters at 1-based `start` with `newsubstring`. `count` defaults to `length(newsubstring)`. |
 
 ### Trimming
 
@@ -1668,6 +1672,7 @@ SELECT rpad('hi', 5, 'xy')   -- 'hixyx'
 | Function | Return | Description |
 |----------|--------|-------------|
 | `position(string, substring)` | Float32 | 1-based index of first occurrence, or 0 if not found. |
+| `strpos(string, substring)` | Float32 | Same as `position()`. |
 | `contains(s, search)` | Boolean | True if `s` contains `search`. |
 | `starts_with(s, prefix)` | Boolean | True if `s` starts with `prefix`. |
 | `ends_with(s, suffix)` | Boolean | True if `s` ends with `suffix`. |

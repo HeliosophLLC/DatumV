@@ -218,13 +218,13 @@ internal static class MonarchGrammarFactory
 
         // String functions
         "len", "length", "char_length", "character_length",
-        "mid", "substring", "upper", "lower",
+        "mid", "substring", "substr", "overlay", "upper", "lower",
         "trim", "ltrim", "rtrim", "btrim",
-        "contains", "starts_with", "ends_with", "position", "replace",
+        "contains", "starts_with", "ends_with", "position", "strpos", "replace",
         "concat", "concat_ws", "repeat", "reverse",
         "lpad", "rpad", "regexp_extract", "regexp_replace",
         "word_count", "split_part", "initcap", "translate",
-        "ascii", "chr",
+        "ascii", "chr", "octet_length", "bit_length",
         "get_filename", "get_file_extension", "get_path",
 
         // Date/Time functions

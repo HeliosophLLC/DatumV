@@ -123,7 +123,23 @@ public static class FunctionDocumentation
             Name = "substring",
             Parameters = [Parameter("value", "String"), Parameter("start", "Float32"), Parameter("length", "Float32", isOptional: true)],
             ReturnType = "String",
-            Description = "Extracts a substring from a 0-based start position, optionally with a length.",
+            Description = "Extracts a substring from a 1-based start position, optionally with a length.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "substr",
+            Parameters = [Parameter("value", "String"), Parameter("start", "Float32"), Parameter("length", "Float32", isOptional: true)],
+            ReturnType = "String",
+            Description = "Extracts a substring from a 1-based start position, optionally with a length. Alias for substring().",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "overlay",
+            Parameters = [Parameter("value", "String"), Parameter("newsubstring", "String"), Parameter("start", "Float32"), Parameter("count", "Float32", isOptional: true)],
+            ReturnType = "String",
+            Description = "Replaces a substring starting at the 1-based start position for count characters with newsubstring. Count defaults to the length of newsubstring.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
@@ -236,6 +252,14 @@ public static class FunctionDocumentation
             Parameters = [Parameter("string", "String"), Parameter("substring", "String")],
             ReturnType = "Float32",
             Description = "Returns the 1-based index of the first occurrence of substring in string, or 0 if not found.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "strpos",
+            Parameters = [Parameter("string", "String"), Parameter("substring", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the 1-based index of the first occurrence of substring in string, or 0 if not found. Same as position().",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
@@ -364,6 +388,22 @@ public static class FunctionDocumentation
             Parameters = [Parameter("code", "Float32")],
             ReturnType = "String",
             Description = "Returns the character corresponding to the given ASCII code.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "octet_length",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the number of bytes in the string (UTF-8 encoded).",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "bit_length",
+            Parameters = [Parameter("value", "String")],
+            ReturnType = "Float32",
+            Description = "Returns the number of bits in the string (8 × octet_length).",
             Category = FunctionCategory.String,
         });
 

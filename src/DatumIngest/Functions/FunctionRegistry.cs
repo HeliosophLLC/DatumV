@@ -172,7 +172,10 @@ public sealed class FunctionRegistry
         registry.RegisterScalarAlias("char_length", len);
         registry.RegisterScalarAlias("character_length", len);
         registry.RegisterScalar(new Scalar.MidFunction());
-        registry.RegisterScalar(new Scalar.SubstringFunction());
+        var substring = new Scalar.SubstringFunction();
+        registry.RegisterScalar(substring);
+        registry.RegisterScalarAlias("substr", substring);
+        registry.RegisterScalar(new Scalar.OverlayFunction());
         registry.RegisterScalar(new Scalar.GetFilenameFunction());
         registry.RegisterScalar(new Scalar.GetFileExtensionFunction());
         registry.RegisterScalar(new Scalar.GetPathFunction());
@@ -185,6 +188,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.StartsWithFunction());
         registry.RegisterScalar(new Scalar.EndsWithFunction());
         registry.RegisterScalar(new Scalar.PositionFunction());
+        registry.RegisterScalar(new Scalar.StrposFunction());
         registry.RegisterScalar(new Scalar.ReplaceFunction());
         registry.RegisterScalar(new Scalar.ConcatFunction());
         registry.RegisterScalar(new Scalar.RepeatFunction());
@@ -203,6 +207,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.AsciiFunction());
         registry.RegisterScalar(new Scalar.ChrFunction());
         registry.RegisterScalar(new Scalar.BtrimFunction());
+        registry.RegisterScalar(new Scalar.OctetLengthFunction());
+        registry.RegisterScalar(new Scalar.BitLengthFunction());
 
         // Type conversion
         registry.RegisterScalar(new Scalar.CastFunction());
