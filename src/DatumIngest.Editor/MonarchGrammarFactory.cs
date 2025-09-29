@@ -223,6 +223,8 @@ internal static class MonarchGrammarFactory
         "contains", "starts_with", "ends_with", "position", "strpos", "replace",
         "concat", "concat_ws", "repeat", "reverse",
         "lpad", "rpad", "regexp_extract", "regexp_replace",
+        "regexp_count", "regexp_like", "regexp_match",
+        "regexp_substr", "regexp_instr",
         "word_count", "split_part", "initcap", "translate",
         "ascii", "chr", "octet_length", "bit_length",
         "get_filename", "get_file_extension", "get_path",

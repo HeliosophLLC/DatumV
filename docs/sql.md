@@ -1712,6 +1712,30 @@ SELECT rpad('hi', 5, 'xy')   -- 'hixyx'
 |----------|--------|-------------|
 | `regexp_extract(s, pattern [, group])` | String | Extracts the first match. With `group` (1-based), returns a specific capture group. Returns NULL if no match. |
 | `regexp_replace(s, pattern, replacement [, flags])` | String | See Replacement section above. |
+| `regexp_count(s, pattern [, start [, flags]])` | Float32 | Number of times `pattern` matches. Optional 1-based `start`. |
+| `regexp_like(s, pattern [, flags])` | Boolean | True if `pattern` matches anywhere in `s`. |
+| `regexp_match(s, pattern [, flags])` | Array | Captured substrings from the first match. NULL if no match. |
+| `regexp_substr(s, pattern [, start [, N [, flags [, subexpr]]]])` | String | The N'th match (default 1). `subexpr` selects a capture group. NULL if no match. |
+| `regexp_instr(s, pattern [, start [, N [, endoption [, flags [, subexpr]]]]])` | Float32 | 1-based position of N'th match. `endoption=1` returns end+1. 0 if no match. |
+
+Flags: `'i'` for case-insensitive. `regexp_replace` also supports `'g'` for global.
+
+```sql
+-- Count digit groups
+SELECT regexp_count('abc123def456', '\d+')          -- 2
+
+-- Test if string matches
+SELECT regexp_like('Hello World', 'world$', 'i')    -- true
+
+-- Extract capture groups
+SELECT regexp_match('2024-03-26', '(\d{4})-(\d{2})-(\d{2})')  -- ['2024','03','26']
+
+-- Extract 2nd occurrence
+SELECT regexp_substr('abc123def456', '\d+', 1, 2)   -- '456'
+
+-- Position of match
+SELECT regexp_instr('ABCDEF', 'c(.)(..)', 1, 1, 0, 'i')  -- 3
+```
 
 ### Other
 

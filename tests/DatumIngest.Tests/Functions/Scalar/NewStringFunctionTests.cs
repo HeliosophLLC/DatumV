@@ -491,4 +491,249 @@ public class NewStringFunctionTests
         Assert.Throws<ArgumentException>(() =>
             new BtrimFunction().ValidateArguments([DataKind.Float32]));
     }
+
+    // ───────────────── RegexpCountFunction ─────────────────
+
+    [Fact]
+    public void RegexpCount_CountsAllMatches()
+    {
+        RegexpCountFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("123456789012"),
+            DataValue.FromString("\\d\\d\\d")
+        ]);
+        Assert.Equal(4f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpCount_WithStart()
+    {
+        RegexpCountFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("123456789012"),
+            DataValue.FromString("\\d\\d\\d"),
+            DataValue.FromFloat32(2)
+        ]);
+        Assert.Equal(3f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpCount_CaseInsensitive()
+    {
+        RegexpCountFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("Hello hello HELLO"),
+            DataValue.FromString("hello"),
+            DataValue.FromFloat32(1),
+            DataValue.FromString("i")
+        ]);
+        Assert.Equal(3f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpCount_NoMatch_ReturnsZero()
+    {
+        RegexpCountFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpCount_NullInput_ReturnsNull()
+    {
+        RegexpCountFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── RegexpLikeFunction ─────────────────
+
+    [Fact]
+    public void RegexpLike_Match_ReturnsTrue()
+    {
+        RegexpLikeFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("Hello World"),
+            DataValue.FromString("world$"),
+            DataValue.FromString("i")
+        ]);
+        Assert.True(result.AsBoolean());
+    }
+
+    [Fact]
+    public void RegexpLike_NoMatch_ReturnsFalse()
+    {
+        RegexpLikeFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("Hello World"),
+            DataValue.FromString("^world")
+        ]);
+        Assert.False(result.AsBoolean());
+    }
+
+    [Fact]
+    public void RegexpLike_NullInput_ReturnsNull()
+    {
+        RegexpLikeFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── RegexpMatchFunction ─────────────────
+
+    [Fact]
+    public void RegexpMatch_WithCaptureGroups()
+    {
+        RegexpMatchFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("foobarbequebaz"),
+            DataValue.FromString("(bar)(beque)")
+        ]);
+        Assert.False(result.IsNull);
+        DataValue[] array = result.AsArray();
+        Assert.Equal(2, array.Length);
+        Assert.Equal("bar", array[0].AsString());
+        Assert.Equal("beque", array[1].AsString());
+    }
+
+    [Fact]
+    public void RegexpMatch_NoCaptureGroups_ReturnsWholeMatch()
+    {
+        RegexpMatchFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abc123def"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.False(result.IsNull);
+        DataValue[] array = result.AsArray();
+        Assert.Single(array);
+        Assert.Equal("123", array[0].AsString());
+    }
+
+    [Fact]
+    public void RegexpMatch_NoMatch_ReturnsNull()
+    {
+        RegexpMatchFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── RegexpSubstrFunction ─────────────────
+
+    [Fact]
+    public void RegexpSubstr_FirstMatch()
+    {
+        RegexpSubstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abc123def456"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.Equal("123", result.AsString());
+    }
+
+    [Fact]
+    public void RegexpSubstr_SecondMatch()
+    {
+        RegexpSubstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("abc123def456"),
+            DataValue.FromString("\\d+"),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(2)
+        ]);
+        Assert.Equal("456", result.AsString());
+    }
+
+    [Fact]
+    public void RegexpSubstr_WithSubexpr()
+    {
+        RegexpSubstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("ABCDEF"),
+            DataValue.FromString("c(.)(..)"),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(1),
+            DataValue.FromString("i"),
+            DataValue.FromFloat32(2)
+        ]);
+        Assert.Equal("EF", result.AsString());
+    }
+
+    [Fact]
+    public void RegexpSubstr_NoMatch_ReturnsNull()
+    {
+        RegexpSubstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── RegexpInstrFunction ─────────────────
+
+    [Fact]
+    public void RegexpInstr_FindsPosition()
+    {
+        RegexpInstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("ABCDEF"),
+            DataValue.FromString("c(.)(..)"),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(0),
+            DataValue.FromString("i")
+        ]);
+        Assert.Equal(3f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpInstr_WithSubexpr()
+    {
+        RegexpInstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("ABCDEF"),
+            DataValue.FromString("c(.)(..)"),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(1),
+            DataValue.FromFloat32(0),
+            DataValue.FromString("i"),
+            DataValue.FromFloat32(2)
+        ]);
+        Assert.Equal(5f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpInstr_NoMatch_ReturnsZero()
+    {
+        RegexpInstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.FromString("hello"),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.Equal(0f, result.AsFloat32());
+    }
+
+    [Fact]
+    public void RegexpInstr_NullInput_ReturnsNull()
+    {
+        RegexpInstrFunction function = new();
+        DataValue result = function.Execute([
+            DataValue.Null(DataKind.String),
+            DataValue.FromString("\\d+")
+        ]);
+        Assert.True(result.IsNull);
+    }
 }

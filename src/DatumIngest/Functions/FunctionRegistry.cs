@@ -199,6 +199,11 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.RpadFunction());
         registry.RegisterScalar(new Scalar.RegexpExtractFunction());
         registry.RegisterScalar(new Scalar.RegexpReplaceFunction());
+        registry.RegisterScalar(new Scalar.RegexpCountFunction());
+        registry.RegisterScalar(new Scalar.RegexpLikeFunction());
+        registry.RegisterScalar(new Scalar.RegexpMatchFunction());
+        registry.RegisterScalar(new Scalar.RegexpSubstrFunction());
+        registry.RegisterScalar(new Scalar.RegexpInstrFunction());
         registry.RegisterScalar(new Scalar.WordCountFunction());
         registry.RegisterScalar(new Scalar.ConcatWsFunction());
         registry.RegisterScalar(new Scalar.SplitPartFunction());

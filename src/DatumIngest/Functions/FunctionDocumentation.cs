@@ -337,9 +337,49 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "regexp_replace",
-            Parameters = [Parameter("input", "String"), Parameter("pattern", "String"), Parameter("replacement", "String")],
+            Parameters = [Parameter("input", "String"), Parameter("pattern", "String"), Parameter("replacement", "String"), Parameter("flags", "String", isOptional: true)],
             ReturnType = "String",
-            Description = "Replaces all substrings matching a regular expression with a replacement string.",
+            Description = "Replaces matches of a POSIX regex. Default replaces all; flags: 'g' global, 'i' case-insensitive.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_count",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Float32", isOptional: true), Parameter("flags", "String", isOptional: true)],
+            ReturnType = "Float32",
+            Description = "Returns the number of times the regex pattern matches in the string. Optional 1-based start position.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_like",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("flags", "String", isOptional: true)],
+            ReturnType = "Boolean",
+            Description = "Returns true if the regex pattern matches anywhere in the string.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_match",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("flags", "String", isOptional: true)],
+            ReturnType = "Array",
+            Description = "Returns captured substrings from the first regex match as an Array. Returns NULL if no match.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_substr",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Float32", isOptional: true), Parameter("N", "Float32", isOptional: true), Parameter("flags", "String", isOptional: true), Parameter("subexpr", "Float32", isOptional: true)],
+            ReturnType = "String",
+            Description = "Returns the substring matching the N'th occurrence of a regex. Returns NULL if no match.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "regexp_instr",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Float32", isOptional: true), Parameter("N", "Float32", isOptional: true), Parameter("endoption", "Float32", isOptional: true), Parameter("flags", "String", isOptional: true), Parameter("subexpr", "Float32", isOptional: true)],
+            ReturnType = "Float32",
+            Description = "Returns the 1-based position of the N'th regex match. endoption=1 returns position after match. Returns 0 if no match.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
