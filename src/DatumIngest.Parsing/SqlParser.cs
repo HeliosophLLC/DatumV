@@ -1180,7 +1180,7 @@ public static class SqlParser
     // ───────────────────── FROM clause ─────────────────────
 
     /// <summary>
-    /// Parses BERNOULLI or SYSTEM as a <see cref="TablesampleMethod"/>.
+    /// Parses BERNOULLI, SYSTEM, STRATIFIED, or BALANCED as a <see cref="TablesampleMethod"/>.
     /// These are parsed as identifiers (not reserved keywords) to avoid breaking user table names.
     /// </summary>
     private static readonly TokenListParser<SqlToken, TablesampleMethod> TablesampleMethodParser =
@@ -1189,22 +1189,55 @@ public static class SqlParser
             {
                 string text = GetTokenText(token);
                 return text.Equals("BERNOULLI", StringComparison.OrdinalIgnoreCase)
-                    || text.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase);
-            }, "BERNOULLI or SYSTEM")
+                    || text.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase)
+                    || text.Equals("STRATIFIED", StringComparison.OrdinalIgnoreCase)
+                    || text.Equals("BALANCED", StringComparison.OrdinalIgnoreCase);
+            }, "BERNOULLI, SYSTEM, STRATIFIED, or BALANCED")
             .Select(token =>
-                GetTokenText(token).Equals("BERNOULLI", StringComparison.OrdinalIgnoreCase)
-                    ? TablesampleMethod.Bernoulli
-                    : TablesampleMethod.System);
+            {
+                string text = GetTokenText(token);
+                if (text.Equals("BERNOULLI", StringComparison.OrdinalIgnoreCase)) return TablesampleMethod.Bernoulli;
+                if (text.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase)) return TablesampleMethod.System;
+                if (text.Equals("STRATIFIED", StringComparison.OrdinalIgnoreCase)) return TablesampleMethod.Stratified;
+                return TablesampleMethod.Balanced;
+            });
 
     /// <summary>
-    /// Parses a TABLESAMPLE clause: <c>TABLESAMPLE BERNOULLI|SYSTEM(percentage) [REPEATABLE(seed)]</c>.
+    /// Parses a single unqualified column name as a <see cref="ColumnReference"/>.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, ColumnReference> UnqualifiedColumnParser =
+        Token.EqualTo(SqlToken.Identifier)
+            .Select(token => new ColumnReference(null, GetTokenText(token), ToSpan(token)));
+
+    /// <summary>
+    /// Parses an <c>ON column</c> or <c>ON (col1, col2, ...)</c> stratification key list.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, IReadOnlyList<ColumnReference>> StratifyColumnsParser =
+        from onKeyword in Token.EqualTo(SqlToken.On)
+        from columns in (
+            // Parenthesized composite key: ON (col1, col2, ...)
+            from open in Token.EqualTo(SqlToken.LeftParen)
+            from cols in UnqualifiedColumnParser.ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            from close in Token.EqualTo(SqlToken.RightParen)
+            select (IReadOnlyList<ColumnReference>)cols
+        ).Try().Or(
+            // Single column: ON col
+            UnqualifiedColumnParser.Select(col => (IReadOnlyList<ColumnReference>)new[] { col })
+        )
+        select columns;
+
+    /// <summary>
+    /// Parses a TABLESAMPLE clause:
+    /// <c>TABLESAMPLE BERNOULLI|SYSTEM(percentage) [REPEATABLE(seed)]</c> or
+    /// <c>TABLESAMPLE STRATIFIED|BALANCED(arg) ON column [REPEATABLE(seed)]</c>.
     /// </summary>
     private static readonly TokenListParser<SqlToken, TablesampleClause> TablesampleClauseParser =
         from tablesampleKeyword in Token.EqualTo(SqlToken.Tablesample)
         from method in TablesampleMethodParser
         from open in Token.EqualTo(SqlToken.LeftParen)
-        from percentage in SP.Ref(() => ExpressionParser!)
+        from argument in SP.Ref(() => ExpressionParser!)
         from close in Token.EqualTo(SqlToken.RightParen)
+        from stratifyColumns in StratifyColumnsParser.AsNullable().OptionalOrDefault()
         from seed in (
             from repeatableKeyword in Token.EqualTo(SqlToken.Repeatable)
             from seedOpen in Token.EqualTo(SqlToken.LeftParen)
@@ -1212,7 +1245,33 @@ public static class SqlParser
             from seedClose in Token.EqualTo(SqlToken.RightParen)
             select seedExpression
         ).AsNullable().OptionalOrDefault()
-        select new TablesampleClause(method, percentage, seed);
+        select ValidateTablesampleClause(method, argument, seed, stratifyColumns);
+
+    /// <summary>
+    /// Validates that the ON clause is present for Stratified/Balanced and absent for Bernoulli/System.
+    /// </summary>
+    private static TablesampleClause ValidateTablesampleClause(
+        TablesampleMethod method, Expression argument, Expression? seed,
+        IReadOnlyList<ColumnReference>? stratifyColumns)
+    {
+        bool requiresOn = method is TablesampleMethod.Stratified or TablesampleMethod.Balanced;
+
+        if (requiresOn && stratifyColumns is null)
+        {
+            throw new ParseException(
+                $"TABLESAMPLE {method.ToString().ToUpperInvariant()} requires an ON clause specifying the stratification column(s).",
+                default);
+        }
+
+        if (!requiresOn && stratifyColumns is not null)
+        {
+            throw new ParseException(
+                $"TABLESAMPLE {method.ToString().ToUpperInvariant()} does not support an ON clause.",
+                default);
+        }
+
+        return new TablesampleClause(method, argument, seed, stratifyColumns);
+    }
 
     /// <summary>A table reference with optional schema qualifier, TABLESAMPLE clause, and alias.</summary>
     private static readonly TokenListParser<SqlToken, TableSource> TableReferenceParser =

@@ -4040,12 +4040,26 @@ public sealed class QueryPlanner
         // Apply TABLESAMPLE row/chunk sampling if the table reference includes a sampling clause.
         if (tableRef.Tablesample is TablesampleClause tablesampleClause)
         {
-            double percentage = EvaluateConstantDouble(tablesampleClause.Percentage);
+            double argument = EvaluateConstantDouble(tablesampleClause.Percentage);
             int? seed = tablesampleClause.Seed is not null
                 ? (int)EvaluateConstantDouble(tablesampleClause.Seed)
                 : null;
 
-            scanOperator = new SampleScanOperator(scanOperator, tablesampleClause.Method, percentage, seed);
+            scanOperator = tablesampleClause.Method switch
+            {
+                TablesampleMethod.Bernoulli or TablesampleMethod.System =>
+                    new SampleScanOperator(scanOperator, tablesampleClause.Method, argument, seed),
+                TablesampleMethod.Stratified =>
+                    new StratifiedSampleOperator(
+                        scanOperator, argument,
+                        tablesampleClause.StratifyColumns!.Select(c => c.ColumnName).ToArray(), seed),
+                TablesampleMethod.Balanced =>
+                    new BalancedSampleOperator(
+                        scanOperator, (int)argument,
+                        tablesampleClause.StratifyColumns!.Select(c => c.ColumnName).ToArray(), seed),
+                _ => throw new InvalidOperationException(
+                    $"Unknown TABLESAMPLE method: {tablesampleClause.Method}"),
+            };
         }
 
         // Wrap column names with the alias prefix. When the query involves JOINs,

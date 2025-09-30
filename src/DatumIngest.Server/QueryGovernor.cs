@@ -29,13 +29,20 @@ namespace DatumIngest.Server;
 /// Maximum number of queries that may execute simultaneously on a single
 /// session. <see langword="null"/> means no limit.
 /// </param>
+/// <param name="MaxStratifyClasses">
+/// Maximum number of distinct classes allowed in a TABLESAMPLE BALANCED
+/// stratification column. Limits the number of per-class reservoirs to
+/// bound memory usage. <see langword="null"/> means use the operator's
+/// internal default (10,000).
+/// </param>
 public sealed record QueryGovernor(
     int? QueryTimeoutSeconds,
     long? MaxOutputRows,
     int? ThrottleDelayMilliseconds,
     long? MaxQueryUnits = null,
     long? MemoryBudgetBytes = null,
-    int? MaxConcurrentQueries = null)
+    int? MaxConcurrentQueries = null,
+    int? MaxStratifyClasses = null)
 {
     /// <summary>
     /// Number of rows between throttle delays. When <see cref="ThrottleDelayMilliseconds"/>
@@ -64,6 +71,7 @@ public sealed record QueryGovernor(
     /// <param name="requestMaxQueryUnits">Query Unit budget override from the client request.</param>
     /// <param name="requestMemoryBudgetBytes">Memory budget override from the client request.</param>
     /// <param name="requestMaxConcurrentQueries">Concurrent query limit override from the client request.</param>
+    /// <param name="requestMaxStratifyClasses">Stratify class limit override from the client request.</param>
     /// <returns>A merged governor reflecting the effective limits for the session.</returns>
     public static QueryGovernor Merge(
         QueryGovernor serverDefaults,
@@ -72,7 +80,8 @@ public sealed record QueryGovernor(
         int requestThrottleDelayMilliseconds,
         long requestMaxQueryUnits = 0,
         long requestMemoryBudgetBytes = 0,
-        int requestMaxConcurrentQueries = 0)
+        int requestMaxConcurrentQueries = 0,
+        int requestMaxStratifyClasses = 0)
     {
         return new QueryGovernor(
             ResolveInt(requestTimeoutSeconds, serverDefaults.QueryTimeoutSeconds),
@@ -80,7 +89,8 @@ public sealed record QueryGovernor(
             ResolveInt(requestThrottleDelayMilliseconds, serverDefaults.ThrottleDelayMilliseconds),
             ResolveLong(requestMaxQueryUnits, serverDefaults.MaxQueryUnits),
             ResolveLong(requestMemoryBudgetBytes, serverDefaults.MemoryBudgetBytes),
-            ResolveInt(requestMaxConcurrentQueries, serverDefaults.MaxConcurrentQueries));
+            ResolveInt(requestMaxConcurrentQueries, serverDefaults.MaxConcurrentQueries),
+            ResolveInt(requestMaxStratifyClasses, serverDefaults.MaxStratifyClasses));
     }
 
     /// <summary>

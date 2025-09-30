@@ -198,20 +198,35 @@ public enum TablesampleMethod
 
     /// <summary>Block-level system sampling — entire chunks/pages are included or excluded.</summary>
     System,
+
+    /// <summary>Stratified sampling — uniform Bernoulli at the given rate within each class, preserving class proportions.</summary>
+    Stratified,
+
+    /// <summary>Balanced sampling — fixed-count reservoir sampling per class, equalizing class representation.</summary>
+    Balanced,
 }
 
 /// <summary>
 /// A TABLESAMPLE clause that limits the rows returned from a table source
-/// to an approximate percentage of the total, using either Bernoulli (row-level)
-/// or System (chunk-level) sampling.
+/// to an approximate percentage of the total. For Bernoulli/System, each row is
+/// independently included with the given probability. For Stratified/Balanced,
+/// rows are sampled per class defined by the <paramref name="StratifyColumns"/>.
 /// </summary>
-/// <param name="Method">The sampling strategy (Bernoulli or System).</param>
-/// <param name="Percentage">An expression evaluating to the sampling percentage (0–100).</param>
+/// <param name="Method">The sampling strategy.</param>
+/// <param name="Percentage">
+/// An expression evaluating to the sampling percentage (0–100) for Bernoulli/System/Stratified,
+/// or the per-class row count for Balanced.
+/// </param>
 /// <param name="Seed">An optional REPEATABLE seed expression for deterministic sampling.</param>
+/// <param name="StratifyColumns">
+/// The columns defining the stratification key, specified via the <c>ON</c> clause.
+/// Required for Stratified/Balanced; must be null for Bernoulli/System.
+/// </param>
 public sealed record TablesampleClause(
     TablesampleMethod Method,
     Expression Percentage,
-    Expression? Seed = null);
+    Expression? Seed = null,
+    IReadOnlyList<ColumnReference>? StratifyColumns = null);
 
 /// <summary>
 /// A subquery used as a table source (derived table), always aliased.

@@ -286,7 +286,13 @@ public sealed class HoverProvider
             SqlToken.Unpivot => "**UNPIVOT** — Rotates columns into rows, producing a name/value pair per source column per input row: `FROM t UNPIVOT (value FOR col_name IN (a, b, c))`.",
             SqlToken.For => "**FOR** — In PIVOT, specifies the pivot axis column: `PIVOT (SUM(x) FOR category IN ('A', 'B'))`. In UNPIVOT, specifies the name-output column: `UNPIVOT (v FOR col IN (a, b))`.",
             SqlToken.Include => "**INCLUDE NULLS** — UNPIVOT modifier that retains rows where the source column is NULL. By default UNPIVOT excludes NULL-valued source columns.",
-            SqlToken.Tablesample => "**TABLESAMPLE** — Samples a fraction of rows from a table source: `FROM t TABLESAMPLE BERNOULLI(10)` (row-level ~10%) or `FROM t TABLESAMPLE SYSTEM(5)` (chunk-level ~5%). Add `REPEATABLE(seed)` for deterministic results.",
+            SqlToken.Tablesample => "**TABLESAMPLE** — Samples rows from a table source.\n\n" +
+                "**Methods:**\n" +
+                "- `BERNOULLI(pct)` — row-level probabilistic sampling\n" +
+                "- `SYSTEM(pct)` — chunk-level sampling\n" +
+                "- `STRATIFIED(pct) ON col` — per-class proportional sampling (preserves distribution)\n" +
+                "- `BALANCED(count) ON col` — per-class fixed-count reservoir sampling (equalizes distribution)\n\n" +
+                "Add `REPEATABLE(seed)` for deterministic results.",
             SqlToken.Repeatable => "**REPEATABLE** — Seeds the random sampler for deterministic TABLESAMPLE results: `TABLESAMPLE BERNOULLI(10) REPEATABLE(42)`. The same seed on the same data always returns the same sample.",
             SqlToken.Create => "**CREATE TEMP TABLE** — Creates a session-scoped temporary table. `CREATE TEMP TABLE name (col type, …) [PRIMARY KEY (col, …)]` for an empty table or `CREATE TEMP TABLE name AS SELECT …` to populate from a query. Add `IF NOT EXISTS` to suppress errors.",
             SqlToken.Drop => "**DROP TABLE** — Removes a temporary table from the session catalog: `DROP TABLE [IF EXISTS] name`.",

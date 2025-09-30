@@ -126,9 +126,6 @@ public readonly struct Row
     {
         get
         {
-#if POOL_DIAGNOSTICS
-            GlobalBufferPool.AssertNotReturned(_values, $"Row[\"{name}\"]");
-#endif
             if (_nameIndex.TryGetValue(name, out int index))
             {
                 return _values[index];
@@ -146,9 +143,6 @@ public readonly struct Row
     {
         get
         {
-#if POOL_DIAGNOSTICS
-            GlobalBufferPool.AssertNotReturned(_values, $"Row[{ordinal}]");
-#endif
             if ((uint)ordinal >= (uint)_values.Length)
             {
                 throw new ArgumentOutOfRangeException(
@@ -167,9 +161,6 @@ public readonly struct Row
     /// <returns><c>true</c> if the column exists; otherwise <c>false</c>.</returns>
     public bool TryGetValue(string name, out DataValue result)
     {
-#if POOL_DIAGNOSTICS
-        GlobalBufferPool.AssertNotReturned(_values, $"Row.TryGetValue(\"{name}\")");
-#endif
         if (_nameIndex.TryGetValue(name, out int index))
         {
             result = _values[index];

@@ -24,6 +24,7 @@ public sealed class ExecutionContext
         MemoryBudgetBytes = context.MemoryBudgetBytes;
         BatchSize = context.BatchSize;
         AssertionDiagnostics = context.AssertionDiagnostics;
+        MaxStratifyClasses = context.MaxStratifyClasses;
     }
 
     /// <summary>
@@ -162,6 +163,7 @@ public sealed class ExecutionContext
             ParallelismBudget = ParallelismBudget,
             BatchSize = BatchSize,
             AssertionDiagnostics = AssertionDiagnostics,
+            MaxStratifyClasses = MaxStratifyClasses,
         };
     }
 
@@ -171,4 +173,12 @@ public sealed class ExecutionContext
     /// diagnostics collection has not been requested.
     /// </summary>
     public AssertionDiagnostics? AssertionDiagnostics { get; init; }
+
+    /// <summary>
+    /// Maximum number of distinct classes allowed in a TABLESAMPLE BALANCED
+    /// stratification column. Limits the number of per-class reservoirs to
+    /// bound memory usage. <see langword="null"/> means use the operator's
+    /// internal default (10,000).
+    /// </summary>
+    public int? MaxStratifyClasses { get; init; }
 }

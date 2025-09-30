@@ -171,6 +171,20 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterAs:
                 // No schema-based completions for file paths or alias names.
                 break;
+
+            // ───────────────────── Contextual identifier zones ─────────────────────
+
+            case CompletionZoneKind.AfterTablesample:
+                AddTablesampleMethods(items);
+                break;
+
+            case CompletionZoneKind.AfterTablesampleMethodArg:
+                AddKeywords(items, ["ON", "REPEATABLE"]);
+                break;
+
+            case CompletionZoneKind.InsideTablesampleArg:
+                // No schema completions — the argument is a numeric literal (percentage or count).
+                break;
         }
 
         // Filter by prefix if the user has partially typed something.
@@ -414,6 +428,54 @@ public sealed class CompletionProvider
         "MILLISECOND", "MICROSECOND",
         "TIMEZONE", "TIMEZONE_HOUR", "TIMEZONE_MINUTE",
     ];
+
+    /// <summary>
+    /// Adds TABLESAMPLE method names as contextual keyword completions with
+    /// documentation explaining each method's semantics and syntax.
+    /// </summary>
+    private static void AddTablesampleMethods(List<CompletionItem> items)
+    {
+        items.Add(new CompletionItem
+        {
+            Label = "BERNOULLI",
+            Kind = CompletionItemKind.Keyword,
+            Detail = "Row-level probabilistic sampling",
+            InsertText = "BERNOULLI(",
+            Documentation = "Each row is independently included with the given probability.\n" +
+                "Syntax: `TABLESAMPLE BERNOULLI(percentage) [REPEATABLE(seed)]`",
+            SortOrder = 0,
+        });
+        items.Add(new CompletionItem
+        {
+            Label = "SYSTEM",
+            Kind = CompletionItemKind.Keyword,
+            Detail = "Chunk-level sampling",
+            InsertText = "SYSTEM(",
+            Documentation = "Entire chunks/pages are included or excluded.\n" +
+                "Syntax: `TABLESAMPLE SYSTEM(percentage) [REPEATABLE(seed)]`",
+            SortOrder = 0,
+        });
+        items.Add(new CompletionItem
+        {
+            Label = "STRATIFIED",
+            Kind = CompletionItemKind.Keyword,
+            Detail = "Per-class proportional sampling (preserves distribution)",
+            InsertText = "STRATIFIED(",
+            Documentation = "Samples each class at the same rate, preserving class proportions.\n" +
+                "Syntax: `TABLESAMPLE STRATIFIED(percentage) ON column [REPEATABLE(seed)]`",
+            SortOrder = 0,
+        });
+        items.Add(new CompletionItem
+        {
+            Label = "BALANCED",
+            Kind = CompletionItemKind.Keyword,
+            Detail = "Per-class fixed-count sampling (equalizes distribution)",
+            InsertText = "BALANCED(",
+            Documentation = "Returns exactly N rows per class via reservoir sampling.\n" +
+                "Syntax: `TABLESAMPLE BALANCED(count) ON column [REPEATABLE(seed)]`",
+            SortOrder = 0,
+        });
+    }
 
     internal static readonly string[] ColumnTypeKeywords =
     [

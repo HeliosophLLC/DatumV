@@ -192,6 +192,7 @@ public sealed class CommandDispatcher
             DegreeOfParallelism = Environment.ProcessorCount,
             ParallelismBudget = _parallelismBudget,
             AssertionDiagnostics = assertionDiagnostics,
+            MaxStratifyClasses = session.Governor.MaxStratifyClasses,
         };
         ExecutionTracer.Write("DISPATCH planning...");
         IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
@@ -505,6 +506,7 @@ public sealed class CommandDispatcher
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,
+                MaxStratifyClasses = session.Governor.MaxStratifyClasses,
             };
 
             await foreach (RowBatch batch in instrumentedRoot.ExecuteAsync(context).ConfigureAwait(false))

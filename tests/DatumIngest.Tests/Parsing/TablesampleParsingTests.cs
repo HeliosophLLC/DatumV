@@ -33,6 +33,7 @@ public sealed class TablesampleParsingTests
         LiteralExpression percentage = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
         Assert.Equal(10d, percentage.Value);
         Assert.Null(tableReference.Tablesample.Seed);
+        Assert.Null(tableReference.Tablesample.StratifyColumns);
     }
 
     /// <summary>
@@ -187,7 +188,240 @@ public sealed class TablesampleParsingTests
         Assert.Null(primaryTable.Tablesample);
     }
 
-    // ───────────────────── BERNOULLI/SYSTEM not reserved ─────────────────────
+    // ───────────────────── STRATIFIED/BALANCED basic syntax ─────────────────────
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED(percentage) ON column parses correctly.
+    /// </summary>
+    [Fact]
+    public void Stratified_ParsesMethodPercentageAndColumn()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM training_data TABLESAMPLE STRATIFIED(10) ON label");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.Equal(TablesampleMethod.Stratified, tableReference.Tablesample!.Method);
+
+        LiteralExpression percentage = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
+        Assert.Equal(10d, percentage.Value);
+        Assert.Null(tableReference.Tablesample.Seed);
+
+        Assert.NotNull(tableReference.Tablesample.StratifyColumns);
+        Assert.Single(tableReference.Tablesample.StratifyColumns!);
+        Assert.Equal("label", tableReference.Tablesample.StratifyColumns![0].ColumnName);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE BALANCED(count) ON column parses correctly.
+    /// </summary>
+    [Fact]
+    public void Balanced_ParsesMethodCountAndColumn()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM training_data TABLESAMPLE BALANCED(1000) ON label");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.Equal(TablesampleMethod.Balanced, tableReference.Tablesample!.Method);
+
+        LiteralExpression count = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
+        Assert.Equal(1000d, count.Value);
+
+        Assert.NotNull(tableReference.Tablesample.StratifyColumns);
+        Assert.Single(tableReference.Tablesample.StratifyColumns!);
+        Assert.Equal("label", tableReference.Tablesample.StratifyColumns![0].ColumnName);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED with composite key ON (col1, col2) parses multiple columns.
+    /// </summary>
+    [Fact]
+    public void Stratified_WithCompositeKey_ParsesMultipleColumns()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM training_data TABLESAMPLE BALANCED(500) ON (label, split)");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.NotNull(tableReference.Tablesample!.StratifyColumns);
+        Assert.Equal(2, tableReference.Tablesample.StratifyColumns!.Count);
+        Assert.Equal("label", tableReference.Tablesample.StratifyColumns[0].ColumnName);
+        Assert.Equal("split", tableReference.Tablesample.StratifyColumns[1].ColumnName);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED with REPEATABLE parses the seed.
+    /// </summary>
+    [Fact]
+    public void Stratified_WithRepeatable_ParsesSeed()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM training_data TABLESAMPLE STRATIFIED(20) ON label REPEATABLE(42)");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.Equal(TablesampleMethod.Stratified, tableReference.Tablesample!.Method);
+        Assert.NotNull(tableReference.Tablesample.Seed);
+
+        LiteralExpression seed = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Seed);
+        Assert.Equal(42d, seed.Value);
+
+        Assert.NotNull(tableReference.Tablesample.StratifyColumns);
+        Assert.Equal("label", tableReference.Tablesample.StratifyColumns![0].ColumnName);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED with alias parses both correctly.
+    /// </summary>
+    [Fact]
+    public void Stratified_WithAlias_ParsesCorrectly()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM training_data TABLESAMPLE STRATIFIED(10) ON label AS s");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("training_data", tableReference.Name);
+        Assert.Equal("s", tableReference.Alias);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.Equal(TablesampleMethod.Stratified, tableReference.Tablesample!.Method);
+        Assert.NotNull(tableReference.Tablesample.StratifyColumns);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED with REPEATABLE and alias parses the full syntax.
+    /// </summary>
+    [Fact]
+    public void Stratified_WithRepeatableAndAlias_ParsesCorrectly()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM training_data TABLESAMPLE BALANCED(100) ON label REPEATABLE(7) AS s");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("training_data", tableReference.Name);
+        Assert.Equal("s", tableReference.Alias);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.Equal(TablesampleMethod.Balanced, tableReference.Tablesample!.Method);
+        Assert.NotNull(tableReference.Tablesample.Seed);
+        Assert.NotNull(tableReference.Tablesample.StratifyColumns);
+    }
+
+    // ───────────────────── STRATIFIED/BALANCED case insensitivity ─────────────────────
+
+    /// <summary>
+    /// STRATIFIED and BALANCED are case-insensitive identifiers.
+    /// </summary>
+    [Theory]
+    [InlineData("stratified", TablesampleMethod.Stratified)]
+    [InlineData("STRATIFIED", TablesampleMethod.Stratified)]
+    [InlineData("Stratified", TablesampleMethod.Stratified)]
+    [InlineData("balanced", TablesampleMethod.Balanced)]
+    [InlineData("BALANCED", TablesampleMethod.Balanced)]
+    [InlineData("Balanced", TablesampleMethod.Balanced)]
+    public void StratifiedBalancedMethodIsCaseInsensitive(string method, TablesampleMethod expected)
+    {
+        SelectStatement result = Parse(
+            $"SELECT * FROM t TABLESAMPLE {method}(50) ON label");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.NotNull(tableReference.Tablesample);
+        Assert.Equal(expected, tableReference.Tablesample!.Method);
+    }
+
+    // ───────────────────── STRATIFIED/BALANCED validation ─────────────────────
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED without ON clause fails with a parse error.
+    /// </summary>
+    [Fact]
+    public void Stratified_MissingOnClause_Fails()
+    {
+        Assert.ThrowsAny<Exception>(() => Parse(
+            "SELECT * FROM t TABLESAMPLE STRATIFIED(10)"));
+    }
+
+    /// <summary>
+    /// TABLESAMPLE BALANCED without ON clause fails with a parse error.
+    /// </summary>
+    [Fact]
+    public void Balanced_MissingOnClause_Fails()
+    {
+        Assert.ThrowsAny<Exception>(() => Parse(
+            "SELECT * FROM t TABLESAMPLE BALANCED(100)"));
+    }
+
+    /// <summary>
+    /// TABLESAMPLE BERNOULLI with ON clause fails with a parse error.
+    /// </summary>
+    [Fact]
+    public void Bernoulli_WithOnClause_Fails()
+    {
+        Assert.ThrowsAny<Exception>(() => Parse(
+            "SELECT * FROM t TABLESAMPLE BERNOULLI(10) ON label"));
+    }
+
+    /// <summary>
+    /// TABLESAMPLE SYSTEM with ON clause fails with a parse error.
+    /// </summary>
+    [Fact]
+    public void System_WithOnClause_Fails()
+    {
+        Assert.ThrowsAny<Exception>(() => Parse(
+            "SELECT * FROM t TABLESAMPLE SYSTEM(10) ON label"));
+    }
+
+    // ───────────────────── STRATIFIED/BALANCED not reserved ─────────────────────
+
+    /// <summary>
+    /// STRATIFIED and BALANCED can still be used as table names.
+    /// </summary>
+    [Fact]
+    public void StratifiedAsTableName_ParsesCorrectly()
+    {
+        SelectStatement result = Parse("SELECT * FROM stratified");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("stratified", tableReference.Name);
+        Assert.Null(tableReference.Tablesample);
+    }
+
+    [Fact]
+    public void BalancedAsTableName_ParsesCorrectly()
+    {
+        SelectStatement result = Parse("SELECT * FROM balanced");
+
+        TableReference tableReference = Assert.IsType<TableReference>(result.From!.Source);
+        Assert.Equal("balanced", tableReference.Name);
+        Assert.Null(tableReference.Tablesample);
+    }
+
+    // ───────────────────── STRATIFIED/BALANCED in JOIN ─────────────────────
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED on a joined table with ON clause does not conflict with JOIN ON.
+    /// </summary>
+    [Fact]
+    public void Stratified_InJoin_ParsesCorrectly()
+    {
+        SelectStatement result = Parse(
+            "SELECT * FROM orders AS o JOIN items TABLESAMPLE STRATIFIED(10) ON category REPEATABLE(42) AS i ON o.id = i.order_id");
+
+        Assert.NotNull(result.Joins);
+        Assert.Single(result.Joins!);
+
+        TableReference joinedTable = Assert.IsType<TableReference>(result.Joins![0].Source);
+        Assert.Equal("items", joinedTable.Name);
+        Assert.Equal("i", joinedTable.Alias);
+        Assert.NotNull(joinedTable.Tablesample);
+        Assert.Equal(TablesampleMethod.Stratified, joinedTable.Tablesample!.Method);
+        Assert.NotNull(joinedTable.Tablesample.StratifyColumns);
+        Assert.Equal("category", joinedTable.Tablesample.StratifyColumns![0].ColumnName);
+
+        LiteralExpression seed = Assert.IsType<LiteralExpression>(joinedTable.Tablesample.Seed);
+        Assert.Equal(42d, seed.Value);
+    }
+
+    // ───────────────────── Existing: BERNOULLI/SYSTEM not reserved ─────────────────────
 
     /// <summary>
     /// BERNOULLI and SYSTEM can still be used as table names since they are not reserved keywords.

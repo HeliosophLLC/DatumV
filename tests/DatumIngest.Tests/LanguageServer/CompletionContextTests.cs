@@ -309,4 +309,59 @@ public sealed class CompletionContextTests
 
         Assert.Equal(CompletionZoneKind.AfterDeleteFrom, zone.Kind);
     }
+
+    // ───────────────────── TABLESAMPLE contextual zones ─────────────────────
+
+    [Fact]
+    public void Classify_AfterTablesample_ReturnsAfterTablesample()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM t TABLESAMPLE ", 28);
+
+        Assert.Equal(CompletionZoneKind.AfterTablesample, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterTablesample_WithPrefix_ReturnsAfterTablesample()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM t TABLESAMPLE STR", 31);
+
+        Assert.Equal(CompletionZoneKind.AfterTablesample, zone.Kind);
+        Assert.Equal("STR", zone.Prefix);
+    }
+
+    [Fact]
+    public void Classify_AfterTablesampleMethodArg_ReturnsAfterTablesampleMethodArg()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT * FROM t TABLESAMPLE STRATIFIED(10) ", 44);
+
+        Assert.Equal(CompletionZoneKind.AfterTablesampleMethodArg, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterTablesampleBernoulliArg_ReturnsAfterTablesampleMethodArg()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT * FROM t TABLESAMPLE BERNOULLI(50) ", 43);
+
+        Assert.Equal(CompletionZoneKind.AfterTablesampleMethodArg, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideTablesampleArgs_ReturnsInsideTablesampleArg()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT * FROM t TABLESAMPLE BERNOULLI(", 38);
+
+        Assert.Equal(CompletionZoneKind.InsideTablesampleArg, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_InsideTablesampleStratifiedArgs_ReturnsInsideTablesampleArg()
+    {
+        CompletionZone zone = CompletionContext.Classify(
+            "SELECT * FROM \"customers_csv\" TABLESAMPLE STRATIFIED(", 53);
+
+        Assert.Equal(CompletionZoneKind.InsideTablesampleArg, zone.Kind);
+    }
 }

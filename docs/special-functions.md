@@ -523,3 +523,99 @@ FROM ranges
 
 - At most one DEFINE block per SELECT.
 - Cannot be combined with inline LET bindings in the same SELECT.
+
+---
+
+## TABLESAMPLE — Class-Balanced Sampling
+
+TABLESAMPLE limits the rows returned from a table source to an approximate sample. Beyond standard BERNOULLI and SYSTEM methods, DatumIngest adds STRATIFIED and BALANCED for ML dataset preparation.
+
+### Syntax
+
+```sql
+FROM table TABLESAMPLE method(argument) [ON column | ON (col1, col2)] [REPEATABLE(seed)]
+```
+
+### Methods
+
+#### BERNOULLI / SYSTEM (standard)
+
+Row-level probabilistic sampling. Each row is independently included with probability `percentage / 100`:
+
+```sql
+SELECT * FROM data TABLESAMPLE BERNOULLI(10)              -- ~10% of rows
+SELECT * FROM data TABLESAMPLE BERNOULLI(10) REPEATABLE(42) -- deterministic
+```
+
+#### STRATIFIED (proportional per-class sampling)
+
+Samples each class at the same rate, preserving the original class distribution. Requires an `ON` clause specifying the stratification column.
+
+```sql
+-- 10% of each class: if 5000 cats and 1000 dogs, returns ~500 cats and ~100 dogs
+SELECT * FROM training_data
+TABLESAMPLE STRATIFIED(10) ON label REPEATABLE(42)
+```
+
+**Algorithm:** Uniform Bernoulli at the given rate — each row is independently included with probability `percentage / 100`, regardless of its class. Because the rate is the same for all classes, proportions are maintained in expectation. Single-pass streaming with no buffering.
+
+**Output:** Approximate row count. Class proportions preserved in expectation.
+
+#### BALANCED (fixed-count per-class sampling)
+
+Returns exactly `count` rows from each distinct class via reservoir sampling (Algorithm R). Equalizes class representation regardless of the original distribution.
+
+```sql
+-- Exactly 500 rows per class: returns 500 cats and 500 dogs
+SELECT * FROM training_data
+TABLESAMPLE BALANCED(500) ON label REPEATABLE(42)
+
+-- Composite stratification key
+SELECT * FROM training_data
+TABLESAMPLE BALANCED(500) ON (label, split)
+```
+
+**Algorithm:** Single-pass per-class reservoir sampling. Maintains one reservoir of capacity `count` per distinct class. Each row is evaluated against its class's reservoir using Algorithm R. After all input is consumed, reservoirs are emitted in class-first order (all rows from the first-seen class, then the second, etc.).
+
+**Output:** Exact row count per class (or fewer if a class has fewer rows than the target — no oversampling). Rows within each class are in reservoir-random order.
+
+**Memory:** Buffers up to `count × C` rows, where `C` is the number of distinct classes. A configurable maximum class count (default 10,000) prevents unbounded memory growth.
+
+### REPEATABLE (deterministic seeding)
+
+`REPEATABLE(seed)` makes any sampling method deterministic. The same seed on the same data always produces the same sample:
+
+```sql
+SELECT * FROM data TABLESAMPLE BALANCED(100) ON label REPEATABLE(42)
+```
+
+### Interaction with WHERE
+
+TABLESAMPLE applies at the scan level. Pushed-down WHERE predicates filter rows **before** sampling:
+
+```sql
+-- Sample from the filtered population (only valid rows)
+SELECT * FROM data TABLESAMPLE STRATIFIED(10) ON label
+WHERE is_valid = 1
+```
+
+### Combining with other clauses
+
+TABLESAMPLE composes naturally with all query clauses:
+
+```sql
+-- Balanced sample → sort → limit → output
+SELECT * FROM training_data
+TABLESAMPLE BALANCED(1000) ON label REPEATABLE(42)
+ORDER BY label, id
+LIMIT 5000
+INTO 'balanced_train.parquet'
+```
+
+### When to use STRATIFIED vs. BALANCED
+
+| Goal | Method | Example |
+|------|--------|---------|
+| Reduce dataset size while preserving class ratios | STRATIFIED | `STRATIFIED(10) ON label` — 10% of each class |
+| Equalize underrepresented classes for training | BALANCED | `BALANCED(1000) ON label` — exactly 1000 per class |
+| Quick exploratory sample | BERNOULLI | `BERNOULLI(1)` — ~1% random sample |

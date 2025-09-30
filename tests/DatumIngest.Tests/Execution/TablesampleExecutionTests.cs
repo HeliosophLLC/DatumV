@@ -186,7 +186,139 @@ public sealed class TablesampleExecutionTests
         Assert.InRange(results.Count, 0, 50);
     }
 
+    // ───────────────────── Stratified ─────────────────────
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED(50) ON label preserves class proportions.
+    /// </summary>
+    [Fact]
+    public async Task Stratified_E2E_PreservesDistribution()
+    {
+        Row[] data = GenerateClassRows(("cat", 300), ("dog", 300), ("bird", 300));
+        TableCatalog catalog = CreateCatalog(("data", data));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT * FROM data TABLESAMPLE STRATIFIED(50) ON label REPEATABLE(42)",
+            catalog);
+
+        // ~450 total (50% of 900), with roughly equal proportions.
+        Assert.InRange(results.Count, 350, 550);
+
+        int catCount = results.Count(r => r["label"].AsString() == "cat");
+        int dogCount = results.Count(r => r["label"].AsString() == "dog");
+        int birdCount = results.Count(r => r["label"].AsString() == "bird");
+
+        // Each class should have roughly 50% of 300 = ~150 rows.
+        Assert.InRange(catCount, 100, 200);
+        Assert.InRange(dogCount, 100, 200);
+        Assert.InRange(birdCount, 100, 200);
+    }
+
+    // ───────────────────── Balanced ─────────────────────
+
+    /// <summary>
+    /// TABLESAMPLE BALANCED(50) ON label returns exactly 50 per class.
+    /// </summary>
+    [Fact]
+    public async Task Balanced_E2E_ExactCountPerClass()
+    {
+        Row[] data = GenerateClassRows(("cat", 300), ("dog", 200), ("bird", 100));
+        TableCatalog catalog = CreateCatalog(("data", data));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT * FROM data TABLESAMPLE BALANCED(50) ON label REPEATABLE(42)",
+            catalog);
+
+        Assert.Equal(150, results.Count);
+
+        int catCount = results.Count(r => r["label"].AsString() == "cat");
+        int dogCount = results.Count(r => r["label"].AsString() == "dog");
+        int birdCount = results.Count(r => r["label"].AsString() == "bird");
+
+        Assert.Equal(50, catCount);
+        Assert.Equal(50, dogCount);
+        Assert.Equal(50, birdCount);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE BALANCED returns all rows from a class that has fewer than the target.
+    /// </summary>
+    [Fact]
+    public async Task Balanced_E2E_SmallClass()
+    {
+        Row[] data = GenerateClassRows(("cat", 100), ("dog", 3));
+        TableCatalog catalog = CreateCatalog(("data", data));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT * FROM data TABLESAMPLE BALANCED(50) ON label REPEATABLE(42)",
+            catalog);
+
+        int catCount = results.Count(r => r["label"].AsString() == "cat");
+        int dogCount = results.Count(r => r["label"].AsString() == "dog");
+
+        Assert.Equal(50, catCount);
+        Assert.Equal(3, dogCount);
+    }
+
+    /// <summary>
+    /// TABLESAMPLE BALANCED with REPEATABLE produces deterministic results.
+    /// </summary>
+    [Fact]
+    public async Task Balanced_E2E_Deterministic()
+    {
+        Row[] data = GenerateClassRows(("cat", 200), ("dog", 200));
+        TableCatalog catalog = CreateCatalog(("data", data));
+
+        List<Row> result1 = await ExecuteQueryAsync(
+            "SELECT * FROM data TABLESAMPLE BALANCED(20) ON label REPEATABLE(42)",
+            catalog);
+        List<Row> result2 = await ExecuteQueryAsync(
+            "SELECT * FROM data TABLESAMPLE BALANCED(20) ON label REPEATABLE(42)",
+            catalog);
+
+        Assert.Equal(result1.Count, result2.Count);
+        for (int i = 0; i < result1.Count; i++)
+        {
+            Assert.Equal(result1[i]["id"].AsFloat32(), result2[i]["id"].AsFloat32());
+        }
+    }
+
+    /// <summary>
+    /// TABLESAMPLE STRATIFIED works with a WHERE clause (WHERE filters first).
+    /// </summary>
+    [Fact]
+    public async Task Stratified_E2E_WithWhereClause()
+    {
+        Row[] data = GenerateClassRows(("cat", 200), ("dog", 200));
+        TableCatalog catalog = CreateCatalog(("data", data));
+
+        // WHERE id >= 100 filters to ~300 rows, then sample 100%.
+        List<Row> results = await ExecuteQueryAsync(
+            "SELECT * FROM data TABLESAMPLE STRATIFIED(100) ON label WHERE id >= 100",
+            catalog);
+
+        // All rows with id >= 100 should be returned.
+        Assert.All(results, r => Assert.True(r["id"].AsFloat32() >= 100));
+    }
+
     // ───────────────────── Helpers ─────────────────────
+
+    private static Row[] GenerateClassRows(params (string label, int count)[] classes)
+    {
+        List<Row> rows = [];
+        int id = 1;
+        foreach ((string label, int count) in classes)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                rows.Add(MakeRow(
+                    ("id", DataValue.FromFloat32(id++)),
+                    ("label", DataValue.FromString(label))));
+            }
+        }
+
+        return rows.ToArray();
+    }
 
     private static Row[] GenerateRows(int count)
     {

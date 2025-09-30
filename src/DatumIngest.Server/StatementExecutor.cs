@@ -380,6 +380,7 @@ internal sealed class StatementExecutor
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,
+                MaxStratifyClasses = _session.Governor.MaxStratifyClasses,
             };
 
             IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);
@@ -712,6 +713,7 @@ internal sealed class StatementExecutor
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,
+                MaxStratifyClasses = _session.Governor.MaxStratifyClasses,
             };
 
             IQueryOperator plan = await planner
@@ -1269,6 +1271,7 @@ internal sealed class StatementExecutor
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,
+                MaxStratifyClasses = _session.Governor.MaxStratifyClasses,
             };
 
             IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, cancellationToken).ConfigureAwait(false);

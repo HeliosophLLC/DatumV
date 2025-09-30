@@ -62,6 +62,14 @@ internal static class MonarchGrammarFactory
                 // Double-quoted identifiers: "column name". "" is the escape sequence.
                 new[] { @"""([^""\\]|"""")*""", "identifier" },
 
+                // TABLESAMPLE transitions to a sub-state that highlights the method
+                // name (BERNOULLI, SYSTEM, STRATIFIED, BALANCED) as a keyword.
+                // Without this, method names are colored as plain identifiers since
+                // they are parsed as contextual identifiers, not reserved keywords.
+                // The negative lookahead prevents matching a longer identifier like
+                // TABLESAMPLEFOO.
+                new[] { @"TABLESAMPLE(?!\w)", "keyword", "@tablesampleMethod" },
+
                 // Unquoted identifiers and keywords. The @keywords and @boolNullKeywords
                 // case tables are checked first; anything else is a plain identifier.
                 new object[]
@@ -106,6 +114,18 @@ internal static class MonarchGrammarFactory
             {
                 new[] { @"\*/", "comment", "@pop" },
                 new[] { @".", "comment" },
+            },
+
+            // TABLESAMPLE method sub-state: highlights the method name that follows
+            // TABLESAMPLE as a keyword, then pops back to root. Handles contextual
+            // identifiers (BERNOULLI, SYSTEM, STRATIFIED, BALANCED) that aren't
+            // reserved keywords. The empty-match fallback ensures non-method tokens
+            // are re-processed by root state rules.
+            tablesampleMethod = new object[]
+            {
+                new[] { @"[ \t\r\n]+", "white" },
+                new[] { @"(?:BERNOULLI|SYSTEM|STRATIFIED|BALANCED)(?!\w)", "keyword", "@pop" },
+                new[] { @"", "", "@pop" },
             },
         },
     };

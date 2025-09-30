@@ -377,4 +377,90 @@ public sealed class CompletionProviderTests
         Assert.Contains(items, item => item.Label == "users" && item.Kind == CompletionItemKind.Table);
         Assert.Contains(items, item => item.Label == "ADD" && item.Kind == CompletionItemKind.Keyword);
     }
+
+    // ───────────────────── TABLESAMPLE contextual completions ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterTablesample_OffersMethodNames()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT * FROM users TABLESAMPLE ", 32);
+
+        Assert.Contains(items, item => item.Label == "BERNOULLI");
+        Assert.Contains(items, item => item.Label == "SYSTEM");
+        Assert.Contains(items, item => item.Label == "STRATIFIED");
+        Assert.Contains(items, item => item.Label == "BALANCED");
+        // Should NOT include tables or columns — only method names.
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Table);
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterTablesample_MethodsHaveDocumentation()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT * FROM users TABLESAMPLE ", 32);
+
+        CompletionItem stratified = Assert.Single(items, item => item.Label == "STRATIFIED");
+        Assert.NotNull(stratified.Detail);
+        Assert.NotNull(stratified.Documentation);
+        Assert.Contains("ON", stratified.Documentation!);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterTablesample_WithPrefix_FiltersMethods()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT * FROM users TABLESAMPLE B", 33);
+
+        Assert.Contains(items, item => item.Label == "BERNOULLI");
+        Assert.Contains(items, item => item.Label == "BALANCED");
+        Assert.DoesNotContain(items, item => item.Label == "STRATIFIED");
+        Assert.DoesNotContain(items, item => item.Label == "SYSTEM");
+    }
+
+    [Fact]
+    public void GetCompletions_AfterTablesampleMethodArg_OffersOnAndRepeatable()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT * FROM users TABLESAMPLE STRATIFIED(10) ", 47);
+
+        Assert.Contains(items, item => item.Label == "ON");
+        Assert.Contains(items, item => item.Label == "REPEATABLE");
+        // Should NOT include method names or tables.
+        Assert.DoesNotContain(items, item => item.Label == "BERNOULLI");
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Table);
+    }
+
+    [Fact]
+    public void GetCompletions_InsideTablesampleArg_ReturnsEmpty()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT * FROM users TABLESAMPLE STRATIFIED(", 44);
+
+        // No column names, no functions — the argument is a numeric literal.
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterTablesampleMethodsInsertParens()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions(
+            "SELECT * FROM users TABLESAMPLE ", 32);
+
+        CompletionItem balanced = Assert.Single(items, item => item.Label == "BALANCED");
+        Assert.Equal("BALANCED(", balanced.InsertText);
+    }
 }

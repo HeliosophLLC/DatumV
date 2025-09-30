@@ -144,6 +144,11 @@ public static class CompletionContext
         // Track parenthesis nesting to skip function arguments when looking for context.
         int parenthesisDepth = 0;
 
+        // Track whether the backward walk has crossed a balanced (...) group.
+        // Used by contextual keyword zones (e.g., TABLESAMPLE) to distinguish
+        // "right after the keyword" from "after the keyword's arguments".
+        bool passedParenGroup = false;
+
         for (int index = tokens.Count - 1; index >= 0; index--)
         {
             SqlToken kind = tokens[index].Kind;
@@ -159,6 +164,11 @@ public static class CompletionContext
                 if (parenthesisDepth > 0)
                 {
                     parenthesisDepth--;
+                    if (parenthesisDepth == 0)
+                    {
+                        passedParenGroup = true;
+                    }
+
                     continue;
                 }
 
@@ -185,6 +195,16 @@ public static class CompletionContext
                 if (index > 0 && IsInsertColumnListParen(tokens, index))
                 {
                     return CompletionZoneKind.AfterInsertTable;
+                }
+
+                // Check if this is a TABLESAMPLE method argument: TABLESAMPLE STRATIFIED(|
+                // The identifier before the paren is the method name; if preceded by
+                // TABLESAMPLE, we're inside the method argument (percentage or count).
+                if (index >= 2
+                    && tokens[index - 1].Kind == SqlToken.Identifier
+                    && tokens[index - 2].Kind == SqlToken.Tablesample)
+                {
+                    return CompletionZoneKind.InsideTablesampleArg;
                 }
 
                 // We're inside a function call or subquery — check what precedes the paren.
@@ -363,6 +383,17 @@ public static class CompletionContext
                     // After LET — user may be typing a binding name or expression.
                     // Return AfterSelect to offer columns and functions for the expression.
                     return CompletionZoneKind.AfterSelect;
+
+                // ───────────────────── Contextual identifier keywords ─────────────────────
+
+                case SqlToken.Tablesample:
+                    // TABLESAMPLE is a contextual keyword governing point. If we've crossed
+                    // a (...) group, the cursor is after the method arguments (e.g., STRATIFIED(10) |)
+                    // and we should suggest ON/REPEATABLE. Otherwise, we're right after TABLESAMPLE
+                    // and should suggest method names.
+                    return passedParenGroup
+                        ? CompletionZoneKind.AfterTablesampleMethodArg
+                        : CompletionZoneKind.AfterTablesample;
 
                 default:
                     // Identifiers, literals, etc. — keep walking back.
@@ -544,4 +575,15 @@ public enum CompletionZoneKind
 
     /// <summary>After ALTER TABLE name ADD — offer COLUMN keyword and column type context.</summary>
     AfterAlterTableAdd,
+
+    // ───────────────────── Contextual identifier zones ─────────────────────
+
+    /// <summary>After TABLESAMPLE — offer sampling method names (BERNOULLI, SYSTEM, STRATIFIED, BALANCED).</summary>
+    AfterTablesample,
+
+    /// <summary>After TABLESAMPLE method(arg) — offer ON (for STRATIFIED/BALANCED) and REPEATABLE.</summary>
+    AfterTablesampleMethodArg,
+
+    /// <summary>Inside TABLESAMPLE method argument parens — indicate expected argument type (percentage or count).</summary>
+    InsideTablesampleArg,
 }
