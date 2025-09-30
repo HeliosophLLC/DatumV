@@ -196,6 +196,24 @@ public static class DatumIngester
         Action<IngestionProgress>? progress,
         CancellationToken cancellationToken)
     {
+        ReferenceStore.BeginQueryScope();
+        try
+        {
+        return await IngestCoreScopedAsync(baseTableName, filePath, progress, cancellationToken)
+            .ConfigureAwait(false);
+        }
+        finally
+        {
+            ReferenceStore.EndQueryScope();
+        }
+    }
+
+    private static async Task<DatumIngestionResult> IngestCoreScopedAsync(
+        string baseTableName,
+        string filePath,
+        Action<IngestionProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         TableCatalog catalog = new();
         await catalog.RegisterAsync(baseTableName, filePath, cancellationToken).ConfigureAwait(false);
 
@@ -362,6 +380,25 @@ public static class DatumIngester
     // ──────────────────── Indexing core ────────────────────
 
     private static async Task<DatumIndexResult> BuildIndexCoreAsync(
+        string baseTableName,
+        string filePath,
+        DatumIndexerOptions options,
+        Action<IndexingProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ReferenceStore.BeginQueryScope();
+        try
+        {
+        return await BuildIndexCoreScopedAsync(baseTableName, filePath, options, progress, cancellationToken)
+            .ConfigureAwait(false);
+        }
+        finally
+        {
+            ReferenceStore.EndQueryScope();
+        }
+    }
+
+    private static async Task<DatumIndexResult> BuildIndexCoreScopedAsync(
         string baseTableName,
         string filePath,
         DatumIndexerOptions options,
