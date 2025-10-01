@@ -149,6 +149,43 @@ public sealed class CsvTableProviderTests
         Assert.Equal(5, rows[2]["y"].AsInt32());
     }
 
+    [Fact]
+    public async Task Open_UnquotedNullLiteralIsTreatedAsNull()
+    {
+        CsvTableProvider provider = new();
+        Schema schema = await provider.GetSchemaAsync(Descriptor("null_literal.csv"), CancellationToken.None);
+
+        // "value" column should infer as Int32 — unquoted NULL must not poison type inference.
+        Assert.Equal(DataKind.Int32, schema.Columns[1].Kind);
+        // "label" column has quoted "NULL" on row 5, so it's a real string value → String.
+        Assert.Equal(DataKind.String, schema.Columns[2].Kind);
+
+        List<Row> rows = await ReadAllAsync(
+            provider.OpenAsync(Descriptor("null_literal.csv"), null, CancellationToken.None));
+
+        Assert.Equal(5, rows.Count);
+
+        // Row 1: id=1, value=100, label=alpha
+        Assert.Equal(100, rows[0]["value"].AsInt32());
+        Assert.Equal("alpha", rows[0]["label"].AsString());
+
+        // Row 2: id=2, value=NULL (unquoted → null), label=beta
+        Assert.True(rows[1]["value"].IsNull);
+        Assert.Equal("beta", rows[1]["label"].AsString());
+
+        // Row 3: id=3, value=300, label=NULL (unquoted → null)
+        Assert.Equal(300, rows[2]["value"].AsInt32());
+        Assert.True(rows[2]["label"].IsNull);
+
+        // Row 4: id=4, value=NULL, label=NULL (both unquoted → null)
+        Assert.True(rows[3]["value"].IsNull);
+        Assert.True(rows[3]["label"].IsNull);
+
+        // Row 5: id=5, value=500, label="NULL" (quoted → literal string "NULL")
+        Assert.Equal(500, rows[4]["value"].AsInt32());
+        Assert.Equal("NULL", rows[4]["label"].AsString());
+    }
+
     // ───────────────────── Empty file (header only) ─────────────────────
 
     [Fact]

@@ -43,6 +43,8 @@ CSV files carry no schema, so the provider infers column types from the first 10
 
 **Float detection.** If all 100 values parse as `double` but some have fractional parts, the column is inferred as `Float64`. If all values are integer-valued doubles (no fractions), the column is `Int64`.
 
+**Null literal.** An unquoted field whose trimmed value equals `NULL` (case-insensitive) is treated as a null value, not as a string. This matches the convention used by SQL Server, Excel, and other tools when exporting query results to CSV. To preserve the literal string `"NULL"`, quote the field. Empty fields are also treated as null.
+
 Implements `IChunkMeasuringProvider` for source index byte-range measurement. The pre-scan is quote-aware, correctly handling multi-line quoted fields and CRLF line endings.
 
 ## JSON

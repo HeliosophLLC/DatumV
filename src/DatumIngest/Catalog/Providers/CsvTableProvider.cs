@@ -449,7 +449,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                         if (currentFieldIndex == projectedIndices[projectionIndex])
                         {
                             ReadOnlySpan<char> fieldSpan = lineSpan[fieldStart..charIndex].Trim();
-                            values[projectionIndex] = ParseFieldSpan(fieldSpan, projectedKinds[projectionIndex]);
+                            values[projectionIndex] = IsNullLiteral(fieldSpan)
+                                ? DataValue.Null(projectedKinds[projectionIndex])
+                                : ParseFieldSpan(fieldSpan, projectedKinds[projectionIndex]);
                             projectionIndex++;
                         }
 
@@ -798,6 +800,14 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
     }
 
     /// <summary>
+    /// Returns <c>true</c> when the trimmed span is the unquoted literal <c>NULL</c>
+    /// (case-insensitive). Quoted fields never reach this method — they are handled by
+    /// <see cref="ParseCsvLineList"/> which strips quotes and preserves the literal text.
+    /// </summary>
+    private static bool IsNullLiteral(ReadOnlySpan<char> field)
+        => field.Length == 4 && field.Equals("NULL", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Selects the narrowest signed integer <see cref="DataKind"/> whose range covers
     /// both <paramref name="minimum"/> and <paramref name="maximum"/>.
     /// </summary>
@@ -1124,14 +1134,17 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
             {
                 // Unquoted field
                 int nextDelimiter = line.IndexOf(delimiter, position);
+                string fieldValue;
                 if (nextDelimiter == -1)
                 {
-                    fields.Add(line[position..]);
+                    fieldValue = line[position..];
+                    fields.Add(fieldValue.Equals("NULL", StringComparison.OrdinalIgnoreCase) ? string.Empty : fieldValue);
                     break;
                 }
                 else
                 {
-                    fields.Add(line[position..nextDelimiter]);
+                    fieldValue = line[position..nextDelimiter];
+                    fields.Add(fieldValue.Equals("NULL", StringComparison.OrdinalIgnoreCase) ? string.Empty : fieldValue);
                     position = nextDelimiter + 1;
                 }
             }
@@ -1422,7 +1435,9 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                         if (currentFieldIndex == projectedIndices[projectionIndex])
                         {
                             ReadOnlySpan<char> fieldSpan = lineSpan[fieldStart..charIndex].Trim();
-                            values[projectionIndex] = ParseFieldSpan(fieldSpan, projectedKinds[projectionIndex]);
+                            values[projectionIndex] = IsNullLiteral(fieldSpan)
+                                ? DataValue.Null(projectedKinds[projectionIndex])
+                                : ParseFieldSpan(fieldSpan, projectedKinds[projectionIndex]);
                             projectionIndex++;
                         }
 

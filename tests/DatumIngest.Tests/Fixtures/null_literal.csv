@@ -1,0 +1,6 @@
+id,value,label
+1,100,alpha
+2,NULL,beta
+3,300,NULL
+4,NULL,NULL
+5,500,"NULL"
