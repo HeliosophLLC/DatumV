@@ -17,15 +17,28 @@ public sealed class LanguageService
     /// Initializes the language service with a manifest JSON string.
     /// Must be called before any other method.
     /// </summary>
+    /// <param name="manifest">The <see cref="LanguageServerManifest"/>.</param>
+    /// <exception cref="InvalidOperationException">Thrown if the manifest cannot be deserialized.</exception>
+    public void Initialize(LanguageServerManifest manifest)
+    {
+        _manifest = manifest ?? throw new InvalidOperationException("Failed to deserialize language server manifest.");
+
+        _completionProvider = new CompletionProvider(_manifest);
+        _hoverProvider = new HoverProvider(_manifest);
+    }
+
+        /// <summary>
+    /// Initializes the language service with a manifest JSON string.
+    /// Must be called before any other method.
+    /// </summary>
     /// <param name="manifestJson">The JSON-serialized <see cref="LanguageServerManifest"/>.</param>
     /// <exception cref="InvalidOperationException">Thrown if the manifest cannot be deserialized.</exception>
     public void Initialize(string manifestJson)
     {
-        _manifest = LanguageServerManifestSerializer.Deserialize(manifestJson)
+        LanguageServerManifest manifest = LanguageServerManifestSerializer.Deserialize(manifestJson)
             ?? throw new InvalidOperationException("Failed to deserialize language server manifest.");
 
-        _completionProvider = new CompletionProvider(_manifest);
-        _hoverProvider = new HoverProvider(_manifest);
+        Initialize(manifest);
     }
 
     /// <summary>
@@ -34,7 +47,7 @@ public sealed class LanguageService
     /// <param name="sql">The full SQL text in the editor.</param>
     /// <param name="cursorOffset">The 0-based character offset of the cursor.</param>
     /// <returns>An array of completion items.</returns>
-    /// <exception cref="InvalidOperationException">Thrown if <see cref="Initialize"/> has not been called.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if <see cref="Initialize(LanguageServerManifest)"/> has not been called.</exception>
     public CompletionItem[] GetCompletions(string sql, int cursorOffset)
     {
         EnsureInitialized();
@@ -60,7 +73,7 @@ public sealed class LanguageService
     /// <param name="sql">The full SQL text in the editor.</param>
     /// <param name="cursorOffset">The 0-based character offset of the cursor.</param>
     /// <returns>A hover result with Markdown content, or null.</returns>
-    /// <exception cref="InvalidOperationException">Thrown if <see cref="Initialize"/> has not been called.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if <see cref="Initialize(LanguageServerManifest)"/> has not been called.</exception>
     public HoverResult? GetHover(string sql, int cursorOffset)
     {
         EnsureInitialized();
@@ -71,6 +84,25 @@ public sealed class LanguageService
     /// Returns whether the service has been initialized with a manifest.
     /// </summary>
     public bool IsInitialized => _manifest is not null;
+
+    /// <summary>
+    /// Returns the full documentation section for the given key, or null if not found.
+    /// Does not require <see cref="Initialize(LanguageServerManifest)"/> — documentation is static.
+    /// </summary>
+    /// <param name="sectionKey">The section key (e.g. "sql/select", "functions/string/upper").</param>
+    public static DocumentationSection? GetDocSection(string sectionKey)
+    {
+        return DocumentationIndex.Instance.TryGetSection(sectionKey);
+    }
+
+    /// <summary>
+    /// Returns all documentation section keys and titles for building a table of contents.
+    /// Does not require <see cref="Initialize(LanguageServerManifest)"/> — documentation is static.
+    /// </summary>
+    public static IReadOnlyList<DocumentationSectionSummary> GetDocTableOfContents()
+    {
+        return DocumentationIndex.Instance.GetTableOfContents();
+    }
 
     private void EnsureInitialized()
     {

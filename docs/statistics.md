@@ -1,6 +1,6 @@
 # Statistics & Manifest
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest collects per-column statistics in a single pass and generates structured JSON manifests describing dataset features for ML pipeline integration.
 
@@ -287,7 +287,7 @@ For tables mutated after initial population (`UPDATE`, `DELETE`, `ALTER TABLE AD
 ANALYZE features   -- rebuilds manifest and source index
 ```
 
-This follows the PostgreSQL convention. See [SQL Reference — ANALYZE](sql.md#analyze) for details.
+This follows the PostgreSQL convention. See [SQL Reference — ANALYZE](sql/ddl-dml.md#analyze) for details.
 
 ### Cost Model
 

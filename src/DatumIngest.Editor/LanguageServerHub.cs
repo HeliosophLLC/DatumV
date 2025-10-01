@@ -86,6 +86,26 @@ public sealed class LanguageServerHub : Hub
         return MonarchGrammarFactory.Build();
     }
 
+    /// <summary>
+    /// Returns the full documentation section for the given key, or null if not found.
+    /// Does not require <see cref="Initialize"/> — documentation is static and
+    /// independent of the schema manifest.
+    /// </summary>
+    /// <param name="sectionKey">The section key (e.g. "sql/select", "functions/string/upper").</param>
+    public DocumentationSection? GetDocSection(string sectionKey)
+    {
+        return LanguageService.GetDocSection(sectionKey);
+    }
+
+    /// <summary>
+    /// Returns all documentation section keys and titles for building a table of contents.
+    /// Does not require <see cref="Initialize"/> — documentation is static.
+    /// </summary>
+    public IReadOnlyList<DocumentationSectionSummary> GetDocTableOfContents()
+    {
+        return LanguageService.GetDocTableOfContents();
+    }
+
     /// <inheritdoc/>
     public override Task OnDisconnectedAsync(Exception? exception)
     {

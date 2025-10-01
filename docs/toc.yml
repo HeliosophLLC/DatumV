@@ -1,0 +1,159 @@
+- name: SQL Reference
+  items:
+    - name: Comments
+      href: sql/comments.md
+    - name: SELECT
+      href: sql/select.md
+      items:
+        - name: SELECT DISTINCT
+          href: sql/select.md#select-distinct
+        - name: SELECT * EXCEPT
+          href: sql/select.md#select--except
+        - name: SELECT * REPLACE
+          href: sql/select.md#select--replace
+    - name: LET Bindings
+      href: sql/let-bindings.md
+      items:
+        - name: Tuple Destructuring
+          href: sql/let-bindings.md#tuple-destructuring
+        - name: Memoization
+          href: sql/let-bindings.md#memoization
+    - name: FROM
+      href: sql/from.md
+    - name: JOIN
+      href: sql/joins.md
+      items:
+        - name: LATERAL JOIN / APPLY
+          href: sql/joins.md#lateral-join--apply
+    - name: TABLESAMPLE
+      href: sql/tablesample.md
+      items:
+        - name: BERNOULLI
+          href: sql/tablesample.md#bernoulli
+        - name: SYSTEM
+          href: sql/tablesample.md#system
+        - name: STRATIFIED
+          href: sql/tablesample.md#stratified
+        - name: BALANCED
+          href: sql/tablesample.md#balanced
+    - name: WHERE
+      href: sql/filtering.md
+      items:
+        - name: Pattern Matching
+          href: sql/filtering.md#pattern-matching
+        - name: ESCAPE
+          href: sql/filtering.md#escape-clause
+    - name: GROUP BY
+      href: sql/group-by.md
+      items:
+        - name: GROUP BY ALL
+          href: sql/group-by.md#group-by-all
+        - name: Aggregate Functions
+          href: sql/group-by.md#aggregate-functions
+        - name: HAVING
+          href: sql/group-by.md#having
+    - name: Window Functions
+      href: sql/window-functions.md
+      items:
+        - name: Ranking Functions
+          href: sql/window-functions.md#ranking-functions
+        - name: Offset Functions
+          href: sql/window-functions.md#offset-functions
+        - name: Value Functions
+          href: sql/window-functions.md#value-functions
+        - name: Window Frames
+          href: sql/window-functions.md#window-frames
+    - name: QUALIFY
+      href: sql/qualify.md
+    - name: ASSERT
+      href: sql/assert.md
+    - name: DEFINE
+      href: sql/define.md
+    - name: PIVOT / UNPIVOT
+      href: sql/pivot-unpivot.md
+    - name: INTO
+      href: sql/into.md
+      items:
+        - name: Sharding
+          href: sql/into.md#sharding
+        - name: Checkpointing
+          href: sql/into.md#checkpointing-resumable-writes
+    - name: ORDER BY / LIMIT / OFFSET
+      href: sql/order-by.md
+    - name: CASE Expressions
+      href: sql/case-expressions.md
+    - name: Lambda Expressions
+      href: sql/lambda-expressions.md
+    - name: Array, Struct & Index Literals
+      href: sql/literals.md
+    - name: Common Table Expressions
+      href: sql/cte.md
+      items:
+        - name: Recursive CTEs
+          href: sql/cte.md#recursive-ctes
+        - name: Materialization Hints
+          href: sql/cte.md#materialization-hints
+    - name: Subqueries
+      href: sql/subqueries.md
+    - name: Set Operations
+      href: sql/set-operations.md
+    - name: Parameterized Queries
+      href: sql/parameters.md
+    - name: Type System
+      href: sql/type-system.md
+    - name: EXPLAIN
+      href: sql/explain.md
+    - name: Schema Introspection
+      href: sql/schema-introspection.md
+    - name: DDL / DML
+      href: sql/ddl-dml.md
+      items:
+        - name: CREATE TEMP TABLE
+          href: sql/ddl-dml.md#create-temp-table
+        - name: INSERT INTO
+          href: sql/ddl-dml.md#insert-into
+        - name: UPDATE
+          href: sql/ddl-dml.md#update
+        - name: DELETE
+          href: sql/ddl-dml.md#delete
+        - name: ALTER TABLE
+          href: sql/ddl-dml.md#alter-table-add-column
+        - name: DROP TABLE
+          href: sql/ddl-dml.md#drop-table
+        - name: ANALYZE
+          href: sql/ddl-dml.md#analyze
+        - name: Batch Execution
+          href: sql/ddl-dml.md#batch-execution
+
+- name: Functions
+  items:
+    - name: String
+      href: functions/string.md
+    - name: Numeric
+      href: functions/numeric.md
+    - name: Trigonometric & Hyperbolic
+      href: functions/trigonometric.md
+    - name: ML Activations
+      href: functions/activation.md
+    - name: Vector & Tensor
+      href: functions/vector.md
+    - name: Temporal
+      href: functions/temporal.md
+    - name: Array
+      href: functions/array.md
+    - name: JSON
+      href: functions/json.md
+    - name: Encoding & Hashing
+      href: functions/encoding.md
+    - name: Image
+      href: functions/image.md
+    - name: Random & Sampling
+      href: functions/random.md
+    - name: Utility & Type Conversion
+      href: functions/utility.md
+    - name: Aggregate
+      href: functions/aggregate.md
+    - name: Window
+      href: functions/window.md
+    - name: Table-Valued
+      href: functions/table-valued.md

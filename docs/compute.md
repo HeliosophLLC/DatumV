@@ -1,6 +1,6 @@
 # Compute Backend (gRPC)
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
+[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md)
 
 DatumIngest.Compute is a gRPC service library that exposes the DatumIngest query engine over the network. It wraps the same `SessionManager` and `CommandDispatcher` used by the interactive shell, enabling remote session management, SQL query streaming, and administrative operations. Embed it in any ASP.NET application with two method calls.
 
@@ -483,7 +483,7 @@ Returns all available functions with parameter metadata.
 | `parameters` | `repeated ParameterInfoMessage` | Ordered parameter list. |
 | `return_type` | `string` | Return type name (e.g. `"Float32"`), empty if context-dependent. |
 | `is_table_valued` | `bool` | Whether this is a table-valued function (used in `FROM`/`JOIN`). |
-| `query_unit_cost` | `int32` | Base query-unit cost per invocation. Image functions may incur additional resolution-dependent cost (see [Functions Reference](functions.md)). |
+| `query_unit_cost` | `int32` | Base query-unit cost per invocation. Image functions may incur additional resolution-dependent cost (see [Functions Reference](functions/image.md)). |
 
 **`ParameterInfoMessage`:**
 
@@ -941,7 +941,7 @@ Each governance field in `CreateSessionRequest` follows three-state semantics:
 
 **Throttle delay (`throttle_delay_ms`):** An artificial pause (in milliseconds) injected every 100 rows during streaming, yielding CPU time to other sessions. Designed for batch export workloads where deadline and row budget are not appropriate. The throttle does not produce an error — it simply slows the stream.
 
-**Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from function invocations (scalar, aggregate, and window). Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-message cost via the `query_units` field on `QueryResult`, and query cumulative session cost via `GetUsage`.
+**Query Unit budget (`max_query_units`):** The maximum total Query Units (QU) a single query may accumulate from function invocations (scalar, aggregate, and window). Each function has a base QU cost reflecting its computational weight (see [Functions Reference — cost tiers](functions/image.md)). Image analysis and transform functions additionally incur a supplemental cost proportional to input resolution: `floor(pixelCount / 100,000)` QU per invocation. The server checks the running total after each row; when the budget is exceeded it stops streaming and returns `ResourceExhausted`. Clients can monitor per-message cost via the `query_units` field on `QueryResult`, and query cumulative session cost via `GetUsage`.
 
 **Memory budget (`memory_budget_bytes`):** The maximum memory (in bytes) that memory-intensive operators may use before spilling to temporary files on disk. Covered operators:
 

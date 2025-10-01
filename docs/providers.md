@@ -1,6 +1,6 @@
 # Data Providers
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest reads from seven file-based data providers. Each implements `ITableProvider` and is selected via the `--source` flag or a catalog file. All providers support transparent [gzip decompression](#gzip-compression).
 

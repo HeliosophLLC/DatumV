@@ -62,6 +62,31 @@ public sealed class LanguageServerInterop
         HoverResult? result = _languageService.GetHover(sql, cursorOffset);
         return JsonSerializer.Serialize(result, InteropJsonContext.Default.HoverResult);
     }
+
+    /// <summary>
+    /// Returns the full documentation section for the given key, or "null" if not found.
+    /// Does not require <see cref="Initialize"/> — documentation is static.
+    /// </summary>
+    /// <param name="sectionKey">The section key (e.g. "sql/select", "functions/string/upper").</param>
+    /// <returns>A JSON string representing a documentation section, or the string "null".</returns>
+    [JSInvokable]
+    public string GetDocSection(string sectionKey)
+    {
+        DocumentationSection? section = LanguageService.GetDocSection(sectionKey);
+        return JsonSerializer.Serialize(section, InteropJsonContext.Default.DocumentationSection);
+    }
+
+    /// <summary>
+    /// Returns all documentation section keys and titles for building a table of contents.
+    /// Does not require <see cref="Initialize"/> — documentation is static.
+    /// </summary>
+    /// <returns>A JSON string representing an array of documentation section summaries.</returns>
+    [JSInvokable]
+    public string GetDocTableOfContents()
+    {
+        IReadOnlyList<DocumentationSectionSummary> toc = LanguageService.GetDocTableOfContents();
+        return JsonSerializer.Serialize(toc, InteropJsonContext.Default.IReadOnlyListDocumentationSectionSummary);
+    }
 }
 
 /// <summary>
@@ -70,6 +95,8 @@ public sealed class LanguageServerInterop
 [JsonSerializable(typeof(CompletionItem[]))]
 [JsonSerializable(typeof(Diagnostic[]))]
 [JsonSerializable(typeof(HoverResult))]
+[JsonSerializable(typeof(DocumentationSection))]
+[JsonSerializable(typeof(IReadOnlyList<DocumentationSectionSummary>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

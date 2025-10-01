@@ -25,6 +25,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\docs\toc.yml" LogicalName="DatumIngest.LanguageServer.docs.toc.yml" />
+    <EmbeddedResource Include="..\..\docs\sql\*.md" LogicalName="DatumIngest.LanguageServer.docs.sql.%(Filename).md" />
+    <EmbeddedResource Include="..\..\docs\functions\*.md" LogicalName="DatumIngest.LanguageServer.docs.functions.%(Filename).md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DatumIngest.Parsing\DatumIngest.Parsing.csproj" />
   </ItemGroup>
 

@@ -308,7 +308,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
-                Documentation = function.Description,
+                Documentation = EnrichFunctionDoc(function.Name),
                 SortOrder = 2,
             });
         }
@@ -332,7 +332,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] Table function: {signature}",
                 InsertText = $"{function.Name}(",
-                Documentation = function.Description,
+                Documentation = EnrichFunctionDoc(function.Name),
                 SortOrder = 1,
             });
         }
@@ -357,7 +357,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
-                Documentation = function.Description,
+                Documentation = EnrichFunctionDoc(function.Name),
                 SortOrder = 2,
             });
         }
@@ -382,7 +382,7 @@ public sealed class CompletionProvider
                 Kind = CompletionItemKind.Function,
                 Detail = $"[{function.Category}] {signature}{returnInfo}",
                 InsertText = $"{function.Name}(",
-                Documentation = function.Description,
+                Documentation = EnrichFunctionDoc(function.Name),
                 SortOrder = 2,
             });
         }
@@ -399,6 +399,30 @@ public sealed class CompletionProvider
                 SortOrder = 3,
             });
         }
+    }
+
+    /// <summary>
+    /// Returns a documentation excerpt and "See more" link from the embedded docs
+    /// for the given function name, or null if no matching section exists.
+    /// </summary>
+    private static string? EnrichFunctionDoc(string functionName)
+    {
+        string? sectionKey = DocumentationIndex.Instance.FindFunctionSection(functionName);
+        if (sectionKey is null)
+        {
+            return null;
+        }
+
+        DocumentationSection? section = DocumentationIndex.Instance.TryGetSection(sectionKey);
+        if (section is null)
+        {
+            return null;
+        }
+
+        string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
+        return string.IsNullOrEmpty(section.Excerpt)
+            ? $"[See more](command:datumingest.openDoc?{encodedKey})"
+            : $"{section.Excerpt}\n\n[See more](command:datumingest.openDoc?{encodedKey})";
     }
 
     private static string FormatParameter(ParameterSignature parameter)

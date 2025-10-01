@@ -6,7 +6,7 @@ namespace DatumIngest.Editor;
 /// resulting object is serialized to JSON and used by the browser to provide
 /// syntax highlighting without a server round-trip.
 /// </summary>
-internal static class MonarchGrammarFactory
+public static class MonarchGrammarFactory
 {
     /// <summary>
     /// Constructs and returns the Monarch grammar as an anonymous object graph.
@@ -32,7 +32,7 @@ internal static class MonarchGrammarFactory
     /// single-character ones, literals before identifiers, identifiers last so
     /// keyword matching via the <c>@keywords</c> case table takes precedence.
     /// </remarks>
-    internal static object Build() => new
+    public static object Build() => new
     {
         defaultToken = "identifier",
         ignoreCase = true,

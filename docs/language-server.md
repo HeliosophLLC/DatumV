@@ -1,6 +1,6 @@
 # Language Server
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Star Schema](star-schema.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 DatumIngest includes a SQL language server that provides autocomplete, diagnostics, and hover for the DatumIngest SQL dialect. Two transport options are available: **Blazor WebAssembly** (client-side, no server required) and **SignalR** (server-side, integrated into any ASP.NET host).
 
@@ -144,11 +144,71 @@ AST nodes that carry names (`ColumnReference`, `TableReference`, `FunctionCallEx
 
 Hovering over a token shows contextual documentation:
 
-- **Keywords** — Brief description of the SQL clause
-- **Functions** — Full signature with parameter types and description
+- **Keywords** — Brief description of the SQL clause, with a documentation excerpt and "See more" link
+- **Functions** — Full signature with parameter types, description, and documentation link
 - **Tables** — Column list with types and nullability
 - **Virtual schemas** — Schema description (e.g. "PostgreSQL-compatible metadata schema") and table description (e.g. "Lists all tables visible in the current catalog")
 - **Columns** — Data kind, nullability, and source table
+
+The `HoverResult` includes a `documentationUri` field (e.g. `"sql/select"`, `"functions/string/upper"`) that the host can use to navigate to the full documentation page. The hover markdown also contains a clickable "See more" link using Monaco's `command:` URI scheme.
+
+### Wiring up documentation links
+
+To make the "See more" link clickable in hover tooltips, the host must:
+
+1. **Register a command** that handles documentation navigation.
+2. **Mark hover markdown as trusted** so Monaco renders `command:` links.
+
+```javascript
+// 1. Register the command on the editor instance.
+editor.addCommand(
+    0, // no keybinding
+    (ctx, sectionKey) => {
+        // Fetch full documentation and render it (panel, modal, new tab, etc.)
+        connection.invoke('GetDocSection', sectionKey).then(section => {
+            if (section) {
+                showDocumentation(section); // your rendering logic
+            }
+        });
+    },
+    'datumingest.openDoc'
+);
+
+// 2. In your hover provider, mark the markdown as trusted.
+monaco.languages.registerHoverProvider('datumingest', {
+    provideHover: async (model, position) => {
+        const offset = model.getOffsetAt(position);
+        const result = await connection.invoke('GetHover', model.getValue(), offset);
+        if (!result) return null;
+        return {
+            range: new monaco.Range(
+                result.startLine + 1, result.startColumn + 1,
+                result.endLine + 1, result.endColumn + 1
+            ),
+            contents: [{ value: result.contents, isTrusted: true }],
+        };
+    },
+});
+```
+
+The `isTrusted: true` flag is required for Monaco to render `command:` links as clickable. Without it, links are rendered as plain text.
+
+### Documentation browsing API
+
+Two hub methods provide access to the full documentation content without requiring `Initialize`:
+
+- **`GetDocSection(sectionKey)`** — Returns the full markdown content for a section key.
+- **`GetDocTableOfContents()`** — Returns all section keys and titles for building a sidebar tree.
+
+```javascript
+// Build a documentation sidebar
+const toc = await connection.invoke('GetDocTableOfContents');
+// toc: [{ key: "sql/select", title: "SELECT", source: "sql" }, ...]
+
+// Fetch full content when user clicks a TOC entry
+const section = await connection.invoke('GetDocSection', 'sql/select');
+// section.fullContent contains the complete markdown
+```
 
 ## Syntax Highlighting
 

@@ -1,6 +1,6 @@
 # Star Schema Detection
 
-[← Back to README](../README.md) · [SQL Reference](sql.md) · [Functions](functions.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
+[← Back to README](../README.md) · [SQL Reference](sql/select.md) · [Functions](functions/string.md) · [Providers](providers.md) · [Statistics & Manifest](statistics.md) · [Source Indexes](indexes.md) · [Architecture](architecture.md) · [Language Server](language-server.md) · [Programmatic API](api.md) · [Compute Backend](compute.md)
 
 `StarSchemaDetector` discovers hub/spoke relationships from table manifests without executing any queries. A hub is a table with a unique key column that connects to multiple spoke tables via foreign key relationships. The detector reuses the column matching and evidence scoring infrastructure to find candidates, then groups them by hub table.
 

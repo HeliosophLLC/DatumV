@@ -204,8 +204,8 @@ datum-ingest explore "SELECT * FROM [orders.csv] LIMIT 10" --source ./datasets/m
 
 | Document | Contents |
 |----------|----------|
-| [docs/sql.md](docs/sql.md) | SQL dialect reference, type system, EXPLAIN, schema introspection |
-| [docs/functions.md](docs/functions.md) | All 200+ functions: math, string, JSON, temporal, image, vector, UUID, hashing, window |
+| [docs/sql/](docs/sql/) | SQL dialect reference: SELECT, JOIN, GROUP BY, window functions, type system, DDL/DML, EXPLAIN |
+| [docs/functions/](docs/functions/) | All 200+ functions: math, string, JSON, temporal, image, vector, UUID, hashing, window |
 | [docs/providers.md](docs/providers.md) | Data provider details, options, catalog file format |
 | [docs/statistics.md](docs/statistics.md) | Statistics accumulators, manifest schema, column interactions |
 | [docs/datum-format.md](docs/datum-format.md) | `.datum` binary columnar format: physical layout, encoding strategies, zone maps, compression |

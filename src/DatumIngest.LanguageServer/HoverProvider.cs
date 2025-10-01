@@ -43,14 +43,16 @@ public sealed class HoverProvider
             return null;
         }
 
+        string? docKey = null;
+
         string? markdown = hit.Kind switch
         {
-            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit),
+            SqlToken.Identifier => ResolveIdentifierHover(hit.Text, tokens, hit, out docKey),
             SqlToken.TypeKeyword => TypeDescriptions.TryGetValue(hit.Text, out string? typeDesc) ? typeDesc : null,
             SqlToken.Arrow => "**`->`** Lambda arrow — separates parameter(s) from the body expression.\n\n" +
                 "Usage: `x -> expr` or `(a, b) -> expr` inside higher-order functions " +
                 "such as `array_transform` and `array_filter`.",
-            _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text),
+            _ when IsKeywordToken(hit.Kind) => GetKeywordHover(hit.Kind, hit.Text, out docKey),
             _ => null,
         };
 
@@ -59,6 +61,9 @@ public sealed class HoverProvider
             return null;
         }
 
+        // Append documentation excerpt and "See more" link if a matching section exists.
+        markdown = AppendDocLink(markdown, docKey);
+
         return new HoverResult
         {
             Contents = markdown,
@@ -66,19 +71,23 @@ public sealed class HoverProvider
             StartColumn = hit.Column,
             EndLine = hit.Line,
             EndColumn = hit.Column + hit.Text.Length,
+            DocumentationUri = docKey,
         };
     }
 
     /// <summary>
     /// Resolves hover for an identifier by checking if it's a function, table, or column name.
     /// </summary>
-    private string? ResolveIdentifierHover(string name, List<TokenHit> tokens, TokenHit currentToken)
+    private string? ResolveIdentifierHover(string name, List<TokenHit> tokens, TokenHit currentToken, out string? docKey)
     {
+        docKey = null;
+
         // If followed by '(' it's a function call.
         int currentIndex = tokens.IndexOf(currentToken);
         if (currentIndex >= 0 && currentIndex + 1 < tokens.Count &&
             tokens[currentIndex + 1].Kind == SqlToken.LeftParen)
         {
+            docKey = DocumentationIndex.Instance.FindFunctionSection(name);
             return GetFunctionHover(name);
         }
 
@@ -212,7 +221,21 @@ public sealed class HoverProvider
         return $"**{tableQualifier}.{column.Name}**: {column.Kind}{nullable}";
     }
 
-    private static string? GetKeywordHover(SqlToken kind, string text)
+    private static string? GetKeywordHover(SqlToken kind, string text, out string? docKey)
+    {
+        docKey = null;
+        string? baseHover = GetKeywordDescription(kind);
+        if (baseHover is null)
+        {
+            return null;
+        }
+
+        // Try to find a matching documentation section for this keyword.
+        docKey = DocumentationIndex.Instance.FindKeywordSection(text.ToUpperInvariant());
+        return baseHover;
+    }
+
+    private static string? GetKeywordDescription(SqlToken kind)
     {
         return kind switch
         {
@@ -314,6 +337,37 @@ public sealed class HoverProvider
             SqlToken.If => "**IF** — Conditional guard for DDL: `CREATE TABLE IF NOT EXISTS name …` or `DROP TABLE IF EXISTS name`.",
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Appends a documentation excerpt and "See more" link to existing hover markdown.
+    /// The link uses the <c>command:</c> URI scheme so Monaco renders it as a clickable
+    /// action when the host registers a <c>datumingest.openDoc</c> command and marks
+    /// the hover markdown as trusted (<c>isTrusted: true</c>).
+    /// </summary>
+    private static string AppendDocLink(string markdown, string? sectionKey)
+    {
+        if (sectionKey is null)
+        {
+            return markdown;
+        }
+
+        DocumentationSection? section = DocumentationIndex.Instance.TryGetSection(sectionKey);
+        if (section is null)
+        {
+            return markdown;
+        }
+
+        if (!string.IsNullOrEmpty(section.Excerpt))
+        {
+            markdown += $"\n\n---\n\n{section.Excerpt}";
+        }
+
+        // Use command: URI scheme — Monaco supports this natively in trusted markdown.
+        // The host registers a 'datumingest.openDoc' command to handle navigation.
+        string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
+        markdown += $"\n\n[See more](command:datumingest.openDoc?{encodedKey})";
+        return markdown;
     }
 
     /// <summary>
