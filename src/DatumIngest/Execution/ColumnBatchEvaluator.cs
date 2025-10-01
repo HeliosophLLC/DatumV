@@ -60,6 +60,17 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// valid elements containing the per-row results.
     /// </returns>
     public DataValue[] EvaluateColumn(Expression expression, ColumnBatch batch)
+        => EvaluateColumnCore(expression, batch, active: null);
+
+    /// <summary>
+    /// Core evaluation method that accepts an optional selection vector.
+    /// When <paramref name="active"/> is non-null, only rows where
+    /// <c>active[row]</c> is <see langword="true"/> are processed;
+    /// inactive rows receive a default/null value and are never passed
+    /// to functions that could throw.  When <paramref name="active"/> is
+    /// <see langword="null"/> all rows are processed (the common path).
+    /// </summary>
+    private DataValue[] EvaluateColumnCore(Expression expression, ColumnBatch batch, bool[]? active)
     {
         try
         {
@@ -67,16 +78,16 @@ public sealed class ColumnBatchEvaluator : IDisposable
             {
                 LiteralExpression literal => EvaluateLiteralColumn(literal, batch.RowCount),
                 ColumnReference column => EvaluateColumnReference(column, batch),
-                BinaryExpression binary => EvaluateBinaryColumn(binary, batch),
-                UnaryExpression unary => EvaluateUnaryColumn(unary, batch),
-                FunctionCallExpression function => EvaluateFunctionColumn(function, batch),
-                InExpression inExpression => EvaluateInColumn(inExpression, batch),
-                BetweenExpression between => EvaluateBetweenColumn(between, batch),
-                IsNullExpression isNull => EvaluateIsNullColumn(isNull, batch),
-                CastExpression cast => EvaluateCastColumn(cast, batch),
-                AtTimeZoneExpression atz => EvaluateAtTimeZoneColumn(atz, batch),
-                CaseExpression caseExpression => EvaluateCaseColumn(caseExpression, batch),
-                LikeExpression like => EvaluateLikeColumn(like, batch),
+                BinaryExpression binary => EvaluateBinaryColumn(binary, batch, active),
+                UnaryExpression unary => EvaluateUnaryColumn(unary, batch, active),
+                FunctionCallExpression function => EvaluateFunctionColumn(function, batch, active),
+                InExpression inExpression => EvaluateInColumn(inExpression, batch, active),
+                BetweenExpression between => EvaluateBetweenColumn(between, batch, active),
+                IsNullExpression isNull => EvaluateIsNullColumn(isNull, batch, active),
+                CastExpression cast => EvaluateCastColumn(cast, batch, active),
+                AtTimeZoneExpression atz => EvaluateAtTimeZoneColumn(atz, batch, active),
+                CaseExpression caseExpression => EvaluateCaseColumn(caseExpression, batch, active),
+                LikeExpression like => EvaluateLikeColumn(like, batch, active),
                 WindowFunctionCallExpression window => throw new InvalidOperationException(
                     $"Window function '{window.FunctionName}' was not rewritten by the query planner."),
                 SubqueryExpression => throw new InvalidOperationException(
@@ -124,7 +135,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
         for (int row = 0; row < rowCount; row++)
         {
-            if (IsTruthy(results[row]))
+            if (IsTruthy(results[row], batch))
             {
                 selectedIndices[selectedCount++] = row;
             }
@@ -230,15 +241,15 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── Binary ─────────────────────────
 
-    private DataValue[] EvaluateBinaryColumn(BinaryExpression binary, ColumnBatch batch)
+    private DataValue[] EvaluateBinaryColumn(BinaryExpression binary, ColumnBatch batch, bool[]? active)
     {
         int rowCount = batch.RowCount;
 
         // AND: evaluate both sides, combine element-wise.
         if (binary.Operator == BinaryOperator.And)
         {
-            DataValue[] left = EvaluateColumn(binary.Left, batch);
-            DataValue[] right = EvaluateColumn(binary.Right, batch);
+            DataValue[] left = EvaluateColumnCore(binary.Left, batch, active);
+            DataValue[] right = EvaluateColumnCore(binary.Right, batch, active);
             DataValue[] result = RentBuffer(rowCount);
 
             DataValue trueValue = DataValue.FromBoolean(true);
@@ -246,7 +257,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
             for (int row = 0; row < rowCount; row++)
             {
-                result[row] = IsTruthy(left[row]) && IsTruthy(right[row])
+                result[row] = IsTruthy(left[row], batch) && IsTruthy(right[row], batch)
                     ? trueValue
                     : falseValue;
             }
@@ -257,8 +268,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
         // OR: evaluate both sides, combine element-wise.
         if (binary.Operator == BinaryOperator.Or)
         {
-            DataValue[] left = EvaluateColumn(binary.Left, batch);
-            DataValue[] right = EvaluateColumn(binary.Right, batch);
+            DataValue[] left = EvaluateColumnCore(binary.Left, batch, active);
+            DataValue[] right = EvaluateColumnCore(binary.Right, batch, active);
             DataValue[] result = RentBuffer(rowCount);
 
             DataValue trueValue = DataValue.FromBoolean(true);
@@ -266,7 +277,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
             for (int row = 0; row < rowCount; row++)
             {
-                result[row] = IsTruthy(left[row]) || IsTruthy(right[row])
+                result[row] = IsTruthy(left[row], batch) || IsTruthy(right[row], batch)
                     ? trueValue
                     : falseValue;
             }
@@ -275,8 +286,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
         }
 
         {
-            DataValue[] left = EvaluateColumn(binary.Left, batch);
-            DataValue[] right = EvaluateColumn(binary.Right, batch);
+            DataValue[] left = EvaluateColumnCore(binary.Left, batch, active);
+            DataValue[] right = EvaluateColumnCore(binary.Right, batch, active);
             DataValue[] result = RentBuffer(rowCount);
 
             DataValue nullResult = DataValue.Null(DataKind.Float32);
@@ -285,62 +296,62 @@ public sealed class ColumnBatchEvaluator : IDisposable
             {
                 case BinaryOperator.Add:
                     EvaluateArithmeticColumn(left, right, result, rowCount, nullResult,
-                        static (a, b) => a + b);
+                        static (a, b) => a + b, batch, active);
                     break;
 
                 case BinaryOperator.Subtract:
                     EvaluateArithmeticColumn(left, right, result, rowCount, nullResult,
-                        static (a, b) => a - b);
+                        static (a, b) => a - b, batch, active);
                     break;
 
                 case BinaryOperator.Multiply:
                     EvaluateArithmeticColumn(left, right, result, rowCount, nullResult,
-                        static (a, b) => a * b);
+                        static (a, b) => a * b, batch, active);
                     break;
 
                 case BinaryOperator.Divide:
                     EvaluateArithmeticColumn(left, right, result, rowCount, nullResult,
-                        static (a, b) => b != 0f ? a / b : float.NaN);
+                        static (a, b) => b != 0f ? a / b : float.NaN, batch, active);
                     break;
 
                 case BinaryOperator.Modulo:
                     EvaluateArithmeticColumn(left, right, result, rowCount, nullResult,
-                        static (a, b) => b != 0f ? a % b : float.NaN);
+                        static (a, b) => b != 0f ? a % b : float.NaN, batch, active);
                     break;
 
                 case BinaryOperator.Power:
                     EvaluateArithmeticColumn(left, right, result, rowCount, nullResult,
-                        static (a, b) => MathF.Pow(a, b));
+                        static (a, b) => MathF.Pow(a, b), batch, active);
                     break;
 
                 case BinaryOperator.Equal:
                     EvaluateComparisonColumn(left, right, result, rowCount, batch,
-                        static comparison => comparison == 0);
+                        static comparison => comparison == 0, active);
                     break;
 
                 case BinaryOperator.NotEqual:
                     EvaluateComparisonColumn(left, right, result, rowCount, batch,
-                        static comparison => comparison != 0);
+                        static comparison => comparison != 0, active);
                     break;
 
                 case BinaryOperator.LessThan:
                     EvaluateComparisonColumn(left, right, result, rowCount, batch,
-                        static comparison => comparison < 0);
+                        static comparison => comparison < 0, active);
                     break;
 
                 case BinaryOperator.GreaterThan:
                     EvaluateComparisonColumn(left, right, result, rowCount, batch,
-                        static comparison => comparison > 0);
+                        static comparison => comparison > 0, active);
                     break;
 
                 case BinaryOperator.LessThanOrEqual:
                     EvaluateComparisonColumn(left, right, result, rowCount, batch,
-                        static comparison => comparison <= 0);
+                        static comparison => comparison <= 0, active);
                     break;
 
                 case BinaryOperator.GreaterThanOrEqual:
                     EvaluateComparisonColumn(left, right, result, rowCount, batch,
-                        static comparison => comparison >= 0);
+                        static comparison => comparison >= 0, active);
                     break;
 
                 case BinaryOperator.Like:
@@ -368,10 +379,13 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     private void EvaluateArithmeticColumn(
         DataValue[] left, DataValue[] right, DataValue[] result, int rowCount,
-        DataValue nullResult, Func<float, float, float> operation)
+        DataValue nullResult, Func<float, float, float> operation,
+        ColumnBatch? batch = null, bool[]? active = null)
     {
         for (int row = 0; row < rowCount; row++)
         {
+            if (active is not null && !active[row]) continue;
+
             DataValue leftValue = left[row];
             DataValue rightValue = right[row];
 
@@ -393,13 +407,13 @@ public sealed class ColumnBatchEvaluator : IDisposable
             }
 
             result[row] = DataValue.FromFloat32(
-                operation(ToFloat(leftValue), ToFloat(rightValue)));
+                operation(ToFloat(leftValue, batch), ToFloat(rightValue, batch)));
         }
     }
 
     private static void EvaluateComparisonColumn(
         DataValue[] left, DataValue[] right, DataValue[] result, int rowCount,
-        ColumnBatch batch, Func<int, bool> predicate)
+        ColumnBatch batch, Func<int, bool> predicate, bool[]? active = null)
     {
         DataValue trueValue = DataValue.FromBoolean(true);
         DataValue falseValue = DataValue.FromBoolean(false);
@@ -407,6 +421,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
         for (int row = 0; row < rowCount; row++)
         {
+            if (active is not null && !active[row]) continue;
+
             DataValue leftValue = left[row];
             DataValue rightValue = right[row];
 
@@ -490,9 +506,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── Unary ─────────────────────────
 
-    private DataValue[] EvaluateUnaryColumn(UnaryExpression unary, ColumnBatch batch)
+    private DataValue[] EvaluateUnaryColumn(UnaryExpression unary, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] operand = EvaluateColumn(unary.Operand, batch);
+        DataValue[] operand = EvaluateColumnCore(unary.Operand, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
 
@@ -510,7 +526,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                         continue;
                     }
 
-                    result[row] = IsTruthy(operand[row]) ? falseValue : trueValue;
+                    result[row] = IsTruthy(operand[row], batch) ? falseValue : trueValue;
                 }
                 break;
 
@@ -524,7 +540,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                         continue;
                     }
 
-                    result[row] = DataValue.FromFloat32(-ToFloat(operand[row]));
+                    result[row] = DataValue.FromFloat32(-ToFloat(operand[row], batch));
                 }
                 break;
 
@@ -538,9 +554,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── IS NULL ─────────────────────────
 
-    private DataValue[] EvaluateIsNullColumn(IsNullExpression isNull, ColumnBatch batch)
+    private DataValue[] EvaluateIsNullColumn(IsNullExpression isNull, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] operand = EvaluateColumn(isNull.Expression, batch);
+        DataValue[] operand = EvaluateColumnCore(isNull.Expression, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
         DataValue trueValue = DataValue.FromBoolean(true);
@@ -566,11 +582,11 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── BETWEEN ─────────────────────────
 
-    private DataValue[] EvaluateBetweenColumn(BetweenExpression between, ColumnBatch batch)
+    private DataValue[] EvaluateBetweenColumn(BetweenExpression between, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] target = EvaluateColumn(between.Expression, batch);
-        DataValue[] low = EvaluateColumn(between.Low, batch);
-        DataValue[] high = EvaluateColumn(between.High, batch);
+        DataValue[] target = EvaluateColumnCore(between.Expression, batch, active);
+        DataValue[] low = EvaluateColumnCore(between.Low, batch, active);
+        DataValue[] high = EvaluateColumnCore(between.High, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
         DataValue trueValue = DataValue.FromBoolean(true);
@@ -579,15 +595,17 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
         for (int row = 0; row < rowCount; row++)
         {
+            if (active is not null && !active[row]) continue;
+
             if (target[row].IsNull || low[row].IsNull || high[row].IsNull)
             {
                 result[row] = nullResult;
                 continue;
             }
 
-            float targetValue = ToFloat(target[row]);
-            float lowValue = ToFloat(low[row]);
-            float highValue = ToFloat(high[row]);
+            float targetValue = ToFloat(target[row], batch);
+            float lowValue = ToFloat(low[row], batch);
+            float highValue = ToFloat(high[row], batch);
 
             bool inRange = targetValue >= lowValue && targetValue <= highValue;
             if (between.Negated)
@@ -603,9 +621,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── IN ─────────────────────────
 
-    private DataValue[] EvaluateInColumn(InExpression inExpression, ColumnBatch batch)
+    private DataValue[] EvaluateInColumn(InExpression inExpression, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] target = EvaluateColumn(inExpression.Expression, batch);
+        DataValue[] target = EvaluateColumnCore(inExpression.Expression, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
         DataValue trueValue = DataValue.FromBoolean(!inExpression.Negated);
@@ -661,7 +679,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[][] valueColumns = new DataValue[inExpression.Values.Count][];
         for (int index = 0; index < inExpression.Values.Count; index++)
         {
-            valueColumns[index] = EvaluateColumn(inExpression.Values[index], batch);
+            valueColumns[index] = EvaluateColumnCore(inExpression.Values[index], batch, active);
         }
 
         for (int row = 0; row < rowCount; row++)
@@ -712,36 +730,63 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── CASE ─────────────────────────
 
-    private DataValue[] EvaluateCaseColumn(CaseExpression caseExpression, ColumnBatch batch)
+    private DataValue[] EvaluateCaseColumn(CaseExpression caseExpression, ColumnBatch batch, bool[]? active)
     {
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
 
-        // Track which rows have already been resolved so later branches skip them.
-        bool[] resolved = ArrayPool<bool>.Shared.Rent(rowCount);
-        Array.Clear(resolved, 0, rowCount);
+        // active tracks which rows still need a result.  Starts as all-true
+        // (or a copy of the incoming active vector for nested CASE).
+        bool[] caseActive = ArrayPool<bool>.Shared.Rent(rowCount);
+        if (active is not null)
+        {
+            Array.Copy(active, caseActive, rowCount);
+        }
+        else
+        {
+            Array.Fill(caseActive, true, 0, rowCount);
+        }
+
+        // Reusable mask for the THEN branch of each WHEN clause.
+        bool[] thenActive = ArrayPool<bool>.Shared.Rent(rowCount);
 
         try
         {
             if (caseExpression.Operand is not null)
             {
                 // Simple CASE: compare operand against each WHEN value.
-                DataValue[] operand = EvaluateColumn(caseExpression.Operand, batch);
+                DataValue[] operand = EvaluateColumnCore(caseExpression.Operand, batch, caseActive);
 
                 foreach (WhenClause whenClause in caseExpression.WhenClauses)
                 {
-                    DataValue[] whenValue = EvaluateColumn(whenClause.Condition, batch);
-                    DataValue[] thenValue = EvaluateColumn(whenClause.Result, batch);
+                    DataValue[] whenValue = EvaluateColumnCore(whenClause.Condition, batch, caseActive);
 
+                    // Determine which active rows match this WHEN clause.
+                    Array.Clear(thenActive, 0, rowCount);
+                    bool anyMatch = false;
                     for (int row = 0; row < rowCount; row++)
                     {
-                        if (resolved[row]) continue;
+                        if (!caseActive[row]) continue;
 
                         if (!operand[row].IsNull && !whenValue[row].IsNull &&
                             CompareDataValues(operand[row], whenValue[row], batch) == 0)
                         {
+                            thenActive[row] = true;
+                            anyMatch = true;
+                        }
+                    }
+
+                    if (!anyMatch) continue;
+
+                    // Evaluate THEN only for matching rows.
+                    DataValue[] thenValue = EvaluateColumnCore(whenClause.Result, batch, thenActive);
+
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        if (thenActive[row])
+                        {
                             result[row] = thenValue[row];
-                            resolved[row] = true;
+                            caseActive[row] = false;
                         }
                     }
                 }
@@ -751,43 +796,65 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 // Searched CASE: evaluate each WHEN condition as boolean.
                 foreach (WhenClause whenClause in caseExpression.WhenClauses)
                 {
-                    DataValue[] condition = EvaluateColumn(whenClause.Condition, batch);
-                    DataValue[] thenValue = EvaluateColumn(whenClause.Result, batch);
+                    DataValue[] condition = EvaluateColumnCore(whenClause.Condition, batch, caseActive);
+
+                    // Determine which active rows are truthy.
+                    Array.Clear(thenActive, 0, rowCount);
+                    bool anyMatch = false;
+                    for (int row = 0; row < rowCount; row++)
+                    {
+                        if (!caseActive[row]) continue;
+
+                        if (IsTruthy(condition[row], batch))
+                        {
+                            thenActive[row] = true;
+                            anyMatch = true;
+                        }
+                    }
+
+                    if (!anyMatch) continue;
+
+                    // Evaluate THEN only for matching rows.
+                    DataValue[] thenValue = EvaluateColumnCore(whenClause.Result, batch, thenActive);
 
                     for (int row = 0; row < rowCount; row++)
                     {
-                        if (resolved[row]) continue;
-
-                        if (IsTruthy(condition[row]))
+                        if (thenActive[row])
                         {
                             result[row] = thenValue[row];
-                            resolved[row] = true;
+                            caseActive[row] = false;
                         }
                     }
                 }
             }
 
-            // Fill unresolved rows with ELSE or typed null.
-            if (caseExpression.ElseResult is not null)
+            // Check if any rows still need the ELSE branch.
+            bool hasUnresolved = false;
+            for (int row = 0; row < rowCount; row++)
             {
-                DataValue[] elseValues = EvaluateColumn(caseExpression.ElseResult, batch);
+                if (caseActive[row]) { hasUnresolved = true; break; }
+            }
+
+            if (hasUnresolved && caseExpression.ElseResult is not null)
+            {
+                DataValue[] elseValues = EvaluateColumnCore(caseExpression.ElseResult, batch, caseActive);
 
                 for (int row = 0; row < rowCount; row++)
                 {
-                    if (!resolved[row])
+                    if (caseActive[row])
                     {
                         result[row] = elseValues[row];
                     }
                 }
             }
-            else
+            else if (hasUnresolved)
             {
                 // Determine the null kind from the first resolved (non-null) result
                 // so unresolved rows have a consistent type with resolved ones.
                 DataKind nullKind = DataKind.Float32;
                 for (int row = 0; row < rowCount; row++)
                 {
-                    if (resolved[row] && !result[row].IsNull)
+                    if (!caseActive[row] && !result[row].IsNull)
                     {
                         nullKind = result[row].Kind;
                         break;
@@ -797,7 +864,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 DataValue nullValue = DataValue.Null(nullKind);
                 for (int row = 0; row < rowCount; row++)
                 {
-                    if (!resolved[row])
+                    if (caseActive[row])
                     {
                         result[row] = nullValue;
                     }
@@ -806,7 +873,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
         }
         finally
         {
-            ArrayPool<bool>.Shared.Return(resolved);
+            ArrayPool<bool>.Shared.Return(thenActive);
+            ArrayPool<bool>.Shared.Return(caseActive);
         }
 
         return result;
@@ -814,9 +882,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── CAST ─────────────────────────
 
-    private DataValue[] EvaluateCastColumn(CastExpression cast, ColumnBatch batch)
+    private DataValue[] EvaluateCastColumn(CastExpression cast, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] source = EvaluateColumn(cast.Expression, batch);
+        DataValue[] source = EvaluateColumnCore(cast.Expression, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
 
@@ -834,7 +902,15 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
             for (int row = 0; row < rowCount; row++)
             {
-                arguments[0] = source[row];
+                if (active is not null && !active[row]) continue;
+
+                DataValue value = source[row];
+                if (value.IsArenaBacked)
+                {
+                    value = DataValue.FromString(value.AsString(batch.StringArena));
+                }
+
+                arguments[0] = value;
                 result[row] = castFunction.Execute(arguments.AsSpan(0, 2));
             }
         }
@@ -851,15 +927,17 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     private readonly Dictionary<string, TimeZoneInfo> _timeZoneCache = new(StringComparer.OrdinalIgnoreCase);
 
-    private DataValue[] EvaluateAtTimeZoneColumn(AtTimeZoneExpression atz, ColumnBatch batch)
+    private DataValue[] EvaluateAtTimeZoneColumn(AtTimeZoneExpression atz, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] source = EvaluateColumn(atz.Expression, batch);
-        DataValue[] tzValues = EvaluateColumn(atz.TimeZone, batch);
+        DataValue[] source = EvaluateColumnCore(atz.Expression, batch, active);
+        DataValue[] tzValues = EvaluateColumnCore(atz.TimeZone, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
 
         for (int row = 0; row < rowCount; row++)
         {
+            if (active is not null && !active[row]) continue;
+
             DataValue value = source[row];
             if (value.IsNull)
             {
@@ -867,7 +945,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 continue;
             }
 
-            string tzName = tzValues[row].AsString();
+            string tzName = ResolveString(tzValues[row], batch);
             if (!_timeZoneCache.TryGetValue(tzName, out TimeZoneInfo? tz))
             {
                 tz = TimeZoneInfo.FindSystemTimeZoneById(tzName);
@@ -883,10 +961,10 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     // ───────────────────────── LIKE with ESCAPE ─────────────────────────
 
-    private DataValue[] EvaluateLikeColumn(LikeExpression like, ColumnBatch batch)
+    private DataValue[] EvaluateLikeColumn(LikeExpression like, ColumnBatch batch, bool[]? active)
     {
-        DataValue[] input = EvaluateColumn(like.Expression, batch);
-        DataValue[] pattern = EvaluateColumn(like.Pattern, batch);
+        DataValue[] input = EvaluateColumnCore(like.Expression, batch, active);
+        DataValue[] pattern = EvaluateColumnCore(like.Pattern, batch, active);
         int rowCount = batch.RowCount;
         DataValue[] result = RentBuffer(rowCount);
         DataValue trueValue = DataValue.FromBoolean(true);
@@ -940,7 +1018,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// <see cref="IScalarFunction.Execute"/> per row.  Vectorized function
     /// variants are planned for Phase 6.
     /// </summary>
-    private DataValue[] EvaluateFunctionColumn(FunctionCallExpression function, ColumnBatch batch)
+    private DataValue[] EvaluateFunctionColumn(FunctionCallExpression function, ColumnBatch batch, bool[]? active)
     {
         IScalarFunction? scalarFunction = _functions.TryGetScalar(function.FunctionName);
         if (scalarFunction is null)
@@ -953,7 +1031,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
         DataValue[][] argumentColumns = new DataValue[argumentCount][];
         for (int index = 0; index < argumentCount; index++)
         {
-            argumentColumns[index] = EvaluateColumn(function.Arguments[index], batch);
+            argumentColumns[index] = EvaluateColumnCore(function.Arguments[index], batch, active);
         }
 
         int rowCount = batch.RowCount;
@@ -964,9 +1042,14 @@ public sealed class ColumnBatchEvaluator : IDisposable
         {
             for (int row = 0; row < rowCount; row++)
             {
+                if (active is not null && !active[row]) continue;
+
                 for (int argument = 0; argument < argumentCount; argument++)
                 {
-                    arguments[argument] = argumentColumns[argument][row];
+                    DataValue arg = argumentColumns[argument][row];
+                    arguments[argument] = arg.IsArenaBacked
+                        ? DataValue.FromString(arg.AsString(batch.StringArena))
+                        : arg;
                 }
 
                 result[row] = scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
@@ -987,7 +1070,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// Interprets a <see cref="DataValue"/> as a boolean for filter/predicate evaluation.
     /// Null is falsy. Zero/empty-string is falsy. Everything else is truthy.
     /// </summary>
-    private static bool IsTruthy(DataValue value)
+    private static bool IsTruthy(DataValue value, ColumnBatch? batch = null)
     {
         if (value.IsNull) return false;
 
@@ -1004,7 +1087,9 @@ public sealed class ColumnBatchEvaluator : IDisposable
             DataKind.UInt32 => value.AsUInt32() != 0,
             DataKind.Int64 => value.AsInt64() != 0,
             DataKind.UInt64 => value.AsUInt64() != 0,
-            DataKind.String => !string.IsNullOrEmpty(value.AsString()),
+            DataKind.String => batch is not null
+                ? !string.IsNullOrEmpty(ResolveString(value, batch))
+                : !string.IsNullOrEmpty(value.AsString()),
             _ => true,
         };
     }
@@ -1013,7 +1098,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// Converts a <see cref="DataValue"/> to <see langword="float"/> for arithmetic.
     /// Matches <see cref="ExpressionEvaluator"/> coercion semantics.
     /// </summary>
-    private static float ToFloat(DataValue value)
+    private static float ToFloat(DataValue value, ColumnBatch? batch = null)
     {
         if (value.TryToFloat(out float f)) return f;
         return value.Kind switch
@@ -1022,10 +1107,11 @@ public sealed class ColumnBatchEvaluator : IDisposable
             DataKind.Time => (float)(value.AsTime().Hour * 3600 + value.AsTime().Minute * 60 +
                 value.AsTime().Second + value.AsTime().Millisecond / 1000.0),
             DataKind.String => float.TryParse(
-                value.AsString(), NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
+                batch is not null ? ResolveString(value, batch) : value.AsString(),
+                NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
                 ? parsed
                 : throw new InvalidOperationException(
-                    $"Cannot convert string '{value.AsString()}' to number."),
+                    $"Cannot convert string '{(batch is not null ? ResolveString(value, batch) : value.AsString())}' to number."),
             _ => throw new InvalidOperationException($"Cannot use {value.Kind} in arithmetic."),
         };
     }

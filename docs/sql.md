@@ -1239,6 +1239,14 @@ FROM users
 - CASE expressions can appear anywhere an expression is valid: SELECT, WHERE, ORDER BY, GROUP BY, HAVING, and JOIN ON.
 - CASE expressions can be nested.
 - For simple single-condition cases, the `iif()` function provides a more concise alternative.
+- **Short-circuit evaluation:** THEN and ELSE branches are only evaluated for
+  rows that actually reach them. A branch that would fail for other rows is
+  safe as long as the WHEN condition prevents those rows from reaching it.
+  This enables patterns like:
+  ```sql
+  CASE WHEN "col" = 'NULL' THEN 0.0 ELSE CAST("col" AS FLOAT64) END
+  ```
+  The CAST is never executed for rows where `col` is the string `'NULL'`.
 
 ### Branch Type Coercion
 
