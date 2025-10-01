@@ -1104,4 +1104,47 @@ public class NewStringFunctionTests
         DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
         Assert.True(result.IsNull);
     }
+
+    // ───────────────── UnicodeNormalizeFunction ─────────────────
+
+    [Fact]
+    public void Normalize_DefaultNFC()
+    {
+        UnicodeNormalizeFunction function = new();
+        // U+0061 (a) + U+0308 (combining diaeresis) → U+00E4 (ä) in NFC
+        string input = "a\u0308";
+        DataValue result = function.Execute([DataValue.FromString(input)]);
+        Assert.Equal("\u00E4", result.AsString());
+    }
+
+    [Fact]
+    public void Normalize_NFD()
+    {
+        UnicodeNormalizeFunction function = new();
+        // ä (U+00E4) → a + combining diaeresis in NFD
+        DataValue result = function.Execute([
+            DataValue.FromString("\u00E4"),
+            DataValue.FromString("NFD")
+        ]);
+        Assert.Equal("a\u0308", result.AsString());
+    }
+
+    [Fact]
+    public void Normalize_NullInput_ReturnsNull()
+    {
+        UnicodeNormalizeFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    [Fact]
+    public void Normalize_InvalidForm_Throws()
+    {
+        UnicodeNormalizeFunction function = new();
+        Assert.Throws<InvalidOperationException>(() =>
+            function.Execute([
+                DataValue.FromString("hello"),
+                DataValue.FromString("INVALID")
+            ]));
+    }
 }

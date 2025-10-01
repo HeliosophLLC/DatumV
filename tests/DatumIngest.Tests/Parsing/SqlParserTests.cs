@@ -247,11 +247,11 @@ public class SqlParserTests
     [Fact]
     public void SelectFunctionCall()
     {
-        SelectStatement result = Parse("SELECT normalize(x, 0, 255) AS norm FROM t");
+        SelectStatement result = Parse("SELECT min_max_normalize(x, 0, 255) AS norm FROM t");
 
         FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(
             result.Columns[0].Expression);
-        Assert.Equal("normalize", function.FunctionName);
+        Assert.Equal("min_max_normalize", function.FunctionName);
         Assert.Equal(3, function.Arguments.Count);
         Assert.Equal("norm", result.Columns[0].Alias);
     }

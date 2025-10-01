@@ -3,21 +3,21 @@ using DatumIngest.Model;
 namespace DatumIngest.Functions.Scalar;
 
 /// <summary>
-/// Normalizes a value to the 0-1 range.
-/// <c>normalize(val)</c> for byte/byte[] uses default 0-255 range.
-/// <c>normalize(val, min, max)</c> for scalar/vector/tensor uses explicit range.
+/// Normalizes a value to the 0-1 range (min-max normalization).
+/// <c>min_max_normalize(val)</c> for byte/byte[] uses default 0-255 range.
+/// <c>min_max_normalize(val, min, max)</c> for scalar/vector/tensor uses explicit range.
 /// </summary>
-public sealed class NormalizeFunction : IScalarFunction
+public sealed class MinMaxNormalizeFunction : IScalarFunction
 {
     /// <inheritdoc />
-    public string Name => "normalize";
+    public string Name => "min_max_normalize";
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length < 1 || argumentKinds.Length > 3)
         {
-            throw new ArgumentException("normalize() requires 1 to 3 arguments.");
+            throw new ArgumentException("min_max_normalize() requires 1 to 3 arguments.");
         }
 
         DataKind inputKind = argumentKinds[0];
@@ -36,12 +36,12 @@ public sealed class NormalizeFunction : IScalarFunction
         {
             if (argumentKinds.Length < 3)
             {
-                throw new ArgumentException("normalize() for scalar/vector/tensor requires min and max arguments.");
+                throw new ArgumentException("min_max_normalize() for scalar/vector/tensor requires min and max arguments.");
             }
             return inputKind;
         }
 
-        throw new ArgumentException($"normalize() does not support {inputKind}.");
+        throw new ArgumentException($"min_max_normalize() does not support {inputKind}.");
     }
 
     /// <inheritdoc />
@@ -124,7 +124,7 @@ public sealed class NormalizeFunction : IScalarFunction
             }
 
             default:
-                throw new InvalidOperationException($"normalize() does not support {input.Kind}.");
+                throw new InvalidOperationException($"min_max_normalize() does not support {input.Kind}.");
         }
     }
 }

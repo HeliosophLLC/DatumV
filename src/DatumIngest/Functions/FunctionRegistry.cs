@@ -160,7 +160,7 @@ public sealed class FunctionRegistry
         FunctionRegistry registry = new();
 
         // Numeric/Array
-        registry.RegisterScalar(new Scalar.NormalizeFunction());
+        registry.RegisterScalar(new Scalar.MinMaxNormalizeFunction());
         registry.RegisterScalar(new Scalar.ClampFunction());
         registry.RegisterScalar(new Scalar.DenormalizeFunction());
         registry.RegisterScalar(new Scalar.ReshapeFunction());
@@ -223,6 +223,7 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.ToAsciiFunction());
         registry.RegisterScalar(new Scalar.UnistrFunction());
         registry.RegisterScalar(new Scalar.CasefoldFunction());
+        registry.RegisterScalar(new Scalar.UnicodeNormalizeFunction());
         registry.RegisterScalar(new Scalar.QuoteIdentFunction());
         registry.RegisterScalar(new Scalar.QuoteLiteralFunction());
         registry.RegisterScalar(new Scalar.QuoteNullableFunction());
@@ -310,7 +311,8 @@ public sealed class FunctionRegistry
         registry.RegisterScalar(new Scalar.BytesFunction());
 
         // Hashing
-        registry.RegisterScalar(new Scalar.Md5Function());
+        registry.RegisterScalar(new Scalar.Md5TextFunction());
+        registry.RegisterScalar(new Scalar.Md5BytesFunction());
         registry.RegisterScalar(new Scalar.Sha256Function());
         registry.RegisterScalar(new Scalar.Sha512Function());
         registry.RegisterScalar(new Scalar.Crc32Function());

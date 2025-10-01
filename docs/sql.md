@@ -25,7 +25,7 @@ Block comments do not nest.
 SELECT *
 SELECT col1, col2, col3
 SELECT a.col1, b.col2
-SELECT col1 AS alias, normalize(col2) AS norm_col
+SELECT col1 AS alias, min_max_normalize(col2) AS norm_col
 SELECT table_alias.*
 SELECT * EXCEPT (col1, col2)
 SELECT * REPLACE (upper(name) AS name)
@@ -53,7 +53,7 @@ Replace specific columns in wildcard expansion with new expressions. The alias m
 
 ```sql
 -- Normalize a column in-place
-SELECT * REPLACE (normalize(score, 0, 100) AS score) FROM data
+SELECT * REPLACE (min_max_normalize(score, 0, 100) AS score) FROM data
 
 -- Replace multiple columns
 SELECT * REPLACE (upper(name) AS name, round(price) AS price) FROM products
@@ -1665,7 +1665,7 @@ SELECT * FROM data WHERE category = $category AND score > $min_score
 SELECT name, score * $weight AS weighted FROM data
 
 -- In function arguments
-SELECT normalize(score, $min, $max) AS norm FROM data
+SELECT min_max_normalize(score, $min, $max) AS norm FROM data
 ```
 
 ### CLI usage
@@ -1884,6 +1884,7 @@ SELECT regexp_split_to_array('hello world', '\s+')  -- ['hello', 'world']
 | `to_ascii(s)` | String | Transliterates to ASCII by removing diacritical marks. |
 | `unistr(s)` | String | Evaluates Unicode escapes: `\XXXX`, `\+XXXXXX`, `\uXXXX`, `\UXXXXXXXX`. `\\` for literal backslash. |
 | `casefold(s)` | String | Unicode case folding for case-insensitive comparison. |
+| `normalize(s [, form])` | String | Unicode normalization. `form` is one of `NFC` (default), `NFD`, `NFKC`, `NFKD`. |
 
 ### SQL Quoting
 

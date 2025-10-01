@@ -9,12 +9,31 @@ namespace DatumIngest.Tests.Functions.Scalar;
 /// </summary>
 public class HashingFunctionTests
 {
-    // ───────────────── Md5Function ─────────────────
+    // ───────────────── Md5TextFunction (PG-compatible, returns hex string) ─────────────────
 
     [Fact]
-    public void Md5Function_HashesString()
+    public void Md5TextFunction_ReturnsHexString()
     {
-        Md5Function function = new();
+        Md5TextFunction function = new();
+        DataValue result = function.Execute([DataValue.FromString("abc")]);
+        Assert.Equal(DataKind.String, result.Kind);
+        Assert.Equal("900150983cd24fb0d6963f7d28e17f72", result.AsString());
+    }
+
+    [Fact]
+    public void Md5TextFunction_NullInput_ReturnsNull()
+    {
+        Md5TextFunction function = new();
+        DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
+        Assert.True(result.IsNull);
+    }
+
+    // ───────────────── Md5BytesFunction (raw bytes) ─────────────────
+
+    [Fact]
+    public void Md5BytesFunction_HashesString()
+    {
+        Md5BytesFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
         Assert.Equal(DataKind.UInt8Array, result.Kind);
         HexEncodeFunction hexEncode = new();
@@ -23,9 +42,9 @@ public class HashingFunctionTests
     }
 
     [Fact]
-    public void Md5Function_HashesBytes()
+    public void Md5BytesFunction_HashesBytes()
     {
-        Md5Function function = new();
+        Md5BytesFunction function = new();
         byte[] inputBytes = [104, 101, 108, 108, 111]; // "hello" in UTF-8
         DataValue result = function.Execute([DataValue.FromUInt8Array(inputBytes)]);
         Assert.Equal(DataKind.UInt8Array, result.Kind);
@@ -35,9 +54,9 @@ public class HashingFunctionTests
     }
 
     [Fact]
-    public void Md5Function_NullInput_ReturnsNull()
+    public void Md5BytesFunction_NullInput_ReturnsNull()
     {
-        Md5Function function = new();
+        Md5BytesFunction function = new();
         DataValue result = function.Execute([DataValue.Null(DataKind.String)]);
         Assert.True(result.IsNull);
     }

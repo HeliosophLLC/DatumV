@@ -248,7 +248,7 @@ internal static class MonarchGrammarFactory
         "word_count", "split_part", "initcap", "translate",
         "ascii", "chr", "octet_length", "bit_length",
         "format", "string_to_array", "regexp_split_to_array",
-        "to_hex", "to_bin", "to_oct", "to_ascii", "unistr", "casefold",
+        "to_hex", "to_bin", "to_oct", "to_ascii", "unistr", "casefold", "normalize",
         "quote_ident", "quote_literal", "quote_nullable", "parse_ident",
         "get_filename", "get_file_extension", "get_path",
 
@@ -328,7 +328,7 @@ internal static class MonarchGrammarFactory
         "random_permutation", "random_choice",
 
         // Numeric/Array
-        "normalize", "clamp", "denormalize", "reshape",
+        "min_max_normalize", "clamp", "denormalize", "reshape",
 
         // Array functions
         "array", "array_length", "array_get",
@@ -346,7 +346,7 @@ internal static class MonarchGrammarFactory
         "label_encode", "label_encode_unk", "hash_encode",
 
         // Hash functions
-        "md5", "sha256", "sha512", "crc32",
+        "md5", "md5_bytes", "sha256", "sha512", "crc32",
 
         // Encoding functions
         "base64_encode", "base64_decode",

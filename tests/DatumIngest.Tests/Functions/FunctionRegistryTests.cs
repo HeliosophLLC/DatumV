@@ -14,7 +14,7 @@ public class FunctionRegistryTests
 
         string[] expectedNames =
         [
-            "normalize", "clamp", "denormalize", "reshape",
+            "min_max_normalize", "clamp", "denormalize", "reshape",
             "len", "mid", "substring",
             "get_filename", "get_file_extension", "get_path",
             "cast", "to_epoch", "date_part", "cyclical_encode",
@@ -69,8 +69,8 @@ public class FunctionRegistryTests
     public void RegisterScalar_ThrowsOnDuplicate()
     {
         FunctionRegistry registry = new();
-        registry.RegisterScalar(new NormalizeFunction());
-        Assert.Throws<ArgumentException>(() => registry.RegisterScalar(new NormalizeFunction()));
+        registry.RegisterScalar(new MinMaxNormalizeFunction());
+        Assert.Throws<ArgumentException>(() => registry.RegisterScalar(new MinMaxNormalizeFunction()));
     }
 
     [Fact]

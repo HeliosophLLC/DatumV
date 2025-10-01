@@ -45,7 +45,7 @@ public static class FunctionDocumentation
 
         Register(new FunctionSignature
         {
-            Name = "normalize",
+            Name = "min_max_normalize",
             Parameters = [Parameter("value", "Float32"), Parameter("min", "Float32"), Parameter("max", "Float32")],
             ReturnType = "Float32",
             Description = "Normalizes a value to [0, 1] given a known min/max range.",
@@ -516,6 +516,14 @@ public static class FunctionDocumentation
             Parameters = [Parameter("value", "String")],
             ReturnType = "String",
             Description = "Performs Unicode case folding for case-insensitive matching.",
+            Category = FunctionCategory.String,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "normalize",
+            Parameters = [Parameter("value", "String"), Parameter("form", "String", isOptional: true)],
+            ReturnType = "String",
+            Description = "Converts a string to the specified Unicode normalization form (NFC, NFD, NFKC, NFKD). Default: NFC.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
@@ -1755,6 +1763,14 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "md5",
+            Parameters = [Parameter("input", "String")],
+            ReturnType = "String",
+            Description = "Computes the MD5 hash of the input, returned as a lowercase hexadecimal string. PostgreSQL compatible.",
+            Category = FunctionCategory.Encoding,
+        });
+        Register(new FunctionSignature
+        {
+            Name = "md5_bytes",
             Parameters = [Parameter("input", "String")],
             ReturnType = "UInt8Array",
             Description = "Computes the MD5 hash of the input and returns the raw hash bytes.",

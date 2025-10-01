@@ -5,12 +5,12 @@ namespace DatumIngest.Tests.Functions;
 
 public class NormalizeFunctionTests
 {
-    private readonly NormalizeFunction _function = new();
+    private readonly MinMaxNormalizeFunction _function = new();
 
     [Fact]
-    public void Name_IsNormalize()
+    public void Name_IsMinMaxNormalize()
     {
-        Assert.Equal("normalize", _function.Name);
+        Assert.Equal("min_max_normalize", _function.Name);
     }
 
     [Fact]

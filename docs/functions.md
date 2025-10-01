@@ -34,48 +34,154 @@ Every function belongs to a single **category** that describes its operational d
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `normalize` | `normalize(val, [min], [max])` | Normalize to 0–1 range. Byte/byte[]: default 0–255. Float32/Vector: requires min/max. | 1 |
+| `min_max_normalize` | `min_max_normalize(val, [min], [max])` | Normalize to 0–1 range. Byte/byte[]: default 0–255. Float32/Vector: requires min/max. | 1 |
 | `clamp` | `clamp(val, min, max)` | Clamp value to [min, max]. Works on Float32, Vector, Matrix, Tensor. | 1 |
-| `denormalize` | `denormalize(val, factor)` | Multiply by factor (reverse of normalize). | 1 |
+| `denormalize` | `denormalize(val, factor)` | Multiply by factor (reverse of min_max_normalize). | 1 |
 | `reshape` | `reshape(tensor, dim1, dim2, ...)` | Reinterpret tensor shape without copying. Element count must match. | 1 |
 
 ## String
 
+PostgreSQL-compatible string functions. All return NULL when any required argument is NULL.
+
+### Length
+
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
 | `len` | `len(val)` | Length of string, collection, or array. | 1 |
-| `mid` | `mid(str, start, length)` | Extract substring by position and length (1-based). | 1 |
-| `substring` | `substring(str, start, [length])` | Extract substring from start position (1-based). | 1 |
+| `length` | `length(str)` | Number of characters. Alias for `len()`. | 1 |
+| `char_length` | `char_length(str)` | SQL standard alias for `len()`. | 1 |
+| `character_length` | `character_length(str)` | SQL standard alias for `len()`. | 1 |
+| `octet_length` | `octet_length(str)` | Number of bytes (UTF-8 encoded). | 1 |
+| `bit_length` | `bit_length(str)` | Number of bits (8 × `octet_length`). | 1 |
+
+### Substring Extraction
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `substring` | `substring(str, start, [length])` | Extract substring from 1-based start position, optionally with length. | 1 |
+| `substr` | `substr(str, start, [length])` | Alias for `substring()`. | 1 |
+| `mid` | `mid(str, start, length)` | Extract substring by 1-based position and length. | 1 |
+| `left` | `left(str, n)` | First n characters. Negative n returns all but last \|n\| characters. | 1 |
+| `right` | `right(str, n)` | Last n characters. Negative n returns all but first \|n\| characters. | 1 |
+| `overlay` | `overlay(str, new, start, [count])` | Replace `count` characters at 1-based `start` with `new`. Count defaults to `length(new)`. | 1 |
+
+### Case Conversion
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
 | `upper` | `upper(str)` | Convert to uppercase (invariant). | 1 |
 | `lower` | `lower(str)` | Convert to lowercase (invariant). | 1 |
-| `trim` | `trim(str)` | Remove whitespace from both sides. | 1 |
-| `ltrim` | `ltrim(str)` | Remove leading whitespace. | 1 |
-| `rtrim` | `rtrim(str)` | Remove trailing whitespace. | 1 |
+| `initcap` | `initcap(str)` | Capitalize first letter of each word, lowercase the rest. Non-alphanumeric characters are word boundaries. | 1 |
+
+### Trimming
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `trim` | `trim(str, [chars])` | Remove characters from both sides. Default: whitespace. | 1 |
+| `ltrim` | `ltrim(str, [chars])` | Remove leading characters. Default: whitespace. | 1 |
+| `rtrim` | `rtrim(str, [chars])` | Remove trailing characters. Default: whitespace. | 1 |
+| `btrim` | `btrim(str, [chars])` | Trim characters from both sides. PostgreSQL alias for `trim()`. | 1 |
+
+### Padding
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `lpad` | `lpad(str, len, [fill])` | Pad on the left to target length with fill string (default space). Truncates from the right if already longer. | 1 |
+| `rpad` | `rpad(str, len, [fill])` | Pad on the right to target length with fill string (default space). Truncates if already longer. | 1 |
+
+### Search
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `position` | `position(str, sub)` | 1-based index of first occurrence, or 0 if not found. | 1 |
+| `strpos` | `strpos(str, sub)` | Same as `position()`. | 1 |
 | `contains` | `contains(str, sub)` | Returns Boolean — whether str contains sub (ordinal). | 1 |
 | `starts_with` | `starts_with(str, prefix)` | Returns Boolean — whether str starts with prefix (ordinal). | 1 |
 | `ends_with` | `ends_with(str, suffix)` | Returns Boolean — whether str ends with suffix (ordinal). | 1 |
-| `position` | `position(str, sub)` | 1-based index of first occurrence, or 0 if not found. | 1 |
+
+### Replacement
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
 | `replace` | `replace(str, old, new)` | Replace all occurrences of old with new (ordinal). | 1 |
+| `translate` | `translate(str, from, to)` | Character-by-character substitution. Chars in `from` without a `to` counterpart are deleted. | 1 |
+| `regexp_replace` | `regexp_replace(str, pattern, replacement, [flags])` | Replace regex matches. Global by default; flags: `'g'` global, `'i'` case-insensitive. Without `'g'`, replaces first match only. | 1 |
+
+### Concatenation
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
 | `concat` | `concat(a, b, ...)` | Concatenate two or more strings. Null args treated as empty. | 1 |
+| `concat_ws` | `concat_ws(sep, s1, s2, ...)` | Concatenate with separator, skipping nulls. | 1 |
 | `repeat` | `repeat(str, count)` | Repeat string count times. | 1 |
+
+### Splitting
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `split_part` | `split_part(str, delim, n)` | Split on delimiter, return the n-th field (1-based). Empty string if out of range. Negative n counts from end. | 1 |
+| `string_to_array` | `string_to_array(str, delim, [null_str])` | Split by delimiter into an Array. NULL delimiter splits into characters. Fields matching `null_str` become NULL. | 1 |
+| `regexp_split_to_array` | `regexp_split_to_array(str, pattern, [flags])` | Split by regex into an Array. | 1 |
+
+### Regular Expressions
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `regexp_extract` | `regexp_extract(str, pattern, [group])` | Extract first regex match. Optional 1-based group index returns a capture group. NULL if no match. | 1 |
+| `regexp_count` | `regexp_count(str, pattern, [start], [flags])` | Number of times pattern matches. Optional 1-based start. | 1 |
+| `regexp_like` | `regexp_like(str, pattern, [flags])` | Returns Boolean — whether pattern matches anywhere. | 1 |
+| `regexp_match` | `regexp_match(str, pattern, [flags])` | Captured substrings from the first match as an Array. NULL if no match. | 1 |
+| `regexp_substr` | `regexp_substr(str, pattern, [start], [N], [flags], [subexpr])` | The N'th match (default 1). `subexpr` selects a capture group. NULL if no match. | 1 |
+| `regexp_instr` | `regexp_instr(str, pattern, [start], [N], [endoption], [flags], [subexpr])` | 1-based position of N'th match. `endoption=1` returns end+1. Returns 0 if no match. | 1 |
+
+### Formatting
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `format` | `format(fmt, ...)` | sprintf-style formatting. `%s` string, `%I` SQL identifier, `%L` SQL literal, `%%` literal `%`. Positional: `%1$s`. | 1 |
+
+### Character Codes
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `ascii` | `ascii(str)` | Unicode code point of first character. Returns 0 for empty string. | 1 |
+| `chr` | `chr(code)` | Character from Unicode code point. | 1 |
+
+### Base Conversion
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `to_hex` | `to_hex(n)` | Hexadecimal string representation. | 1 |
+| `to_bin` | `to_bin(n)` | Binary string representation. | 1 |
+| `to_oct` | `to_oct(n)` | Octal string representation. | 1 |
+
+### Unicode
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `normalize` | `normalize(str, [form])` | Unicode normalization. Form: `NFC` (default), `NFD`, `NFKC`, `NFKD`. | 1 |
+| `to_ascii` | `to_ascii(str)` | Transliterate to ASCII by removing diacritical marks. | 1 |
+| `unistr` | `unistr(str)` | Evaluate Unicode escapes: `\XXXX`, `\+XXXXXX`, `\uXXXX`, `\UXXXXXXXX`. `\\` for literal backslash. | 1 |
+| `casefold` | `casefold(str)` | Unicode case folding for case-insensitive comparison. | 1 |
+
+### SQL Quoting
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
+| `quote_ident` | `quote_ident(str)` | Quote as a SQL identifier (double-quoted) when necessary. | 1 |
+| `quote_literal` | `quote_literal(val)` | Quote as a SQL string literal (single-quoted). NULL on NULL input. | 1 |
+| `quote_nullable` | `quote_nullable(val)` | Like `quote_literal`, but returns the string `'NULL'` for NULL input. | 1 |
+| `parse_ident` | `parse_ident(str, [strict])` | Split a qualified identifier into an Array, removing quotes and folding to lowercase. | 1 |
+
+### Other
+
+| Function | Signature | Description | QU |
+|----------|-----------|-------------|----|
 | `reverse` | `reverse(str)` | Reverse character order. | 1 |
-| `left` | `left(str, n)` | First n characters. | 1 |
-| `right` | `right(str, n)` | Last n characters. | 1 |
-| `lpad` | `lpad(str, len, fill)` | Pad on the left to target length with fill string. | 1 |
-| `rpad` | `rpad(str, len, fill)` | Pad on the right to target length with fill string. | 1 |
+| `word_count` | `word_count(str)` | Count whitespace-separated words. | 1 |
 | `get_filename` | `get_filename(path)` | Return file name with extension from path. | 1 |
 | `get_file_extension` | `get_file_extension(path)` | Return extension (with dot) from path. | 1 |
 | `get_path` | `get_path(path)` | Return directory portion of path. | 1 |
-| `regexp_extract` | `regexp_extract(str, pattern, [group])` | Extract first regex match. Optional 1-based group index returns a capture group. NULL if no match. | 1 |
-| `regexp_replace` | `regexp_replace(str, pattern, replacement, [flags])` | Replace regex matches. Global by default; flags: `'g'` global, `'i'` case-insensitive. Without `'g'`, replaces first match only. | 1 |
-| `concat_ws` | `concat_ws(sep, s1, s2, ...)` | Concatenate with separator, skipping nulls. | 1 |
-| `split_part` | `split_part(str, delim, n)` | Split on delimiter, return the n-th field (1-based). Empty string if out of range. Negative n counts from end. | 1 |
-| `initcap` | `initcap(str)` | Capitalize first letter of each word, lowercase the rest. | 1 |
-| `translate` | `translate(str, from, to)` | Character-by-character substitution. Chars in `from` without a `to` counterpart are deleted. | 1 |
-| `ascii` | `ascii(str)` | ASCII code of first character. Returns 0 for empty string. | 1 |
-| `chr` | `chr(code)` | Character from ASCII/Unicode code point. | 1 |
-| `btrim` | `btrim(str, [chars])` | Trim specified characters from both sides. Default: whitespace. | 1 |
-| `word_count` | `word_count(str)` | Count whitespace-separated words. | 1 |
 
 ## JSON Column Functions
 
@@ -232,7 +338,8 @@ SELECT sha256(bytes_concat(uuid_bytes(id1), uuid_bytes(id2))) AS composite_hash 
 
 | Function | Signature | Description | QU |
 |----------|-----------|-------------|----|
-| `md5` | `md5(val)` | MD5 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
+| `md5` | `md5(str)` | MD5 hash as lowercase hex string. PostgreSQL compatible. | 2 |
+| `md5_bytes` | `md5_bytes(val)` | MD5 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. | 2 |
 | `sha256` | `sha256(val)` | SHA-256 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
 | `sha512` | `sha512(val)` | SHA-512 hash as UInt8Array. Accepts String (UTF-8) or UInt8Array. Use `hex_encode()` for hex digest. | 2 |
 | `crc32` | `crc32(val)` | CRC-32 checksum as Float32. Accepts String (UTF-8) or UInt8Array. | 2 |
@@ -618,7 +725,7 @@ SELECT *, AVG(score) OVER (PARTITION BY category) AS category_avg FROM data
 
 ```sql
 -- Normalize a numeric column
-SELECT id, normalize(score, 0, 100) AS norm_score FROM data
+SELECT id, min_max_normalize(score, 0, 100) AS norm_score FROM data
 
 -- JSON extraction
 SELECT json_value(metadata, '$.category') AS cat FROM records
