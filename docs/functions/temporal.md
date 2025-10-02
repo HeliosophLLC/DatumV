@@ -259,7 +259,7 @@ Actual wall-clock time as a formatted String (ISO 8601). NOT batch-stable.
 
 `make_date(year, month, day)` -> Date | QU: 1
 
-Construct a Date from components (all Float32).
+Construct a Date from integer components (year, month, day).
 
 ```sql
 SELECT make_date(year_col, month_col, 1) AS first_of_month FROM data
@@ -269,7 +269,7 @@ SELECT make_date(year_col, month_col, 1) AS first_of_month FROM data
 
 `make_timestamp(y, m, d, h, min, s)` -> DateTime | QU: 1
 
-Construct a DateTime (UTC) from components (all Float32).
+Construct a DateTime (UTC) from components. Year, month, day, hour, minute are integers; second is numeric (supports fractional seconds).
 
 ### date_diff
 

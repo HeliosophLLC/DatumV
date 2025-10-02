@@ -11,7 +11,7 @@ PostgreSQL-compatible string functions. All functions return NULL when any requi
 
 ### len
 
-`len(val)` → Float32 | QU: 1
+`len(val)` → Int32 | QU: 1
 
 Length of string, collection, or array. Also works on Vector, UInt8Array, Matrix, Tensor, JsonValue, and Array.
 
@@ -21,7 +21,7 @@ SELECT len('hello') -- 5
 
 ### length
 
-`length(str)` → Float32 | QU: 1
+`length(str)` → Int32 | QU: 1
 
 Number of characters. Alias for `len()`.
 
@@ -31,7 +31,7 @@ SELECT length('hello') -- 5
 
 ### char_length
 
-`char_length(str)` → Float32 | QU: 1
+`char_length(str)` → Int32 | QU: 1
 
 SQL standard alias for `len()`.
 
@@ -41,7 +41,7 @@ SELECT char_length('hello') -- 5
 
 ### character_length
 
-`character_length(str)` → Float32 | QU: 1
+`character_length(str)` → Int32 | QU: 1
 
 SQL standard alias for `len()`.
 
@@ -51,7 +51,7 @@ SELECT character_length('hello') -- 5
 
 ### octet_length
 
-`octet_length(str)` → Float32 | QU: 1
+`octet_length(str)` → Int32 | QU: 1
 
 Number of bytes in the string (UTF-8 encoded).
 
@@ -62,7 +62,7 @@ SELECT octet_length('cafe\u0301') -- more than char count for multi-byte chars
 
 ### bit_length
 
-`bit_length(str)` → Float32 | QU: 1
+`bit_length(str)` → Int32 | QU: 1
 
 Number of bits in the string (8 x `octet_length`).
 
@@ -238,7 +238,7 @@ SELECT rpad('hi', 5, 'xy')   -- 'hixyx'
 
 ### position
 
-`position(str, sub)` → Float32 | QU: 1
+`position(str, sub)` → Int32 | QU: 1
 
 1-based index of first occurrence, or 0 if not found.
 
@@ -248,7 +248,7 @@ SELECT position('hello world', 'world') -- 7
 
 ### strpos
 
-`strpos(str, sub)` → Float32 | QU: 1
+`strpos(str, sub)` → Int32 | QU: 1
 
 Same as `position()`.
 
@@ -367,7 +367,7 @@ SELECT split_part('a.b.c', '.', -1) -- 'c'
 
 ### ascii
 
-`ascii(str)` → Float32 | QU: 1
+`ascii(str)` → Int32 | QU: 1
 
 Unicode code point of first character. Returns 0 for empty string.
 
@@ -402,7 +402,7 @@ SELECT regexp_extract('abc123', '(\d+)', 1)   -- '123'
 
 ### regexp_count
 
-`regexp_count(str, pattern, [start], [flags])` → Float32 | QU: 1
+`regexp_count(str, pattern, [start], [flags])` → Int32 | QU: 1
 
 Number of times pattern matches. Optional 1-based start.
 
@@ -442,7 +442,7 @@ SELECT regexp_substr('abc123def456', '\d+', 1, 2) -- '456'
 
 ### regexp_instr
 
-`regexp_instr(str, pattern, [start], [N], [endoption], [flags], [subexpr])` → Float32 | QU: 1
+`regexp_instr(str, pattern, [start], [N], [endoption], [flags], [subexpr])` → Int32 | QU: 1
 
 1-based position of N'th match. `endoption=1` returns end+1. Returns 0 if no match.
 
@@ -615,7 +615,7 @@ SELECT reverse('hello') -- 'olleh'
 
 ### word_count
 
-`word_count(str)` → Float32 | QU: 1
+`word_count(str)` → Int32 | QU: 1
 
 Count whitespace-separated words.
 

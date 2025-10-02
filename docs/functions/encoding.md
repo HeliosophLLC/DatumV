@@ -108,7 +108,7 @@ Extract sub-array by position and length (0-based, clamped).
 
 `bytes(a, b, ...)` -> UInt8Array | QU: 1
 
-Construct a byte array from Float32 values (each 0-255).
+Construct a byte array from integer values (each 0-255). Values outside this range produce an error.
 
 ## Hashing
 

@@ -82,7 +82,7 @@ public static class FunctionDocumentation
         {
             Name = "len",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the character length of a string.",
             Category = FunctionCategory.String,
         });
@@ -90,7 +90,7 @@ public static class FunctionDocumentation
         {
             Name = "length",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the number of characters in a string. Alias for len().",
             Category = FunctionCategory.String,
         });
@@ -98,7 +98,7 @@ public static class FunctionDocumentation
         {
             Name = "char_length",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the number of characters in a string. SQL standard alias for len().",
             Category = FunctionCategory.String,
         });
@@ -106,14 +106,14 @@ public static class FunctionDocumentation
         {
             Name = "character_length",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the number of characters in a string. SQL standard alias for len().",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "mid",
-            Parameters = [Parameter("value", "String"), Parameter("start", "Float32"), Parameter("length", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("start", "Int32"), Parameter("length", "Int32")],
             ReturnType = "String",
             Description = "Extracts a substring starting at the given 1-based position with the specified length.",
             Category = FunctionCategory.String,
@@ -121,7 +121,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "substring",
-            Parameters = [Parameter("value", "String"), Parameter("start", "Float32"), Parameter("length", "Float32", isOptional: true)],
+            Parameters = [Parameter("value", "String"), Parameter("start", "Int32"), Parameter("length", "Int32", isOptional: true)],
             ReturnType = "String",
             Description = "Extracts a substring from a 1-based start position, optionally with a length.",
             Category = FunctionCategory.String,
@@ -129,7 +129,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "substr",
-            Parameters = [Parameter("value", "String"), Parameter("start", "Float32"), Parameter("length", "Float32", isOptional: true)],
+            Parameters = [Parameter("value", "String"), Parameter("start", "Int32"), Parameter("length", "Int32", isOptional: true)],
             ReturnType = "String",
             Description = "Extracts a substring from a 1-based start position, optionally with a length. Alias for substring().",
             Category = FunctionCategory.String,
@@ -137,7 +137,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "overlay",
-            Parameters = [Parameter("value", "String"), Parameter("newsubstring", "String"), Parameter("start", "Float32"), Parameter("count", "Float32", isOptional: true)],
+            Parameters = [Parameter("value", "String"), Parameter("newsubstring", "String"), Parameter("start", "Int32"), Parameter("count", "Int32", isOptional: true)],
             ReturnType = "String",
             Description = "Replaces a substring starting at the 1-based start position for count characters with newsubstring. Count defaults to the length of newsubstring.",
             Category = FunctionCategory.String,
@@ -169,7 +169,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "regexp_extract",
-            Parameters = [Parameter("input", "String"), Parameter("pattern", "String"), Parameter("group_index", "Float32", isOptional: true)],
+            Parameters = [Parameter("input", "String"), Parameter("pattern", "String"), Parameter("group_index", "Int32", isOptional: true)],
             ReturnType = "String",
             Description = "Extracts the first substring matching a regular expression. With group_index (1-based), returns a specific capture group. Returns NULL if no match.",
             Category = FunctionCategory.String,
@@ -250,7 +250,7 @@ public static class FunctionDocumentation
         {
             Name = "position",
             Parameters = [Parameter("string", "String"), Parameter("substring", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the 1-based index of the first occurrence of substring in string, or 0 if not found.",
             Category = FunctionCategory.String,
         });
@@ -258,7 +258,7 @@ public static class FunctionDocumentation
         {
             Name = "strpos",
             Parameters = [Parameter("string", "String"), Parameter("substring", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the 1-based index of the first occurrence of substring in string, or 0 if not found. Same as position().",
             Category = FunctionCategory.String,
         });
@@ -289,7 +289,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "repeat",
-            Parameters = [Parameter("value", "String"), Parameter("count", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("count", "Int32")],
             ReturnType = "String",
             Description = "Repeats a string the specified number of times.",
             Category = FunctionCategory.String,
@@ -305,7 +305,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "left",
-            Parameters = [Parameter("value", "String"), Parameter("n", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("n", "Int32")],
             ReturnType = "String",
             Description = "Returns the first n characters. When n is negative, returns all but the last |n| characters.",
             Category = FunctionCategory.String,
@@ -313,7 +313,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "right",
-            Parameters = [Parameter("value", "String"), Parameter("n", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("n", "Int32")],
             ReturnType = "String",
             Description = "Returns the last n characters. When n is negative, returns all but the first |n| characters.",
             Category = FunctionCategory.String,
@@ -321,7 +321,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "lpad",
-            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String", isOptional: true)],
+            Parameters = [Parameter("value", "String"), Parameter("length", "Int32"), Parameter("fill", "String", isOptional: true)],
             ReturnType = "String",
             Description = "Left-pads a string to the specified length with a fill string (default space). Truncates from the right if already longer.",
             Category = FunctionCategory.String,
@@ -329,7 +329,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "rpad",
-            Parameters = [Parameter("value", "String"), Parameter("length", "Float32"), Parameter("fill", "String", isOptional: true)],
+            Parameters = [Parameter("value", "String"), Parameter("length", "Int32"), Parameter("fill", "String", isOptional: true)],
             ReturnType = "String",
             Description = "Right-pads a string to the specified length with a fill string (default space). Truncates if already longer.",
             Category = FunctionCategory.String,
@@ -345,8 +345,8 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "regexp_count",
-            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Float32", isOptional: true), Parameter("flags", "String", isOptional: true)],
-            ReturnType = "Float32",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Int32", isOptional: true), Parameter("flags", "String", isOptional: true)],
+            ReturnType = "Int32",
             Description = "Returns the number of times the regex pattern matches in the string. Optional 1-based start position.",
             Category = FunctionCategory.String,
         });
@@ -369,7 +369,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "regexp_substr",
-            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Float32", isOptional: true), Parameter("N", "Float32", isOptional: true), Parameter("flags", "String", isOptional: true), Parameter("subexpr", "Float32", isOptional: true)],
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Int32", isOptional: true), Parameter("N", "Int32", isOptional: true), Parameter("flags", "String", isOptional: true), Parameter("subexpr", "Int32", isOptional: true)],
             ReturnType = "String",
             Description = "Returns the substring matching the N'th occurrence of a regex. Returns NULL if no match.",
             Category = FunctionCategory.String,
@@ -377,8 +377,8 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "regexp_instr",
-            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Float32", isOptional: true), Parameter("N", "Float32", isOptional: true), Parameter("endoption", "Float32", isOptional: true), Parameter("flags", "String", isOptional: true), Parameter("subexpr", "Float32", isOptional: true)],
-            ReturnType = "Float32",
+            Parameters = [Parameter("string", "String"), Parameter("pattern", "String"), Parameter("start", "Int32", isOptional: true), Parameter("N", "Int32", isOptional: true), Parameter("endoption", "Int32", isOptional: true), Parameter("flags", "String", isOptional: true), Parameter("subexpr", "Int32", isOptional: true)],
+            ReturnType = "Int32",
             Description = "Returns the 1-based position of the N'th regex match. endoption=1 returns position after match. Returns 0 if no match.",
             Category = FunctionCategory.String,
         });
@@ -386,14 +386,14 @@ public static class FunctionDocumentation
         {
             Name = "word_count",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the number of whitespace-delimited words in a string.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "split_part",
-            Parameters = [Parameter("value", "String"), Parameter("delimiter", "String"), Parameter("index", "Float32")],
+            Parameters = [Parameter("value", "String"), Parameter("delimiter", "String"), Parameter("index", "Int32")],
             ReturnType = "String",
             Description = "Splits a string by a delimiter and returns the 1-based Nth part.",
             Category = FunctionCategory.String,
@@ -418,14 +418,14 @@ public static class FunctionDocumentation
         {
             Name = "ascii",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the ASCII code of the first character of the string.",
             Category = FunctionCategory.String,
         });
         Register(new FunctionSignature
         {
             Name = "chr",
-            Parameters = [Parameter("code", "Float32")],
+            Parameters = [Parameter("code", "Int32")],
             ReturnType = "String",
             Description = "Returns the character corresponding to the given ASCII code.",
             Category = FunctionCategory.String,
@@ -434,7 +434,7 @@ public static class FunctionDocumentation
         {
             Name = "octet_length",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the number of bytes in the string (UTF-8 encoded).",
             Category = FunctionCategory.String,
         });
@@ -442,7 +442,7 @@ public static class FunctionDocumentation
         {
             Name = "bit_length",
             Parameters = [Parameter("value", "String")],
-            ReturnType = "Float32",
+            ReturnType = "Int32",
             Description = "Returns the number of bits in the string (8 × octet_length).",
             Category = FunctionCategory.String,
         });
@@ -646,7 +646,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "make_date",
-            Parameters = [Parameter("year", "Float32"), Parameter("month", "Float32"), Parameter("day", "Float32")],
+            Parameters = [Parameter("year", "Int32"), Parameter("month", "Int32"), Parameter("day", "Int32")],
             ReturnType = "Date",
             Description = "Constructs a Date from year, month, and day components.",
             Category = FunctionCategory.Temporal,
@@ -654,7 +654,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "make_timestamp",
-            Parameters = [Parameter("year", "Float32"), Parameter("month", "Float32"), Parameter("day", "Float32"), Parameter("hour", "Float32"), Parameter("minute", "Float32"), Parameter("second", "Float32")],
+            Parameters = [Parameter("year", "Int32"), Parameter("month", "Int32"), Parameter("day", "Int32"), Parameter("hour", "Int32"), Parameter("minute", "Int32"), Parameter("second", "Float64")],
             ReturnType = "DateTime",
             Description = "Constructs a UTC DateTime from year, month, day, hour, minute, and second components.",
             Category = FunctionCategory.Temporal,
@@ -1417,7 +1417,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "array_get",
-            Parameters = [Parameter("array", "Array"), Parameter("index", "Float32")],
+            Parameters = [Parameter("array", "Array"), Parameter("index", "Int32")],
             ReturnType = "Any",
             Description = "Returns the element at a 1-based index in an array. Returns null if the index is out of bounds.",
             Category = FunctionCategory.Utility,
@@ -1457,7 +1457,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "array_slice",
-            Parameters = [Parameter("array", "Array"), Parameter("start", "Float32"), Parameter("length", "Float32")],
+            Parameters = [Parameter("array", "Array"), Parameter("start", "Int32"), Parameter("length", "Int32")],
             ReturnType = "Array",
             Description = "Extracts a sub-array using 1-based start position and length.",
             Category = FunctionCategory.Utility,
@@ -1540,7 +1540,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "bytes",
-            Parameters = [Parameter("values", "Float32")],
+            Parameters = [Parameter("values", "Int32")],
             ReturnType = "UInt8Array",
             Description = "Constructs a byte array from one or more scalar byte values (0–255).",
             Category = FunctionCategory.Utility,
@@ -1556,7 +1556,7 @@ public static class FunctionDocumentation
         Register(new FunctionSignature
         {
             Name = "bytes_slice",
-            Parameters = [Parameter("array", "UInt8Array"), Parameter("start", "Float32"), Parameter("length", "Float32")],
+            Parameters = [Parameter("array", "UInt8Array"), Parameter("start", "Int32"), Parameter("length", "Int32")],
             ReturnType = "UInt8Array",
             Description = "Extracts a sub-range from a byte array using 1-based start position and length.",
             Category = FunctionCategory.Utility,
