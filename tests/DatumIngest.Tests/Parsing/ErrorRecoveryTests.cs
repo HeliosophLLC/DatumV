@@ -290,4 +290,27 @@ public sealed class ErrorRecoveryTests
         Assert.NotNull(result.Statements);
         Assert.Equal(2, result.Statements!.Count);
     }
+
+    // ───────────── Tokenizer-level failures (incomplete tokens) ─────────────
+
+    [Fact]
+    public void IncompleteQuotedIdentifier_ReportsErrorWithoutThrowing()
+    {
+        ParseResult result = SqlParser.TryParseRecovering(
+            "SELECT payment_type, COUNT(*) AS count\nFROM \"yello ");
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Query);
+        ParseError error = Assert.Single(result.Errors);
+        Assert.Contains("incomplete identifier", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void IncompleteStringLiteral_ReportsErrorWithoutThrowing()
+    {
+        ParseResult result = SqlParser.TryParseRecovering("SELECT 'unterminated");
+
+        Assert.False(result.IsSuccess);
+        Assert.Single(result.Errors);
+    }
 }

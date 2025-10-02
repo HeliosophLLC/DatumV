@@ -2356,7 +2356,26 @@ public static class SqlParser
     /// </returns>
     public static ParseResult TryParseRecovering(string sql)
     {
-        TokenList<SqlToken> tokens = SqlTokenizer.Instance.Tokenize(sql);
+        TokenList<SqlToken> tokens;
+        try
+        {
+            tokens = SqlTokenizer.Instance.Tokenize(sql);
+        }
+        catch (Superpower.ParseException ex)
+        {
+            // The tokenizer throws when it encounters an untokenizable sequence
+            // (e.g. an incomplete quoted identifier like `"foo`). Convert the
+            // exception into a ParseResult with an error diagnostic so the
+            // language server can report it gracefully.
+            return new ParseResult(
+                query: null,
+                [new ParseError
+                {
+                    Message = ex.Message,
+                    Line = ex.ErrorPosition.Line,
+                    Column = ex.ErrorPosition.Column,
+                }]);
+        }
 
         // Fast path: try the full batch parser first. This handles all statement
         // types (SELECT, CREATE, INSERT, UPDATE, DELETE, ALTER, ANALYZE) and
