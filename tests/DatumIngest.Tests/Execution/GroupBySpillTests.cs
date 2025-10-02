@@ -106,13 +106,13 @@ public sealed class GroupBySpillTests
         Row groupB = results.First(row => row["category"].AsString() == "B");
         Row groupC = results.First(row => row["category"].AsString() == "C");
 
-        Assert.Equal(4f, groupA["COUNT(*)"].AsFloat32());
+        Assert.Equal(4L, groupA["COUNT(*)"].AsInt64());
         Assert.Equal(17f, groupA["SUM(value)"].AsFloat32());
 
-        Assert.Equal(3f, groupB["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, groupB["COUNT(*)"].AsInt64());
         Assert.Equal(15f, groupB["SUM(value)"].AsFloat32());
 
-        Assert.Equal(3f, groupC["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, groupC["COUNT(*)"].AsInt64());
         Assert.Equal(23f, groupC["SUM(value)"].AsFloat32());
     }
 
@@ -159,15 +159,15 @@ public sealed class GroupBySpillTests
         Assert.Equal(100, spillResults.Count);
 
         // Verify every group matches.
-        Dictionary<string, (float Count, float Sum)> expected = unboundedResults.ToDictionary(
+        Dictionary<string, (long Count, float Sum)> expected = unboundedResults.ToDictionary(
             row => row["key"].AsString(),
-            row => (row["COUNT(*)"].AsFloat32(), row["SUM(val)"].AsFloat32()));
+            row => (row["COUNT(*)"].AsInt64(), row["SUM(val)"].AsFloat32()));
 
         foreach (Row row in spillResults)
         {
             string key = row["key"].AsString();
             Assert.True(expected.ContainsKey(key), $"Unexpected group key: {key}");
-            Assert.Equal(expected[key].Count, row["COUNT(*)"].AsFloat32());
+            Assert.Equal(expected[key].Count, row["COUNT(*)"].AsInt64());
             Assert.Equal(expected[key].Sum, row["SUM(val)"].AsFloat32());
         }
     }
@@ -208,22 +208,22 @@ public sealed class GroupBySpillTests
 
         Row groupXActive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "active");
-        Assert.Equal(3f, groupXActive["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, groupXActive["COUNT(*)"].AsInt64());
         Assert.Equal(900f, groupXActive["SUM(amount)"].AsFloat32());
 
         Row groupXInactive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "inactive");
-        Assert.Equal(2f, groupXInactive["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, groupXInactive["COUNT(*)"].AsInt64());
         Assert.Equal(350f, groupXInactive["SUM(amount)"].AsFloat32());
 
         Row groupYActive = results.First(row =>
             row["dept"].AsString() == "Y" && row["status"].AsString() == "active");
-        Assert.Equal(2f, groupYActive["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, groupYActive["COUNT(*)"].AsInt64());
         Assert.Equal(75f, groupYActive["SUM(amount)"].AsFloat32());
 
         Row groupYInactive = results.First(row =>
             row["dept"].AsString() == "Y" && row["status"].AsString() == "inactive");
-        Assert.Equal(1f, groupYInactive["COUNT(*)"].AsFloat32());
+        Assert.Equal(1L, groupYInactive["COUNT(*)"].AsInt64());
         Assert.Equal(75f, groupYInactive["SUM(amount)"].AsFloat32());
     }
 
@@ -256,7 +256,7 @@ public sealed class GroupBySpillTests
         List<Row> results = await CollectAsync(groupBy, CreateContext(TinyBudget));
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, results[0]["COUNT(*)"].AsInt64());
         Assert.Equal(6f, results[0]["SUM(x)"].AsFloat32());
     }
 

@@ -74,11 +74,11 @@ public sealed class StreamingGroupByTests
 
         // Streaming preserves input order.
         Assert.Equal("A", results[0]["category"].AsString());
-        Assert.Equal(3f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, results[0]["COUNT(*)"].AsInt64());
         Assert.Equal(9f, results[0]["SUM(value)"].AsFloat32());
 
         Assert.Equal("B", results[1]["category"].AsString());
-        Assert.Equal(2f, results[1]["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, results[1]["COUNT(*)"].AsInt64());
         Assert.Equal(6f, results[1]["SUM(value)"].AsFloat32());
     }
 
@@ -128,7 +128,7 @@ public sealed class StreamingGroupByTests
             DataValue key = streamingRow["key"];
             Row hashRow = hashResults.First(row => row["key"].Equals(key));
 
-            Assert.Equal(hashRow["COUNT(*)"].AsFloat32(), streamingRow["COUNT(*)"].AsFloat32());
+            Assert.Equal(hashRow["COUNT(*)"].AsInt64(), streamingRow["COUNT(*)"].AsInt64());
             Assert.Equal(hashRow["SUM(val)"].AsFloat32(), streamingRow["SUM(val)"].AsFloat32());
         }
     }
@@ -165,17 +165,17 @@ public sealed class StreamingGroupByTests
         // Groups appear in sorted order.
         Assert.Equal("X", results[0]["dept"].AsString());
         Assert.Equal("active", results[0]["status"].AsString());
-        Assert.Equal(2f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, results[0]["COUNT(*)"].AsInt64());
         Assert.Equal(400f, results[0]["SUM(amount)"].AsFloat32());
 
         Assert.Equal("X", results[1]["dept"].AsString());
         Assert.Equal("inactive", results[1]["status"].AsString());
-        Assert.Equal(1f, results[1]["COUNT(*)"].AsFloat32());
+        Assert.Equal(1L, results[1]["COUNT(*)"].AsInt64());
         Assert.Equal(200f, results[1]["SUM(amount)"].AsFloat32());
 
         Assert.Equal("Y", results[2]["dept"].AsString());
         Assert.Equal("active", results[2]["status"].AsString());
-        Assert.Equal(1f, results[2]["COUNT(*)"].AsFloat32());
+        Assert.Equal(1L, results[2]["COUNT(*)"].AsInt64());
         Assert.Equal(50f, results[2]["SUM(amount)"].AsFloat32());
     }
 
@@ -237,7 +237,7 @@ public sealed class StreamingGroupByTests
         for (int index = 0; index < 5; index++)
         {
             Assert.Equal((float)index, results[index]["group_id"].AsFloat32());
-            Assert.Equal(10f, results[index]["COUNT(*)"].AsFloat32());
+            Assert.Equal(10L, results[index]["COUNT(*)"].AsInt64());
         }
 
         // The source should read enough rows to fill the first output batch of 8
@@ -320,7 +320,7 @@ public sealed class StreamingGroupByTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Equal(3, results.Count);
-        Assert.All(results, row => Assert.Equal(1f, row["COUNT(*)"].AsFloat32()));
+        Assert.All(results, row => Assert.Equal(1L, row["COUNT(*)"].AsInt64()));
     }
 
     /// <summary>
@@ -347,9 +347,9 @@ public sealed class StreamingGroupByTests
 
         Assert.Equal(2, results.Count);
         Assert.True(results[0]["key"].IsNull);
-        Assert.Equal(2f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, results[0]["COUNT(*)"].AsInt64());
         Assert.Equal("A", results[1]["key"].AsString());
-        Assert.Equal(1f, results[1]["COUNT(*)"].AsFloat32());
+        Assert.Equal(1L, results[1]["COUNT(*)"].AsInt64());
     }
 
     // ─────────────── MIN/MAX in streaming mode ───────────────

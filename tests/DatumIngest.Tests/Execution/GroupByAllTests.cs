@@ -71,8 +71,8 @@ public sealed class GroupByAllTests
         Assert.Equal(2, results.Count);
         Row rowX = results.First(r => r["category"].AsString() == "X");
         Row rowY = results.First(r => r["category"].AsString() == "Y");
-        Assert.Equal(2f, rowX["n"].AsFloat32());
-        Assert.Equal(1f, rowY["n"].AsFloat32());
+        Assert.Equal(2L, rowX["n"].AsInt64());
+        Assert.Equal(1L, rowY["n"].AsInt64());
     }
 
     // ─────────────── Computed expressions ───────────────
@@ -101,7 +101,7 @@ public sealed class GroupByAllTests
         // Three distinct (a, b) pairs: (X,P), (X,Q), (Y,P)
         Assert.Equal(3, results.Count);
         Row yp = results.First(r => r["a"].AsString() == "Y" && r["b"].AsString() == "P");
-        Assert.Equal(2f, yp["n"].AsFloat32());
+        Assert.Equal(2L, yp["n"].AsInt64());
         Assert.Equal(7f, yp["total"].AsFloat32());
     }
 
@@ -127,7 +127,7 @@ public sealed class GroupByAllTests
 
         Assert.Equal(2, results.Count);
         Row east = results.First(r => r["region"].AsString() == "East");
-        Assert.Equal(2f, east["n"].AsFloat32());
+        Assert.Equal(2L, east["n"].AsInt64());
         Assert.Equal(30f, east["total"].AsFloat32());
         Assert.Equal(15.0, east["avg_sales"].AsFloat64());
     }

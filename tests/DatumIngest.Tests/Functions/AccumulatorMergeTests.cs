@@ -27,7 +27,7 @@ public class AccumulatorMergeTests
 
         left.Merge(right);
 
-        Assert.Equal(3f, left.Result.AsFloat32());
+        Assert.Equal(3L, left.Result.AsInt64());
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public class AccumulatorMergeTests
         left.Merge(right);
 
         // 1 non-null from left + 2 from right = 3
-        Assert.Equal(3f, left.Result.AsFloat32());
+        Assert.Equal(3L, left.Result.AsInt64());
     }
 
     // ─────────────── SUM ───────────────
@@ -480,7 +480,7 @@ public class AccumulatorMergeTests
         left.Merge(right);
 
         // COUNT(DISTINCT) of {1, 2, 3} = 3
-        Assert.Equal(3f, left.Result.AsFloat32());
+        Assert.Equal(3L, left.Result.AsInt64());
     }
 
     // ─────────────── APPROX_MEDIAN ───────────────

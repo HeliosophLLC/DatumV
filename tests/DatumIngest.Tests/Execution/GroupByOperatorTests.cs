@@ -58,7 +58,7 @@ public class GroupByOperatorTests
         List<Row> results = await CollectAsync(groupBy);
 
         Assert.Single(results);
-        Assert.Equal(3f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, results[0]["COUNT(*)"].AsInt64());
     }
 
     [Fact]
@@ -123,10 +123,10 @@ public class GroupByOperatorTests
         Row groupA = results.First(row => row["category"].AsString() == "A");
         Row groupB = results.First(row => row["category"].AsString() == "B");
 
-        Assert.Equal(3f, groupA["COUNT(*)"].AsFloat32());
+        Assert.Equal(3L, groupA["COUNT(*)"].AsInt64());
         Assert.Equal(9f, groupA["SUM(value)"].AsFloat32());
 
-        Assert.Equal(2f, groupB["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, groupB["COUNT(*)"].AsInt64());
         Assert.Equal(6f, groupB["SUM(value)"].AsFloat32());
     }
 
@@ -159,12 +159,12 @@ public class GroupByOperatorTests
 
         Row groupXActive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "active");
-        Assert.Equal(2f, groupXActive["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, groupXActive["COUNT(*)"].AsInt64());
         Assert.Equal(400f, groupXActive["SUM(amount)"].AsFloat32());
 
         Row groupXInactive = results.First(row =>
             row["dept"].AsString() == "X" && row["status"].AsString() == "inactive");
-        Assert.Equal(1f, groupXInactive["COUNT(*)"].AsFloat32());
+        Assert.Equal(1L, groupXInactive["COUNT(*)"].AsInt64());
         Assert.Equal(200f, groupXInactive["SUM(amount)"].AsFloat32());
     }
 
@@ -237,7 +237,7 @@ public class GroupByOperatorTests
 
         // Global aggregation on empty input returns a single row with COUNT(*) = 0.
         Assert.Single(results);
-        Assert.Equal(0f, results[0]["COUNT(*)"].AsFloat32());
+        Assert.Equal(0L, results[0]["COUNT(*)"].AsInt64());
     }
 
     // ─────────────── Null handling ───────────────
@@ -263,7 +263,7 @@ public class GroupByOperatorTests
         Assert.Equal(2, results.Count);
 
         Row nullGroup = results.First(row => row["category"].IsNull);
-        Assert.Equal(2f, nullGroup["COUNT(*)"].AsFloat32());
+        Assert.Equal(2L, nullGroup["COUNT(*)"].AsInt64());
     }
 
     // ─────────────── Output column schema ───────────────

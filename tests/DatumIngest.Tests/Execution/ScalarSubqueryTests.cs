@@ -469,9 +469,9 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(2f, results[0]["item_count"].AsFloat32());
-        Assert.Equal(1f, results[1]["item_count"].AsFloat32());
-        Assert.Equal(0f, results[2]["item_count"].AsFloat32());
+        Assert.Equal(2L, results[0]["item_count"].ToInt64());
+        Assert.Equal(1L, results[1]["item_count"].ToInt64());
+        Assert.Equal(0L, results[2]["item_count"].ToInt64());
     }
 
     /// <summary>
@@ -574,8 +574,8 @@ public sealed class ScalarSubqueryTests
             catalog);
 
         Assert.Equal(2, results.Count);
-        Assert.Equal(1f, results[0]["cnt"].AsFloat32());
-        Assert.Equal(2f, results[1]["cnt"].AsFloat32());
+        Assert.Equal(1L, results[0]["cnt"].AsInt64());
+        Assert.Equal(2L, results[1]["cnt"].AsInt64());
     }
 
     /// <summary>

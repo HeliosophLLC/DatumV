@@ -1930,7 +1930,7 @@ public static class FunctionDocumentation
         {
             Name = "COUNT",
             Parameters = [Parameter("expression", "Any", isOptional: true)],
-            ReturnType = "Float32",
+            ReturnType = "Int64",
             Description = "Counts the number of rows. COUNT(*) counts all rows; COUNT(expr) counts non-null values.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,

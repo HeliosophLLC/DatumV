@@ -22,7 +22,7 @@ public class AggregateFunctionTests
         accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
         accumulator.Accumulate(ReadOnlySpan<DataValue>.Empty);
 
-        Assert.Equal(3f, accumulator.Result.AsFloat32());
+        Assert.Equal(3L, accumulator.Result.AsInt64());
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public class AggregateFunctionTests
         accumulator.Accumulate(nullValue);
         accumulator.Accumulate(nonNull);
 
-        Assert.Equal(2f, accumulator.Result.AsFloat32());
+        Assert.Equal(2L, accumulator.Result.AsInt64());
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class AggregateFunctionTests
         CountFunction function = new();
         IAggregateAccumulator accumulator = function.CreateAccumulator();
 
-        Assert.Equal(0f, accumulator.Result.AsFloat32());
+        Assert.Equal(0L, accumulator.Result.AsInt64());
     }
 
     // ─────────────── SUM ───────────────

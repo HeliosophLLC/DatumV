@@ -21,7 +21,7 @@ public sealed class CountFunction : IAggregateFunction
             throw new ArgumentException("COUNT() accepts zero or one argument.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int64;
     }
 
     /// <inheritdoc/>
@@ -52,7 +52,7 @@ public sealed class CountFunction : IAggregateFunction
             _count += otherAccumulator._count;
         }
 
-        public DataValue Result => DataValue.FromFloat32(_count);
+        public DataValue Result => DataValue.FromInt64(_count);
 
         /// <inheritdoc />
         public void Reset()

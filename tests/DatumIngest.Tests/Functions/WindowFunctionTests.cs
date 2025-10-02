@@ -444,9 +444,9 @@ public class WindowFunctionTests
         IReadOnlyList<Expression> arguments = [new ColumnReference("val")];
         DataValue[] results = ComputeWindow(function, rows, argumentExpressions: arguments);
 
-        Assert.Equal(3f, results[0].AsFloat32());
-        Assert.Equal(3f, results[1].AsFloat32());
-        Assert.Equal(3f, results[2].AsFloat32());
+        Assert.Equal(3L, results[0].AsInt64());
+        Assert.Equal(3L, results[1].AsInt64());
+        Assert.Equal(3L, results[2].AsInt64());
     }
 
     [Fact]

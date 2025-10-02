@@ -204,7 +204,7 @@ public class DistinctTests
         }
 
         // 3 distinct values: 1, 2, 3.
-        Assert.Equal(3f, decorator.Result.AsFloat32());
+        Assert.Equal(3L, decorator.Result.AsInt64());
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public class DistinctTests
             decorator.Accumulate([DataValue.FromFloat32(42f)]);
         }
 
-        Assert.Equal(1f, decorator.Result.AsFloat32());
+        Assert.Equal(1L, decorator.Result.AsInt64());
     }
 
     [Fact]
@@ -254,7 +254,7 @@ public class DistinctTests
 
         // The distinct decorator treats NULLs as equal (2 distinct values seen),
         // but COUNT's inner accumulator skips NULL values. Only 1f is counted.
-        Assert.Equal(1f, decorator.Result.AsFloat32());
+        Assert.Equal(1L, decorator.Result.AsInt64());
     }
 
     [Fact]
@@ -264,7 +264,7 @@ public class DistinctTests
         IAggregateAccumulator accumulator = countFunction.CreateAccumulator();
         DistinctAccumulatorDecorator decorator = new(accumulator, argumentCount: 1);
 
-        Assert.Equal(0f, decorator.Result.AsFloat32());
+        Assert.Equal(0L, decorator.Result.AsInt64());
     }
 
     // ─────────────── GroupByOperator with DISTINCT aggregates ───────────────
@@ -298,8 +298,8 @@ public class DistinctTests
         Row groupA = results.First(r => r["category"].AsString() == "A");
         Row groupB = results.First(r => r["category"].AsString() == "B");
 
-        Assert.Equal(2f, groupA["COUNT(DISTINCT item)"].AsFloat32());
-        Assert.Equal(1f, groupB["COUNT(DISTINCT item)"].AsFloat32());
+        Assert.Equal(2L, groupA["COUNT(DISTINCT item)"].AsInt64());
+        Assert.Equal(1L, groupB["COUNT(DISTINCT item)"].AsInt64());
     }
 
     // ─────────────── DistinctAccumulatorDecorator spill-to-disk ───────────────
@@ -325,7 +325,7 @@ public class DistinctTests
         }
 
         // COUNT(DISTINCT) of {0, 1, 2, ..., 199} = 200.
-        Assert.Equal(200f, decorator.Result.AsFloat32());
+        Assert.Equal(200L, decorator.Result.AsInt64());
         decorator.Dispose();
     }
 
@@ -371,7 +371,7 @@ public class DistinctTests
             decorator.Accumulate([DataValue.FromInt64(index)]);
         }
 
-        Assert.Equal(100f, decorator.Result.AsFloat32());
+        Assert.Equal(100L, decorator.Result.AsInt64());
 
         // Reset and reuse with different data.
         decorator.Reset();
@@ -381,7 +381,7 @@ public class DistinctTests
             decorator.Accumulate([DataValue.FromInt64(index)]);
         }
 
-        Assert.Equal(5f, decorator.Result.AsFloat32());
+        Assert.Equal(5L, decorator.Result.AsInt64());
         decorator.Dispose();
     }
 
@@ -404,7 +404,7 @@ public class DistinctTests
             decorator.Accumulate([DataValue.FromString($"value_{index}")]);
         }
 
-        Assert.Equal(150f, decorator.Result.AsFloat32());
+        Assert.Equal(150L, decorator.Result.AsInt64());
         decorator.Dispose();
     }
 
@@ -445,8 +445,8 @@ public class DistinctTests
         List<Row> results = await CollectAsync(groupBy, context);
 
         Assert.Single(results);
-        Assert.Equal(300f, results[0]["total_count"].AsFloat32());
-        Assert.Equal(150f, results[0]["distinct_id_count"].AsFloat32());
+        Assert.Equal(300L, results[0]["total_count"].AsInt64());
+        Assert.Equal(150L, results[0]["distinct_id_count"].AsInt64());
     }
 
     // ─────────────── Validation ───────────────
