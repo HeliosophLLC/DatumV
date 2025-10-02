@@ -63,6 +63,8 @@ public static class ExpressionTypeResolver
 
         return literal.Value switch
         {
+            sbyte => DataKind.Int8,
+            short => DataKind.Int16,
             int => DataKind.Int32,
             long => DataKind.Int64,
             float => DataKind.Float32,
@@ -333,7 +335,9 @@ public static class ExpressionTypeResolver
             return DataKind.Duration;
         }
 
-        return TypeCoercion.FindCommonKind(leftKind.Value, rightKind.Value) ?? DataKind.Float32;
+        // The runtime ArithmeticOp always converts to float and returns Float32,
+        // so the static resolver must match regardless of operand kinds.
+        return DataKind.Float32;
     }
 
     private static DataKind? ResolveUnary(UnaryExpression unary, Schema sourceSchema, FunctionRegistry functions)

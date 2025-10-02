@@ -25,9 +25,9 @@ public sealed class RightFunction : IScalarFunction
             throw new ArgumentException($"right() requires a String as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
         {
-            throw new ArgumentException($"right() requires a Scalar as the second argument, got {argumentKinds[1]}.");
+            throw new ArgumentException($"right() requires an integer as the second argument, got {argumentKinds[1]}.");
         }
 
         return DataKind.String;
@@ -45,7 +45,7 @@ public sealed class RightFunction : IScalarFunction
         }
 
         string inputString = input.AsString();
-        int count = (int)countValue.AsFloat32();
+        int count = countValue.ToInt32();
 
         if (count < 0)
         {

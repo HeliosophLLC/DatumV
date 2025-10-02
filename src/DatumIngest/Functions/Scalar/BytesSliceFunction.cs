@@ -9,31 +9,18 @@ namespace DatumIngest.Functions.Scalar;
 /// </summary>
 public sealed class BytesSliceFunction : IScalarFunction
 {
+    private static readonly string[] ArgumentNamesArray = ["bytes", "start", "length"];
+
     /// <inheritdoc />
     public string Name => "bytes_slice";
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length != 3)
-        {
-            throw new ArgumentException("bytes_slice() requires exactly 3 arguments: bytes, start, length.");
-        }
-
-        if (argumentKinds[0] != DataKind.UInt8Array)
-        {
-            throw new ArgumentException($"bytes_slice() first argument must be UInt8Array, got {argumentKinds[0]}.");
-        }
-
-        if (argumentKinds[1] != DataKind.Float32)
-        {
-            throw new ArgumentException($"bytes_slice() second argument must be Scalar, got {argumentKinds[1]}.");
-        }
-
-        if (argumentKinds[2] != DataKind.Float32)
-        {
-            throw new ArgumentException($"bytes_slice() third argument must be Scalar, got {argumentKinds[2]}.");
-        }
+        FunctionArgumentException.ThrowIfArgumentCountMismatch(Name, argumentKinds.Length, ArgumentNamesArray);
+        FunctionArgumentException.ThrowIfArgumentKindMismatch(Name, 0, ArgumentNamesArray[0], DataKind.UInt8Array, argumentKinds[0]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 1, ArgumentNamesArray[1], argumentKinds[1]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 2, ArgumentNamesArray[2], argumentKinds[2]);
 
         return DataKind.UInt8Array;
     }
@@ -47,8 +34,8 @@ public sealed class BytesSliceFunction : IScalarFunction
         }
 
         ReadOnlyMemory<byte> source = arguments[0].AsUInt8Array();
-        int start = (int)arguments[1].AsFloat32();
-        int length = (int)arguments[2].AsFloat32();
+        int start = arguments[1].ToInt32();
+        int length = arguments[2].ToInt32();
 
         start = System.Math.Max(0, System.Math.Min(start, source.Length));
         length = System.Math.Max(0, System.Math.Min(length, source.Length - start));

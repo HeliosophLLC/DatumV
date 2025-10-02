@@ -31,7 +31,7 @@ public sealed class TablesampleParsingTests
         Assert.Equal(TablesampleMethod.Bernoulli, tableReference.Tablesample!.Method);
 
         LiteralExpression percentage = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
-        Assert.Equal(10d, percentage.Value);
+        Assert.Equal((sbyte)10, percentage.Value);
         Assert.Null(tableReference.Tablesample.Seed);
         Assert.Null(tableReference.Tablesample.StratifyColumns);
     }
@@ -51,7 +51,7 @@ public sealed class TablesampleParsingTests
         Assert.Equal(TablesampleMethod.System, tableReference.Tablesample!.Method);
 
         LiteralExpression percentage = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
-        Assert.Equal(5d, percentage.Value);
+        Assert.Equal((sbyte)5, percentage.Value);
     }
 
     /// <summary>
@@ -68,7 +68,7 @@ public sealed class TablesampleParsingTests
         Assert.NotNull(tableReference.Tablesample!.Seed);
 
         LiteralExpression seed = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Seed);
-        Assert.Equal(42d, seed.Value);
+        Assert.Equal((sbyte)42, seed.Value);
     }
 
     // ───────────────────── Alias combinations ─────────────────────
@@ -181,7 +181,7 @@ public sealed class TablesampleParsingTests
         Assert.Equal(TablesampleMethod.Bernoulli, joinedTable.Tablesample!.Method);
 
         LiteralExpression seed = Assert.IsType<LiteralExpression>(joinedTable.Tablesample.Seed);
-        Assert.Equal(42d, seed.Value);
+        Assert.Equal((sbyte)42, seed.Value);
 
         // The primary table should have no TABLESAMPLE
         TableReference primaryTable = Assert.IsType<TableReference>(result.From!.Source);
@@ -204,7 +204,7 @@ public sealed class TablesampleParsingTests
         Assert.Equal(TablesampleMethod.Stratified, tableReference.Tablesample!.Method);
 
         LiteralExpression percentage = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
-        Assert.Equal(10d, percentage.Value);
+        Assert.Equal((sbyte)10, percentage.Value);
         Assert.Null(tableReference.Tablesample.Seed);
 
         Assert.NotNull(tableReference.Tablesample.StratifyColumns);
@@ -226,7 +226,7 @@ public sealed class TablesampleParsingTests
         Assert.Equal(TablesampleMethod.Balanced, tableReference.Tablesample!.Method);
 
         LiteralExpression count = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Percentage);
-        Assert.Equal(1000d, count.Value);
+        Assert.Equal((short)1000, count.Value);
 
         Assert.NotNull(tableReference.Tablesample.StratifyColumns);
         Assert.Single(tableReference.Tablesample.StratifyColumns!);
@@ -265,7 +265,7 @@ public sealed class TablesampleParsingTests
         Assert.NotNull(tableReference.Tablesample.Seed);
 
         LiteralExpression seed = Assert.IsType<LiteralExpression>(tableReference.Tablesample.Seed);
-        Assert.Equal(42d, seed.Value);
+        Assert.Equal((sbyte)42, seed.Value);
 
         Assert.NotNull(tableReference.Tablesample.StratifyColumns);
         Assert.Equal("label", tableReference.Tablesample.StratifyColumns![0].ColumnName);
@@ -418,7 +418,7 @@ public sealed class TablesampleParsingTests
         Assert.Equal("category", joinedTable.Tablesample.StratifyColumns![0].ColumnName);
 
         LiteralExpression seed = Assert.IsType<LiteralExpression>(joinedTable.Tablesample.Seed);
-        Assert.Equal(42d, seed.Value);
+        Assert.Equal((sbyte)42, seed.Value);
     }
 
     // ───────────────────── Existing: BERNOULLI/SYSTEM not reserved ─────────────────────

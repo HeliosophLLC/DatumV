@@ -1,3 +1,4 @@
+using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
 using DatumIngest.Model;
 
@@ -12,7 +13,7 @@ public class StringFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
-        Assert.Equal(5f, result.AsFloat32());
+        Assert.Equal(5, result.AsInt32());
     }
 
     [Fact]
@@ -20,7 +21,7 @@ public class StringFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("")]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]
@@ -28,7 +29,7 @@ public class StringFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([DataValue.FromVector([1, 2, 3])]);
-        Assert.Equal(3f, result.AsFloat32());
+        Assert.Equal(3, result.AsInt32());
     }
 
     [Fact]
@@ -36,7 +37,7 @@ public class StringFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([DataValue.FromUInt8Array([10, 20])]);
-        Assert.Equal(2f, result.AsFloat32());
+        Assert.Equal(2, result.AsInt32());
     }
 
     [Fact]
@@ -44,7 +45,7 @@ public class StringFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([DataValue.FromMatrix([1, 2, 3, 4, 5, 6], 2, 3)]);
-        Assert.Equal(6f, result.AsFloat32());
+        Assert.Equal(6, result.AsInt32());
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public class StringFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([DataValue.FromTensor([1, 2, 3, 4, 5, 6, 7, 8], [2, 2, 2])]);
-        Assert.Equal(8f, result.AsFloat32());
+        Assert.Equal(8, result.AsInt32());
     }
 
     [Fact]
@@ -145,8 +146,8 @@ public class StringFunctionTests
     public void Mid_WrongArgCount_Throws()
     {
         MidFunction function = new();
-        Assert.Throws<ArgumentException>(() =>
-            function.ValidateArguments([DataKind.String, DataKind.Float32]));
+        Assert.Throws<FunctionArgumentException>(() =>
+            function.ValidateArguments([DataKind.String, DataKind.Int32]));
     }
 
     // ───────────────── SubstringFunction ─────────────────

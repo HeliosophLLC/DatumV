@@ -177,7 +177,7 @@ public sealed class ParameterTests
 
         BinaryExpression where = Assert.IsType<BinaryExpression>(bound.Where);
         LiteralExpression literal = Assert.IsType<LiteralExpression>(where.Right);
-        Assert.IsType<double>(literal.Value);
+        Assert.IsType<float>(literal.Value);
     }
 
     [Fact]

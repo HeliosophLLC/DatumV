@@ -9,23 +9,18 @@ namespace DatumIngest.Functions.Scalar;
 /// </summary>
 public sealed class BitLengthFunction : IScalarFunction
 {
+    private static readonly string[] ArgumentNamesArray = ["value"];
+
     /// <inheritdoc />
     public string Name => "bit_length";
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length != 1)
-        {
-            throw new ArgumentException("bit_length() requires exactly 1 argument.");
-        }
+        FunctionArgumentException.ThrowIfArgumentCountMismatch(Name, argumentKinds.Length, ArgumentNamesArray);
+        FunctionArgumentException.ThrowIfNotStringArgument(Name, 0, ArgumentNamesArray[0], argumentKinds[0]);
 
-        if (argumentKinds[0] != DataKind.String)
-        {
-            throw new ArgumentException($"bit_length() requires a String argument, got {argumentKinds[0]}.");
-        }
-
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc />
@@ -34,9 +29,9 @@ public sealed class BitLengthFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
-        return DataValue.FromFloat32(Encoding.UTF8.GetByteCount(input.AsString()) * 8);
+        return DataValue.FromInt32(Encoding.UTF8.GetByteCount(input.AsString()) * 8);
     }
 }

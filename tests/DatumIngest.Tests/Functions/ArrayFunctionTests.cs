@@ -418,7 +418,7 @@ public class ArrayFunctionTests
     {
         LenFunction function = new();
         DataValue result = function.Execute([MakeScalarArray(1f, 2f, 3f)]);
-        Assert.Equal(3f, result.AsFloat32());
+        Assert.Equal(3, result.AsInt32());
     }
 
     [Fact]
@@ -433,7 +433,7 @@ public class ArrayFunctionTests
     public void Len_ArrayKind_Validates()
     {
         LenFunction function = new();
-        Assert.Equal(DataKind.Float32, function.ValidateArguments([DataKind.Array]));
+        Assert.Equal(DataKind.Int32, function.ValidateArguments([DataKind.Array]));
     }
 
     // ───────────────── ARRAY_SORT ─────────────────
@@ -909,7 +909,7 @@ public class ArrayFunctionTests
     {
         ArrayGetFunction function = new();
         DataKind result = function.ValidateArgumentsWithElementKinds(
-            [DataKind.Array, DataKind.Float32], [DataKind.String, null]);
+            [DataKind.Array, DataKind.Int32], [DataKind.String, null]);
         Assert.Equal(DataKind.String, result);
     }
 
@@ -918,7 +918,7 @@ public class ArrayFunctionTests
     {
         ArrayGetFunction function = new();
         DataKind result = function.ValidateArgumentsWithElementKinds(
-            [DataKind.Array, DataKind.Float32], [null, null]);
+            [DataKind.Array, DataKind.Int32], [null, null]);
         Assert.Equal(DataKind.Float32, result);
     }
 

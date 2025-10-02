@@ -32,10 +32,10 @@ public sealed class SplitPartFunction : IScalarFunction
                 $"split_part() second argument (delimiter) must be String, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds[2] is not (DataKind.Float32 or DataKind.UInt8))
+        if (!DataValue.IsIntegerKind(argumentKinds[2]))
         {
             throw new ArgumentException(
-                $"split_part() third argument (field number) must be numeric, got {argumentKinds[2]}.");
+                $"split_part() third argument (field number) requires an integer, got {argumentKinds[2]}.");
         }
 
         return DataKind.String;
@@ -51,7 +51,7 @@ public sealed class SplitPartFunction : IScalarFunction
 
         string text = arguments[0].AsString();
         string delimiter = arguments[1].AsString();
-        int fieldNumber = (int)arguments[2].AsFloat32();
+        int fieldNumber = arguments[2].ToInt32();
 
         if (fieldNumber == 0)
         {

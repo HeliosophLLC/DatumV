@@ -22,12 +22,16 @@ public sealed class MakeTimestampFunction : IScalarFunction
             throw new ArgumentException("make_timestamp() requires exactly 6 arguments: year, month, day, hour, minute, second (all Scalar).");
         }
 
-        for (int i = 0; i < 6; i++)
+        // PG: year, month, day, hour, minute are int; second is double precision
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 0, "year", argumentKinds[0]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 1, "month", argumentKinds[1]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 2, "day", argumentKinds[2]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 3, "hour", argumentKinds[3]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 4, "minute", argumentKinds[4]);
+
+        if (!DataValue.IsNumericScalarKind(argumentKinds[5]))
         {
-            if (argumentKinds[i] != DataKind.Float32)
-            {
-                throw new ArgumentException($"make_timestamp() argument {i + 1} must be Scalar, got {argumentKinds[i]}.");
-            }
+            throw new ArgumentException($"make_timestamp() argument 'second' must be numeric, got {argumentKinds[5]}.");
         }
 
         return DataKind.DateTime;
@@ -44,13 +48,16 @@ public sealed class MakeTimestampFunction : IScalarFunction
             }
         }
 
-        int year = (int)arguments[0].AsFloat32();
-        int month = (int)arguments[1].AsFloat32();
-        int day = (int)arguments[2].AsFloat32();
-        int hour = (int)arguments[3].AsFloat32();
-        int minute = (int)arguments[4].AsFloat32();
-        int second = (int)arguments[5].AsFloat32();
+        int year = arguments[0].ToInt32();
+        int month = arguments[1].ToInt32();
+        int day = arguments[2].ToInt32();
+        int hour = arguments[3].ToInt32();
+        int minute = arguments[4].ToInt32();
+        double second = arguments[5].ToDouble();
 
-        return DataValue.FromDateTime(new DateTimeOffset(year, month, day, hour, minute, second, TimeSpan.Zero));
+        int wholeSec = (int)second;
+        int ms = (int)((second - wholeSec) * 1000);
+
+        return DataValue.FromDateTime(new DateTimeOffset(year, month, day, hour, minute, wholeSec, ms, TimeSpan.Zero));
     }
 }

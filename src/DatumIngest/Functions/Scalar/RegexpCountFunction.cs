@@ -18,35 +18,24 @@ public sealed class RegexpCountFunction : IScalarFunction
     {
         if (argumentKinds.Length is < 2 or > 4)
         {
-            throw new ArgumentException(
-                "regexp_count() requires 2 to 4 arguments: string, pattern [, start [, flags]].");
+            throw new FunctionArgumentException(Name, "requires 2 to 4 arguments: string, pattern [, start [, flags]].");
         }
 
-        if (argumentKinds[0] != DataKind.String)
+        FunctionArgumentException.ThrowIfNotStringArgument(Name, 0, "string", argumentKinds[0]);
+        FunctionArgumentException.ThrowIfNotStringArgument(Name, 1, "pattern", argumentKinds[1]);
+
+
+        if (argumentKinds.Length >= 3)
         {
-            throw new ArgumentException(
-                $"regexp_count() first argument must be String, got {argumentKinds[0]}.");
+            FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 2, "start", argumentKinds[2]);
         }
 
-        if (argumentKinds[1] != DataKind.String)
+        if (argumentKinds.Length == 4)
         {
-            throw new ArgumentException(
-                $"regexp_count() second argument (pattern) must be String, got {argumentKinds[1]}.");
+            FunctionArgumentException.ThrowIfNotStringArgument(Name, 3, "flags", argumentKinds[3]);
         }
 
-        if (argumentKinds.Length >= 3 && argumentKinds[2] != DataKind.Float32)
-        {
-            throw new ArgumentException(
-                $"regexp_count() third argument (start) must be Scalar, got {argumentKinds[2]}.");
-        }
-
-        if (argumentKinds.Length == 4 && argumentKinds[3] != DataKind.String)
-        {
-            throw new ArgumentException(
-                $"regexp_count() fourth argument (flags) must be String, got {argumentKinds[3]}.");
-        }
-
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc />
@@ -54,7 +43,7 @@ public sealed class RegexpCountFunction : IScalarFunction
     {
         if (arguments[0].IsNull || arguments[1].IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
         string input = arguments[0].AsString();
@@ -63,7 +52,7 @@ public sealed class RegexpCountFunction : IScalarFunction
         int start = 0;
         if (arguments.Length >= 3 && !arguments[2].IsNull)
         {
-            start = (int)arguments[2].AsFloat32() - 1; // 1-based to 0-based
+            start = arguments[2].ToInt32() - 1; // 1-based to 0-based
             if (start < 0) start = 0;
         }
 
@@ -76,11 +65,11 @@ public sealed class RegexpCountFunction : IScalarFunction
 
         if (start >= input.Length)
         {
-            return DataValue.FromFloat32(0);
+            return DataValue.FromInt32(0);
         }
 
         string searchIn = input[start..];
         int count = Regex.Matches(searchIn, pattern, options).Count;
-        return DataValue.FromFloat32(count);
+        return DataValue.FromInt32(count);
     }
 }

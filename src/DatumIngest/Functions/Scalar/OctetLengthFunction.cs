@@ -25,7 +25,7 @@ public sealed class OctetLengthFunction : IScalarFunction
             throw new ArgumentException($"octet_length() requires a String argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc />
@@ -34,9 +34,9 @@ public sealed class OctetLengthFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
-        return DataValue.FromFloat32(Encoding.UTF8.GetByteCount(input.AsString()));
+        return DataValue.FromInt32(Encoding.UTF8.GetByteCount(input.AsString()));
     }
 }

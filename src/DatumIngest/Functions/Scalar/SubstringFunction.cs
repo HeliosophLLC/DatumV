@@ -25,6 +25,16 @@ public sealed class SubstringFunction : IScalarFunction
             throw new ArgumentException($"substring() first argument must be String, got {argumentKinds[0]}.");
         }
 
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
+        {
+            throw new ArgumentException($"substring() second argument (start) requires an integer, got {argumentKinds[1]}.");
+        }
+
+        if (argumentKinds.Length == 3 && !DataValue.IsIntegerKind(argumentKinds[2]))
+        {
+            throw new ArgumentException($"substring() third argument (length) requires an integer, got {argumentKinds[2]}.");
+        }
+
         return DataKind.String;
     }
 
@@ -38,7 +48,7 @@ public sealed class SubstringFunction : IScalarFunction
         }
 
         string text = input.AsString();
-        int start = (int)arguments[1].AsFloat32() - 1;
+        int start = arguments[1].ToInt32() - 1;
 
         if (start < 0)
         {
@@ -52,7 +62,7 @@ public sealed class SubstringFunction : IScalarFunction
 
         if (arguments.Length == 3)
         {
-            int length = (int)arguments[2].AsFloat32();
+            int length = arguments[2].ToInt32();
             int availableLength = text.Length - start;
             if (length > availableLength)
             {

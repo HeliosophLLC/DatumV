@@ -28,16 +28,16 @@ public sealed class ArraySliceFunction : IScalarFunction
                 $"array_slice() requires an Array as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
         {
             throw new ArgumentException(
-                $"array_slice() requires a Scalar start position as the second argument, got {argumentKinds[1]}.");
+                $"array_slice() requires an integer start position as the second argument, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds[2] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[2]))
         {
             throw new ArgumentException(
-                $"array_slice() requires a Scalar length as the third argument, got {argumentKinds[2]}.");
+                $"array_slice() requires an integer length as the third argument, got {argumentKinds[2]}.");
         }
 
         return DataKind.Array;
@@ -60,8 +60,8 @@ public sealed class ArraySliceFunction : IScalarFunction
         DataValue[] elements = arrayValue.AsArray();
         DataKind elementKind = arrayValue.ArrayElementKind;
 
-        int start = System.Math.Max(0, (int)startValue.AsFloat32() - 1);
-        int length = System.Math.Max(0, (int)lengthValue.AsFloat32());
+        int start = System.Math.Max(0, startValue.ToInt32() - 1);
+        int length = System.Math.Max(0, lengthValue.ToInt32());
 
         if (start >= elements.Length)
         {

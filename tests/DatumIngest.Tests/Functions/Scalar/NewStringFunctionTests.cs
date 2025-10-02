@@ -1,3 +1,4 @@
+using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
 using DatumIngest.Model;
 
@@ -346,7 +347,7 @@ public class NewStringFunctionTests
     {
         AsciiFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("A")]);
-        Assert.Equal(65f, result.AsFloat32());
+        Assert.Equal(65, result.AsInt32());
     }
 
     [Fact]
@@ -354,7 +355,7 @@ public class NewStringFunctionTests
     {
         AsciiFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("hello")]);
-        Assert.Equal(104f, result.AsFloat32());
+        Assert.Equal(104, result.AsInt32());
     }
 
     [Fact]
@@ -362,7 +363,7 @@ public class NewStringFunctionTests
     {
         AsciiFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("")]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]
@@ -376,15 +377,15 @@ public class NewStringFunctionTests
     [Fact]
     public void Ascii_Validate_WrongArgCount_Throws()
     {
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<FunctionArgumentException>(() =>
             new AsciiFunction().ValidateArguments([DataKind.String, DataKind.String]));
     }
 
     [Fact]
     public void Ascii_Validate_NonString_Throws()
     {
-        Assert.Throws<ArgumentException>(() =>
-            new AsciiFunction().ValidateArguments([DataKind.Float32]));
+        Assert.Throws<FunctionArgumentException>(() =>
+            new AsciiFunction().ValidateArguments([DataKind.Int32]));
     }
 
     // ───────────────── ChrFunction ─────────────────
@@ -416,14 +417,14 @@ public class NewStringFunctionTests
     [Fact]
     public void Chr_Validate_WrongArgCount_Throws()
     {
-        Assert.Throws<ArgumentException>(() =>
-            new ChrFunction().ValidateArguments([DataKind.Float32, DataKind.Float32]));
+        Assert.Throws<FunctionArgumentException>(() =>
+            new ChrFunction().ValidateArguments([DataKind.Int32, DataKind.Int32]));
     }
 
     [Fact]
     public void Chr_Validate_NonNumeric_Throws()
     {
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<FunctionArgumentException>(() =>
             new ChrFunction().ValidateArguments([DataKind.String]));
     }
 
@@ -502,7 +503,7 @@ public class NewStringFunctionTests
             DataValue.FromString("123456789012"),
             DataValue.FromString("\\d\\d\\d")
         ]);
-        Assert.Equal(4f, result.AsFloat32());
+        Assert.Equal(4, result.AsInt32());
     }
 
     [Fact]
@@ -514,7 +515,7 @@ public class NewStringFunctionTests
             DataValue.FromString("\\d\\d\\d"),
             DataValue.FromFloat32(2)
         ]);
-        Assert.Equal(3f, result.AsFloat32());
+        Assert.Equal(3, result.AsInt32());
     }
 
     [Fact]
@@ -527,7 +528,7 @@ public class NewStringFunctionTests
             DataValue.FromFloat32(1),
             DataValue.FromString("i")
         ]);
-        Assert.Equal(3f, result.AsFloat32());
+        Assert.Equal(3, result.AsInt32());
     }
 
     [Fact]
@@ -538,7 +539,7 @@ public class NewStringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("\\d+")
         ]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]
@@ -696,7 +697,7 @@ public class NewStringFunctionTests
             DataValue.FromFloat32(0),
             DataValue.FromString("i")
         ]);
-        Assert.Equal(3f, result.AsFloat32());
+        Assert.Equal(3, result.AsInt32());
     }
 
     [Fact]
@@ -712,7 +713,7 @@ public class NewStringFunctionTests
             DataValue.FromString("i"),
             DataValue.FromFloat32(2)
         ]);
-        Assert.Equal(5f, result.AsFloat32());
+        Assert.Equal(5, result.AsInt32());
     }
 
     [Fact]
@@ -723,7 +724,7 @@ public class NewStringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("\\d+")
         ]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]

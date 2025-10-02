@@ -25,7 +25,7 @@ public sealed class WordCountFunction : IScalarFunction
             throw new ArgumentException($"word_count() requires a String argument, got {argumentKinds[0]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc />
@@ -34,13 +34,13 @@ public sealed class WordCountFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
         string text = input.AsString();
         if (text.Length == 0)
         {
-            return DataValue.FromFloat32(0);
+            return DataValue.FromInt32(0);
         }
 
         int count = 0;
@@ -59,6 +59,6 @@ public sealed class WordCountFunction : IScalarFunction
             }
         }
 
-        return DataValue.FromFloat32(count);
+        return DataValue.FromInt32(count);
     }
 }

@@ -193,6 +193,8 @@ public sealed class ExpressionEvaluator
         return literal.Value switch
         {
             DataValue dataValue => dataValue,
+            sbyte int8Value => DataValue.FromInt8(int8Value),
+            short int16Value => DataValue.FromInt16(int16Value),
             int intValue => DataValue.FromInt32(intValue),
             long longValue => DataValue.FromInt64(longValue),
             float floatValue => DataValue.FromFloat32(floatValue),
@@ -976,6 +978,8 @@ public sealed class ExpressionEvaluator
         return expression switch
         {
             LiteralExpression { Value: string } => DataKind.String,
+            LiteralExpression { Value: sbyte } => DataKind.Int8,
+            LiteralExpression { Value: short } => DataKind.Int16,
             LiteralExpression { Value: int } => DataKind.Int32,
             LiteralExpression { Value: long } => DataKind.Int64,
             LiteralExpression { Value: float } => DataKind.Float32,

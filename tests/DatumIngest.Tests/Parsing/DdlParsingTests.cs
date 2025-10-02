@@ -315,7 +315,7 @@ public class DdlParsingTests
         Assert.Equal("FLOAT64", alter.TypeName);
         Assert.NotNull(alter.DefaultValue);
         LiteralExpression literal = Assert.IsType<LiteralExpression>(alter.DefaultValue);
-        Assert.Equal(0.0, literal.Value);
+        Assert.Equal((sbyte)0, literal.Value);
     }
 
     /// <summary>

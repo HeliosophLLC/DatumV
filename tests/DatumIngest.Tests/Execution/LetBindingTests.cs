@@ -261,9 +261,9 @@ public sealed class LetBindingTests
             catalog);
 
         Assert.Single(results);
-        // Struct literal fields are Float64 (SQL numeric literals are always Float64).
-        Assert.Equal(7.0, results[0]["pv"].AsFloat64(), precision: 4);
-        Assert.Equal(8.0, results[0]["qv"].AsFloat64(), precision: 4);
+        // Struct literal fields may be narrower integer types after literal narrowing.
+        Assert.Equal(7.0, results[0]["pv"].ToDouble(), precision: 4);
+        Assert.Equal(8.0, results[0]["qv"].ToDouble(), precision: 4);
     }
 
     /// <summary>
@@ -282,9 +282,9 @@ public sealed class LetBindingTests
             catalog);
 
         Assert.Single(results);
-        // Struct literal fields are Float64 (SQL numeric literals are always Float64).
-        Assert.Equal(7.0, results[0]["av"].AsFloat64(), precision: 4);
-        Assert.Equal(8.0, results[0]["bv"].AsFloat64(), precision: 4);
+        // Struct literal fields may be narrower integer types after literal narrowing.
+        Assert.Equal(7.0, results[0]["av"].ToDouble(), precision: 4);
+        Assert.Equal(8.0, results[0]["bv"].ToDouble(), precision: 4);
     }
 
     /// <summary>
@@ -304,7 +304,7 @@ public sealed class LetBindingTests
 
         Assert.Single(results);
         Assert.Equal("hello", results[0]["av"].AsString());
-        Assert.Equal(42.0, results[0]["bv"].AsFloat64(), precision: 4);
+        Assert.Equal(42.0, results[0]["bv"].ToDouble(), precision: 4);
     }
 
     /// <summary>

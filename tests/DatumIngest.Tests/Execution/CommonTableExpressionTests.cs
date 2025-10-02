@@ -324,6 +324,8 @@ public sealed class CommonTableExpressionTests
             DataValue n = results[index]["n"];
             int actual = n.Kind switch
             {
+                DataKind.Int8 => n.AsInt8(),
+                DataKind.Int16 => n.AsInt16(),
                 DataKind.Int32 => n.AsInt32(),
                 DataKind.Float32 => (int)n.AsFloat32(),
                 DataKind.Float64 => (int)n.AsFloat64(),

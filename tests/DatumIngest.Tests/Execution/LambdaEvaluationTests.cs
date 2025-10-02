@@ -471,9 +471,9 @@ public class LambdaEvaluationTests
         Assert.Single(results);
         DataValue[] elements = results[0]["nums"].AsArray();
         Assert.Equal(3, elements.Length);
-        Assert.Equal(10.0, elements[0].AsFloat64());
-        Assert.Equal(20.0, elements[1].AsFloat64());
-        Assert.Equal(30.0, elements[2].AsFloat64());
+        Assert.Equal(10.0, elements[0].ToDouble());
+        Assert.Equal(20.0, elements[1].ToDouble());
+        Assert.Equal(30.0, elements[2].ToDouble());
     }
 
     [Fact]
@@ -489,8 +489,8 @@ public class LambdaEvaluationTests
         Assert.Single(results);
         DataValue[] elements = results[0]["big"].AsArray();
         Assert.Equal(2, elements.Length);
-        Assert.Equal(25.0, elements[0].AsFloat64());
-        Assert.Equal(35.0, elements[1].AsFloat64());
+        Assert.Equal(25.0, elements[0].ToDouble());
+        Assert.Equal(35.0, elements[1].ToDouble());
     }
 
     [Fact]

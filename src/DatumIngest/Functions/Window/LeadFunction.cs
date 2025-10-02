@@ -23,7 +23,7 @@ public sealed class LeadFunction : IWindowFunction
             throw new ArgumentException("LEAD() requires 1 to 3 arguments: (expression [, offset [, default]]).");
         }
 
-        if (argumentKinds.Length >= 2 && argumentKinds[1] != DataKind.Float32)
+        if (argumentKinds.Length >= 2 && !DataValue.IsIntegerKind(argumentKinds[1]))
         {
             throw new ArgumentException("LEAD() offset argument must be a numeric scalar.");
         }

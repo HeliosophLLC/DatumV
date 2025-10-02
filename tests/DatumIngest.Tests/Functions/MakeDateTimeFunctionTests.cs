@@ -1,3 +1,4 @@
+using DatumIngest.Functions;
 using DatumIngest.Functions.Scalar;
 using DatumIngest.Model;
 
@@ -87,17 +88,17 @@ public class MakeDateTimeFunctionTests
     }
 
     [Fact]
-    public void MakeDate_ValidateArguments_RejectsNonScalar()
+    public void MakeDate_ValidateArguments_RejectsNonInteger()
     {
         MakeDateFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Float32, DataKind.Float32]));
+        Assert.Throws<FunctionArgumentException>(() => function.ValidateArguments([DataKind.String, DataKind.Int32, DataKind.Int32]));
     }
 
     [Fact]
     public void MakeDate_ValidateArguments_ReturnsDateKind()
     {
         MakeDateFunction function = new();
-        DataKind result = function.ValidateArguments([DataKind.Float32, DataKind.Float32, DataKind.Float32]);
+        DataKind result = function.ValidateArguments([DataKind.Int32, DataKind.Int32, DataKind.Int32]);
         Assert.Equal(DataKind.Date, result);
     }
 
@@ -166,21 +167,23 @@ public class MakeDateTimeFunctionTests
     }
 
     [Fact]
-    public void MakeTimestamp_ValidateArguments_RejectsNonScalar()
+    public void MakeTimestamp_ValidateArguments_RejectsNonInteger()
     {
         MakeTimestampFunction function = new();
-        Assert.Throws<ArgumentException>(() => function.ValidateArguments([
-            DataKind.Float32, DataKind.Float32, DataKind.Float32,
-            DataKind.Float32, DataKind.String, DataKind.Float32]));
+        // minute (arg 5) is String — should reject
+        Assert.Throws<FunctionArgumentException>(() => function.ValidateArguments([
+            DataKind.Int32, DataKind.Int32, DataKind.Int32,
+            DataKind.Int32, DataKind.String, DataKind.Float64]));
     }
 
     [Fact]
     public void MakeTimestamp_ValidateArguments_ReturnsDateTimeKind()
     {
         MakeTimestampFunction function = new();
+        // First 5 args are integer, last (second) is numeric (Float64 for fractional seconds)
         DataKind result = function.ValidateArguments([
-            DataKind.Float32, DataKind.Float32, DataKind.Float32,
-            DataKind.Float32, DataKind.Float32, DataKind.Float32]);
+            DataKind.Int32, DataKind.Int32, DataKind.Int32,
+            DataKind.Int32, DataKind.Int32, DataKind.Float64]);
         Assert.Equal(DataKind.DateTime, result);
     }
 }

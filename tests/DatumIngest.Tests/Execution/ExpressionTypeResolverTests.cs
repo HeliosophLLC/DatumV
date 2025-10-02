@@ -119,7 +119,7 @@ public sealed class ExpressionTypeResolverTests
             TestSchema,
             DefaultFunctions);
 
-        Assert.Equal(DataKind.Float64, result);
+        Assert.Equal(DataKind.Float32, result);
     }
 
     // ───────────────────── Unary expressions ─────────────────────

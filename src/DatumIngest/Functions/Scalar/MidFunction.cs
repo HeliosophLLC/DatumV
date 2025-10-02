@@ -9,21 +9,18 @@ namespace DatumIngest.Functions.Scalar;
 /// </summary>
 public sealed class MidFunction : IScalarFunction
 {
+    private static readonly string[] ArgumentNamesArray = ["string", "start", "length"];
+
     /// <inheritdoc />
     public string Name => "mid";
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length != 3)
-        {
-            throw new ArgumentException("mid() requires exactly 3 arguments: string, start, length.");
-        }
-
-        if (argumentKinds[0] != DataKind.String)
-        {
-            throw new ArgumentException($"mid() first argument must be String, got {argumentKinds[0]}.");
-        }
+        FunctionArgumentException.ThrowIfArgumentCountMismatch(Name, argumentKinds.Length, ArgumentNamesArray);
+        FunctionArgumentException.ThrowIfArgumentKindMismatch(Name, 0, "string", DataKind.String, argumentKinds[0]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 1, "start", argumentKinds[1]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 2, "length", argumentKinds[2]);
 
         return DataKind.String;
     }
@@ -38,8 +35,8 @@ public sealed class MidFunction : IScalarFunction
         }
 
         string text = input.AsString();
-        int start = (int)arguments[1].AsFloat32() - 1;
-        int length = (int)arguments[2].AsFloat32();
+        int start = arguments[1].ToInt32() - 1;
+        int length = arguments[2].ToInt32();
 
         if (start < 0)
         {

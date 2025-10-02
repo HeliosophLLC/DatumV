@@ -23,7 +23,7 @@ public sealed class LagFunction : IWindowFunction
             throw new ArgumentException("LAG() requires 1 to 3 arguments: (expression [, offset [, default]]).");
         }
 
-        if (argumentKinds.Length >= 2 && argumentKinds[1] != DataKind.Float32)
+        if (argumentKinds.Length >= 2 && !DataValue.IsIntegerKind(argumentKinds[1]))
         {
             throw new ArgumentException("LAG() offset argument must be a numeric scalar.");
         }

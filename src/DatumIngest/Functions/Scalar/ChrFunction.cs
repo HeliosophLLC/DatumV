@@ -8,21 +8,16 @@ namespace DatumIngest.Functions.Scalar;
 /// </summary>
 public sealed class ChrFunction : IScalarFunction
 {
+    private static readonly string[] ArgumentNamesArray = ["code"];
+
     /// <inheritdoc />
     public string Name => "chr";
 
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length != 1)
-        {
-            throw new ArgumentException("chr() requires exactly 1 argument.");
-        }
-
-        if (argumentKinds[0] is not (DataKind.Float32 or DataKind.UInt8))
-        {
-            throw new ArgumentException($"chr() requires a numeric argument, got {argumentKinds[0]}.");
-        }
+        FunctionArgumentException.ThrowIfArgumentCountMismatch(Name, argumentKinds.Length, ArgumentNamesArray);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 0, ArgumentNamesArray[0], argumentKinds[0]);
 
         return DataKind.String;
     }
@@ -36,9 +31,7 @@ public sealed class ChrFunction : IScalarFunction
             return DataValue.Null(DataKind.String);
         }
 
-        int codePoint = (int)(input.Kind is DataKind.UInt8
-            ? input.AsUInt8()
-            : input.AsFloat32());
+        int codePoint = input.ToInt32();
 
         return DataValue.FromString(((char)codePoint).ToString());
     }

@@ -37,19 +37,19 @@ public sealed class RegexpInstrFunction : IScalarFunction
                 $"regexp_instr() second argument (pattern) must be String, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds.Length >= 3 && argumentKinds[2] != DataKind.Float32)
+        if (argumentKinds.Length >= 3 && !DataValue.IsIntegerKind(argumentKinds[2]))
         {
             throw new ArgumentException(
                 $"regexp_instr() third argument (start) must be Scalar, got {argumentKinds[2]}.");
         }
 
-        if (argumentKinds.Length >= 4 && argumentKinds[3] != DataKind.Float32)
+        if (argumentKinds.Length >= 4 && !DataValue.IsIntegerKind(argumentKinds[3]))
         {
             throw new ArgumentException(
                 $"regexp_instr() fourth argument (N) must be Scalar, got {argumentKinds[3]}.");
         }
 
-        if (argumentKinds.Length >= 5 && argumentKinds[4] != DataKind.Float32)
+        if (argumentKinds.Length >= 5 && !DataValue.IsIntegerKind(argumentKinds[4]))
         {
             throw new ArgumentException(
                 $"regexp_instr() fifth argument (endoption) must be Scalar, got {argumentKinds[4]}.");
@@ -61,13 +61,13 @@ public sealed class RegexpInstrFunction : IScalarFunction
                 $"regexp_instr() sixth argument (flags) must be String, got {argumentKinds[5]}.");
         }
 
-        if (argumentKinds.Length == 7 && argumentKinds[6] != DataKind.Float32)
+        if (argumentKinds.Length == 7 && !DataValue.IsIntegerKind(argumentKinds[6]))
         {
             throw new ArgumentException(
                 $"regexp_instr() seventh argument (subexpr) must be Scalar, got {argumentKinds[6]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc />
@@ -75,7 +75,7 @@ public sealed class RegexpInstrFunction : IScalarFunction
     {
         if (arguments[0].IsNull || arguments[1].IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
         string input = arguments[0].AsString();
@@ -84,20 +84,20 @@ public sealed class RegexpInstrFunction : IScalarFunction
         int start = 0;
         if (arguments.Length >= 3 && !arguments[2].IsNull)
         {
-            start = (int)arguments[2].AsFloat32() - 1;
+            start = arguments[2].ToInt32() - 1;
             if (start < 0) start = 0;
         }
 
         int n = 1;
         if (arguments.Length >= 4 && !arguments[3].IsNull)
         {
-            n = (int)arguments[3].AsFloat32();
+            n = arguments[3].ToInt32();
         }
 
         int endoption = 0;
         if (arguments.Length >= 5 && !arguments[4].IsNull)
         {
-            endoption = (int)arguments[4].AsFloat32();
+            endoption = arguments[4].ToInt32();
         }
 
         RegexOptions options = RegexOptions.None;
@@ -110,12 +110,12 @@ public sealed class RegexpInstrFunction : IScalarFunction
         int subexpr = 0;
         if (arguments.Length == 7 && !arguments[6].IsNull)
         {
-            subexpr = (int)arguments[6].AsFloat32();
+            subexpr = arguments[6].ToInt32();
         }
 
         if (start >= input.Length)
         {
-            return DataValue.FromFloat32(0);
+            return DataValue.FromInt32(0);
         }
 
         string searchIn = input[start..];
@@ -123,7 +123,7 @@ public sealed class RegexpInstrFunction : IScalarFunction
 
         if (n < 1 || n > matches.Count)
         {
-            return DataValue.FromFloat32(0);
+            return DataValue.FromInt32(0);
         }
 
         Match match = matches[n - 1];
@@ -132,21 +132,21 @@ public sealed class RegexpInstrFunction : IScalarFunction
         {
             if (subexpr >= match.Groups.Count)
             {
-                return DataValue.FromFloat32(0);
+                return DataValue.FromInt32(0);
             }
 
             Group group = match.Groups[subexpr];
             if (!group.Success)
             {
-                return DataValue.FromFloat32(0);
+                return DataValue.FromInt32(0);
             }
 
             // Return 1-based position relative to original string
             int pos = start + group.Index;
-            return DataValue.FromFloat32(endoption == 0 ? pos + 1 : pos + group.Length + 1);
+            return DataValue.FromInt32(endoption == 0 ? pos + 1 : pos + group.Length + 1);
         }
 
         int matchPos = start + match.Index;
-        return DataValue.FromFloat32(endoption == 0 ? matchPos + 1 : matchPos + match.Length + 1);
+        return DataValue.FromInt32(endoption == 0 ? matchPos + 1 : matchPos + match.Length + 1);
     }
 }

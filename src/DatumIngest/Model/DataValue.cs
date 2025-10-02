@@ -370,6 +370,8 @@ public readonly struct DataValue : IEquatable<DataValue>
         return rawLiteral switch
         {
             DataValue dataValue => dataValue,
+            sbyte int8Value => FromInt8(int8Value),
+            short int16Value => FromInt16(int16Value),
             int intValue => FromInt32(intValue),
             long longValue => FromInt64(longValue),
             float floatValue => FromFloat32(floatValue),
@@ -555,10 +557,26 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// floating-point, or boolean scalar that can be widened to <see cref="float"/> or <see cref="double"/>.
     /// Boolean values are treated as 1 (true) and 0 (false).
     /// </summary>
-    public bool IsNumericScalar => _kind is DataKind.Float32 or DataKind.Float64
-        or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
-        or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
-        or DataKind.Boolean;
+    public bool IsNumericScalar => IsNumericScalarKind(_kind);
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="kind"/> is any integer,
+    /// floating-point, or boolean scalar that can be converted to a numeric value.
+    /// </summary>
+    public static bool IsNumericScalarKind(DataKind kind) =>
+        kind is DataKind.Float32 or DataKind.Float64
+            or DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64
+            or DataKind.Boolean;
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="kind"/> is any integer type
+    /// (signed or unsigned). Excludes floating-point and boolean kinds.
+    /// Use for function parameters that are logically integer (positions, counts, indices).
+    /// </summary>
+    public static bool IsIntegerKind(DataKind kind) =>
+        kind is DataKind.Int8 or DataKind.Int16 or DataKind.Int32 or DataKind.Int64
+            or DataKind.UInt8 or DataKind.UInt16 or DataKind.UInt32 or DataKind.UInt64;
 
     /// <summary>
     /// Widens any numeric scalar value to <see cref="float"/>.

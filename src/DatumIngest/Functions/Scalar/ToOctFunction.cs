@@ -37,7 +37,7 @@ public sealed class ToOctFunction : IScalarFunction
             return DataValue.Null(DataKind.String);
         }
 
-        long value = (long)arguments[0].AsFloat32();
+        long value = arguments[0].ToInt64();
         return DataValue.FromString(Convert.ToString(value, 8));
     }
 }

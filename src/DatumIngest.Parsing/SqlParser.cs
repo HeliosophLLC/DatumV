@@ -135,11 +135,32 @@ public static class SqlParser
                 : new ColumnReference(GetTokenText(first), GetTokenText(rest), ToSpan(first, rest)))
             : new ColumnReference(null, GetTokenText(first), ToSpan(first));
 
-    /// <summary>Number literal parsed as a double.</summary>
+    /// <summary>
+    /// Number literal parsed as the narrowest type that fits the value.
+    /// Whole numbers: sbyte (-128..127) → short → int → long based on magnitude.
+    /// Decimals/scientific notation: float if no precision loss, otherwise double.
+    /// </summary>
     private static readonly TokenListParser<SqlToken, Expression> NumberLiteral =
         Token.EqualTo(SqlToken.NumberLiteral)
             .Apply(Numerics.DecimalDouble)
-            .Select(value => (Expression)new LiteralExpression(value));
+            .Select(value => (Expression)new LiteralExpression(NarrowNumericLiteral(value)));
+
+    private static object NarrowNumericLiteral(double d)
+    {
+        // ReSharper disable once CompareOfFloatsByEqualityOperator
+        if (d != System.Math.Truncate(d))
+        {
+            float f = (float)d;
+            // ReSharper disable once CompareOfFloatsByEqualityOperator
+            return (double)f == d ? f : d;
+        }
+
+        if (d >= sbyte.MinValue && d <= sbyte.MaxValue) return (sbyte)d;
+        if (d >= short.MinValue && d <= short.MaxValue) return (short)d;
+        if (d >= int.MinValue && d <= int.MaxValue) return (int)d;
+        if (d >= long.MinValue && d <= long.MaxValue) return (long)d;
+        return d;
+    }
 
     /// <summary>String literal with quote unescaping.</summary>
     private static readonly TokenListParser<SqlToken, Expression> StringLiteral =

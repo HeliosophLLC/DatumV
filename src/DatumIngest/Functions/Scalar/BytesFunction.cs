@@ -15,17 +15,11 @@ public sealed class BytesFunction : IScalarFunction
     /// <inheritdoc />
     public DataKind ValidateArguments(ReadOnlySpan<DataKind> argumentKinds)
     {
-        if (argumentKinds.Length < 1)
-        {
-            throw new ArgumentException("bytes() requires at least 1 argument.");
-        }
+        FunctionArgumentException.ThrowIfNoArguments(Name, argumentKinds.Length);
 
         for (int i = 0; i < argumentKinds.Length; i++)
         {
-            if (argumentKinds[i] != DataKind.Float32)
-            {
-                throw new ArgumentException($"bytes() requires all arguments to be Scalar, but argument {i} is {argumentKinds[i]}.");
-            }
+            FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, i, $"arg{i}", argumentKinds[i]);
         }
 
         return DataKind.UInt8Array;
@@ -43,7 +37,14 @@ public sealed class BytesFunction : IScalarFunction
             }
             else
             {
-                result[i] = (byte)arguments[i].AsFloat32();
+                int value = arguments[i].ToInt32();
+                if (value < 0 || value > 255)
+                {
+                    throw new InvalidOperationException(
+                        $"bytes() argument {i} value {value} is out of byte range (0–255).");
+                }
+
+                result[i] = (byte)value;
             }
         }
 

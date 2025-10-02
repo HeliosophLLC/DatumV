@@ -203,6 +203,8 @@ public sealed class ColumnBatchEvaluator : IDisposable
         return literal.Value switch
         {
             DataValue dataValue => dataValue,
+            sbyte int8Value => DataValue.FromInt8(int8Value),
+            short int16Value => DataValue.FromInt16(int16Value),
             int intValue => DataValue.FromInt32(intValue),
             long longValue => DataValue.FromInt64(longValue),
             float floatValue => DataValue.FromFloat32(floatValue),

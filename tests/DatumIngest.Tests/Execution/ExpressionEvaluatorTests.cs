@@ -878,7 +878,7 @@ public class ExpressionEvaluatorTests
         DataValue result = _evaluator.Evaluate(
             new FunctionCallExpression("len", [new ColumnReference("name")]),
             row);
-        Assert.Equal(5f, result.AsFloat32());
+        Assert.Equal(5, result.AsInt32());
     }
 
     [Fact]

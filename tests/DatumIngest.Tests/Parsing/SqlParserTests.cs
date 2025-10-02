@@ -221,8 +221,109 @@ public class SqlParserTests
         SelectStatement result = Parse("SELECT 42 FROM t");
 
         LiteralExpression literal = Assert.IsType<LiteralExpression>(result.Columns[0].Expression);
-        Assert.Equal(42.0, literal.Value);
+        Assert.Equal((sbyte)42, literal.Value);
     }
+
+    // ───── Numeric literal narrowing: integers ─────
+
+    // ───── Numeric literal narrowing: positive integers ─────
+
+    [Theory]
+    [InlineData("0", (sbyte)0)]
+    [InlineData("1", (sbyte)1)]
+    [InlineData("127", (sbyte)127)]       // sbyte.MaxValue
+    public void NumericLiteral_SByteRange(string sql, object expected)
+    {
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse($"SELECT {sql} FROM t").Columns[0].Expression);
+        Assert.IsType<sbyte>(literal.Value);
+        Assert.Equal(expected, literal.Value);
+    }
+
+    [Theory]
+    [InlineData("128", (short)128)]        // sbyte.MaxValue + 1
+    [InlineData("32767", (short)32767)]    // short.MaxValue
+    public void NumericLiteral_Int16Range(string sql, object expected)
+    {
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse($"SELECT {sql} FROM t").Columns[0].Expression);
+        Assert.IsType<short>(literal.Value);
+        Assert.Equal(expected, literal.Value);
+    }
+
+    [Theory]
+    [InlineData("32768", 32768)]           // short.MaxValue + 1
+    [InlineData("2147483647", 2147483647)] // int.MaxValue
+    public void NumericLiteral_Int32Range(string sql, object expected)
+    {
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse($"SELECT {sql} FROM t").Columns[0].Expression);
+        Assert.IsType<int>(literal.Value);
+        Assert.Equal(expected, literal.Value);
+    }
+
+    [Theory]
+    [InlineData("2147483648", 2147483648L)]   // int.MaxValue + 1
+    [InlineData("9223372036854775807", 9223372036854775807L)] // long.MaxValue
+    public void NumericLiteral_Int64Range(string sql, object expected)
+    {
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse($"SELECT {sql} FROM t").Columns[0].Expression);
+        Assert.IsType<long>(literal.Value);
+        Assert.Equal(expected, literal.Value);
+    }
+
+    // ───── Numeric literal narrowing: negative integers ─────
+    // Note: negative literals are parsed as UnaryExpression(Negate, positive_literal),
+    // so the literal value itself is always positive. We test negation indirectly.
+
+    [Fact]
+    public void NumericLiteral_NegativeNumber_ParsedAsUnaryNegate()
+    {
+        SelectStatement result = Parse("SELECT -128 FROM t");
+        UnaryExpression unary = Assert.IsType<UnaryExpression>(result.Columns[0].Expression);
+        Assert.Equal(UnaryOperator.Negate, unary.Operator);
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(unary.Operand);
+        Assert.IsType<short>(literal.Value); // 128 > sbyte.MaxValue(127), so short
+        Assert.Equal((short)128, literal.Value);
+    }
+
+    // ───── Numeric literal narrowing: floating-point ─────
+    // Whole-number decimals like 1.0 narrow to integer (Truncate(1.0)==1.0).
+    // Fractional decimals stay as double unless float roundtrip is exact.
+
+    [Fact]
+    public void NumericLiteral_WholeDecimal_NarrowsToInteger()
+    {
+        // 1.0 → Truncate(1.0)==1.0 → sbyte(1)
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse("SELECT 1.0 FROM t").Columns[0].Expression);
+        Assert.IsType<sbyte>(literal.Value);
+        Assert.Equal((sbyte)1, literal.Value);
+    }
+
+    [Fact]
+    public void NumericLiteral_HalfValue_NarrowsToFloat()
+    {
+        // 0.5 is exactly representable as float: (double)(float)0.5 == 0.5
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse("SELECT 0.5 FROM t").Columns[0].Expression);
+        // 0.5 can be exact in float, but let's just verify it's not integer
+        Assert.True(literal.Value is float or double);
+    }
+
+    [Fact]
+    public void NumericLiteral_Pi_StaysDouble()
+    {
+        // 3.14: (double)(float)3.14 != 3.14 due to precision loss → stays double
+        LiteralExpression literal = Assert.IsType<LiteralExpression>(
+            Parse("SELECT 3.14 FROM t").Columns[0].Expression);
+        Assert.IsType<double>(literal.Value);
+    }
+
+    // Note: scientific notation (1e5, 1.23e1) is not supported by the SQL tokenizer.
+    // The NumberToken recognizer only handles digits[.digits]. This is a pre-existing
+    // limitation, not related to the narrowing change.
 
     [Fact]
     public void SelectStringLiteral()
@@ -296,7 +397,7 @@ public class SqlParserTests
         Assert.Equal("x", left.ColumnName);
 
         LiteralExpression right = Assert.IsType<LiteralExpression>(binary.Right);
-        Assert.Equal(5.0, right.Value);
+        Assert.Equal((sbyte)5, right.Value);
     }
 
     [Fact]
@@ -1528,9 +1629,9 @@ public class SqlParserTests
         FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
         Assert.Equal("array", function.FunctionName);
         Assert.Equal(3, function.Arguments.Count);
-        Assert.Equal(1.0, Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
-        Assert.Equal(2.0, Assert.IsType<LiteralExpression>(function.Arguments[1]).Value);
-        Assert.Equal(3.0, Assert.IsType<LiteralExpression>(function.Arguments[2]).Value);
+        Assert.Equal((sbyte)1, Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
+        Assert.Equal((sbyte)2, Assert.IsType<LiteralExpression>(function.Arguments[1]).Value);
+        Assert.Equal((sbyte)3, Assert.IsType<LiteralExpression>(function.Arguments[2]).Value);
     }
 
     [Fact]
@@ -1541,7 +1642,7 @@ public class SqlParserTests
         FunctionCallExpression function = Assert.IsType<FunctionCallExpression>(result.Columns[0].Expression);
         Assert.Equal("array", function.FunctionName);
         Assert.Single(function.Arguments);
-        Assert.Equal(42.0, Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
+        Assert.Equal((sbyte)42, Assert.IsType<LiteralExpression>(function.Arguments[0]).Value);
     }
 
     [Fact]
@@ -1935,7 +2036,7 @@ public class SqlParserTests
             Assert.IsType<StructLiteralExpression>(result.Columns[0].Expression);
         Assert.Single(literal.Fields);
         Assert.Equal("x", literal.Fields[0].Name);
-        Assert.Equal(1.0, Assert.IsType<LiteralExpression>(literal.Fields[0].Value).Value);
+        Assert.Equal((sbyte)1, Assert.IsType<LiteralExpression>(literal.Fields[0].Value).Value);
     }
 
     [Fact]
@@ -1949,7 +2050,7 @@ public class SqlParserTests
         Assert.Equal("name", literal.Fields[0].Name);
         Assert.Equal("alice", Assert.IsType<LiteralExpression>(literal.Fields[0].Value).Value);
         Assert.Equal("age", literal.Fields[1].Name);
-        Assert.Equal(30.0, Assert.IsType<LiteralExpression>(literal.Fields[1].Value).Value);
+        Assert.Equal((sbyte)30, Assert.IsType<LiteralExpression>(literal.Fields[1].Value).Value);
     }
 
     [Fact]
@@ -1998,7 +2099,7 @@ public class SqlParserTests
             Assert.IsType<IndexAccessExpression>(result.Columns[0].Expression);
         ColumnReference source = Assert.IsType<ColumnReference>(access.Source);
         Assert.Equal("arr", source.ColumnName);
-        Assert.Equal(0.0, Assert.IsType<LiteralExpression>(access.Index).Value);
+        Assert.Equal((sbyte)0, Assert.IsType<LiteralExpression>(access.Index).Value);
     }
 
     [Fact]

@@ -290,11 +290,11 @@ public sealed class FoldScanTests
 
         Assert.Equal(3, results.Count);
         // Row 1: PREV(ts)=NULL → s=0, body: CASE NULL IS NULL → s=0 → output 0
-        Assert.Equal(0d, results[0]["session_id"].AsFloat64());
+        Assert.Equal(0d, results[0]["session_id"].ToDouble());
         // Row 2: PREV(ts)=100, gap=10 ≤ 50 → output 0
-        Assert.Equal(0d, results[1]["session_id"].AsFloat64());
+        Assert.Equal(0d, results[1]["session_id"].ToDouble());
         // Row 3: PREV(ts)=110, gap=90 > 50 → output 1
-        Assert.Equal(1d, results[2]["session_id"].AsFloat64());
+        Assert.Equal(1d, results[2]["session_id"].ToDouble());
     }
 
     [Fact]
@@ -316,10 +316,10 @@ public sealed class FoldScanTests
             catalog);
 
         Assert.Equal(4, results.Count);
-        Assert.Equal(1d, results[0]["current_streak"].AsFloat64()); // 0+1
-        Assert.Equal(2d, results[1]["current_streak"].AsFloat64()); // 1+1
-        Assert.Equal(0d, results[2]["current_streak"].AsFloat64()); // reset
-        Assert.Equal(1d, results[3]["current_streak"].AsFloat64()); // 0+1
+        Assert.Equal(1d, results[0]["current_streak"].ToDouble()); // 0+1
+        Assert.Equal(2d, results[1]["current_streak"].ToDouble()); // 1+1
+        Assert.Equal(0d, results[2]["current_streak"].ToDouble()); // reset
+        Assert.Equal(1d, results[3]["current_streak"].ToDouble()); // 0+1
     }
 
     [Fact]
@@ -366,17 +366,17 @@ public sealed class FoldScanTests
 
         Assert.Equal(4, results.Count);
         // Row 1: episode=0, step=0 → body: gap=0 ≤ 60 → (0, 0+1) = (0, 1)
-        Assert.Equal(0d, results[0]["episode_id"].AsFloat64());
-        Assert.Equal(1d, results[0]["step_index"].AsFloat64());
+        Assert.Equal(0d, results[0]["episode_id"].ToDouble());
+        Assert.Equal(1d, results[0]["step_index"].ToDouble());
         // Row 2: episode=0, step=1 → gap=10 ≤ 60 → (0, 2)
-        Assert.Equal(0d, results[1]["episode_id"].AsFloat64());
-        Assert.Equal(2d, results[1]["step_index"].AsFloat64());
+        Assert.Equal(0d, results[1]["episode_id"].ToDouble());
+        Assert.Equal(2d, results[1]["step_index"].ToDouble());
         // Row 3: episode=0, step=2 → gap=100 > 60 → (1, 0)
-        Assert.Equal(1d, results[2]["episode_id"].AsFloat64());
-        Assert.Equal(0d, results[2]["step_index"].AsFloat64());
+        Assert.Equal(1d, results[2]["episode_id"].ToDouble());
+        Assert.Equal(0d, results[2]["step_index"].ToDouble());
         // Row 4: episode=1, step=0 → gap=5 ≤ 60 → (1, 1)
-        Assert.Equal(1d, results[3]["episode_id"].AsFloat64());
-        Assert.Equal(1d, results[3]["step_index"].AsFloat64());
+        Assert.Equal(1d, results[3]["episode_id"].ToDouble());
+        Assert.Equal(1d, results[3]["step_index"].ToDouble());
     }
 
     [Fact]

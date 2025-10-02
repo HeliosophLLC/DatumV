@@ -51,7 +51,7 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
         }
 
         DataValue[] elements = arrayValue.AsArray();
-        int index = (int)indexValue.AsFloat32() - 1; // 1-based → 0-based
+        int index = indexValue.ToInt32() - 1; // 1-based → 0-based
 
         if (index < 0 || index >= elements.Length)
         {
@@ -74,10 +74,10 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
                 $"array_get() requires an Array as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
         {
             throw new ArgumentException(
-                $"array_get() requires a Scalar index as the second argument, got {argumentKinds[1]}.");
+                $"array_get() requires an integer index as the second argument, got {argumentKinds[1]}.");
         }
     }
 }

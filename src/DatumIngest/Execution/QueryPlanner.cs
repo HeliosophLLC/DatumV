@@ -3925,10 +3925,12 @@ public sealed class QueryPlanner
         return literal.Value switch
         {
             DataValue dataValue => dataValue,
-            int intValue => DataValue.FromFloat32(intValue),
-            long longValue => DataValue.FromFloat32(longValue),
+            sbyte int8Value => DataValue.FromInt8(int8Value),
+            short int16Value => DataValue.FromInt16(int16Value),
+            int intValue => DataValue.FromInt32(intValue),
+            long longValue => DataValue.FromInt64(longValue),
             float floatValue => DataValue.FromFloat32(floatValue),
-            double doubleValue => DataValue.FromFloat32((float)doubleValue),
+            double doubleValue => DataValue.FromFloat64(doubleValue),
             string stringValue => DataValue.FromString(stringValue),
             bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(
@@ -4551,6 +4553,8 @@ public sealed class QueryPlanner
     {
         return expression switch
         {
+            LiteralExpression { Value: sbyte int8Value } => int8Value,
+            LiteralExpression { Value: short int16Value } => int16Value,
             LiteralExpression { Value: int intValue } => intValue,
             LiteralExpression { Value: long longValue } => longValue,
             LiteralExpression { Value: float floatValue } => floatValue,

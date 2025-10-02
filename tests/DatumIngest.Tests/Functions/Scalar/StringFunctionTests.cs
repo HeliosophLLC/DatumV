@@ -238,7 +238,7 @@ public class StringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("ll")
         ]);
-        Assert.Equal(3f, result.AsFloat32());
+        Assert.Equal(3, result.AsInt32());
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public class StringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("xyz")
         ]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]
@@ -697,7 +697,7 @@ public class StringFunctionTests
             DataValue.FromString("high"),
             DataValue.FromString("ig")
         ]);
-        Assert.Equal(2f, result.AsFloat32());
+        Assert.Equal(2, result.AsInt32());
     }
 
     [Fact]
@@ -708,7 +708,7 @@ public class StringFunctionTests
             DataValue.FromString("hello"),
             DataValue.FromString("xyz")
         ]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]
@@ -738,7 +738,7 @@ public class StringFunctionTests
     {
         OctetLengthFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("jose")]);
-        Assert.Equal(4f, result.AsFloat32());
+        Assert.Equal(4, result.AsInt32());
     }
 
     [Fact]
@@ -746,7 +746,7 @@ public class StringFunctionTests
     {
         OctetLengthFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("josé")]);
-        Assert.Equal(5f, result.AsFloat32()); // é is 2 bytes in UTF-8
+        Assert.Equal(5, result.AsInt32()); // é is 2 bytes in UTF-8
     }
 
     [Fact]
@@ -764,7 +764,7 @@ public class StringFunctionTests
     {
         BitLengthFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("jose")]);
-        Assert.Equal(32f, result.AsFloat32()); // 4 bytes * 8
+        Assert.Equal(32, result.AsInt32()); // 4 bytes * 8
     }
 
     [Fact]
@@ -772,7 +772,7 @@ public class StringFunctionTests
     {
         BitLengthFunction function = new();
         DataValue result = function.Execute([DataValue.FromString("josé")]);
-        Assert.Equal(40f, result.AsFloat32()); // 5 bytes * 8
+        Assert.Equal(40, result.AsInt32()); // 5 bytes * 8
     }
 
     [Fact]

@@ -25,7 +25,7 @@ public sealed class NthValueFunction : IWindowFunction
             throw new ArgumentException("NTH_VALUE() requires exactly 2 arguments: (expression, n).");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
         {
             throw new ArgumentException("NTH_VALUE() second argument (n) must be a numeric scalar.");
         }

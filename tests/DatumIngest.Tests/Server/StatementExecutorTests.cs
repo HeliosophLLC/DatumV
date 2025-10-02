@@ -945,19 +945,19 @@ public sealed class StatementExecutorTests : IDisposable
 
         Assert.Equal("Alice", rows[0]["name"].AsString());
         Assert.Equal("Login", rows[0]["label"].AsString());
-        Assert.Equal(1f, rows[0]["event_count"].AsFloat32());
+        Assert.Equal(1d, rows[0]["event_count"].ToDouble());
 
         Assert.Equal("Alice", rows[1]["name"].AsString());
         Assert.Equal("Purchase", rows[1]["label"].AsString());
-        Assert.Equal(1f, rows[1]["event_count"].AsFloat32());
+        Assert.Equal(1d, rows[1]["event_count"].ToDouble());
 
         Assert.Equal("Bob", rows[2]["name"].AsString());
         Assert.Equal("Login", rows[2]["label"].AsString());
-        Assert.Equal(2f, rows[2]["event_count"].AsFloat32());
+        Assert.Equal(2d, rows[2]["event_count"].ToDouble());
 
         Assert.Equal("Bob", rows[3]["name"].AsString());
         Assert.Equal("Purchase", rows[3]["label"].AsString());
-        Assert.Equal(1f, rows[3]["event_count"].AsFloat32());
+        Assert.Equal(1d, rows[3]["event_count"].ToDouble());
     }
 
     /// <summary>
@@ -996,13 +996,13 @@ public sealed class StatementExecutorTests : IDisposable
         Assert.Equal(3, rows.Count);
 
         Assert.Equal(2, rows[0]["purchase_id"].AsInt32());
-        Assert.Equal(2f, rows[0]["basket_size"].AsFloat32());
+        Assert.Equal(2d, rows[0]["basket_size"].ToDouble());
 
         Assert.Equal(4, rows[1]["purchase_id"].AsInt32());
-        Assert.Equal(3f, rows[1]["basket_size"].AsFloat32());
+        Assert.Equal(3d, rows[1]["basket_size"].ToDouble());
 
         Assert.Equal(6, rows[2]["purchase_id"].AsInt32());
-        Assert.Equal(1f, rows[2]["basket_size"].AsFloat32());
+        Assert.Equal(1d, rows[2]["basket_size"].ToDouble());
     }
 
     // ──────────────────── Multiple operations ────────────────────

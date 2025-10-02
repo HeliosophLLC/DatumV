@@ -34,10 +34,10 @@ public sealed class RegexpExtractFunction : IScalarFunction
                 $"regexp_extract() requires a String pattern as the second argument, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds.Length == 3 && argumentKinds[2] != DataKind.Float32)
+        if (argumentKinds.Length == 3 && !DataValue.IsIntegerKind(argumentKinds[2]))
         {
             throw new ArgumentException(
-                $"regexp_extract() requires a Scalar group index as the third argument, got {argumentKinds[2]}.");
+                $"regexp_extract() requires an integer group index as the third argument, got {argumentKinds[2]}.");
         }
 
         return DataKind.String;
@@ -62,7 +62,7 @@ public sealed class RegexpExtractFunction : IScalarFunction
                 return DataValue.Null(DataKind.String);
             }
 
-            groupIndex = (int)arguments[2].AsFloat32();
+            groupIndex = arguments[2].ToInt32();
         }
 
         Match match = Regex.Match(input.AsString(), pattern.AsString());

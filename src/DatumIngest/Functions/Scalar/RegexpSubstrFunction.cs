@@ -36,13 +36,13 @@ public sealed class RegexpSubstrFunction : IScalarFunction
                 $"regexp_substr() second argument (pattern) must be String, got {argumentKinds[1]}.");
         }
 
-        if (argumentKinds.Length >= 3 && argumentKinds[2] != DataKind.Float32)
+        if (argumentKinds.Length >= 3 && !DataValue.IsIntegerKind(argumentKinds[2]))
         {
             throw new ArgumentException(
                 $"regexp_substr() third argument (start) must be Scalar, got {argumentKinds[2]}.");
         }
 
-        if (argumentKinds.Length >= 4 && argumentKinds[3] != DataKind.Float32)
+        if (argumentKinds.Length >= 4 && !DataValue.IsIntegerKind(argumentKinds[3]))
         {
             throw new ArgumentException(
                 $"regexp_substr() fourth argument (N) must be Scalar, got {argumentKinds[3]}.");
@@ -54,7 +54,7 @@ public sealed class RegexpSubstrFunction : IScalarFunction
                 $"regexp_substr() fifth argument (flags) must be String, got {argumentKinds[4]}.");
         }
 
-        if (argumentKinds.Length == 6 && argumentKinds[5] != DataKind.Float32)
+        if (argumentKinds.Length == 6 && !DataValue.IsIntegerKind(argumentKinds[5]))
         {
             throw new ArgumentException(
                 $"regexp_substr() sixth argument (subexpr) must be Scalar, got {argumentKinds[5]}.");
@@ -77,14 +77,14 @@ public sealed class RegexpSubstrFunction : IScalarFunction
         int start = 0;
         if (arguments.Length >= 3 && !arguments[2].IsNull)
         {
-            start = (int)arguments[2].AsFloat32() - 1;
+            start = arguments[2].ToInt32() - 1;
             if (start < 0) start = 0;
         }
 
         int n = 1;
         if (arguments.Length >= 4 && !arguments[3].IsNull)
         {
-            n = (int)arguments[3].AsFloat32();
+            n = arguments[3].ToInt32();
         }
 
         RegexOptions options = RegexOptions.None;
@@ -97,7 +97,7 @@ public sealed class RegexpSubstrFunction : IScalarFunction
         int subexpr = 0;
         if (arguments.Length == 6 && !arguments[5].IsNull)
         {
-            subexpr = (int)arguments[5].AsFloat32();
+            subexpr = arguments[5].ToInt32();
         }
 
         if (start >= input.Length)

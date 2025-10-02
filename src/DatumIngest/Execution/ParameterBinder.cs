@@ -303,7 +303,13 @@ public static class ParameterBinder
 
         return value.Kind switch
         {
-            DataKind.Float32 => new LiteralExpression((double)value.AsFloat32()),
+            DataKind.Int8 => new LiteralExpression((sbyte)value.AsInt8()),
+            DataKind.Int16 => new LiteralExpression((short)value.AsInt16()),
+            DataKind.Int32 => new LiteralExpression(value.AsInt32()),
+            DataKind.Int64 => new LiteralExpression(value.AsInt64()),
+            DataKind.UInt8 => new LiteralExpression((sbyte)value.AsUInt8()),
+            DataKind.Float32 => new LiteralExpression((float)value.AsFloat32()),
+            DataKind.Float64 => new LiteralExpression(value.AsFloat64()),
             DataKind.String => new LiteralExpression(value.AsString()),
             DataKind.Boolean => new LiteralExpression(value.AsBoolean()),
             _ => new LiteralExpression(value.AsString()),

@@ -25,9 +25,9 @@ public sealed class RepeatFunction : IScalarFunction
             throw new ArgumentException($"repeat() requires a String as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
         {
-            throw new ArgumentException($"repeat() requires a Scalar as the second argument, got {argumentKinds[1]}.");
+            throw new ArgumentException($"repeat() requires an integer as the second argument, got {argumentKinds[1]}.");
         }
 
         return DataKind.String;
@@ -44,7 +44,7 @@ public sealed class RepeatFunction : IScalarFunction
             return DataValue.Null(DataKind.String);
         }
 
-        int count = (int)countValue.AsFloat32();
+        int count = countValue.ToInt32();
         if (count <= 0)
         {
             return DataValue.FromString(string.Empty);

@@ -373,9 +373,9 @@ public sealed class DefineBlockTests
             catalog);
 
         Assert.Single(rows);
-        // Struct literal fields are Float64 (SQL numeric literals are always double).
-        Assert.Equal(10.0, rows[0]["av"].AsFloat64(), precision: 4);
-        Assert.Equal(20.0, rows[0]["bv"].AsFloat64(), precision: 4);
+        // Struct literal fields may be narrower integer types after literal narrowing.
+        Assert.Equal(10.0, rows[0]["av"].ToDouble(), precision: 4);
+        Assert.Equal(20.0, rows[0]["bv"].ToDouble(), precision: 4);
     }
 
     /// <summary>

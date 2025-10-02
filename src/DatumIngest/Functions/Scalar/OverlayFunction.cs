@@ -21,24 +21,13 @@ public sealed class OverlayFunction : IScalarFunction
             throw new ArgumentException("overlay() requires 3 or 4 arguments: string, newsubstring, start [, count].");
         }
 
-        if (argumentKinds[0] != DataKind.String)
-        {
-            throw new ArgumentException($"overlay() first argument must be String, got {argumentKinds[0]}.");
-        }
+        FunctionArgumentException.ThrowIfArgumentKindMismatch(Name, 0, "string", DataKind.String, argumentKinds[0]);
+        FunctionArgumentException.ThrowIfArgumentKindMismatch(Name, 1, "newsubstring", DataKind.String, argumentKinds[1]);
+        FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 2, "start", argumentKinds[2]);
 
-        if (argumentKinds[1] != DataKind.String)
+        if (argumentKinds.Length == 4)
         {
-            throw new ArgumentException($"overlay() second argument must be String, got {argumentKinds[1]}.");
-        }
-
-        if (argumentKinds[2] != DataKind.Float32)
-        {
-            throw new ArgumentException($"overlay() third argument must be Scalar, got {argumentKinds[2]}.");
-        }
-
-        if (argumentKinds.Length == 4 && argumentKinds[3] != DataKind.Float32)
-        {
-            throw new ArgumentException($"overlay() fourth argument must be Scalar, got {argumentKinds[3]}.");
+            FunctionArgumentException.ThrowIfArgumentNotIntegerType(Name, 3, "count", argumentKinds[3]);
         }
 
         return DataKind.String;
@@ -58,7 +47,7 @@ public sealed class OverlayFunction : IScalarFunction
 
         string text = input.AsString();
         string replacement = newSubstring.AsString();
-        int start = (int)startValue.AsFloat32() - 1; // convert to 0-based
+        int start = startValue.ToInt32() - 1; // convert to 0-based
 
         int count = replacement.Length;
         if (arguments.Length == 4)
@@ -68,7 +57,7 @@ public sealed class OverlayFunction : IScalarFunction
                 return DataValue.Null(DataKind.String);
             }
 
-            count = (int)arguments[3].AsFloat32();
+            count = arguments[3].ToInt32();
         }
 
         if (start < 0)

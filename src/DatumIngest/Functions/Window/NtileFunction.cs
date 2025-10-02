@@ -23,7 +23,7 @@ public sealed class NtileFunction : IWindowFunction
             throw new ArgumentException("NTILE() requires exactly one argument (the number of buckets).");
         }
 
-        if (argumentKinds[0] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[0]))
         {
             throw new ArgumentException("NTILE() argument must be a numeric scalar.");
         }

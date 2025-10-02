@@ -397,7 +397,7 @@ public class OperatorTests
         ]);
 
         List<Row> rows = await CollectAsync(project);
-        Assert.Equal(5f, rows[0]["name_len"].AsFloat32());
+        Assert.Equal(5, rows[0]["name_len"].AsInt32());
     }
 
     [Fact]

@@ -25,9 +25,9 @@ public sealed class LpadFunction : IScalarFunction
             throw new ArgumentException($"lpad() requires a String as the first argument, got {argumentKinds[0]}.");
         }
 
-        if (argumentKinds[1] != DataKind.Float32)
+        if (!DataValue.IsIntegerKind(argumentKinds[1]))
         {
-            throw new ArgumentException($"lpad() requires a Scalar as the second argument, got {argumentKinds[1]}.");
+            throw new ArgumentException($"lpad() requires an integer as the second argument, got {argumentKinds[1]}.");
         }
 
         if (argumentKinds.Length == 3 && argumentKinds[2] != DataKind.String)
@@ -60,7 +60,7 @@ public sealed class LpadFunction : IScalarFunction
         }
 
         string inputString = input.AsString();
-        int targetLength = (int)lengthValue.AsFloat32();
+        int targetLength = lengthValue.ToInt32();
         string fillString = arguments.Length == 3 ? arguments[2].AsString() : " ";
 
         if (targetLength <= 0)
