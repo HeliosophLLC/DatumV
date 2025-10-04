@@ -109,7 +109,7 @@ public sealed class ProjectOperator : IQueryOperator
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            RowBatch outputBatch = RowBatch.Rent(inputBatch.Count);
+            RowBatch outputBatch = pool.RentBatch(inputBatch.Count);
 
             for (int index = 0; index < inputBatch.Count; index++)
             {
@@ -122,7 +122,7 @@ public sealed class ProjectOperator : IQueryOperator
                 }
             }
 
-            inputBatch.Return();
+            pool.ReturnBatch(inputBatch);
             yield return outputBatch;
         }
     }

@@ -179,7 +179,7 @@ public sealed class UnpivotOperator : IQueryOperator
                 // Name column — the source column name as a string.
                 values[keyFieldOrdinals.Length + 1] = DataValue.FromString(sourceColumnName);
 
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
 
                 if (outputBatch.IsFull)

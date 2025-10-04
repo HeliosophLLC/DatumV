@@ -230,7 +230,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                             }
                         }
 
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(row);
 
                         if (outputBatch.IsFull)
@@ -317,7 +317,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (spilledIsNew)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(spilledRow);
 
                             if (outputBatch.IsFull)
@@ -469,7 +469,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -542,7 +542,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                             if (isNew)
                             {
-                                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                                 outputBatch.Add(row);
 
                                 if (outputBatch.IsFull)
@@ -614,7 +614,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -745,7 +745,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -793,7 +793,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             if (DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                             {
-                                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                                 outputBatch.Add(row);
 
                                 if (outputBatch.IsFull)
@@ -840,7 +840,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     {
                         if (DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -1005,7 +1005,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -1074,7 +1074,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                             if (isNew)
                             {
-                                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                                 outputBatch.Add(row);
 
                                 if (outputBatch.IsFull)
@@ -1143,7 +1143,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (isNew)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -1269,7 +1269,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (columnCount == -1)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -1283,7 +1283,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
 
                         if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)
@@ -1331,7 +1331,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                         {
                             if (!DecrementCount(row, columnCount, rightSingleCounts, rightCompositeCounts, compositeKeyScratch))
                             {
-                                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                                 outputBatch.Add(row);
 
                                 if (outputBatch.IsFull)
@@ -1378,7 +1378,7 @@ internal sealed class SetOperationOperator : IQueryOperator, IDisposable
                     {
                         if (!DecrementCount(row, columnCount, partRightSingle, partRightComposite, compositeKeyScratch))
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(row);
 
                             if (outputBatch.IsFull)

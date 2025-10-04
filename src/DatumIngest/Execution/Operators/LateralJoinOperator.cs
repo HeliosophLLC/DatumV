@@ -114,7 +114,7 @@ public sealed class LateralJoinOperator : IQueryOperator
 
                         matched = true;
                         cachedNullRight ??= JoinOperator.CreateNullRow(rightRow);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(combined);
 
                         if (outputBatch.IsFull)
@@ -140,7 +140,7 @@ public sealed class LateralJoinOperator : IQueryOperator
                         unmatched = leftRow;
                     }
 
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(unmatched);
 
                     if (outputBatch.IsFull)

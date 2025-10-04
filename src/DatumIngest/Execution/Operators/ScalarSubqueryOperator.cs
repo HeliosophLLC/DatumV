@@ -149,7 +149,7 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
 
                 values[outerFieldCount] = scalarResult;
 
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
 
                 if (outputBatch.IsFull)

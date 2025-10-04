@@ -212,7 +212,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     if (currentGroup is not null && !key.Equals(currentSingleKey!))
                     {
                         FlushOrderedBuffersForGroup(currentGroup, context);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
                             ref outputNames, ref outputNameIndex));
                         GlobalBufferPool.ReturnGroupState(currentGroup);
@@ -241,7 +241,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     if (currentGroup is not null && !CompositeKeysEqual(currentKeyValues!, compositeKeyScratch!))
                     {
                         FlushOrderedBuffersForGroup(currentGroup, context);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
                             ref outputNames, ref outputNameIndex));
                         GlobalBufferPool.ReturnGroupState(currentGroup);
@@ -269,17 +269,17 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 // Row values have been fully extracted — return the row to
                 // the pool so the upstream operator can reuse it.
-                context.LocalBufferPool.ReturnValues(row);
+                // Row values extracted — batch-level ReturnBatch handles array return.
             }
 
-            inputBatch.Return();
+            context.LocalBufferPool.ReturnBatch(inputBatch);
         }
 
         // Emit the final group.
         if (currentGroup is not null)
         {
             FlushOrderedBuffersForGroup(currentGroup, context);
-            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
             outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
                 ref outputNames, ref outputNameIndex));
             GlobalBufferPool.ReturnGroupState(currentGroup);
@@ -474,7 +474,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         Row row = inputBatch[i];
                         EvaluateAggregateArgumentsInto(evaluator, row, argumentScratch, sortKeyScratch);
                         AccumulateRow(globalGroup!, argumentScratch, sortKeyScratch, context);
-                        context.LocalBufferPool.ReturnValues(row);
+                        // Row values extracted — batch-level ReturnBatch handles array return.
                     }
                 }
                 else if (spilling)
@@ -535,7 +535,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         if (existingGroup is not null)
                             AccumulateRow(existingGroup, argumentScratch, sortKeyScratch, context);
 
-                        context.LocalBufferPool.ReturnValues(row);
+                        // Row values extracted — batch-level ReturnBatch handles array return.
                     }
                 }
                 else
@@ -701,7 +701,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         }
 
                         // Return the row to the pool so upstream can reuse it.
-                        context.LocalBufferPool.ReturnValues(row);
+                        // Row values extracted — batch-level ReturnBatch handles array return.
                     }
                 }
 
@@ -710,7 +710,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 // before we move on to the next one.
                 context.QueryMeter?.ThrowIfExceeded();
 
-                inputBatch.Return();
+                context.LocalBufferPool.ReturnBatch(inputBatch);
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -746,7 +746,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             RowBatch? outputBatch = null;
             foreach (GroupState group in allGroups)
             {
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(EmitGroupRow(group, isGlobalAggregation, ref outputNames, ref outputNameIndex));
                 if (outputBatch.IsFull)
                 {
@@ -783,7 +783,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         singleKeyGroups, compositeKeyGroups, hasOrderedAggregates, context,
                         ref outputNames, ref outputNameIndex))
                     {
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(groupRow);
                         if (outputBatch.IsFull)
                         {
@@ -917,7 +917,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                                     .ConfigureAwait(false);
                             }
 
-                            inputBatch.Return();
+                            context.LocalBufferPool.ReturnBatch(inputBatch);
                         }
                     }
                     finally
@@ -944,7 +944,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             EvaluateAggregateArgumentsInto(
                                 workerEvaluator, row, workerArgScratch, workerSortScratch);
                             AccumulateRow(workerGlobalGroups[wi], workerArgScratch, workerSortScratch, context);
-                            context.LocalBufferPool.ReturnValues(row);
+                            // Row values extracted — batch-level ReturnBatch handles array return.
                         }
                     }, cancellationToken);
                 }
@@ -968,7 +968,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     FlushOrderedBuffers([workerGlobalGroups[0]], context);
                 }
 
-                RowBatch globalOutputBatch = RowBatch.Rent(context.BatchSize);
+                RowBatch globalOutputBatch = context.LocalBufferPool.RentBatch(context.BatchSize);
                 globalOutputBatch.Add(EmitGroupRow(
                     workerGlobalGroups[0], isGlobalAggregation: true,
                     ref globalOutputNames, ref globalOutputNameIndex));
@@ -1071,7 +1071,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             .ConfigureAwait(false);
                         }
 
-                        inputBatch.Return();
+                        context.LocalBufferPool.ReturnBatch(inputBatch);
                     }
                 }
                 finally
@@ -1256,7 +1256,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
 
                 foreach (GroupState group in workerGroups)
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(EmitGroupRow(
                         group, isGlobalAggregation: false, ref outputNames, ref outputNameIndex));
                     if (outputBatch.IsFull)
@@ -1290,7 +1290,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                             hasOrderedAggregates, context,
                             ref outputNames, ref outputNameIndex))
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(groupRow);
                             if (outputBatch.IsFull)
                             {

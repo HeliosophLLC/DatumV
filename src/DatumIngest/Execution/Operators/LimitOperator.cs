@@ -100,7 +100,7 @@ public sealed class LimitOperator : IQueryOperator
                     yield break;
                 }
 
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(row);
                 emitted++;
 

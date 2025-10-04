@@ -150,7 +150,7 @@ public sealed class IndexScanOperator : IQueryOperator
                             }
                         }
 
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(row);
 
                         if (outputBatch.IsFull)
@@ -184,7 +184,7 @@ public sealed class IndexScanOperator : IQueryOperator
                         }
                     }
 
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(row);
 
                     if (outputBatch.IsFull)

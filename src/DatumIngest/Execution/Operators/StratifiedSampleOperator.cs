@@ -100,7 +100,7 @@ public sealed class StratifiedSampleOperator : IQueryOperator
 
                 if (random.NextDouble() < threshold)
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(row);
 
                     if (outputBatch.IsFull)

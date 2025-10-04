@@ -96,7 +96,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
             RowBatch? outputBatch = null;
             foreach (Row row in rows)
             {
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(row);
                 if (outputBatch.IsFull)
                 {
@@ -128,7 +128,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 RowBatch? outputBatch = null;
                 foreach (Row row in buffer)
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(row);
                     if (outputBatch.IsFull)
                     {
@@ -409,7 +409,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
                 context.CancellationToken.ThrowIfCancellationRequested();
 
                 RunReader winner = heap.Dequeue();
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(winner.Current.GetValueOrDefault());
                 if (outputBatch.IsFull)
                 {

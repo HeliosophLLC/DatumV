@@ -482,7 +482,7 @@ public sealed class DefineBlockTests
 
             foreach (Row row in _rows)
             {
-                batch.Add(row);
+                batch.Add(row.Clone());
 
                 if (batch.IsFull)
                 {

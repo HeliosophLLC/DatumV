@@ -175,7 +175,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
                             }
                         }
 
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(row);
 
                         if (outputBatch.IsFull)
@@ -274,7 +274,7 @@ internal sealed class DistinctOperator : IQueryOperator, IDisposable
 
                         if (spilledIsNew)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(spilledRow);
 
                             if (outputBatch.IsFull)

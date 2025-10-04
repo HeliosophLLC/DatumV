@@ -49,7 +49,7 @@ public sealed class AliasOperator : IQueryOperator
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
         {
-            RowBatch outputBatch = RowBatch.Rent(inputBatch.Count);
+            RowBatch outputBatch = context.LocalBufferPool.RentBatch(inputBatch.Count);
             for (int i = 0; i < inputBatch.Count; i++)
             {
                 Row row = inputBatch[i];

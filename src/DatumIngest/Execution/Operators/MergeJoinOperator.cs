@@ -215,7 +215,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullRight ??= CreateNullRow(rightRow);
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -230,7 +230,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullLeft ??= CreateNullRow(leftRow);
                     schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -248,7 +248,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullRight ??= CreateNullRow(rightRow);
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -262,7 +262,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                 {
                     cachedNullLeft ??= CreateNullRow(leftRow);
                     schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -315,7 +315,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                             }
 
                             leftRowMatched = true;
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(candidateRow);
                             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
@@ -323,7 +323,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         {
                             leftRowMatched = true;
                             schema ??= CombinedRowSchema.Build(leftRow, matchedRight);
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(schema.Combine(leftRow, matchedRight));
                             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
@@ -334,7 +334,7 @@ public sealed class MergeJoinOperator : IQueryOperator
                         // All right-group rows filtered out by residual — emit unmatched left.
                         cachedNullRight ??= CreateNullRow(rightGroup[0]);
                         schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
@@ -370,14 +370,14 @@ public sealed class MergeJoinOperator : IQueryOperator
                 if (cachedNullRight is not null)
                 {
                     schema ??= CombinedRowSchema.Build(leftRow, cachedNullRight.Value);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(leftRow, cachedNullRight.Value));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
                     // No right rows were ever seen — emit left row alone.
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(leftRow);
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -398,14 +398,14 @@ public sealed class MergeJoinOperator : IQueryOperator
                 if (cachedNullLeft is not null)
                 {
                     schema ??= CombinedRowSchema.Build(cachedNullLeft.Value, rightRow);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.Combine(cachedNullLeft.Value, rightRow));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
                     // No left rows were ever seen — emit right row alone.
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(rightRow);
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }

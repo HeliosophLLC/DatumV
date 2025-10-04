@@ -163,7 +163,7 @@ public sealed class WindowOperator : IQueryOperator
                 values[inputFieldCount + windowColumnIndex] = windowResults[rowIndex][windowColumnIndex];
             }
 
-            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
             outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
 
             if (outputBatch.IsFull)

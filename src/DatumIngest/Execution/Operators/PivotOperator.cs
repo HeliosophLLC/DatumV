@@ -321,7 +321,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
                     values[keyCount + cellIndex] = group.CellAccumulators[cellIndex].Result;
                 }
 
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(new Row(outputNames, values, outputNameIndex));
 
                 if (outputBatch.IsFull)

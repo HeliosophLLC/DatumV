@@ -174,7 +174,7 @@ public sealed class LateMaterializationOperator : IQueryOperator
 
             schema ??= MergedRowSchema.Build(row, _deferredColumns, _alias);
 
-            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
             outputBatch.Add(schema.Merge(row, deferredRow));
 
             if (outputBatch.IsFull)

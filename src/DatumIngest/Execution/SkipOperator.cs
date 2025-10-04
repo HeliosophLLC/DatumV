@@ -59,7 +59,7 @@ public sealed class SkipOperator : IQueryOperator
                     continue;
                 }
 
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(row);
 
                 if (outputBatch.IsFull)

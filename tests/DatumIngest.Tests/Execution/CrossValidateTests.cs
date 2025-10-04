@@ -369,7 +369,7 @@ public sealed class CrossValidateTests
             RowBatch batch = RowBatch.Rent(64);
             foreach (Row row in _rows)
             {
-                batch.Add(row);
+                batch.Add(row.Clone());
                 if (batch.IsFull) { yield return batch; batch = RowBatch.Rent(64); }
             }
 

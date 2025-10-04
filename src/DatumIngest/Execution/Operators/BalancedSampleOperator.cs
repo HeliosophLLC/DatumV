@@ -152,7 +152,7 @@ public sealed class BalancedSampleOperator : IQueryOperator
 
             for (int i = 0; i < reservoir.Count; i++)
             {
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(reservoir.Rows[i]);
 
                 if (outputBatch.IsFull)

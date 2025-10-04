@@ -192,7 +192,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     // but we need to verify residual if present.
                     if (residual is null)
                     {
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(probeRow);
                         if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                         continue;
@@ -232,7 +232,7 @@ internal sealed class IndexNestedLoopJoinExecutor
 
                     if (semiMatch)
                     {
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(probeRow);
                         if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                     }
@@ -276,7 +276,7 @@ internal sealed class IndexNestedLoopJoinExecutor
                     bufferPool.Return(buildRow.RawValues);
                     totalMatches++;
 
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(combined);
                     if (outputBatch.IsFull) { trialBuffer.Add(outputBatch); outputBatch = null; }
                 }

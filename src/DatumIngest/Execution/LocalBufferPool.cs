@@ -69,6 +69,20 @@ public sealed class LocalBufferPool : IDisposable
     }
 
     /// <summary>
+    /// Rents a <see cref="DataValue"/> array and copies the source values into it.
+    /// Used by caching operators (CTE, CrossValidate) that need to hold values
+    /// independently of the input batch lifecycle.
+    /// </summary>
+    /// <param name="source">The values to copy.</param>
+    /// <returns>A pool-rented array containing a copy of <paramref name="source"/>.</returns>
+    public DataValue[] RentCopy(ReadOnlySpan<DataValue> source)
+    {
+        DataValue[] buffer = Rent(source.Length);
+        source.CopyTo(buffer);
+        return buffer;
+    }
+
+    /// <summary>
     /// Returns the backing <see cref="DataValue"/> array from a <see cref="Row"/>
     /// to the pool. Convenience overload for callers holding a <see cref="Row"/> struct.
     /// </summary>

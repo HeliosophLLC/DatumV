@@ -54,6 +54,7 @@ public sealed class FilterOperator : IQueryOperator
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
         ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        LocalBufferPool pool = context.LocalBufferPool;
         RowBatch? outputBatch = null;
 
         await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
@@ -64,7 +65,7 @@ public sealed class FilterOperator : IQueryOperator
 
                 if (evaluator.EvaluateAsBoolean(_predicate, row))
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= pool.RentBatch(context.BatchSize);
                     outputBatch.Add(row);
 
                     if (outputBatch.IsFull)

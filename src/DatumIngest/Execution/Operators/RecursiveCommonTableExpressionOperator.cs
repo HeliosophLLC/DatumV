@@ -28,7 +28,8 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// </summary>
     private readonly Func<IQueryOperator, IQueryOperator> _recursiveMemberFactory;
 
-    private List<Row>? _allRows;
+    private List<RowBatch>? _allBatches;
+    private LocalBufferPool? _cachePool;
     private bool _materialized;
     private string? _spillFilePath;
 
@@ -78,6 +79,8 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
+        LocalBufferPool pool = context.LocalBufferPool;
+
         if (!_materialized)
         {
             await MaterializeAsync(context).ConfigureAwait(false);
@@ -91,17 +94,25 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                 yield return batch;
             }
         }
-        else if (_allRows is not null)
+        else if (_allBatches is not null)
         {
+            // Replay by copying cached values into fresh output batches.
             RowBatch? outputBatch = null;
-            foreach (Row row in _allRows)
+            foreach (RowBatch cachedBatch in _allBatches)
             {
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
-                outputBatch.Add(RenameColumnsIfNeeded(row));
-                if (outputBatch.IsFull)
+                for (int i = 0; i < cachedBatch.Count; i++)
                 {
-                    yield return outputBatch;
-                    outputBatch = null;
+                    Row cachedRow = cachedBatch[i];
+                    DataValue[] outputValues = pool.RentCopy(cachedRow.RawValues);
+                    Row outputRow = new(cachedRow.RawNames, outputValues, cachedRow.RawNameIndex);
+
+                    outputBatch ??= pool.RentBatch(context.BatchSize);
+                    outputBatch.Add(RenameColumnsIfNeeded(outputRow));
+                    if (outputBatch.IsFull)
+                    {
+                        yield return outputBatch;
+                        outputBatch = null;
+                    }
                 }
             }
 
@@ -114,16 +125,24 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
 
     /// <summary>
     /// Executes the anchor member, then iterates the recursive member until fixpoint
-    /// or the max recursion depth is reached.
+    /// or the max recursion depth is reached. All rows are cached with pool-rented
+    /// <see cref="DataValue"/> arrays independent of the input batch lifecycle.
     /// </summary>
     private async Task MaterializeAsync(ExecutionContext context)
     {
-        _allRows = new List<Row>();
+        LocalBufferPool pool = context.LocalBufferPool;
+        _cachePool = pool;
+        _allBatches = new List<RowBatch>();
         long? memoryBudget = context.MemoryBudgetBytes;
         MemoryEstimator? estimator = memoryBudget.HasValue ? new MemoryEstimator() : null;
         BinaryWriter? spillWriter = null;
         bool schemaWritten = false;
         int maxDepth = context.MaxRecursionDepth;
+
+        // Schema arrays shared across all cached rows (built from first row).
+        string[]? cacheNames = null;
+        Dictionary<string, int>? cacheNameIndex = null;
+        RowBatch? cacheBatch = null;
 
         try
         {
@@ -137,8 +156,15 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                     context.CancellationToken.ThrowIfCancellationRequested();
                     context.QueryMeter?.ThrowIfExceeded();
 
-                    workingTable.Add(row);
-                    AddRow(row, estimator, memoryBudget, ref spillWriter, ref schemaWritten);
+                    BuildCacheSchema(row, ref cacheNames, ref cacheNameIndex);
+
+                    // Clone into pool-rented array for the cache/working table.
+                    DataValue[] clonedValues = pool.RentCopy(row.RawValues);
+                    Row clonedRow = new(cacheNames!, clonedValues, cacheNameIndex!);
+
+                    workingTable.Add(clonedRow);
+                    AddRow(clonedRow, ref cacheBatch, pool, estimator, memoryBudget,
+                        ref spillWriter, ref schemaWritten);
                 }
 
                 inputBatch.Return();
@@ -152,7 +178,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                     break;
                 }
 
-                WorkingTableOperator workingTableOperator = new(workingTable);
+                WorkingTableOperator workingTableOperator = new(workingTable, pool);
                 IQueryOperator recursiveMember = _recursiveMemberFactory(workingTableOperator);
 
                 List<Row> nextWorkingTable = new();
@@ -164,13 +190,21 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
                         context.CancellationToken.ThrowIfCancellationRequested();
                         context.QueryMeter?.ThrowIfExceeded();
 
-                        nextWorkingTable.Add(row);
-                        AddRow(row, estimator, memoryBudget, ref spillWriter, ref schemaWritten);
+                        BuildCacheSchema(row, ref cacheNames, ref cacheNameIndex);
+
+                        DataValue[] clonedValues = pool.RentCopy(row.RawValues);
+                        Row clonedRow = new(cacheNames!, clonedValues, cacheNameIndex!);
+
+                        nextWorkingTable.Add(clonedRow);
+                        AddRow(clonedRow, ref cacheBatch, pool, estimator, memoryBudget,
+                            ref spillWriter, ref schemaWritten);
                     }
 
                     inputBatch.Return();
                 }
 
+                // Previous working table rows share DataValue[] with _allBatches cache —
+                // no separate cleanup needed.
                 workingTable = nextWorkingTable;
             }
 
@@ -189,19 +223,58 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             }
         }
 
+        // Add the last partial batch.
+        if (cacheBatch is not null && _spillFilePath is null)
+        {
+            _allBatches.Add(cacheBatch);
+        }
+        else if (cacheBatch is not null)
+        {
+            pool.ReturnBatch(cacheBatch);
+        }
+
         if (_spillFilePath is not null)
         {
-            _allRows = null;
+            foreach (RowBatch batch in _allBatches)
+            {
+                pool.ReturnBatch(batch);
+            }
+
+            _allBatches = null;
         }
 
         _materialized = true;
     }
 
     /// <summary>
-    /// Adds a row to the accumulator (in-memory or spilled to disk).
+    /// Builds shared schema arrays from the first row encountered.
+    /// </summary>
+    private static void BuildCacheSchema(
+        Row row,
+        ref string[]? cacheNames,
+        ref Dictionary<string, int>? cacheNameIndex)
+    {
+        if (cacheNames is not null)
+        {
+            return;
+        }
+
+        cacheNames = new string[row.FieldCount];
+        for (int col = 0; col < row.FieldCount; col++)
+            cacheNames[col] = row.ColumnNames[col];
+        cacheNameIndex = new Dictionary<string, int>(
+            cacheNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int col = 0; col < cacheNames.Length; col++)
+            cacheNameIndex[cacheNames[col]] = col;
+    }
+
+    /// <summary>
+    /// Adds a row to the cache (in-memory batch or spilled to disk).
     /// </summary>
     private void AddRow(
         Row row,
+        ref RowBatch? cacheBatch,
+        LocalBufferPool pool,
         MemoryEstimator? estimator,
         long? memoryBudget,
         ref BinaryWriter? spillWriter,
@@ -216,10 +289,19 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             }
 
             RowSerializer.WriteRow(spillWriter!, row);
+            // Row was cloned into pool-rented array but is now serialized to disk.
+            // Return its array to the pool.
+            pool.ReturnValues(row);
         }
         else
         {
-            _allRows!.Add(row);
+            cacheBatch ??= pool.RentBatch(1024);
+            cacheBatch.Add(row);
+            if (cacheBatch.IsFull)
+            {
+                _allBatches!.Add(cacheBatch);
+                cacheBatch = null;
+            }
 
             if (estimator is not null)
             {
@@ -233,7 +315,14 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
 
                 if (estimatedMemory > memoryBudget!.Value)
                 {
-                    SpillToDisk(ref spillWriter, ref schemaWritten);
+                    // Flush partial cache batch before spilling.
+                    if (cacheBatch is not null)
+                    {
+                        _allBatches!.Add(cacheBatch);
+                        cacheBatch = null;
+                    }
+
+                    SpillToDisk(ref spillWriter, ref schemaWritten, pool);
                 }
                 else if (estimatedMemory > (long)(memoryBudget.Value * MemoryEstimator.EscalationThreshold))
                 {
@@ -244,9 +333,9 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     }
 
     /// <summary>
-    /// Transitions to spill mode, writing all buffered rows to a temp file.
+    /// Transitions to spill mode, writing all cached rows to a temp file.
     /// </summary>
-    private void SpillToDisk(ref BinaryWriter? spillWriter, ref bool schemaWritten)
+    private void SpillToDisk(ref BinaryWriter? spillWriter, ref bool schemaWritten, LocalBufferPool pool)
     {
         string spillDirectory = Path.Combine(
             Path.GetTempPath(),
@@ -258,18 +347,24 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             _spillFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536);
         spillWriter = new BinaryWriter(fileStream);
 
-        foreach (Row bufferedRow in _allRows!)
+        foreach (RowBatch batch in _allBatches!)
         {
-            if (!schemaWritten)
+            for (int i = 0; i < batch.Count; i++)
             {
-                RowSerializer.WriteSchema(spillWriter, bufferedRow);
-                schemaWritten = true;
+                Row bufferedRow = batch[i];
+                if (!schemaWritten)
+                {
+                    RowSerializer.WriteSchema(spillWriter, bufferedRow);
+                    schemaWritten = true;
+                }
+
+                RowSerializer.WriteRow(spillWriter, bufferedRow);
             }
 
-            RowSerializer.WriteRow(spillWriter, bufferedRow);
+            pool.ReturnBatch(batch);
         }
 
-        _allRows!.Clear();
+        _allBatches!.Clear();
     }
 
     /// <summary>
@@ -277,6 +372,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// </summary>
     private async IAsyncEnumerable<RowBatch> ReplayFromDiskAsync(ExecutionContext context)
     {
+        LocalBufferPool pool = context.LocalBufferPool;
         FileStream fileStream = new(
             _spillFilePath!, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
 
@@ -291,7 +387,7 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             {
                 context.CancellationToken.ThrowIfCancellationRequested();
                 Row row = RowSerializer.ReadRow(reader, names, nameIndex);
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= pool.RentBatch(context.BatchSize);
                 outputBatch.Add(RenameColumnsIfNeeded(row));
                 if (outputBatch.IsFull)
                 {
@@ -334,6 +430,17 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     /// <inheritdoc/>
     public void Dispose()
     {
+        // Return cached batches to the pool if still held.
+        if (_allBatches is not null && _cachePool is not null)
+        {
+            foreach (RowBatch batch in _allBatches)
+            {
+                _cachePool.ReturnBatch(batch);
+            }
+
+            _allBatches = null;
+        }
+
         if (_spillFilePath is not null)
         {
             string? directory = Path.GetDirectoryName(_spillFilePath);
@@ -354,20 +461,25 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
     }
 
     /// <summary>
-    /// Simple operator that replays an in-memory list of rows.
-    /// Used as the working table for the recursive member in each iteration.
+    /// Simple operator that replays an in-memory list of rows by copying
+    /// cached values into fresh pool-rented output batches. The cached rows'
+    /// <see cref="DataValue"/> arrays are owned by the recursive CTE's cache
+    /// and must not be returned by downstream consumers.
     /// </summary>
     internal sealed class WorkingTableOperator : IQueryOperator
     {
         private readonly List<Row> _rows;
+        private readonly LocalBufferPool _pool;
 
         /// <summary>
         /// Creates a working table operator from a snapshot of rows.
         /// </summary>
         /// <param name="rows">The rows to replay.</param>
-        public WorkingTableOperator(List<Row> rows)
+        /// <param name="pool">The pool for renting output batch arrays.</param>
+        public WorkingTableOperator(List<Row> rows, LocalBufferPool pool)
         {
             _rows = rows;
+            _pool = pool;
         }
 
         /// <inheritdoc/>
@@ -386,8 +498,13 @@ internal sealed class RecursiveCommonTableExpressionOperator : IQueryOperator, I
             RowBatch? outputBatch = null;
             foreach (Row row in _rows)
             {
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
-                outputBatch.Add(row);
+                // Copy cached values into fresh pool-rented arrays so the output
+                // batch can be safely ReturnBatch'd by downstream operators.
+                DataValue[] outputValues = _pool.RentCopy(row.RawValues);
+                Row outputRow = new(row.RawNames, outputValues, row.RawNameIndex);
+
+                outputBatch ??= _pool.RentBatch(context.BatchSize);
+                outputBatch.Add(outputRow);
                 if (outputBatch.IsFull)
                 {
                     yield return outputBatch;

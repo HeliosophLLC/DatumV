@@ -283,7 +283,7 @@ internal sealed class GraceHashJoinExecutor
                         foreach (Row result in ProbePartitionRow(
                             buildTables[partitionIndex]!, probeRow, keyPairs, useSingleKey, isSemiJoin, nullBuildTemplate, context.LocalBufferPool, keyScratch))
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(result);
                             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
@@ -821,7 +821,7 @@ internal sealed class GraceHashJoinExecutor
                         }
 
                         Row combinedResult = schema!.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(combinedResult);
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
@@ -832,7 +832,7 @@ internal sealed class GraceHashJoinExecutor
                     if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                         (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                     {
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(probeRow);
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
@@ -857,7 +857,7 @@ internal sealed class GraceHashJoinExecutor
                         Row rightRow = _flipped ? probeRow : nullBuild.Value;
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                         Row unmatchedProbeResult = schema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(unmatchedProbeResult);
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
@@ -865,7 +865,7 @@ internal sealed class GraceHashJoinExecutor
                     {
                         // No null template — yield the probe row directly.
                         // Cannot return it to the pool since the caller still owns it.
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(probeRow);
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         continue;
@@ -899,13 +899,13 @@ internal sealed class GraceHashJoinExecutor
                             Row rightRow = _flipped ? nullPad.Value : buildRowList[index];
                             buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
                             Row unmatchedBuildResult = buildUnmatchedSchema.CombinePooled(leftRow, rightRow, context.LocalBufferPool);
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(unmatchedBuildResult);
                             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }
                         else
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(buildRowList[index]);
                             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                         }

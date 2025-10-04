@@ -153,7 +153,7 @@ public sealed class FoldScanOperator : IQueryOperator
                 values[inputFieldCount + j] = scanResults[rowIndex][j];
             }
 
-            outputBatch ??= RowBatch.Rent(context.BatchSize);
+            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
             outputBatch.Add(new Row(outputNames, values, outputNameIndex!));
 
             if (outputBatch.IsFull)

@@ -600,7 +600,7 @@ public sealed class JoinOperator : IQueryOperator
                         schema ??= CombinedRowSchema.Build(leftRow, rightRow);
                     }
 
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema!.CombinePooled(leftRow, rightRow, bufferPool));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -612,7 +612,7 @@ public sealed class JoinOperator : IQueryOperator
                 if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                     (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(probeRow);
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -626,13 +626,13 @@ public sealed class JoinOperator : IQueryOperator
                     Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
                     Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(probeRow);
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -668,13 +668,13 @@ public sealed class JoinOperator : IQueryOperator
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool));
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                     else
                     {
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(buildRows[index]);
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
@@ -922,7 +922,7 @@ public sealed class JoinOperator : IQueryOperator
             RowBatch? outputBatch = null;
             await foreach (Row row in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(row);
                 if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
@@ -1068,7 +1068,7 @@ public sealed class JoinOperator : IQueryOperator
                     buildMatched[index] = true;
                 }
 
-                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                 outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
                 if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
@@ -1078,7 +1078,7 @@ public sealed class JoinOperator : IQueryOperator
                 if ((_joinType == JoinType.LeftSemi && hasMatch) ||
                     (_joinType == JoinType.LeftAntiSemi && !hasMatch))
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(probeRow);
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -1091,13 +1091,13 @@ public sealed class JoinOperator : IQueryOperator
                     Row leftRow = _flipped ? cachedNullBuild.Value : probeRow;
                     Row rightRow = _flipped ? probeRow : cachedNullBuild.Value;
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
                 else
                 {
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(probeRow);
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }
@@ -1124,13 +1124,13 @@ public sealed class JoinOperator : IQueryOperator
                         Row leftRow = _flipped ? buildRows[index] : nullProbeRow;
                         Row rightRow = _flipped ? nullProbeRow : buildRows[index];
                         buildUnmatchedSchema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(buildUnmatchedSchema.CombinePooled(leftRow, rightRow, bufferPool));
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
                     else
                     {
-                        outputBatch ??= RowBatch.Rent(context.BatchSize);
+                        outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(buildRows[index]);
                         if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                     }
@@ -1169,7 +1169,7 @@ public sealed class JoinOperator : IQueryOperator
                 foreach (Row rightRow in rightRows)
                 {
                     schema ??= CombinedRowSchema.Build(leftRow, rightRow);
-                    outputBatch ??= RowBatch.Rent(context.BatchSize);
+                    outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                     outputBatch.Add(schema.CombinePooled(leftRow, rightRow, bufferPool));
                     if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
                 }

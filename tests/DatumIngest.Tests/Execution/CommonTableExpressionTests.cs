@@ -985,7 +985,9 @@ public sealed class CommonTableExpressionTests
 
             foreach (Row row in _rows)
             {
-                batch.Add(row);
+                // Clone so the batch owns independent DataValue[] arrays,
+                // matching the production ScanOperator's pool.Rent behavior.
+                batch.Add(row.Clone());
 
                 if (batch.IsFull)
                 {

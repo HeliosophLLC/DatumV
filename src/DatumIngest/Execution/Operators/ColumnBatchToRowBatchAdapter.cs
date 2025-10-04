@@ -48,7 +48,7 @@ public sealed class ColumnBatchToRowBatchAdapter : IQueryOperator
         {
             int rowCount = columnBatch.RowCount;
             int columnCount = columnBatch.ColumnCount;
-            RowBatch rowBatch = RowBatch.Rent(rowCount);
+            RowBatch rowBatch = pool.RentBatch(rowCount);
 
             for (int row = 0; row < rowCount; row++)
             {
