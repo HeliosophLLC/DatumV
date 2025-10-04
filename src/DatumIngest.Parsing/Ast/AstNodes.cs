@@ -30,7 +30,8 @@ public sealed record SelectStatement(
     int? Offset = null,
     bool Distinct = false,
     IReadOnlyList<CommonTableExpression>? CommonTableExpressions = null,
-    IReadOnlyList<LetBinding>? LetBindings = null);
+    IReadOnlyList<LetBinding>? LetBindings = null,
+    CrossValidateClause? CrossValidate = null);
 
 /// <summary>
 /// Specifies how a destructured LET binding extracts values from its right-hand-side expression.
@@ -237,6 +238,25 @@ public sealed record SubquerySource(SelectStatement Query, string Alias) : Table
 /// A table-valued function call used as a table source in FROM or JOIN.
 /// </summary>
 public sealed record FunctionSource(string FunctionName, IReadOnlyList<Expression> Arguments, string? Alias = null, SourceSpan? Span = null) : TableSource;
+
+/// <summary>
+/// A CROSS VALIDATE clause that assigns deterministic fold indices to rows
+/// for k-fold cross-validation. Desugars to a synthetic LET binding at plan time:
+/// <c>CAST(FLOOR(hash_split(key, seed) * k) AS Int32)</c>.
+/// </summary>
+/// <param name="FoldCount">The number of folds (k). Must be an integer >= 2.</param>
+/// <param name="Seed">Optional seed for deterministic fold assignment. Defaults to 0.</param>
+/// <param name="KeyColumns">The column(s) used as the hash key for fold assignment.</param>
+/// <param name="StratifyColumns">Optional STRATIFY BY columns for class-balanced folds.</param>
+/// <param name="GroupColumns">Optional GROUP BY columns — all rows with the same group key get the same fold.</param>
+/// <param name="OutputAlias">The output column name for the fold index.</param>
+public sealed record CrossValidateClause(
+    Expression FoldCount,
+    Expression? Seed,
+    IReadOnlyList<Expression> KeyColumns,
+    IReadOnlyList<Expression>? StratifyColumns,
+    IReadOnlyList<Expression>? GroupColumns,
+    string OutputAlias);
 
 /// <summary>
 /// A single JOIN clause combining a source with a join condition.

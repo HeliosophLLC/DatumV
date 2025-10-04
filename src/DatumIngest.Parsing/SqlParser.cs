@@ -1388,11 +1388,12 @@ public static class SqlParser
             .IgnoreThen(Token.EqualTo(SqlToken.Outer).OptionalOrDefault())
             .IgnoreThen(Token.EqualTo(SqlToken.Join))
             .Select(_ => (JoinType.FullOuter, false)).Try())
-        // CROSS JOIN [LATERAL]
-        .Or(from _ in Token.EqualTo(SqlToken.Cross)
+        // CROSS JOIN [LATERAL] — .Try() allows backtracking when CROSS is followed by
+        // VALIDATE (for CROSS VALIDATE) instead of JOIN.
+        .Or((from _ in Token.EqualTo(SqlToken.Cross)
             from __ in Token.EqualTo(SqlToken.Join)
             from isLateral in Token.EqualTo(SqlToken.Lateral).Select(t => true).OptionalOrDefault(false)
-            select (JoinType.Cross, isLateral))
+            select (JoinType.Cross, isLateral)).Try())
         // Plain JOIN (defaults to INNER)
         .Or(Token.EqualTo(SqlToken.Join)
             .Select(_ => (JoinType.Inner, false)));
@@ -1719,7 +1720,7 @@ public static class SqlParser
 
     /// <summary>
     /// Parses a non-recursive CTE whose body is a full query expression, supporting
-    /// UNION, UNION ALL, INTERSECT, and EXCEPT inside the parentheses.
+    /// UNION, UNION ALL, INTERSECT, EXCEPT, ORDER BY, LIMIT, and OFFSET inside the parentheses.
     /// </summary>
     private static readonly TokenListParser<SqlToken, CommonTableExpression> NonRecursiveCommonTableExpressionParser =
         from name in Token.EqualTo(SqlToken.Identifier)
@@ -1727,7 +1728,7 @@ public static class SqlParser
         from asKw in Token.EqualTo(SqlToken.As)
         from hint in MaterializationHintParser.OptionalOrDefault()
         from open in Token.EqualTo(SqlToken.LeftParen)
-        from body in SP.Ref(() => CompoundQueryParser!)
+        from body in SP.Ref(() => QueryExpressionParser!)
         from close in Token.EqualTo(SqlToken.RightParen)
         select new CommonTableExpression(
             GetTokenText(name),
@@ -1775,6 +1776,62 @@ public static class SqlParser
             .ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
         select ctes;
 
+    // ───────────────────── CROSS VALIDATE ─────────────────────
+
+    /// <summary>
+    /// Parses a named argument of the form <c>name = value</c> where name is a contextual
+    /// identifier and value is a numeric literal.
+    /// </summary>
+    private static TokenListParser<SqlToken, (string Name, Expression Value)> NamedArg(string name) =>
+        from n in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals(name, StringComparison.OrdinalIgnoreCase), name)
+        from eq in Token.EqualTo(SqlToken.Equals)
+        from value in SP.Ref(() => ExpressionParser!)
+        select (name, value);
+
+    /// <summary>
+    /// Parses a CROSS VALIDATE clause:
+    /// <c>CROSS VALIDATE(k = N [, seed = S]) ON key [STRATIFY BY col] [GROUP BY col] AS alias</c>.
+    /// CROSS is a keyword token; VALIDATE and STRATIFY are contextual identifiers.
+    /// </summary>
+    private static readonly TokenListParser<SqlToken, CrossValidateClause> CrossValidateClauseParser =
+        from cross in Token.EqualTo(SqlToken.Cross)
+        from validate in Token.EqualTo(SqlToken.Identifier)
+            .Where(t => GetTokenText(t).Equals("VALIDATE", StringComparison.OrdinalIgnoreCase), "VALIDATE")
+        from open in Token.EqualTo(SqlToken.LeftParen)
+        from k in NamedArg("k")
+        from seed in (
+            from comma in Token.EqualTo(SqlToken.Comma)
+            from s in NamedArg("seed")
+            select s.Value
+        ).AsNullable().OptionalOrDefault()
+        from close in Token.EqualTo(SqlToken.RightParen)
+        from onKw in Token.EqualTo(SqlToken.On)
+        from keyColumns in (
+            from lp in Token.EqualTo(SqlToken.LeftParen)
+            from cols in SP.Ref(() => ExpressionParser!).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            from rp in Token.EqualTo(SqlToken.RightParen)
+            select (IReadOnlyList<Expression>)cols
+        ).Try().Or(
+            SP.Ref(() => ExpressionParser!).Select(e => (IReadOnlyList<Expression>)new[] { e })
+        )
+        from stratifyColumns in (
+            from stratifyKw in Token.EqualTo(SqlToken.Identifier)
+                .Where(t => GetTokenText(t).Equals("STRATIFY", StringComparison.OrdinalIgnoreCase), "STRATIFY")
+            from byKw in Token.EqualTo(SqlToken.By)
+            from cols in SP.Ref(() => ExpressionParser!).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            select (IReadOnlyList<Expression>?)cols
+        ).OptionalOrDefault()
+        from groupColumns in (
+            from groupKw in Token.EqualTo(SqlToken.Group)
+            from byKw in Token.EqualTo(SqlToken.By)
+            from cols in SP.Ref(() => ExpressionParser!).ManyDelimitedBy(Token.EqualTo(SqlToken.Comma))
+            select (IReadOnlyList<Expression>?)cols
+        ).OptionalOrDefault()
+        from asKw in Token.EqualTo(SqlToken.As)
+        from alias in IdentifierLike
+        select new CrossValidateClause(k.Value, seed, keyColumns, stratifyColumns, groupColumns, GetTokenText(alias));
+
     // ───────────────────── SELECT statement ─────────────────────
 
     /// <summary>The core SELECT statement parser (without WITH preamble).</summary>
@@ -1786,6 +1843,7 @@ public static class SqlParser
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
+        from crossValidateClause in CrossValidateClauseParser.AsNullable().Try().OptionalOrDefault()
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
         from qualifyClause in QualifyClauseParser.OptionalOrDefault()
@@ -1812,7 +1870,8 @@ public static class SqlParser
             limitValue,
             offsetValue,
             Distinct: distinct.HasValue,
-            LetBindings: letOrDefine.LetBindings.Length > 0 ? letOrDefine.LetBindings : null);
+            LetBindings: letOrDefine.LetBindings.Length > 0 ? letOrDefine.LetBindings : null,
+            CrossValidate: crossValidateClause);
 
     /// <summary>
     /// Bare SELECT parser: same as <see cref="SelectStatementParser"/> but stops
@@ -1830,6 +1889,7 @@ public static class SqlParser
         from fromClause in FromClauseParser.AsNullable().OptionalOrDefault()
         from joinClauses in JoinClausesParser
         from whereClause in WhereClauseParser.OptionalOrDefault()
+        from crossValidateClause in CrossValidateClauseParser.AsNullable().Try().OptionalOrDefault()
         from groupByClause in GroupByClauseParser.OptionalOrDefault()
         from havingClause in HavingClauseParser.OptionalOrDefault()
         from qualifyClause in QualifyClauseParser.OptionalOrDefault()
@@ -1853,7 +1913,8 @@ public static class SqlParser
             Limit: null,
             Offset: null,
             Distinct: distinct.HasValue,
-            LetBindings: letOrDefine.LetBindings.Length > 0 ? letOrDefine.LetBindings : null);
+            LetBindings: letOrDefine.LetBindings.Length > 0 ? letOrDefine.LetBindings : null,
+            CrossValidate: crossValidateClause);
 
     /// <summary>
     /// Top-level statement parser: optional WITH clause followed by SELECT.

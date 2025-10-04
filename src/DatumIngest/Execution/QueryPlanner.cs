@@ -628,13 +628,51 @@ public sealed class QueryPlanner
         }
 
         // 3c. GROUP BY / aggregation.
+        // Desugar CROSS VALIDATE into a synthetic LET binding before any rewriting pass.
+        // The fold expression is: CAST(FLOOR(hash_split(key, seed) * k) AS Int32)
+        IReadOnlyList<LetBinding>? userLetBindings = statement.LetBindings;
+        GroupByClause? groupBy = statement.GroupBy;
+        if (statement.CrossValidate is CrossValidateClause cv)
+        {
+            LetBinding foldBinding = DesugarCrossValidate(cv);
+            List<LetBinding> merged = userLetBindings is not null
+                ? [foldBinding, .. userLetBindings]
+                : [foldBinding];
+            userLetBindings = merged;
+
+            // When GROUP BY references the fold alias, we need the fold value to be
+            // materialized as a column BEFORE GroupByOperator runs. We'll inject a
+            // pre-GROUP BY ProjectOperator that computes the fold and passes all
+            // source columns through (SELECT *, fold_expr AS fold). Then GROUP BY
+            // references the materialized "fold" column directly.
+            if (groupBy is not null && HasColumnReference(groupBy.Expressions, cv.OutputAlias))
+            {
+                // Wrap the source with a pre-GROUP BY projection that computes the fold
+                // column via a LET binding (SELECT *, fold_expr AS fold). This
+                // materializes the fold value BEFORE GroupByOperator runs, so GROUP BY
+                // can reference "fold" as a plain column without needing to evaluate
+                // hash_split against aliased rows.
+                LetBinding preFoldBinding = new(cv.OutputAlias, foldBinding.Expression, OutputAlias: cv.OutputAlias);
+                source = new ProjectOperator(
+                    source,
+                    [new SelectAllColumns()],
+                    letBindings: [preFoldBinding]);
+
+                // Remove the fold from the final LET bindings — it's already materialized
+                // as a source column. The final SELECT column "fold" will resolve against
+                // the GroupByOperator's output (which carries the fold as a GROUP BY key).
+                merged.RemoveAt(0);
+                userLetBindings = merged.Count > 0 ? merged : null;
+            }
+        }
+
         // Desugar destructured LET bindings before any rewriting pass so that all
         // downstream code (aggregate rewriting, window rewriting, ProjectOperator) only
         // sees plain LetBinding nodes. statement.LetBindings is left untouched so that
         // separate utility passes (column-reference collection, pushdown analysis) that
         // read it directly continue to work against the original AST expressions.
-        IReadOnlyList<LetBinding>? letBindings = DesugarDestructuredLetBindings(statement.LetBindings);
-        bool hasGroupBy = statement.GroupBy is not null;
+        IReadOnlyList<LetBinding>? letBindings = DesugarDestructuredLetBindings(userLetBindings);
+        bool hasGroupBy = groupBy is not null;
         bool hasAggregates = HasAggregateFunction(statement.Columns, _functionRegistry)
             || HasLetAggregateFunction(letBindings, _functionRegistry);
         IReadOnlyList<SelectColumn> projectionColumns = statement.Columns;
@@ -643,10 +681,10 @@ public sealed class QueryPlanner
         if (hasGroupBy || hasAggregates)
         {
             IReadOnlyList<Expression> groupByExpressions =
-                statement.GroupBy?.Expressions ?? Array.Empty<Expression>();
+                groupBy?.Expressions ?? Array.Empty<Expression>();
 
             // GROUP BY ALL: derive grouping keys from non-aggregate SELECT columns.
-            if (statement.GroupBy is { IsAll: true })
+            if (groupBy is { IsAll: true })
             {
                 List<Expression> inferred = new();
 
@@ -2905,6 +2943,43 @@ public sealed class QueryPlanner
             }
         }
 
+        // CROSS VALIDATE key columns (ON, STRATIFY BY, GROUP BY).
+        if (statement.CrossValidate is not null)
+        {
+            foreach (Expression keyExpr in statement.CrossValidate.KeyColumns)
+            {
+                foreach ((string? tableName, string columnName) in
+                    ColumnReferenceCollector.Collect(keyExpr))
+                {
+                    references.Add((tableName, columnName));
+                }
+            }
+
+            if (statement.CrossValidate.StratifyColumns is not null)
+            {
+                foreach (Expression stratifyExpr in statement.CrossValidate.StratifyColumns)
+                {
+                    foreach ((string? tableName, string columnName) in
+                        ColumnReferenceCollector.Collect(stratifyExpr))
+                    {
+                        references.Add((tableName, columnName));
+                    }
+                }
+            }
+
+            if (statement.CrossValidate.GroupColumns is not null)
+            {
+                foreach (Expression groupExpr in statement.CrossValidate.GroupColumns)
+                {
+                    foreach ((string? tableName, string columnName) in
+                        ColumnReferenceCollector.Collect(groupExpr))
+                    {
+                        references.Add((tableName, columnName));
+                    }
+                }
+            }
+        }
+
         return references;
     }
 
@@ -3369,7 +3444,133 @@ public sealed class QueryPlanner
     /// aggregate function call, requiring the GROUP BY rewriting path.
     /// </summary>
     /// <summary>
-    /// Expands any destructured LET bindings into a flat sequence of plain <see cref="LetBinding"/>
+    /// Checks if any expression in the list is a column reference matching the given name.
+    /// </summary>
+    private static bool HasColumnReference(IReadOnlyList<Expression> expressions, string columnName)
+    {
+        foreach (Expression expr in expressions)
+        {
+            if (expr is ColumnReference { TableName: null } col
+                && col.ColumnName.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Rewrites SELECT column expressions that reference the CROSS VALIDATE fold alias
+    /// with the GroupByOperator's formatted output column name. This ensures the projection
+    /// resolves against the grouped row rather than through the LET binding.
+    /// </summary>
+    private static IReadOnlyList<SelectColumn> RewriteFoldAliasInColumns(
+        IReadOnlyList<SelectColumn> columns, string foldAlias, string groupByColumnName)
+    {
+        List<SelectColumn> result = new(columns.Count);
+        foreach (SelectColumn column in columns)
+        {
+            if (column.Expression is ColumnReference { TableName: null } col
+                && col.ColumnName.Equals(foldAlias, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(new SelectColumn(
+                    new ColumnReference(null, groupByColumnName), column.Alias ?? foldAlias));
+            }
+            else
+            {
+                result.Add(column);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Rewrites GROUP BY expressions that reference the CROSS VALIDATE fold alias
+    /// with the fold expression. This is necessary because GROUP BY runs before LET
+    /// evaluation, so the fold alias doesn't exist as a row column yet.
+    /// </summary>
+    private static GroupByClause RewriteFoldAliasInGroupBy(
+        GroupByClause groupBy, string foldAlias, Expression foldExpression)
+    {
+        bool anyRewritten = false;
+        List<Expression> rewritten = new(groupBy.Expressions.Count);
+
+        foreach (Expression expr in groupBy.Expressions)
+        {
+            if (expr is ColumnReference { TableName: null } col
+                && col.ColumnName.Equals(foldAlias, StringComparison.OrdinalIgnoreCase))
+            {
+                rewritten.Add(foldExpression);
+                anyRewritten = true;
+            }
+            else
+            {
+                rewritten.Add(expr);
+            }
+        }
+
+        return anyRewritten ? new GroupByClause(rewritten, groupBy.IsAll) : groupBy;
+    }
+
+    /// <summary>
+    /// Desugars a <see cref="CrossValidateClause"/> into a synthetic <see cref="LetBinding"/>
+    /// that computes the fold index: <c>CAST(FLOOR(hash_split(key, seed) * k) AS Int32)</c>.
+    /// For composite keys, the key is <c>concat_ws('|', CAST(k1 AS String), ...)</c>.
+    /// For GROUP BY keys, the group key replaces the ON key.
+    /// </summary>
+    private static LetBinding DesugarCrossValidate(CrossValidateClause cv)
+    {
+        double k = EvaluateConstantDouble(cv.FoldCount);
+        if (k < 2 || k != Math.Floor(k))
+        {
+            throw new InvalidOperationException(
+                $"CROSS VALIDATE k must be an integer >= 2, got {k}.");
+        }
+
+        double seed = cv.Seed is not null ? EvaluateConstantDouble(cv.Seed) : 0;
+
+        // Determine the hash key expression — GROUP BY key overrides ON key.
+        IReadOnlyList<Expression> keyColumns = cv.GroupColumns ?? cv.KeyColumns;
+
+        // Build the hash key expression: single column or composite via concat_ws.
+        Expression hashKeyExpr;
+        if (keyColumns.Count == 1)
+        {
+            hashKeyExpr = keyColumns[0];
+        }
+        else
+        {
+            // concat_ws('|', CAST(k1 AS String), CAST(k2 AS String), ...)
+            List<Expression> concatArgs = [new LiteralExpression("|")];
+            foreach (Expression col in keyColumns)
+            {
+                concatArgs.Add(new CastExpression(col, "String"));
+            }
+
+            hashKeyExpr = new FunctionCallExpression("concat_ws", concatArgs);
+        }
+
+        // hash_split(key, seed)
+        Expression hashSplitCall = new FunctionCallExpression("hash_split",
+            [hashKeyExpr, new LiteralExpression(seed)]);
+
+        // hash_split(...) * k
+        Expression multiply = new BinaryExpression(
+            hashSplitCall, BinaryOperator.Multiply, new LiteralExpression(k));
+
+        // FLOOR(hash_split(...) * k)
+        Expression floor = new FunctionCallExpression("floor", [multiply]);
+
+        // CAST(FLOOR(...) AS Int32)
+        Expression cast = new CastExpression(floor, "Int32");
+
+        return new LetBinding(cv.OutputAlias, cast, OutputAlias: cv.OutputAlias);
+    }
+
+    /// <summary>
+    /// Expands destructured LET bindings (<c>LET (a, b) = expr</c>, <c>LET {x, y} = expr</c>) into plain
     /// nodes before any rewriting passes run. Each destructured binding becomes one hidden memoizing
     /// binding (named <c>__destructure_N</c>) plus one plain binding per extracted name.
     /// Plain bindings are passed through unchanged.

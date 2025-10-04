@@ -102,6 +102,86 @@ public sealed class CommonTableExpressionTests
     }
 
     /// <summary>
+    /// LIMIT inside a non-recursive CTE body is parsed onto the inner SelectStatement.
+    /// </summary>
+    [Fact]
+    public void Parse_CteWithLimit_CapturesLimit()
+    {
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH sample AS (SELECT x FROM t LIMIT 100) SELECT * FROM sample")).Statement;
+
+        Assert.NotNull(result.CommonTableExpressions);
+        SelectQueryExpression body = Assert.IsType<SelectQueryExpression>(result.CommonTableExpressions[0].Body);
+        Assert.Equal(100, body.Statement.Limit);
+    }
+
+    /// <summary>
+    /// ORDER BY and LIMIT inside a non-recursive CTE body are both parsed.
+    /// </summary>
+    [Fact]
+    public void Parse_CteWithOrderByAndLimit_CapturesBoth()
+    {
+        SelectStatement result = ((SelectQueryExpression)SqlParser.Parse(
+            "WITH top_items AS (SELECT x FROM t ORDER BY x LIMIT 50) SELECT * FROM top_items")).Statement;
+
+        Assert.NotNull(result.CommonTableExpressions);
+        SelectQueryExpression body = Assert.IsType<SelectQueryExpression>(result.CommonTableExpressions[0].Body);
+        Assert.NotNull(body.Statement.OrderBy);
+        Assert.Equal(50, body.Statement.Limit);
+    }
+
+    /// <summary>
+    /// LIMIT inside a CTE restricts the rows produced by that CTE at execution time.
+    /// </summary>
+    [Fact]
+    public async Task Execute_CteWithLimit_RestrictsRows()
+    {
+        Row[] data =
+        [
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t", data));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH sample AS (SELECT x FROM t LIMIT 3) SELECT * FROM sample",
+            catalog);
+
+        Assert.Equal(3, results.Count);
+    }
+
+    /// <summary>
+    /// Multiple CTEs each with their own LIMIT clause produce correct row counts.
+    /// </summary>
+    [Fact]
+    public async Task Execute_MultipleCtes_EachWithLimit_ProducesCorrectCounts()
+    {
+        Row[] data =
+        [
+            MakeRow(("x", DataValue.FromFloat32(1f))),
+            MakeRow(("x", DataValue.FromFloat32(2f))),
+            MakeRow(("x", DataValue.FromFloat32(3f))),
+            MakeRow(("x", DataValue.FromFloat32(4f))),
+            MakeRow(("x", DataValue.FromFloat32(5f))),
+        ];
+
+        TableCatalog catalog = CreateCatalog(("t1", data), ("t2", data));
+
+        List<Row> results = await ExecuteQueryAsync(
+            "WITH a AS (SELECT x FROM t1 LIMIT 2), " +
+            "b AS (SELECT x FROM t2 LIMIT 1) " +
+            "SELECT a.x FROM a INNER JOIN b ON a.x = b.x",
+            catalog);
+
+        // b has at most 1 row, so the join produces at most 1 match.
+        Assert.True(results.Count <= 1);
+    }
+
+    /// <summary>
     /// WITH RECURSIVE sets the IsRecursive flag on all CTEs in that block.
     /// </summary>
     [Fact]
