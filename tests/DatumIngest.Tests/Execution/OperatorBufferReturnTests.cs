@@ -25,6 +25,83 @@ public sealed class OperatorBufferReturnTests
     /// </summary>
     private const int RowCount = 10_000;
 
+    // ────────────────── RowBatch lifecycle ──────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.ReturnBatch"/> returns all contained
+    /// <see cref="DataValue"/> arrays to the <see cref="LocalBufferPool"/>.
+    /// </summary>
+    [Fact]
+    public void ReturnBatch_ReturnsAllDataValueArrays()
+    {
+        LocalBufferPool pool = new();
+        int rowCount = 100;
+        int columnCount = 3;
+
+        RowBatch batch = pool.RentBatch(rowCount);
+
+        string[] names = ["c0", "c1", "c2"];
+        Dictionary<string, int> nameIndex = new() { ["c0"] = 0, ["c1"] = 1, ["c2"] = 2 };
+
+        for (int i = 0; i < rowCount; i++)
+        {
+            DataValue[] values = pool.Rent(columnCount);
+            values[0] = DataValue.FromFloat32(i);
+            values[1] = DataValue.FromFloat32(i * 10);
+            values[2] = DataValue.FromFloat32(i * 100);
+            batch.Add(new Row(names, values, nameIndex));
+        }
+
+        Assert.Equal(rowCount, pool.RentCount);
+        Assert.Equal(0, pool.ReturnCount);
+
+        pool.ReturnBatch(batch);
+
+        // All DataValue[] arrays should have been returned.
+        Assert.Equal(rowCount, pool.ReturnCount);
+    }
+
+    /// <summary>
+    /// Verifies that returning a batch twice throws — a double return is a bug,
+    /// not a no-op, because it indicates two code paths claiming ownership of the
+    /// same batch.
+    /// </summary>
+    [Fact]
+    public void ReturnBatch_ThrowsOnDoubleReturn()
+    {
+        LocalBufferPool pool = new();
+
+        RowBatch batch = pool.RentBatch(10);
+        DataValue[] values = pool.Rent(2);
+        values[0] = DataValue.FromFloat32(1);
+        values[1] = DataValue.FromFloat32(2);
+        batch.Add(new Row(["a", "b"], values, new() { ["a"] = 0, ["b"] = 1 }));
+
+        pool.ReturnBatch(batch);
+
+        Assert.Throws<InvalidOperationException>(() => pool.ReturnBatch(batch));
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="RowBatch.Return"/> does NOT return
+    /// <see cref="DataValue"/> arrays — only <see cref="LocalBufferPool.ReturnBatch"/> does.
+    /// </summary>
+    [Fact]
+    public void LegacyReturn_DoesNotReturnDataValueArrays()
+    {
+        LocalBufferPool pool = new();
+
+        RowBatch batch = pool.RentBatch(10);
+        DataValue[] values = pool.Rent(2);
+        values[0] = DataValue.FromFloat32(1);
+        values[1] = DataValue.FromFloat32(2);
+        batch.Add(new Row(["a", "b"], values, new() { ["a"] = 0, ["b"] = 1 }));
+
+        batch.Return(); // Legacy path — should NOT return DataValue[] arrays.
+
+        Assert.Equal(0, pool.ReturnCount);
+    }
+
     // ────────────────── ProjectOperator ──────────────────
 
     /// <summary>

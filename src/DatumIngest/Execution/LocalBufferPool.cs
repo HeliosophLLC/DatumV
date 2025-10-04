@@ -101,6 +101,36 @@ public sealed class LocalBufferPool : IDisposable
         return Own(Rent(length));
     }
 
+    /// <summary>
+    /// Rents a pool-aware <see cref="RowBatch"/>. The backing <see cref="Row"/> array
+    /// is rented from <see cref="System.Buffers.ArrayPool{T}.Shared"/>.
+    /// When the batch is returned via <see cref="ReturnBatch"/>, all contained
+    /// <see cref="DataValue"/> arrays are returned to this pool.
+    /// </summary>
+    /// <param name="capacity">The maximum number of rows the batch can hold.</param>
+    /// <returns>An empty batch ready for <see cref="RowBatch.Add"/> calls.</returns>
+    public RowBatch RentBatch(int capacity)
+    {
+        return RowBatch.Rent(capacity);
+    }
+
+    /// <summary>
+    /// Returns all <see cref="DataValue"/> arrays contained in the batch to this pool,
+    /// then returns the backing <see cref="Row"/> array to
+    /// <see cref="System.Buffers.ArrayPool{T}.Shared"/>.
+    /// The batch must not be used after calling this method.
+    /// </summary>
+    /// <param name="batch">The batch to return.</param>
+    public void ReturnBatch(RowBatch batch)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            ReturnValues(batch[i]);
+        }
+
+        batch.ReturnShell();
+    }
+
     /// <summary>Total number of <see cref="Rent"/> calls made against this pool.</summary>
     internal long RentCount => Interlocked.Read(ref _rentCount);
 

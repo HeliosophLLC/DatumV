@@ -1,4 +1,5 @@
 using System.Buffers;
+using DatumIngest.Execution;
 
 namespace DatumIngest.Model;
 
@@ -7,6 +8,13 @@ namespace DatumIngest.Model;
 /// from <see cref="ArrayPool{T}"/>. Batching amortises async state-machine
 /// overhead by yielding many rows per <c>MoveNextAsync</c> call.
 /// </summary>
+/// <remarks>
+/// <para>
+/// RowBatch is a dumb container — it does not manage <see cref="DataValue"/>
+/// array lifetimes. Lifecycle management is handled by <see cref="LocalBufferPool"/>
+/// via <see cref="LocalBufferPool.RentBatch"/> and <see cref="LocalBufferPool.ReturnBatch"/>.
+/// </para>
+/// </remarks>
 public sealed class RowBatch
 {
     private Row[] _rows;
@@ -67,6 +75,8 @@ public sealed class RowBatch
     /// <summary>
     /// Rents a new batch with the given capacity. The backing array is rented
     /// from <see cref="ArrayPool{T}.Shared"/>.
+    /// Individual <see cref="Row"/> objects are not returned to any pool;
+    /// their lifecycle is managed separately by operators.
     /// </summary>
     /// <param name="capacity">The maximum number of rows the batch can hold.</param>
     /// <returns>An empty batch ready for <see cref="Add"/> calls.</returns>
@@ -87,6 +97,27 @@ public sealed class RowBatch
         if (_returned)
         {
             return;
+        }
+
+        _returned = true;
+        Array.Clear(_rows, 0, Count);
+        ArrayPool<Row>.Shared.Return(_rows);
+        _rows = Array.Empty<Row>();
+        Count = 0;
+    }
+
+    /// <summary>
+    /// Returns the backing array to <see cref="ArrayPool{T}.Shared"/> without
+    /// clearing Row references. Called by <see cref="LocalBufferPool.ReturnBatch"/>
+    /// after it has already returned the contained <see cref="DataValue"/> arrays.
+    /// </summary>
+    internal void ReturnShell()
+    {
+        if (_returned)
+        {
+            throw new InvalidOperationException(
+                "RowBatch has already been returned. This indicates a double-return bug — " +
+                "two code paths are returning the same batch.");
         }
 
         _returned = true;
