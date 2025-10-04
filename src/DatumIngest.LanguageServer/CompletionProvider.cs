@@ -33,7 +33,7 @@ public sealed class CompletionProvider
         switch (zone.Kind)
         {
             case CompletionZoneKind.StatementStart:
-                AddKeywords(items, ["SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "ANALYZE"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterSelect:
@@ -41,46 +41,60 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, ["FROM", "AS", "CAST", "CASE", "LET", "SCAN", "ASSERT", "DEFINE", "DISTINCT", "WITHIN GROUP", "EXTRACT",
-                    "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterFrom:
             case CompletionZoneKind.AfterJoin:
                 AddTables(items);
                 AddTableValuedFunctions(items);
-                AddKeywords(items, ["UNION", "INTERSECT", "EXCEPT"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
+            case CompletionZoneKind.AfterFromSource:
+            case CompletionZoneKind.AfterJoinSource:
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterWhere:
+                AddColumns(items, allTables: true);
+                AddScalarFunctions(items);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
             case CompletionZoneKind.AfterOn:
+                AddColumns(items, allTables: true);
+                AddScalarFunctions(items);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
             case CompletionZoneKind.Expression:
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
-                AddKeywords(items, ExpressionKeywords);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterOrderBy:
                 AddColumns(items, allTables: true);
-                AddKeywords(items, ["ASC", "DESC", "UNION", "INTERSECT", "EXCEPT"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterGroupBy:
                 AddColumns(items, allTables: true);
-                AddKeywords(items, ["ALL"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterHaving:
                 AddColumns(items, allTables: true);
                 AddAggregateFunctions(items);
-                AddKeywords(items, ExpressionKeywords);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterQualify:
                 AddColumns(items, allTables: true);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, ExpressionKeywords);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterAssert:
@@ -88,11 +102,11 @@ public sealed class CompletionProvider
                 AddScalarFunctions(items);
                 AddAggregateFunctions(items);
                 AddWindowFunctions(items);
-                AddKeywords(items, [.. ExpressionKeywords, "MESSAGE", "ON FAIL"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.InsideDefineBlock:
-                AddKeywords(items, ["LET", "ASSERT", "}"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.InFunctionArguments:
@@ -102,11 +116,11 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.InsideOver:
-                AddKeywords(items, ["PARTITION BY", "ORDER BY", "ROWS BETWEEN"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.InsideExtract:
-                AddKeywords(items, DatePartFieldNames);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterDot:
@@ -117,20 +131,19 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterSetOperation:
-                AddKeywords(items, ["ALL", "SELECT"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterCreate:
-                AddKeywords(items, ["TEMP", "TEMPORARY", "TABLE", "INDEX"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterDrop:
-                AddKeywords(items, ["TABLE", "INDEX", "IF EXISTS"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterCreateTableColumns:
-                AddKeywords(items, ColumnTypeKeywords);
-                AddKeywords(items, ["PRIMARY KEY", "NOT NULL", "DEFAULT"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterInsertInto:
@@ -139,7 +152,7 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterInsertTable:
                 AddColumns(items, allTables: true);
-                AddKeywords(items, ["VALUES", "SELECT"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterUpdate:
@@ -149,7 +162,7 @@ public sealed class CompletionProvider
             case CompletionZoneKind.AfterUpdateSet:
                 AddColumns(items, allTables: true);
                 AddScalarFunctions(items);
-                AddKeywords(items, ["WHERE", "FROM"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterDeleteFrom:
@@ -158,18 +171,19 @@ public sealed class CompletionProvider
 
             case CompletionZoneKind.AfterAlterTable:
                 AddTables(items);
-                AddKeywords(items, ["ADD"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterAlterTableAdd:
-                AddKeywords(items, ["COLUMN"]);
-                AddKeywords(items, ColumnTypeKeywords);
-                AddKeywords(items, ["NOT NULL", "DEFAULT"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.AfterInto:
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
+                break;
+
             case CompletionZoneKind.AfterAs:
-                // No schema-based completions for file paths or alias names.
+                // No schema-based completions — user is typing an alias name.
                 break;
 
             // ───────────────────── Contextual identifier zones ─────────────────────
@@ -179,7 +193,7 @@ public sealed class CompletionProvider
                 break;
 
             case CompletionZoneKind.AfterTablesampleMethodArg:
-                AddKeywords(items, ["ON", "REPEATABLE"]);
+                AddKeywords(items, KeywordRegistry.GetKeywords(zone.Kind));
                 break;
 
             case CompletionZoneKind.InsideTablesampleArg:
@@ -431,27 +445,6 @@ public sealed class CompletionProvider
         return $"{parameter.Name}: {parameter.Kind}{optional}";
     }
 
-    private static readonly string[] ExpressionKeywords =
-    [
-        "AND", "OR", "NOT", "IN", "BETWEEN", "LIKE",
-        "IS", "NULL", "TRUE", "FALSE", "CAST", "CASE", "EXISTS", "DISTINCT", "EXTRACT",
-        "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP",
-        "AT TIME ZONE",
-    ];
-
-    /// <summary>
-    /// Date part field names offered inside <c>EXTRACT(</c> completions.
-    /// PostgreSQL-compatible fields plus DatumIngest extensions.
-    /// </summary>
-    internal static readonly string[] DatePartFieldNames =
-    [
-        "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND",
-        "QUARTER", "WEEK", "DOW", "DOY",
-        "ISODOW", "ISOYEAR",
-        "EPOCH", "CENTURY", "DECADE", "MILLENNIUM", "JULIAN",
-        "MILLISECOND", "MICROSECOND",
-        "TIMEZONE", "TIMEZONE_HOUR", "TIMEZONE_MINUTE",
-    ];
 
     /// <summary>
     /// Adds TABLESAMPLE method names as contextual keyword completions with
@@ -501,17 +494,4 @@ public sealed class CompletionProvider
         });
     }
 
-    internal static readonly string[] ColumnTypeKeywords =
-    [
-        "Unknown",
-        "Type",
-        "Boolean",
-        "UInt8", "UInt16", "UInt32", "UInt64",
-        "Int8", "Int16", "Int32", "Int64",
-        "Float32", "Float64",
-        "Date", "Time", "DateTime", "Duration",
-        "String", "JsonValue", "Uuid",
-        "UInt8Array", "Image",
-        "Vector", "Matrix", "Tensor", "Array", "Struct",
-    ];
 }

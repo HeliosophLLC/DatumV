@@ -36,13 +36,13 @@ public sealed class MonarchGrammarSyncTests
     [Fact]
     public void CompletionProvider_ColumnTypeKeywords_CoversAllDataKindNames()
     {
-        HashSet<string> completionTypes = new(CompletionProvider.ColumnTypeKeywords, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> completionTypes = new(KeywordRegistry.ColumnTypeKeywords, StringComparer.OrdinalIgnoreCase);
 
         foreach (string kindName in Enum.GetNames<DataKind>())
         {
             Assert.True(
                 completionTypes.Contains(kindName),
-                $"DataKind.{kindName} is missing from CompletionProvider.ColumnTypeKeywords. " +
+                $"DataKind.{kindName} is missing from KeywordRegistry.ColumnTypeKeywords. " +
                 $"Add \"{kindName}\" so it appears in CREATE TABLE completions.");
         }
     }
@@ -182,7 +182,7 @@ public sealed class MonarchGrammarSyncTests
 
     /// <summary>
     /// Every name in <see cref="MonarchGrammarFactory.DatePartKeywords"/> and
-    /// <see cref="CompletionProvider.DatePartFieldNames"/> must be accepted by
+    /// <see cref="KeywordRegistry.DatePartFieldNames"/> must be accepted by
     /// <see cref="DatePartFunction"/> without throwing. This detects drift when
     /// a field name is added to highlighting/completions but not to the runtime,
     /// or vice versa.
@@ -199,7 +199,7 @@ public sealed class MonarchGrammarSyncTests
         HashSet<string> allNames = new(StringComparer.OrdinalIgnoreCase);
         foreach (string name in MonarchGrammarFactory.DatePartKeywords())
             allNames.Add(name);
-        foreach (string name in CompletionProvider.DatePartFieldNames)
+        foreach (string name in KeywordRegistry.DatePartFieldNames)
             allNames.Add(name);
 
         List<string> rejected = [];
@@ -222,14 +222,14 @@ public sealed class MonarchGrammarSyncTests
     }
 
     /// <summary>
-    /// Ensures <see cref="CompletionProvider.DatePartFieldNames"/> is a superset of
+    /// Ensures <see cref="KeywordRegistry.DatePartFieldNames"/> is a superset of
     /// <see cref="MonarchGrammarFactory.DatePartKeywords"/> — every highlighted name
     /// should also be offered in autocomplete.
     /// </summary>
     [Fact]
     public void DatePartKeywords_AllInCompletionProvider()
     {
-        HashSet<string> completions = new(CompletionProvider.DatePartFieldNames, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> completions = new(KeywordRegistry.DatePartFieldNames, StringComparer.OrdinalIgnoreCase);
 
         List<string> missing = [];
         foreach (string name in MonarchGrammarFactory.DatePartKeywords())
@@ -242,7 +242,7 @@ public sealed class MonarchGrammarSyncTests
 
         Assert.True(
             missing.Count == 0,
-            $"The following Monarch DatePartKeywords are missing from CompletionProvider.DatePartFieldNames: " +
+            $"The following Monarch DatePartKeywords are missing from KeywordRegistry.DatePartFieldNames: " +
             $"{string.Join(", ", missing)}. Add them so they appear in EXTRACT autocomplete.");
     }
 }

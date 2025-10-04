@@ -187,13 +187,13 @@ public sealed class CompletionProviderTests
     // ───────────────────── INTO / AS — no completions ─────────────────────
 
     [Fact]
-    public void GetCompletions_AfterInto_ReturnsEmpty()
+    public void GetCompletions_AfterInto_OffersShard()
     {
         CompletionProvider provider = CreateProvider();
 
         CompletionItem[] items = provider.GetCompletions("SELECT * FROM t INTO ", 21);
 
-        Assert.Empty(items);
+        Assert.Contains(items, item => item.Label == "SHARD" && item.Kind == CompletionItemKind.Keyword);
     }
 
     [Fact]
@@ -462,5 +462,132 @@ public sealed class CompletionProviderTests
 
         CompletionItem balanced = Assert.Single(items, item => item.Label == "BALANCED");
         Assert.Equal("BALANCED(", balanced.InsertText);
+    }
+
+    // ───────────────────── Clause continuation: FROM source ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterFromSource_OffersClauseKeywords()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users ", 20);
+
+        Assert.Contains(items, item => item.Label == "WHERE" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "JOIN" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "LEFT JOIN" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "GROUP BY" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "ORDER BY" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "TABLESAMPLE" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "CROSS VALIDATE" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "LIMIT" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "OFFSET" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterFromSource_DoesNotOfferTableNames()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users ", 20);
+
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Table);
+        Assert.DoesNotContain(items, item => item.Kind == CompletionItemKind.Column);
+    }
+
+    [Fact]
+    public void GetCompletions_AfterFromSourceWithPrefix_FiltersByPrefix()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users W", 21);
+
+        Assert.Contains(items, item => item.Label == "WHERE");
+        Assert.DoesNotContain(items, item => item.Label == "JOIN");
+        Assert.DoesNotContain(items, item => item.Label == "GROUP BY");
+    }
+
+    // ───────────────────── Clause continuation: JOIN source ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterJoinSource_OffersOnAndClauseKeywords()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM a JOIN b ", 23);
+
+        Assert.Contains(items, item => item.Label == "ON" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "WHERE" && item.Kind == CompletionItemKind.Keyword);
+        Assert.Contains(items, item => item.Label == "JOIN" && item.Kind == CompletionItemKind.Keyword);
+    }
+
+    // ───────────────────── Clause continuation: WHERE ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterWhereCondition_OffersNextClauses()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users WHERE id = 1 ", 33);
+
+        // Expression keywords still present.
+        Assert.Contains(items, item => item.Label == "AND");
+        Assert.Contains(items, item => item.Label == "OR");
+        // Clause continuation keywords now also present.
+        Assert.Contains(items, item => item.Label == "GROUP BY");
+        Assert.Contains(items, item => item.Label == "ORDER BY");
+        Assert.Contains(items, item => item.Label == "CROSS VALIDATE");
+    }
+
+    // ───────────────────── Clause continuation: GROUP BY ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterGroupByColumn_OffersNextClauses()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users GROUP BY name ", 34);
+
+        Assert.Contains(items, item => item.Label == "HAVING");
+        Assert.Contains(items, item => item.Label == "ORDER BY");
+        Assert.Contains(items, item => item.Label == "QUALIFY");
+    }
+
+    // ───────────────────── Clause continuation: ORDER BY ─────────────────────
+
+    [Fact]
+    public void GetCompletions_AfterOrderByColumn_OffersLimitOffset()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users ORDER BY id ", 32);
+
+        Assert.Contains(items, item => item.Label == "LIMIT");
+        Assert.Contains(items, item => item.Label == "OFFSET");
+        Assert.Contains(items, item => item.Label == "ASC");
+        Assert.Contains(items, item => item.Label == "DESC");
+    }
+
+    // ───────────────────── CROSS VALIDATE discoverability ─────────────────────
+
+    [Fact]
+    public void GetCompletions_CrossValidate_DiscoverableAfterFromSource()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users ", 20);
+
+        Assert.Contains(items, item => item.Label == "CROSS VALIDATE");
+    }
+
+    [Fact]
+    public void GetCompletions_CrossValidate_DiscoverableWithCrossPrefix()
+    {
+        CompletionProvider provider = CreateProvider();
+
+        CompletionItem[] items = provider.GetCompletions("SELECT * FROM users CR", 22);
+
+        Assert.Contains(items, item => item.Label == "CROSS VALIDATE");
+        Assert.Contains(items, item => item.Label == "CROSS JOIN");
     }
 }

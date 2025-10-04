@@ -84,6 +84,87 @@ public sealed class CompletionContextTests
         Assert.Equal("us", zone.Prefix);
     }
 
+    // ───────────────────── FROM source zone (table already specified) ─────────────────────
+
+    [Fact]
+    public void Classify_AfterFromTable_ReturnsAfterFromSource()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM users ", 20);
+
+        Assert.Equal(CompletionZoneKind.AfterFromSource, zone.Kind);
+        Assert.Null(zone.Prefix);
+    }
+
+    [Fact]
+    public void Classify_AfterFromTableAlias_ReturnsAfterFromSource()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM users u ", 22);
+
+        Assert.Equal(CompletionZoneKind.AfterFromSource, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterFromTableAsAlias_ReturnsAfterFromSource()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM users AS u ", 25);
+
+        Assert.Equal(CompletionZoneKind.AfterFromSource, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterFromTableAs_ReturnsAfterAs()
+    {
+        // User is still typing the alias name — no completions.
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM users AS ", 23);
+
+        Assert.Equal(CompletionZoneKind.AfterAs, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterFromSubquery_ReturnsAfterFromSource()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM (SELECT 1) ", 25);
+
+        Assert.Equal(CompletionZoneKind.AfterFromSource, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterFromTableWithPrefix_ReturnsAfterFromSource()
+    {
+        // "FROM users W" — prefix "W" is being typed, walk skips it, hits "users" → passedContent.
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM users W", 21);
+
+        Assert.Equal(CompletionZoneKind.AfterFromSource, zone.Kind);
+        Assert.Equal("W", zone.Prefix);
+    }
+
+    // ───────────────────── JOIN source zone ─────────────────────
+
+    [Fact]
+    public void Classify_AfterJoinTable_ReturnsAfterJoinSource()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM a JOIN b ", 23);
+
+        Assert.Equal(CompletionZoneKind.AfterJoinSource, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterJoinTableAsAlias_ReturnsAfterJoinSource()
+    {
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM a JOIN b AS x ", 28);
+
+        Assert.Equal(CompletionZoneKind.AfterJoinSource, zone.Kind);
+    }
+
+    [Fact]
+    public void Classify_AfterLeftJoin_ReturnsAfterJoin()
+    {
+        // Just typed "LEFT JOIN " — need a table name.
+        CompletionZone zone = CompletionContext.Classify("SELECT * FROM a LEFT JOIN ", 26);
+
+        Assert.Equal(CompletionZoneKind.AfterJoin, zone.Kind);
+    }
+
     // ───────────────────── WHERE zone ─────────────────────
 
     [Fact]

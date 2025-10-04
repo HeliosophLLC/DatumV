@@ -45,7 +45,7 @@ public static class CompletionContext
         }
 
         // Walk backwards through tokens to find the governing keyword.
-        CompletionZoneKind zone = ClassifyFromTokens(tokens);
+        CompletionZoneKind zone = ClassifyFromTokens(tokens, hasPrefix: prefix is not null);
 
         return new CompletionZone(zone, prefix, TableQualifier: null);
     }
@@ -139,7 +139,7 @@ public static class CompletionContext
     /// Walks the token list to classify the cursor position by finding the nearest
     /// governing keyword context.
     /// </summary>
-    private static CompletionZoneKind ClassifyFromTokens(List<TokenInfo> tokens)
+    private static CompletionZoneKind ClassifyFromTokens(List<TokenInfo> tokens, bool hasPrefix)
     {
         // Track parenthesis nesting to skip function arguments when looking for context.
         int parenthesisDepth = 0;
@@ -149,7 +149,15 @@ public static class CompletionContext
         // "right after the keyword" from "after the keyword's arguments".
         bool passedParenGroup = false;
 
-        for (int index = tokens.Count - 1; index >= 0; index--)
+        // Track whether any content (identifiers, literals, balanced paren groups)
+        // has been passed between the cursor and the current position in the walk.
+        // Used to distinguish "need a table name" (FROM |) from "have a table,
+        // need next clause" (FROM t |). When hasPrefix is true the last token is
+        // the partially-typed word and must be skipped so it doesn't count as content.
+        bool passedContent = false;
+        int startIndex = hasPrefix ? tokens.Count - 2 : tokens.Count - 1;
+
+        for (int index = startIndex; index >= 0; index--)
         {
             SqlToken kind = tokens[index].Kind;
 
@@ -167,6 +175,7 @@ public static class CompletionContext
                     if (parenthesisDepth == 0)
                     {
                         passedParenGroup = true;
+                        passedContent = true;
                     }
 
                     continue;
@@ -234,12 +243,16 @@ public static class CompletionContext
                     {
                         return CompletionZoneKind.AfterDeleteFrom;
                     }
-                    return CompletionZoneKind.AfterFrom;
+                    return passedContent
+                        ? CompletionZoneKind.AfterFromSource
+                        : CompletionZoneKind.AfterFrom;
 
                 case SqlToken.Join:
                 case SqlToken.Lateral:
                 case SqlToken.Apply:
-                    return CompletionZoneKind.AfterJoin;
+                    return passedContent
+                        ? CompletionZoneKind.AfterJoinSource
+                        : CompletionZoneKind.AfterJoin;
 
                 case SqlToken.On:
                     return CompletionZoneKind.AfterOn;
@@ -325,7 +338,13 @@ public static class CompletionContext
                     continue;
 
                 case SqlToken.As:
-                    // After AS — user is typing an alias, no completions from schema.
+                    // If content was passed (alias already typed), keep walking
+                    // to find the governing clause (e.g., FROM t AS u | → AfterFromSource).
+                    if (passedContent)
+                    {
+                        continue;
+                    }
+                    // No alias typed yet — user is typing an alias name, no completions.
                     return CompletionZoneKind.AfterAs;
 
                 case SqlToken.Set:
@@ -396,7 +415,8 @@ public static class CompletionContext
                         : CompletionZoneKind.AfterTablesample;
 
                 default:
-                    // Identifiers, literals, etc. — keep walking back.
+                    // Identifiers, literals, etc. — mark as content and keep walking back.
+                    passedContent = true;
                     continue;
             }
         }
@@ -493,8 +513,14 @@ public enum CompletionZoneKind
     /// <summary>After FROM — offer table names.</summary>
     AfterFrom,
 
+    /// <summary>After FROM source [alias] — offer next-clause keywords (WHERE, JOIN, GROUP BY, etc.).</summary>
+    AfterFromSource,
+
     /// <summary>After JOIN — offer table names.</summary>
     AfterJoin,
+
+    /// <summary>After JOIN source [alias] — offer ON and next-clause keywords.</summary>
+    AfterJoinSource,
 
     /// <summary>After ON — offer columns for join conditions.</summary>
     AfterOn,
