@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\datum_compute.proto" GrpcServices="Server" />
+    <Protobuf Include="Protos\datum_compute.proto" GrpcServices="Both" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
   </ItemGroup>
 
   <ItemGroup>

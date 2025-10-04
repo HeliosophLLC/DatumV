@@ -19,6 +19,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     private readonly SessionManager _sessionManager;
     private readonly CommandDispatcher _dispatcher;
     private readonly QueryGovernor _serverDefaults;
+    private readonly Func<string, Task<DatumIngest.Catalog.TableCatalog>> _catalogFactory;
+    private readonly bool _enableDetailedErrors;
 
     /// <summary>
     /// Initializes the gRPC service with the shared session manager, command dispatcher,
@@ -27,11 +29,24 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
     /// <param name="sessionManager">Session manager for session lifecycle.</param>
     /// <param name="dispatcher">Command dispatcher for query execution.</param>
     /// <param name="serverDefaults">Server-wide default resource governance limits.</param>
-    public ComputeService(SessionManager sessionManager, CommandDispatcher dispatcher, QueryGovernor serverDefaults)
+    /// <param name="catalogFactory">
+    /// Factory that builds a <see cref="DatumIngest.Catalog.TableCatalog"/> from a local
+    /// dataset path. Injected via DI; defaults to <see cref="DatasetCatalogFactory.CreateAsync"/>
+    /// for the standalone server. Embedded hosts override this to return a pre-built catalog.
+    /// </param>
+    /// <param name="options">Compute options for error detail control.</param>
+    public ComputeService(
+        SessionManager sessionManager,
+        CommandDispatcher dispatcher,
+        QueryGovernor serverDefaults,
+        Func<string, Task<DatumIngest.Catalog.TableCatalog>>? catalogFactory = null,
+        DatumComputeOptions? options = null)
     {
         _sessionManager = sessionManager;
         _dispatcher = dispatcher;
         _serverDefaults = serverDefaults;
+        _catalogFactory = catalogFactory ?? DatasetCatalogFactory.CreateAsync;
+        _enableDetailedErrors = options?.EnableDetailedErrors ?? false;
     }
 
     /// <inheritdoc />
@@ -79,7 +94,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 session = await _sessionManager.CreateSessionAsync(
                     role,
                     request.DatasetId,
-                    DatasetCatalogFactory.CreateAsync,
+                    _catalogFactory,
                     context.CancellationToken,
                     governor).ConfigureAwait(false);
             }
@@ -236,8 +251,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             }
             catch (Exception parseException) when (parseException is not OperationCanceledException)
             {
-                throw new RpcException(new Status(StatusCode.InvalidArgument,
-                    $"Syntax error: {parseException.Message}"));
+                string detail = _enableDetailedErrors
+                    ? $"Syntax error:\n{parseException}"
+                    : $"Syntax error: {parseException.Message}";
+                throw new RpcException(new Status(StatusCode.InvalidArgument, detail));
             }
 
             session.RecordQuery(request.Sql);
@@ -396,9 +413,10 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             }
             catch (Exception exception)
             {
-                throw new RpcException(new Status(
-                    StatusCode.Internal,
-                    $"Query failed at row {totalRowCount}: {exception.GetType().Name}: {exception.Message}"));
+                string detail = _enableDetailedErrors
+                    ? $"Query failed at row {totalRowCount}:\n{exception}"
+                    : $"Query failed at row {totalRowCount}: {exception.GetType().Name}: {exception.Message}";
+                throw new RpcException(new Status(StatusCode.Internal, detail));
             }
             finally
             {

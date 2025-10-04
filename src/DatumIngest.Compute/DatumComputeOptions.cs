@@ -90,6 +90,14 @@ public sealed class DatumComputeOptions
     public string? TraceFilePath { get; set; }
 
     /// <summary>
+    /// Gets or sets whether gRPC error responses include full exception details
+    /// (type, message, and stack trace). Enable for in-process or development
+    /// use; disable in production to avoid leaking internal details to clients.
+    /// Defaults to <see langword="false"/>.
+    /// </summary>
+    public bool EnableDetailedErrors { get; set; }
+
+    /// <summary>
     /// Gets or sets the maximum number of parallel operator workers allowed
     /// across all concurrent queries. Parallel operators (e.g. parallel hash
     /// join probe, parallel hash aggregate) acquire slots from a shared

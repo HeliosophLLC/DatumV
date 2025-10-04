@@ -1,3 +1,4 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 using DatumIngest.Compute.Grpc;
 
@@ -7,7 +8,7 @@ namespace DatumIngest.Compute.Services;
 /// Converts between the domain <see cref="DataValue"/> / <see cref="Schema"/>
 /// types and their Protobuf message representations.
 /// </summary>
-internal static class ProtoConverter
+public static class ProtoConverter
 {
     /// <summary>
     /// Converts a domain <see cref="ColumnInfo"/> to its Protobuf representation.
@@ -312,7 +313,7 @@ internal static class ProtoConverter
     /// <summary>
     /// Maps the Protobuf <see cref="DataKindValue"/> enum to the domain <see cref="DataKind"/>.
     /// </summary>
-    private static DataKind FromProtoKind(DataKindValue kind)
+    public static DataKind FromProtoKind(DataKindValue kind)
     {
         return kind switch
         {
@@ -345,5 +346,146 @@ internal static class ProtoConverter
             DataKindValue.DataKindStruct => DataKind.Struct,
             _ => DataKind.String,
         };
+    }
+
+    // ── Schema round-trip ──────────────────────��───────────────────
+
+    /// <summary>
+    /// Converts a Protobuf <see cref="ColumnInfoMessage"/> to the domain <see cref="ColumnInfo"/>.
+    /// </summary>
+    public static ColumnInfo FromProto(ColumnInfoMessage message)
+    {
+        DataKind kind = FromProtoKind(message.Kind);
+
+        // Struct columns use a dedicated constructor with field metadata.
+        if (kind == DataKind.Struct && message.Fields.Count > 0)
+        {
+            ColumnInfo[] fields = message.Fields.Select(FromProto).ToArray();
+            return new ColumnInfo(message.Name, message.Nullable, fields);
+        }
+
+        // Array columns carry an element kind.
+        DataKind? arrayElementKind = message.ArrayElementKind != DataKindValue.DataKindUnknown
+            ? FromProtoKind(message.ArrayElementKind)
+            : null;
+
+        return arrayElementKind is not null
+            ? new ColumnInfo(message.Name, kind, message.Nullable, arrayElementKind)
+            : new ColumnInfo(message.Name, kind, message.Nullable);
+    }
+
+    /// <summary>
+    /// Converts a Protobuf <see cref="SchemaMessage"/> to the domain <see cref="Schema"/>.
+    /// </summary>
+    public static Schema FromProto(SchemaMessage message)
+    {
+        ColumnInfo[] columns = new ColumnInfo[message.Columns.Count];
+        for (int i = 0; i < columns.Length; i++)
+        {
+            columns[i] = FromProto(message.Columns[i]);
+        }
+
+        return new Schema(columns);
+    }
+
+    // ── Row deserialization ────────────────────────────────────────
+
+    /// <summary>
+    /// Constructs a domain <see cref="Row"/> from a Protobuf <see cref="QueryResultRow"/>
+    /// using the column names from the provided <paramref name="schema"/>.
+    /// </summary>
+    public static Row RowFromProto(QueryResultRow row, Schema schema)
+    {
+        string[] names = new string[schema.Columns.Count];
+        DataValue[] values = new DataValue[schema.Columns.Count];
+
+        for (int i = 0; i < names.Length; i++)
+        {
+            names[i] = schema.Columns[i].Name;
+        }
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = i < row.Values.Count
+                ? FromProto(row.Values[i])
+                : DataValue.UnknownNull();
+        }
+
+        return new Row(names, values);
+    }
+
+    /// <summary>
+    /// Overload that reuses pre-built column name and index arrays across rows
+    /// to reduce per-row allocations.
+    /// </summary>
+    public static Row RowFromProto(
+        QueryResultRow row,
+        string[] names,
+        Dictionary<string, int> nameIndex)
+    {
+        DataValue[] values = new DataValue[names.Length];
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = i < row.Values.Count
+                ? FromProto(row.Values[i])
+                : DataValue.UnknownNull();
+        }
+
+        return new Row(names, values, nameIndex);
+    }
+
+    // ── ExplainPlanNode round-trip ─────────────────────────────────
+
+    /// <summary>
+    /// Converts a Protobuf <see cref="ExplainPlanNodeMessage"/> to the domain
+    /// <see cref="ExplainPlanNode"/>, including runtime metrics when present.
+    /// </summary>
+    public static ExplainPlanNode FromProto(ExplainPlanNodeMessage message)
+    {
+        ExplainPlanNode node = new()
+        {
+            OperatorName = message.OperatorName,
+            Details = message.Details,
+            ChildLabel = string.IsNullOrEmpty(message.ChildLabel) ? null : message.ChildLabel,
+            Warnings = [.. message.Warnings],
+            Annotations = [.. message.Annotations],
+            Children = message.Children.Select(FromProto).ToList(),
+        };
+
+        if (message.HasEstimatedRows)
+        {
+            node.EstimatedRows = message.EstimatedRows;
+        }
+
+        if (message.AccessMethod != ExplainAccessMethod.Unspecified)
+        {
+            node.AccessStrategyMethod = message.AccessMethod switch
+            {
+                ExplainAccessMethod.TableScan => AccessMethod.TableScan,
+                ExplainAccessMethod.IndexScan => AccessMethod.IndexScan,
+                _ => null,
+            };
+        }
+
+        if (message.Properties.Count > 0)
+        {
+            node.Properties = new Dictionary<string, string>(message.Properties);
+        }
+
+        if (message.Runtime is { } runtime)
+        {
+            node.RowsProduced = runtime.RowsProduced;
+            node.RowsConsumed = runtime.RowsConsumed;
+            node.SelfTime = TimeSpan.FromMicroseconds(runtime.SelfTimeUs);
+            node.TotalTime = TimeSpan.FromMicroseconds(runtime.TotalTimeUs);
+            // RuntimeAnnotations is init-only, so we add to the list created by the initializer.
+            foreach (string annotation in runtime.RuntimeAnnotations)
+            {
+                node.RuntimeAnnotations.Add(annotation);
+            }
+        }
+
+        return node;
     }
 }

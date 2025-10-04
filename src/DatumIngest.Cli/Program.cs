@@ -3,6 +3,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DatumIngest.Catalog;
 using DatumIngest.Cli;
+using DatumIngest.Compute.Grpc;
+using DatumIngest.Compute.Services;
+using Grpc.Core;
+using GrpcClient = global::DatumIngest.Compute.Grpc.DatumCompute.DatumComputeClient;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Indexing;
@@ -60,9 +64,46 @@ try
         return await RunStarSchemaAsync(catalog, options);
     }
 
+    // schema is purely compile-time resolution — no execution needed, no gRPC.
+    if (options.Command == "schema")
+    {
+        if (options.SqlFile is not null)
+        {
+            options.Sql = options.SqlFile == "-"
+                ? await Console.In.ReadToEndAsync()
+                : await File.ReadAllTextAsync(options.SqlFile);
+        }
+
+        QueryExpression schemaQuery = SqlParser.Parse(options.Sql);
+        return await RunSchemaAsync(schemaQuery, catalog);
+    }
+
+    // All remaining commands (shell, query, explore, stats, explain, manifest)
+    // go through the in-process gRPC server.
+    await using EmbeddedComputeHost host = await EmbeddedComputeHost.StartAsync(catalog, opts =>
+    {
+        opts.MemoryBudgetBytes = options.MemoryBudgetBytes;
+    });
+
+    CreateSessionResponse sessionResp = await host.Client.CreateSessionAsync(new CreateSessionRequest
+    {
+        Role = "admin",
+        DatasetId = EmbeddedComputeHost.EmbeddedDatasetId,
+    });
+
+    CreateQueryContextResponse contextResp = await host.Client.CreateQueryContextAsync(
+        new CreateQueryContextRequest
+        {
+            SessionId = sessionResp.SessionId,
+            Label = "CLI",
+        });
+
+    string sessionId = sessionResp.SessionId;
+    string contextId = contextResp.ContextId;
+
     if (options.Command == "shell")
     {
-        InteractiveShell shell = new(catalog, options.MemoryBudgetBytes);
+        InteractiveShell shell = new(host.Client, sessionId, contextId, catalog);
         return await shell.RunAsync(CancellationToken.None);
     }
 
@@ -74,28 +115,25 @@ try
             : await File.ReadAllTextAsync(options.SqlFile);
     }
 
-    QueryExpression query = SqlParser.Parse(options.Sql);
-
-    // Bind named parameters ($name) to concrete values before planning.
-    if (options.Parameters.Count > 0 || ParameterBinder.CollectParameterNames(query).Count > 0)
+    // Build gRPC parameter map from CLI --param values.
+    Dictionary<string, DataValueMessage>? grpcParameters = null;
+    if (options.Parameters.Count > 0)
     {
-        Dictionary<string, DataValue> parameterValues = new(StringComparer.OrdinalIgnoreCase);
+        grpcParameters = new Dictionary<string, DataValueMessage>(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, string> entry in options.Parameters)
         {
-            parameterValues[entry.Key] = ParameterValueParser.Parse(entry.Value);
+            DataValue value = ParameterValueParser.Parse(entry.Value);
+            grpcParameters[entry.Key] = ProtoConverter.ToProto(value);
         }
-
-        query = ParameterBinder.Bind(query, parameterValues);
     }
 
     return options.Command switch
     {
-        "query" => await RunQueryRepeatedAsync(query, catalog, options),
-        "explore" => await RunExploreAsync(query, catalog, options.Limit),
-        "stats" => await RunStatsAsync(query, catalog),
-        "explain" => await RunExplainAsync(query, catalog, options.Analyze, options.MemoryBudgetBytes),
-        "manifest" => await RunManifestAsync(query, catalog, options.OutputPath),
-        "schema" => await RunSchemaAsync(query, catalog),
+        "query" => await RunQueryViaGrpcAsync(host.Client, sessionId, contextId, options, grpcParameters),
+        "explore" => await RunExploreViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.Limit, grpcParameters),
+        "stats" => await RunStatsViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, grpcParameters),
+        "explain" => await RunExplainViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.Analyze),
+        "manifest" => await RunManifestViaGrpcAsync(host.Client, sessionId, contextId, options.Sql, options.OutputPath, grpcParameters),
         _ => throw new ArgumentException($"Unknown command: {options.Command}. Use 'query', 'explore', 'stats', 'explain', 'manifest', 'manifest-schema', 'schema', 'shell', 'index', 'index-manifest', 'ingest', or 'star-schema'.")
     };
 }
@@ -891,380 +929,6 @@ static TableDescriptor ParseSourceDefinition(string source)
     return new TableDescriptor(provider, name, filePath, options);
 }
 
-static async Task<int> RunQueryRepeatedAsync(QueryExpression query, TableCatalog catalog, CliOptions options)
-{
-    for (int iteration = 0; iteration < options.Repeat; iteration++)
-    {
-        if (options.Repeat > 1)
-        {
-            Console.Error.WriteLine($"--- Iteration {iteration + 1}/{options.Repeat} ---");
-        }
-
-        int result = await RunQueryAsync(query, catalog, options);
-        if (result != 0)
-        {
-            return result;
-        }
-    }
-
-    return 0;
-}
-
-static async Task<int> RunQueryAsync(QueryExpression query, TableCatalog catalog, CliOptions options)
-{
-    ReferenceStore.BeginQueryScope();
-
-    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
-
-    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
-    ExecutionContext context = new(
-        CancellationToken.None,
-        functionRegistry,
-        catalog,
-        localBufferPool,
-        memoryBudgetBytes: options.MemoryBudgetBytes)
-    {
-        DegreeOfParallelism = Environment.ProcessorCount,
-    };
-
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-    IntoClause? intoClause = ExtractIntoClause(query);
-
-    ProgressReporter progress = new();
-
-    // Checkpoint setup
-    bool checkpointEnabled = options.Checkpoint && intoClause?.Shard is not null;
-    CheckpointManager? checkpointManager = null;
-    IReadOnlyList<CheckpointFingerprint>? sourceFingerprints = null;
-    int startShardIndex = 0;
-
-    if (options.Checkpoint && intoClause?.Shard is null)
-    {
-        Console.Error.WriteLine("Warning: --checkpoint requires SHARD ON; checkpointing disabled.");
-    }
-
-    if (checkpointEnabled && intoClause is not null)
-    {
-        checkpointManager = new CheckpointManager(intoClause.Path);
-        sourceFingerprints = SourceFingerprintCollector.Collect(catalog);
-
-        IReadOnlyList<CheckpointMarker> existingCheckpoints =
-            await checkpointManager.ScanExistingCheckpointsAsync();
-
-        if (existingCheckpoints.Count > 0)
-        {
-            // Validate source fingerprints against the first checkpoint's fingerprints
-            string? mismatch = SourceFingerprintCollector.Validate(
-                existingCheckpoints[0].SourceFingerprints, sourceFingerprints);
-
-            if (mismatch is not null)
-            {
-                Console.Error.WriteLine($"Error: Source data has changed since last run. {mismatch}");
-                Console.Error.WriteLine("Delete existing checkpoint files to start fresh.");
-                return 1;
-            }
-
-            ResumeState resumeState = CheckpointManager.ComputeResumeState(existingCheckpoints);
-            startShardIndex = resumeState.NextShardIndex;
-
-            // Delete orphaned shard file at the resume point (partial write from crash)
-            checkpointManager.DeleteOrphanedShard(resumeState.NextShardIndex);
-
-            if (resumeState.RowsToSkip > 0)
-            {
-                Console.WriteLine(
-                    $"Resuming from shard {resumeState.NextShardIndex} (skipping {resumeState.RowsToSkip:N0} rows)");
-                plan = new SkipOperator(plan, resumeState.RowsToSkip);
-            }
-        }
-    }
-
-    if (intoClause is not null)
-    {
-        IOutputWriter outputWriter = checkpointEnabled
-            ? CreateCheckpointedOutputWriter(intoClause, checkpointManager!, sourceFingerprints!, startShardIndex)
-            : CreateOutputWriter(intoClause);
-        await using IOutputWriter writer = outputWriter;
-
-        // Infer schema from first row, write all rows
-        bool schemaInitialized = false;
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row row = batch[i];
-                if (!schemaInitialized)
-                {
-                    Schema schema = InferSchema(row);
-                    await writer.InitializeAsync(schema);
-                    schemaInitialized = true;
-                }
-
-                await writer.WriteRowAsync(row);
-                progress.ReportRow();
-            }
-            batch.Return();
-        }
-
-        ReferenceStore.EndQueryScope();
-
-        if (!schemaInitialized)
-        {
-            Console.WriteLine("No rows produced by query.");
-            return 0;
-        }
-
-        OutputSummary summary = await writer.FinalizeAsync();
-
-        // Clean up checkpoint files after successful completion
-        if (checkpointEnabled && writer is ShardingOutputWriter shardingWriter)
-        {
-            shardingWriter.CleanupCheckpoints();
-        }
-
-        progress.WriteSummary();
-        Console.WriteLine($"Output: {summary.FilesCreated.Count} file(s), {summary.BytesWritten:N0} bytes");
-
-        foreach (string file in summary.FilesCreated)
-        {
-            Console.WriteLine($"  {file}");
-        }
-    }
-    else
-    {
-        // No INTO clause: print rows to stdout
-        await foreach (RowBatch batch in plan.ExecuteAsync(context))
-        {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Row row = batch[i];
-                PrintRow(row);
-                progress.ReportRow();
-            }
-            batch.Return();
-        }
-        progress.WriteSummary();
-    }
-
-    ReferenceStore.EndQueryScope();
-    context.LocalBufferPool.DumpStats();
-    return 0;
-}
-
-static async Task<int> RunExploreAsync(QueryExpression query, TableCatalog catalog, int limit)
-{
-    ReferenceStore.BeginQueryScope();
-
-    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
-
-    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
-    ExecutionContext context = new(
-        CancellationToken.None,
-        functionRegistry,
-        catalog,
-        localBufferPool);
-
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-    int count = 0;
-    bool headerPrinted = false;
-    Stopwatch stopwatch = Stopwatch.StartNew();
-
-    bool limitReached = false;
-    await foreach (RowBatch batch in plan.ExecuteAsync(context))
-    {
-        for (int i = 0; i < batch.Count; i++)
-        {
-            Row row = batch[i];
-            if (!headerPrinted)
-            {
-                PrintHeader(row);
-                headerPrinted = true;
-            }
-
-            PrintRow(row);
-            count++;
-
-            if (count >= limit)
-            {
-                limitReached = true;
-                break;
-            }
-        }
-        batch.Return();
-
-        if (limitReached)
-        {
-            break;
-        }
-    }
-
-    ReferenceStore.EndQueryScope();
-    stopwatch.Stop();
-    Console.WriteLine($"\n{count} row(s) in {stopwatch.Elapsed.TotalSeconds:F2} second(s)");
-    return 0;
-}
-
-static async Task<int> RunStatsAsync(QueryExpression query, TableCatalog catalog)
-{
-    ReferenceStore.BeginQueryScope();
-
-    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
-
-    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
-    ExecutionContext context = new(
-        CancellationToken.None,
-        functionRegistry,
-        catalog,
-        localBufferPool);
-
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-    StatisticsCollector collector = new();
-    ProgressReporter progress = new();
-
-    await foreach (RowBatch batch in plan.ExecuteAsync(context))
-    {
-        for (int i = 0; i < batch.Count; i++)
-        {
-            Row row = batch[i];
-            collector.AddRow(row);
-            progress.ReportRow();
-        }
-        batch.Return();
-    }
-
-    ReferenceStore.EndQueryScope();
-    progress.WriteSummary();
-    Console.WriteLine();
-
-    IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-
-    foreach (KeyValuePair<string, ColumnStatistics> entry in stats)
-    {
-        Console.WriteLine($"Column: {entry.Key}");
-
-        foreach (KeyValuePair<string, StatisticResult> stat in entry.Value.Results)
-        {
-            Console.WriteLine($"  {stat.Key}: {FormatStatResult(stat.Value)}");
-        }
-
-        Console.WriteLine();
-    }
-
-    return 0;
-}
-
-static async Task<int> RunExplainAsync(QueryExpression query, TableCatalog catalog, bool analyze, long? memoryBudgetBytes)
-{
-    ReferenceStore.BeginQueryScope();
-
-    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
-    IQueryOperator plan = await planner.PlanAsync(query, CancellationToken.None);
-
-    // Build the static explain plan from the original operator tree.
-    ExplainPlanNode explainPlan = QueryExplainer.Explain(plan);
-
-    if (analyze)
-    {
-        // Wrap the tree with instrumented operators, execute, and collect metrics.
-        InstrumentedOperator instrumentedRoot = InstrumentedOperator.InstrumentTree(plan);
-
-        using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
-        ExecutionContext context = new(
-            CancellationToken.None,
-            functionRegistry,
-            catalog,
-            localBufferPool);
-
-        // Consume all rows to collect timing.
-        await foreach (RowBatch _ in instrumentedRoot.ExecuteAsync(context))
-        {
-        }
-
-        ReferenceStore.EndQueryScope();
-        InstrumentedOperator.PopulateMetrics(explainPlan, instrumentedRoot);
-    }
-
-    Console.WriteLine(explainPlan.Render());
-    return 0;
-}
-
-static async Task<int> RunManifestAsync(QueryExpression query, TableCatalog catalog, string? outputPath)
-{
-    ReferenceStore.BeginQueryScope();
-
-    FunctionRegistry functionRegistry = FunctionRegistry.CreateDefault();
-    VirtualSchemaRegistry virtualSchemaRegistry = VirtualSchemaRegistry.CreateDefault();
-    QueryPlanner planner = new(catalog, functionRegistry, virtualSchemaRegistry);
-
-    using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
-    ExecutionContext context = new(
-        CancellationToken.None,
-        functionRegistry,
-        catalog,
-        localBufferPool);
-
-    IQueryOperator plan = await planner.PlanWithSubqueriesAsync(query, context, CancellationToken.None);
-
-    StatisticsCollector collector = new();
-    ColumnInteractionCollector interactionCollector = new();
-    ProgressReporter progress = new();
-    Dictionary<string, DataKind> columnKinds = new();
-    long rowCount = 0;
-
-    await foreach (RowBatch batch in plan.ExecuteAsync(context))
-    {
-        for (int i = 0; i < batch.Count; i++)
-        {
-            Row row = batch[i];
-            // Capture column kinds from the first row
-            if (rowCount == 0)
-            {
-                foreach (string columnName in row.ColumnNames)
-                {
-                    columnKinds[columnName] = row[columnName].Kind;
-                }
-            }
-
-            collector.AddRow(row);
-            interactionCollector.AddRow(row);
-            rowCount++;
-            progress.ReportRow();
-        }
-        batch.Return();
-    }
-
-    ReferenceStore.EndQueryScope();
-    progress.WriteSummary();
-
-    IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
-    IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
-    QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount, interactions);
-    SourceManifest sourceManifest = SourceManifest.Create("result", manifest);
-    string json = ManifestSerializer.Serialize(sourceManifest);
-
-    if (outputPath is not null)
-    {
-        await File.WriteAllTextAsync(outputPath, json);
-        Console.WriteLine($"Manifest written to: {outputPath}");
-    }
-    else
-    {
-        Console.WriteLine(json);
-    }
-
-    return 0;
-}
-
 static async Task<int> RunSchemaAsync(QueryExpression query, TableCatalog catalog)
 {
     if (query is not SelectQueryExpression selectQuery)
@@ -1290,6 +954,305 @@ static async Task<int> RunSchemaAsync(QueryExpression query, TableCatalog catalo
     }
 
     Console.WriteLine($"\n({schema.Columns.Count} column(s) from {schema.TableNames.Count()} source(s))");
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  gRPC-routed command implementations
+// ═══════════════════════════════════════════════════════════════
+
+static QueryRequest BuildQueryRequest(
+    string sessionId, string contextId, string sql,
+    Dictionary<string, DataValueMessage>? parameters = null,
+    long maxRows = 0)
+{
+    QueryRequest request = new()
+    {
+        SessionId = sessionId,
+        ContextId = contextId,
+        Sql = sql,
+        MaxRows = maxRows,
+    };
+
+    if (parameters is not null)
+    {
+        foreach (KeyValuePair<string, DataValueMessage> entry in parameters)
+        {
+            request.Parameters[entry.Key] = entry.Value;
+        }
+    }
+
+    return request;
+}
+
+static async Task<int> RunQueryViaGrpcAsync(
+    GrpcClient client,
+    string sessionId,
+    string contextId,
+    CliOptions options,
+    Dictionary<string, DataValueMessage>? parameters)
+{
+    for (int iteration = 0; iteration < options.Repeat; iteration++)
+    {
+        if (options.Repeat > 1)
+        {
+            Console.Error.WriteLine($"--- Iteration {iteration + 1}/{options.Repeat} ---");
+        }
+
+        int result = await RunSingleQueryViaGrpcAsync(client, sessionId, contextId, options, parameters);
+        if (result != 0) return result;
+    }
+
+    return 0;
+}
+
+static async Task<int> RunSingleQueryViaGrpcAsync(
+    GrpcClient client,
+    string sessionId,
+    string contextId,
+    CliOptions options,
+    Dictionary<string, DataValueMessage>? parameters)
+{
+    // Parse SQL locally to extract INTO clause (server ignores it during planning).
+    QueryExpression query = SqlParser.Parse(options.Sql);
+    IntoClause? intoClause = ExtractIntoClause(query);
+
+    QueryRequest request = BuildQueryRequest(sessionId, contextId, options.Sql, parameters);
+    AsyncServerStreamingCall<QueryResult> call = client.Query(request);
+    GrpcQueryResult grpcResult = await GrpcResultAdapter.ReadQueryAsync(call);
+
+    ProgressReporter progress = new();
+
+    if (options.Checkpoint && intoClause?.Shard is null)
+    {
+        Console.Error.WriteLine("Warning: --checkpoint requires SHARD ON; checkpointing disabled.");
+    }
+
+    if (intoClause is not null)
+    {
+        IOutputWriter outputWriter = CreateOutputWriter(intoClause);
+        await using IOutputWriter writer = outputWriter;
+
+        bool schemaInitialized = false;
+        await foreach (RowBatch batch in grpcResult.Rows)
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                if (!schemaInitialized)
+                {
+                    Schema schema = InferSchema(row);
+                    await writer.InitializeAsync(schema);
+                    schemaInitialized = true;
+                }
+
+                await writer.WriteRowAsync(row);
+                progress.ReportRow();
+            }
+            batch.Return();
+        }
+
+        if (!schemaInitialized)
+        {
+            Console.WriteLine("No rows produced by query.");
+            return 0;
+        }
+
+        OutputSummary summary = await writer.FinalizeAsync();
+        progress.WriteSummary();
+        Console.WriteLine($"Output: {summary.FilesCreated.Count} file(s), {summary.BytesWritten:N0} bytes");
+
+        foreach (string file in summary.FilesCreated)
+        {
+            Console.WriteLine($"  {file}");
+        }
+    }
+    else
+    {
+        await foreach (RowBatch batch in grpcResult.Rows)
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Row row = batch[i];
+                PrintRow(row);
+                progress.ReportRow();
+            }
+            batch.Return();
+        }
+        progress.WriteSummary();
+    }
+
+    return 0;
+}
+
+static async Task<int> RunExploreViaGrpcAsync(
+    GrpcClient client,
+    string sessionId,
+    string contextId,
+    string sql,
+    int limit,
+    Dictionary<string, DataValueMessage>? parameters)
+{
+    QueryRequest request = BuildQueryRequest(sessionId, contextId, sql, parameters, maxRows: limit);
+    AsyncServerStreamingCall<QueryResult> call = client.Query(request);
+    GrpcQueryResult grpcResult = await GrpcResultAdapter.ReadQueryAsync(call);
+
+    int count = 0;
+    bool headerPrinted = false;
+    Stopwatch stopwatch = Stopwatch.StartNew();
+
+    await foreach (RowBatch batch in grpcResult.Rows)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            Row row = batch[i];
+            if (!headerPrinted)
+            {
+                PrintHeader(row);
+                headerPrinted = true;
+            }
+
+            PrintRow(row);
+            count++;
+        }
+        batch.Return();
+    }
+
+    stopwatch.Stop();
+    Console.WriteLine($"\n{count} row(s) in {stopwatch.Elapsed.TotalSeconds:F2} second(s)");
+    return 0;
+}
+
+static async Task<int> RunStatsViaGrpcAsync(
+    GrpcClient client,
+    string sessionId,
+    string contextId,
+    string sql,
+    Dictionary<string, DataValueMessage>? parameters)
+{
+    QueryRequest request = BuildQueryRequest(sessionId, contextId, sql, parameters);
+    AsyncServerStreamingCall<QueryResult> call = client.Query(request);
+    GrpcQueryResult grpcResult = await GrpcResultAdapter.ReadQueryAsync(call);
+
+    StatisticsCollector collector = new();
+    ProgressReporter progress = new();
+
+    await foreach (RowBatch batch in grpcResult.Rows)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            Row row = batch[i];
+            collector.AddRow(row);
+            progress.ReportRow();
+        }
+        batch.Return();
+    }
+
+    progress.WriteSummary();
+    Console.WriteLine();
+
+    IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+
+    foreach (KeyValuePair<string, ColumnStatistics> entry in stats)
+    {
+        Console.WriteLine($"Column: {entry.Key}");
+
+        foreach (KeyValuePair<string, StatisticResult> stat in entry.Value.Results)
+        {
+            Console.WriteLine($"  {stat.Key}: {FormatStatResult(stat.Value)}");
+        }
+
+        Console.WriteLine();
+    }
+
+    return 0;
+}
+
+static async Task<int> RunExplainViaGrpcAsync(
+    GrpcClient client,
+    string sessionId,
+    string contextId,
+    string sql,
+    bool analyze)
+{
+    ExplainResponse response = await client.ExplainAsync(new ExplainRequest
+    {
+        SessionId = sessionId,
+        Sql = sql,
+        Analyze = analyze,
+        ContextId = contextId,
+    });
+
+    if (response.Root is not null)
+    {
+        ExplainPlanNode plan = ProtoConverter.FromProto(response.Root);
+        Console.WriteLine(plan.Render());
+    }
+    else
+    {
+        Console.WriteLine(response.PlanText);
+    }
+
+    return 0;
+}
+
+static async Task<int> RunManifestViaGrpcAsync(
+    GrpcClient client,
+    string sessionId,
+    string contextId,
+    string sql,
+    string? outputPath,
+    Dictionary<string, DataValueMessage>? parameters)
+{
+    QueryRequest request = BuildQueryRequest(sessionId, contextId, sql, parameters);
+    AsyncServerStreamingCall<QueryResult> call = client.Query(request);
+    GrpcQueryResult grpcResult = await GrpcResultAdapter.ReadQueryAsync(call);
+
+    StatisticsCollector collector = new();
+    ColumnInteractionCollector interactionCollector = new();
+    ProgressReporter progress = new();
+    Dictionary<string, DataKind> columnKinds = new();
+    long rowCount = 0;
+
+    await foreach (RowBatch batch in grpcResult.Rows)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            Row row = batch[i];
+            if (rowCount == 0)
+            {
+                foreach (string columnName in row.ColumnNames)
+                {
+                    columnKinds[columnName] = row[columnName].Kind;
+                }
+            }
+
+            collector.AddRow(row);
+            interactionCollector.AddRow(row);
+            rowCount++;
+            progress.ReportRow();
+        }
+        batch.Return();
+    }
+
+    progress.WriteSummary();
+
+    IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
+    IReadOnlyList<ColumnInteractionResult> interactions = interactionCollector.GetInteractions();
+    QueryResultsManifest manifest = ManifestBuilder.Build(stats, columnKinds, rowCount, interactions);
+    SourceManifest sourceManifest = SourceManifest.Create("result", manifest);
+    string json = ManifestSerializer.Serialize(sourceManifest);
+
+    if (outputPath is not null)
+    {
+        await File.WriteAllTextAsync(outputPath, json);
+        Console.WriteLine($"Manifest written to: {outputPath}");
+    }
+    else
+    {
+        Console.WriteLine(json);
+    }
+
     return 0;
 }
 
@@ -1371,30 +1334,6 @@ static IOutputWriter CreateOutputWriter(IntoClause into)
     }
 
     return CreateBaseWriter(into.Format, into.Path);
-}
-
-static IOutputWriter CreateCheckpointedOutputWriter(
-    IntoClause into,
-    CheckpointManager checkpointManager,
-    IReadOnlyList<CheckpointFingerprint> sourceFingerprints,
-    int startShardIndex)
-{
-    DatumIngest.Output.ShardMode mode = into.Shard!.Mode switch
-    {
-        DatumIngest.Parsing.Ast.ShardMode.SampleCount => DatumIngest.Output.ShardMode.SampleCount,
-        DatumIngest.Parsing.Ast.ShardMode.ByteSize => DatumIngest.Output.ShardMode.ByteSize,
-        _ => throw new ArgumentException($"Unknown shard mode: {into.Shard.Mode}")
-    };
-
-    ShardStrategy strategy = new(mode, into.Shard.Value);
-
-    return new ShardingOutputWriter(
-        path => CreateBaseWriter(into.Format, path),
-        strategy,
-        into.Path,
-        checkpointManager,
-        sourceFingerprints,
-        startShardIndex);
 }
 
 static IOutputWriter CreateBaseWriter(OutputFormat format, string path)

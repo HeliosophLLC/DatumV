@@ -19,6 +19,7 @@ namespace DatumIngest.Compute.Client;
 public sealed class DatumComputeConnection : IDisposable
 {
     private readonly GrpcChannel _channel;
+    private readonly bool _ownsChannel;
 
     /// <summary>
     /// Gets the generated gRPC client for calling the DatumCompute service.
@@ -36,8 +37,30 @@ public sealed class DatumComputeConnection : IDisposable
     /// header on every call.
     /// </param>
     public DatumComputeConnection(string address, string? apiKey = null)
+        : this(GrpcChannel.ForAddress(address), apiKey, ownsChannel: true)
     {
-        _channel = GrpcChannel.ForAddress(address);
+    }
+
+    /// <summary>
+    /// Creates a connection using a pre-built <see cref="GrpcChannel"/>. Use this
+    /// overload for custom transports such as Unix Domain Sockets or named pipes.
+    /// </summary>
+    /// <param name="channel">
+    /// The gRPC channel to use. The caller controls channel lifetime unless
+    /// <paramref name="ownsChannel"/> is <see langword="true"/>.
+    /// </param>
+    /// <param name="apiKey">
+    /// Optional API key. When provided, added as an <c>x-api-key</c> metadata
+    /// header on every call.
+    /// </param>
+    /// <param name="ownsChannel">
+    /// When <see langword="true"/>, the channel is disposed when the connection is
+    /// disposed. Defaults to <see langword="false"/>.
+    /// </param>
+    public DatumComputeConnection(GrpcChannel channel, string? apiKey = null, bool ownsChannel = false)
+    {
+        _channel = channel;
+        _ownsChannel = ownsChannel;
 
         CallInvoker invoker = _channel.CreateCallInvoker();
 
@@ -154,6 +177,9 @@ public sealed class DatumComputeConnection : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        _channel.Dispose();
+        if (_ownsChannel)
+        {
+            _channel.Dispose();
+        }
     }
 }

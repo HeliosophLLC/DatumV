@@ -1,3 +1,4 @@
+using DatumIngest.Catalog;
 using DatumIngest.Compute.Services;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
@@ -88,6 +89,11 @@ public static class DatumComputeServiceExtensions
             services.TryAddSingleton(new ParallelismBudget(maxParallelWorkers));
         }
 
+        // Register the default catalog factory. Embedded hosts override this
+        // with a factory that returns a pre-built catalog.
+        services.TryAddSingleton<Func<string, Task<TableCatalog>>>(
+            _ => DatasetCatalogFactory.CreateAsync);
+
         // Register engine services only if the host has not already provided them.
         services.TryAddSingleton<FunctionRegistry>(_ => FunctionRegistry.CreateDefault());
 
@@ -104,6 +110,9 @@ public static class DatumComputeServiceExtensions
             ParallelismBudget? parallelismBudget = provider.GetService<ParallelismBudget>();
             return new CommandDispatcher(sessionManager, parallelismBudget);
         });
+
+        // Store the options so ComputeService can read EnableDetailedErrors.
+        services.TryAddSingleton(options);
 
         // Register the gRPC interceptor and service.
         services.AddSingleton<ApiKeyInterceptor>();
