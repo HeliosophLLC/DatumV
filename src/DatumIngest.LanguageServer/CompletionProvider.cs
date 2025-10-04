@@ -410,6 +410,7 @@ public sealed class CompletionProvider
             {
                 Label = keyword,
                 Kind = CompletionItemKind.Keyword,
+                Documentation = EnrichKeywordDoc(keyword),
                 SortOrder = 3,
             });
         }
@@ -422,6 +423,41 @@ public sealed class CompletionProvider
     private static string? EnrichFunctionDoc(string functionName)
     {
         string? sectionKey = DocumentationIndex.Instance.FindFunctionSection(functionName);
+        if (sectionKey is null)
+        {
+            return null;
+        }
+
+        DocumentationSection? section = DocumentationIndex.Instance.TryGetSection(sectionKey);
+        if (section is null)
+        {
+            return null;
+        }
+
+        string encodedKey = Uri.EscapeDataString($"\"{sectionKey}\"");
+        return string.IsNullOrEmpty(section.Excerpt)
+            ? $"[See more](command:datumingest.openDoc?{encodedKey})"
+            : $"{section.Excerpt}\n\n[See more](command:datumingest.openDoc?{encodedKey})";
+    }
+
+    /// <summary>
+    /// Returns a documentation excerpt and "See more" link from the embedded docs
+    /// for the given SQL keyword, or null if no matching section exists.
+    /// For compound keywords like "GROUP BY", tries the full phrase first, then
+    /// the first word (e.g. "GROUP").
+    /// </summary>
+    private static string? EnrichKeywordDoc(string keyword)
+    {
+        string? sectionKey = DocumentationIndex.Instance.FindKeywordSection(keyword);
+
+        // For compound keywords like "CROSS VALIDATE", "LEFT JOIN", etc.,
+        // fall back to the first word if the full phrase has no match.
+        if (sectionKey is null && keyword.Contains(' '))
+        {
+            string firstWord = keyword[..keyword.IndexOf(' ')];
+            sectionKey = DocumentationIndex.Instance.FindKeywordSection(firstWord);
+        }
+
         if (sectionKey is null)
         {
             return null;
