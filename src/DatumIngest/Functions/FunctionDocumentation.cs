@@ -1948,7 +1948,7 @@ public static class FunctionDocumentation
         {
             Name = "AVG",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Returns the arithmetic mean of all non-null values in the group.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -1975,7 +1975,7 @@ public static class FunctionDocumentation
         {
             Name = "VARIANCE",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Sample variance (N\u22121 denominator) of non-null values. Alias for VAR_SAMP.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -1984,7 +1984,7 @@ public static class FunctionDocumentation
         {
             Name = "VAR_SAMP",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Sample variance (N\u22121 denominator) of non-null values. Returns null for fewer than 2 values.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -1993,7 +1993,7 @@ public static class FunctionDocumentation
         {
             Name = "VAR_POP",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Population variance (N denominator) of non-null values.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2002,7 +2002,7 @@ public static class FunctionDocumentation
         {
             Name = "STDDEV",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Sample standard deviation (N\u22121 denominator) of non-null values. Alias for STDDEV_SAMP.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2011,7 +2011,7 @@ public static class FunctionDocumentation
         {
             Name = "STDDEV_SAMP",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Sample standard deviation (N\u22121 denominator) of non-null values. Returns null for fewer than 2 values.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2020,7 +2020,7 @@ public static class FunctionDocumentation
         {
             Name = "STDDEV_POP",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Population standard deviation (N denominator) of non-null values.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2029,7 +2029,7 @@ public static class FunctionDocumentation
         {
             Name = "MEDIAN",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Median (50th percentile) of non-null values. For even counts, returns the average of the two middle values.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2038,7 +2038,7 @@ public static class FunctionDocumentation
         {
             Name = "PERCENTILE_CONT",
             Parameters = [Parameter("expression", "Float32"), Parameter("fraction", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Continuous percentile using linear interpolation. Fraction must be between 0 and 1.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2047,7 +2047,7 @@ public static class FunctionDocumentation
         {
             Name = "PERCENTILE_DISC",
             Parameters = [Parameter("expression", "Float32"), Parameter("fraction", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Discrete percentile (nearest rank). Returns an actually observed value. Fraction in [0, 1].",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2065,7 +2065,7 @@ public static class FunctionDocumentation
         {
             Name = "CORR",
             Parameters = [Parameter("y", "Float32"), Parameter("x", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Pearson correlation coefficient between two numeric columns. Returns value in [−1, 1].",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2074,7 +2074,7 @@ public static class FunctionDocumentation
         {
             Name = "COVAR_POP",
             Parameters = [Parameter("y", "Float32"), Parameter("x", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Population covariance (N denominator) between two numeric columns.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2083,7 +2083,7 @@ public static class FunctionDocumentation
         {
             Name = "COVAR_SAMP",
             Parameters = [Parameter("y", "Float32"), Parameter("x", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Sample covariance (N−1 denominator) between two numeric columns. Null for fewer than 2 pairs.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2092,7 +2092,7 @@ public static class FunctionDocumentation
         {
             Name = "APPROX_MEDIAN",
             Parameters = [Parameter("expression", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Approximate median using reservoir sampling. O(1) memory, ~1–5% error for large groups.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
@@ -2101,7 +2101,7 @@ public static class FunctionDocumentation
         {
             Name = "APPROX_PERCENTILE",
             Parameters = [Parameter("expression", "Float32"), Parameter("fraction", "Float32")],
-            ReturnType = "Float32",
+            ReturnType = "Float64",
             Description = "Approximate percentile using reservoir sampling. O(1) memory, ~1–5% error for large groups.",
             IsAggregate = true,
             Category = FunctionCategory.Aggregate,
