@@ -322,7 +322,7 @@ public sealed class ProjectOperator : IQueryOperator
                 return ProjectWithLetBindings(sourceRow, evaluator, pool, diagnostics);
             }
 
-            DataValue[] values = pool.RentOwned(_slots.Length);
+            DataValue[] values = pool.Rent(_slots.Length);
 
             for (int index = 0; index < _slots.Length; index++)
             {
@@ -417,7 +417,7 @@ public sealed class ProjectOperator : IQueryOperator
             }
 
             // Evaluate output slots against the augmented row.
-            DataValue[] values = pool.RentOwned(_slots.Length);
+            DataValue[] values = pool.Rent(_slots.Length);
             for (int index = 0; index < _slots.Length; index++)
             {
                 ProjectionSlot slot = _slots[index];

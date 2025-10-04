@@ -101,6 +101,21 @@ public sealed class LocalBufferPool : IDisposable
         return Own(Rent(length));
     }
 
+    /// <summary>Total number of <see cref="Rent"/> calls made against this pool.</summary>
+    internal long RentCount => Interlocked.Read(ref _rentCount);
+
+    /// <summary>Total number of <see cref="Return"/>/<see cref="ReturnValues"/> calls.</summary>
+    internal long ReturnCount => Interlocked.Read(ref _returnCount);
+
+    /// <summary>Total number of <see cref="Own"/>/<see cref="RentOwned"/> calls.</summary>
+    internal long OwnedArrayCount => Interlocked.Read(ref _ownedArrayCount);
+
+    /// <summary>
+    /// Current number of arrays in the <see cref="_ownedArrays"/> queue.
+    /// This is O(segments) — use only in tests and diagnostics, not in hot paths.
+    /// </summary>
+    internal int OwnedArrayQueueCount => _ownedArrays.Count;
+
     /// <summary>Writes pool utilisation statistics to stderr (temporary diagnostics).</summary>
     public void DumpStats()
     {

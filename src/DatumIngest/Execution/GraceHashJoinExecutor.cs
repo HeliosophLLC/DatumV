@@ -307,6 +307,15 @@ internal sealed class GraceHashJoinExecutor
                         }
 
                         partition.AddProbeRow(probeRow);
+
+                        // The row has been serialized to disk — return its DataValue[]
+                        // to the pool so it can be reused immediately. Without this,
+                        // pooled arrays from upstream CombinePooled calls accumulate
+                        // until GC collects them, bypassing the memory budget.
+                        if (!isSemiJoin && !isFirst)
+                        {
+                            context.LocalBufferPool.ReturnValues(probeRow);
+                        }
                     }
                     }
                     probeBatch.Return();
