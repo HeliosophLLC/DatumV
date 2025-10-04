@@ -208,51 +208,61 @@ internal sealed class InteractiveShell
             ? System.Diagnostics.Stopwatch.StartNew()
             : null;
 
-        CommandResult result = await dispatcher.DispatchAsync(session, queryContext, input, cancellationToken).ConfigureAwait(false);
-
-        switch (result.Kind)
+        ReferenceStore.BeginQueryScope();
+        try
         {
-            case CommandResultKind.StreamingRows:
-                await formatter.FormatAsync(result.Rows!, result.Schema!, Console.Out).ConfigureAwait(false);
-                RenderAssertionDiagnostics(result.AssertionDiagnostics);
-                break;
 
-            case CommandResultKind.SchemaResult:
-                RenderSchema(result.Schema!);
-                break;
+            CommandResult result = await dispatcher.DispatchAsync(session, queryContext, input, cancellationToken).ConfigureAwait(false);
 
-            case CommandResultKind.ListResult:
-                RenderList(result.Items!);
-                break;
+            switch (result.Kind)
+            {
+                case CommandResultKind.StreamingRows:
+                    await formatter.FormatAsync(result.Rows!, result.Schema!, Console.Out).ConfigureAwait(false);
+                    RenderAssertionDiagnostics(result.AssertionDiagnostics);
+                    break;
 
-            case CommandResultKind.FunctionList:
-                RenderFunctions(result.Functions!);
-                break;
+                case CommandResultKind.SchemaResult:
+                    RenderSchema(result.Schema!);
+                    break;
 
-            case CommandResultKind.SessionList:
-                RenderSessionList(result.Sessions!);
-                break;
+                case CommandResultKind.ListResult:
+                    RenderList(result.Items!);
+                    break;
 
-            case CommandResultKind.Success:
-                if (result.ExplainPlan is not null)
-                {
-                    RenderExplainPlan(result.ExplainPlan);
-                }
-                else if (!string.IsNullOrEmpty(result.Message))
-                {
-                    AnsiConsole.MarkupLine($"[green]{Markup.Escape(result.Message)}[/]");
-                }
-                break;
+                case CommandResultKind.FunctionList:
+                    RenderFunctions(result.Functions!);
+                    break;
 
-            case CommandResultKind.Error:
-                AnsiConsole.MarkupLine($"[red]{Markup.Escape(result.Message ?? "Unknown error")}[/]");
-                break;
+                case CommandResultKind.SessionList:
+                    RenderSessionList(result.Sessions!);
+                    break;
+
+                case CommandResultKind.Success:
+                    if (result.ExplainPlan is not null)
+                    {
+                        RenderExplainPlan(result.ExplainPlan);
+                    }
+                    else if (!string.IsNullOrEmpty(result.Message))
+                    {
+                        AnsiConsole.MarkupLine($"[green]{Markup.Escape(result.Message)}[/]");
+                    }
+                    break;
+
+                case CommandResultKind.Error:
+                    AnsiConsole.MarkupLine($"[red]{Markup.Escape(result.Message ?? "Unknown error")}[/]");
+                    break;
+            }
+
+            if (stopwatch is not null)
+            {
+                stopwatch.Stop();
+                AnsiConsole.MarkupLine($"[grey]Time: {stopwatch.Elapsed.TotalMilliseconds:F1}ms[/]");
+            }
+
         }
-
-        if (stopwatch is not null)
+        finally
         {
-            stopwatch.Stop();
-            AnsiConsole.MarkupLine($"[grey]Time: {stopwatch.Elapsed.TotalMilliseconds:F1}ms[/]");
+            ReferenceStore.EndQueryScope();
         }
     }
 

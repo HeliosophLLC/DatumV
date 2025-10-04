@@ -420,29 +420,37 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         QueryContext? queryContext = TryResolveQueryContext(session, request.ContextId);
         CancellationToken cancellationToken = LinkedToken(context, session);
 
-        CommandResult result = queryContext is not null
-            ? await _dispatcher.DispatchAsync(
-                session, queryContext, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false)
-            : await _dispatcher.DispatchAsync(
-                session, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false);
-
-        if (!result.IsSuccess)
+        ReferenceStore.BeginQueryScope();
+        try
         {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Schema lookup failed."));
-        }
+            CommandResult result = queryContext is not null
+                ? await _dispatcher.DispatchAsync(
+                    session, queryContext, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false)
+                : await _dispatcher.DispatchAsync(
+                    session, $".schema {request.TableName}", cancellationToken).ConfigureAwait(false);
 
-        if (result.Schema is null)
+            if (!result.IsSuccess)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Schema lookup failed."));
+            }
+
+            if (result.Schema is null)
+            {
+                throw new RpcException(new Status(StatusCode.NotFound, $"Schema not found for '{request.TableName}'."));
+            }
+
+            SchemaResponse response = new();
+            foreach (ColumnInfo column in result.Schema.Columns)
+            {
+                response.Columns.Add(ProtoConverter.ToProto(column));
+            }
+
+            return response;
+        }
+        finally
         {
-            throw new RpcException(new Status(StatusCode.NotFound, $"Schema not found for '{request.TableName}'."));
+            ReferenceStore.EndQueryScope();
         }
-
-        SchemaResponse response = new();
-        foreach (ColumnInfo column in result.Schema.Columns)
-        {
-            response.Columns.Add(ProtoConverter.ToProto(column));
-        }
-
-        return response;
     }
 
     /// <inheritdoc />
@@ -526,25 +534,33 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         string explainSql = request.Analyze ? $"analyze {request.Sql}" : request.Sql;
 
-        CommandResult result = queryContext is not null
-            ? await _dispatcher.DispatchAsync(
-                session, queryContext, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false)
-            : await _dispatcher.DispatchAsync(
-                session, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false);
-
-        if (!result.IsSuccess)
+        ReferenceStore.BeginQueryScope();
+        try
         {
-            throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Explain failed."));
+            CommandResult result = queryContext is not null
+                ? await _dispatcher.DispatchAsync(
+                    session, queryContext, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false)
+                : await _dispatcher.DispatchAsync(
+                    session, $".explain {explainSql}", LinkedToken(context, session)).ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                throw new RpcException(new Status(StatusCode.InvalidArgument, result.Message ?? "Explain failed."));
+            }
+
+            ExplainResponse response = new() { PlanText = result.Message ?? "" };
+
+            if (result.ExplainPlan is not null)
+            {
+                response.Root = ToProto(result.ExplainPlan);
+            }
+
+            return response;
         }
-
-        ExplainResponse response = new() { PlanText = result.Message ?? "" };
-
-        if (result.ExplainPlan is not null)
+        finally
         {
-            response.Root = ToProto(result.ExplainPlan);
+            ReferenceStore.EndQueryScope();
         }
-
-        return response;
     }
 
     /// <summary>
