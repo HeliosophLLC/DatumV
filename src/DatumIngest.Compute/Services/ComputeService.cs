@@ -257,6 +257,18 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 throw new RpcException(new Status(StatusCode.InvalidArgument, detail));
             }
 
+            // Block INTO clauses in gRPC queries — users must not write to the
+            // server filesystem. Output routing is handled by the CreateSplitOutput RPC.
+            foreach (Statement stmt in statements)
+            {
+                if (stmt is QueryStatement qs && HasIntoClause(qs.Query))
+                {
+                    throw new RpcException(new Status(StatusCode.InvalidArgument,
+                        "INTO clauses are not permitted in gRPC queries. " +
+                        "Query results are streamed back to the client."));
+                }
+            }
+
             session.RecordQuery(request.Sql);
 
             long totalRowCount = 0;
@@ -978,6 +990,22 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
             FunctionCategory.Table => FunctionCategoryValue.FunctionCategoryTable,
             FunctionCategory.Aggregate => FunctionCategoryValue.FunctionCategoryAggregate,
             _ => FunctionCategoryValue.FunctionCategoryUtility,
+        };
+    }
+
+    /// <summary>
+    /// Checks whether a query expression contains an INTO clause at any level.
+    /// INTO is blocked in gRPC queries to prevent server filesystem writes.
+    /// </summary>
+    private static bool HasIntoClause(QueryExpression query)
+    {
+        return query switch
+        {
+            SelectQueryExpression sqe => sqe.Statement.Into is not null,
+            CompoundQueryExpression cqe => cqe.Into is not null
+                || HasIntoClause(cqe.Left)
+                || HasIntoClause(cqe.Right),
+            _ => false,
         };
     }
 }
