@@ -153,7 +153,7 @@ public sealed class WindowOperator : IQueryOperator
                 }
             }
 
-            DataValue[] values = pool.RentOwned(totalFieldCount);
+            DataValue[] values = pool.Rent(totalFieldCount);
             for (int field = 0; field < inputFieldCount; field++)
             {
                 values[field] = sourceRow[field];

@@ -165,7 +165,7 @@ public sealed class UnpivotOperator : IQueryOperator
                     continue;
                 }
 
-                DataValue[] values = pool.RentOwned(outputNames!.Length);
+                DataValue[] values = pool.Rent(outputNames!.Length);
 
                 // Copy key field values.
                 for (int keyIndex = 0; keyIndex < keyFieldOrdinals!.Length; keyIndex++)

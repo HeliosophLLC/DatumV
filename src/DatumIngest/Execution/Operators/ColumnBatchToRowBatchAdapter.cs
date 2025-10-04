@@ -52,7 +52,7 @@ public sealed class ColumnBatchToRowBatchAdapter : IQueryOperator
 
             for (int row = 0; row < rowCount; row++)
             {
-                DataValue[] buffer = pool.RentOwned(columnCount);
+                DataValue[] buffer = pool.Rent(columnCount);
                 rowBatch.Add(columnBatch.GetRow(row, buffer));
             }
 

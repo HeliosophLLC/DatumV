@@ -140,7 +140,7 @@ internal sealed class ScalarSubqueryOperator : IQueryOperator
                     }
                 }
 
-                DataValue[] values = pool.RentOwned(outerFieldCount + 1);
+                DataValue[] values = pool.Rent(outerFieldCount + 1);
 
                 for (int index = 0; index < outerFieldCount; index++)
                 {

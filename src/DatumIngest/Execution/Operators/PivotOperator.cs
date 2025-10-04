@@ -306,7 +306,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
 
             foreach (PivotGroupState group in allGroups)
             {
-                DataValue[] values = pool.RentOwned(totalOutputFields);
+                DataValue[] values = pool.Rent(totalOutputFields);
 
                 if (group.KeyValues is not null)
                 {
