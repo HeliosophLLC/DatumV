@@ -83,10 +83,8 @@ public sealed class RoundFunction : IScalarFunction
 
         switch (input.Kind)
         {
-            case DataKind.UInt8:
-                return DataValue.FromFloat32(Round(input.AsUInt8()));
-            case DataKind.Float32:
-                return DataValue.FromFloat32(Round(input.AsFloat32()));
+            case var k when DataValue.IsNumericScalarKind(k):
+                return DataValue.FromFloat32(Round(input.ToFloat()));
             case DataKind.Vector:
             {
                 float[] source = input.AsVector();
