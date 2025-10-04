@@ -504,7 +504,7 @@ public sealed class ScanOperator : IQueryOperator
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(inputBatch[i]);
 
                             if (outputBatch.IsFull)
@@ -583,7 +583,7 @@ public sealed class ScanOperator : IQueryOperator
                         {
                             if (IsBitmapBitSet(bitmapMask, rowInChunk))
                             {
-                                outputBatch ??= RowBatch.Rent(context.BatchSize);
+                                outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                                 outputBatch.Add(inputBatch[i]);
 
                                 if (outputBatch.IsFull)
@@ -607,7 +607,7 @@ public sealed class ScanOperator : IQueryOperator
                     {
                         for (int i = 0; i < inputBatch.Count; i++)
                         {
-                            outputBatch ??= RowBatch.Rent(context.BatchSize);
+                            outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                             outputBatch.Add(inputBatch[i]);
 
                             if (outputBatch.IsFull)
@@ -675,7 +675,7 @@ public sealed class ScanOperator : IQueryOperator
                 {
                     if (fallbackBitmapMask is null || IsBitmapBitSet(fallbackBitmapMask, fallbackRowInChunk))
                     {
-                        fallbackOutputBatch ??= RowBatch.Rent(context.BatchSize);
+                        fallbackOutputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         fallbackOutputBatch.Add(row);
 
                         if (fallbackOutputBatch.IsFull)
@@ -1482,7 +1482,7 @@ public sealed class ScanOperator : IQueryOperator
         {
             int rowCount = columnBatch.RowCount;
             int columnCount = columnBatch.ColumnCount;
-            RowBatch rowBatch = RowBatch.Rent(rowCount);
+            RowBatch rowBatch = pool.RentBatch(rowCount);
 
             for (int row = 0; row < rowCount; row++)
             {
