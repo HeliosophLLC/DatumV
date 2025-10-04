@@ -2,6 +2,10 @@
 title: SELECT
 ---
 
+## Why Use This
+
+SELECT is the starting point of every query. Beyond basic column selection, DatumIngest extends SELECT with EXCEPT (drop columns you don't need), REPLACE (transform columns in-place), and DISTINCT (deduplicate results).
+
 The SELECT clause specifies which columns and expressions appear in the query result.
 
 ```sql
@@ -17,6 +21,8 @@ SELECT t.* EXCEPT (id) REPLACE (score * 100 AS score)
 
 ### SELECT * EXCEPT
 
+You want all columns from a table except the raw image bytes that would bloat your CSV export.
+
 Exclude specific columns from wildcard expansion. Applies to both `*` and `table.*`:
 
 ```sql
@@ -31,6 +37,8 @@ FROM features a JOIN labels b ON a.id = b.id
 Column names in the EXCEPT list must exist in the expanded column set; unknown names produce a planner error.
 
 ### SELECT * REPLACE
+
+You want to normalize a score column to 0-1 range without listing every other column by hand.
 
 Replace specific columns in wildcard expansion with new expressions. The alias must match an existing column name — the replacement takes the original column's position:
 

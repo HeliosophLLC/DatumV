@@ -2,6 +2,38 @@
 title: Schema Introspection
 ---
 
+## Why Use This
+
+Before you write a query, you need to know what you're working with -- what tables are available, what columns they have, and what types those columns are. Schema introspection answers these questions without trial and error.
+
+## Quick Start
+
+Three questions you will ask constantly:
+
+**"What tables do I have?"**
+
+```sql
+SELECT table_name FROM information_schema.tables
+```
+
+**"What columns does this table have?"**
+
+```sql
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'orders'
+ORDER BY ordinal_position
+```
+
+**"What functions are available for strings?"**
+
+```sql
+SELECT function_name, description
+FROM datum_catalog.functions
+WHERE category = 'String'
+ORDER BY function_name
+```
+
 The `schema` command resolves column metadata from all table sources in a query's FROM and JOIN clauses without executing the query. This is designed for editor integration (Monaco, VS Code) where column names, types, and source tables are needed for autocomplete. Table names in the query can use any of the quoted identifier styles described in the [FROM](#from) section.
 
 ### CLI usage

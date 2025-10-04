@@ -2,6 +2,14 @@
 title: Common Table Expressions (WITH)
 ---
 
+## Why Use This
+
+A complex query with nested subqueries quickly becomes unreadable. CTEs let you name each step and write them top-to-bottom, like a pipeline — each step feeds into the next.
+
+## When to Use CTE vs Subquery
+
+Use a CTE when you reference the same intermediate result more than once, or when the nesting gets more than two levels deep. Use a subquery for simple one-off filters. CTEs are also the only way to write recursive queries (hierarchies, sequences).
+
 CTEs define named temporary result sets scoped to a single statement. They can simplify complex queries by breaking them into readable, composable stages.
 
 ```sql
@@ -84,6 +92,32 @@ WITH RECURSIVE tree AS (
   FROM nodes AS n INNER JOIN tree AS t ON n.parent_id = t.id
 )
 SELECT id, name, depth FROM tree ORDER BY depth, name
+```
+
+### Generating a date sequence for time-series gap-filling
+
+When your sensor data has missing days, a recursive CTE can generate the full date range so you can LEFT JOIN and find the gaps:
+
+```sql
+WITH RECURSIVE date_range AS (
+  -- Anchor: start of the period
+  SELECT CAST('2026-01-01' AS DATE) AS report_date
+  UNION ALL
+  -- Recursive: add one day until end of period
+  SELECT report_date + INTERVAL '1' DAY
+  FROM date_range
+  WHERE report_date < '2026-03-31'
+)
+SELECT
+    d.report_date,
+    COALESCE(r.avg_temperature, 0) AS avg_temperature
+FROM date_range d
+LEFT JOIN (
+    SELECT reading_date, AVG(temperature) AS avg_temperature
+    FROM sensor_data
+    GROUP BY reading_date
+) r ON d.report_date = r.reading_date
+ORDER BY d.report_date
 ```
 
 ### Execution strategy

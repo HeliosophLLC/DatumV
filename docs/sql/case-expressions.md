@@ -2,6 +2,10 @@
 title: CASE Expressions
 ---
 
+## Why Use This
+
+CASE lets you create new columns based on conditions — bin continuous scores into grades, map numeric codes to human-readable labels, or handle special values differently. It's the SQL equivalent of if/else.
+
 CASE expressions provide inline conditional logic, similar to if/else chains.
 
 ### Searched CASE
@@ -81,6 +85,22 @@ FROM data
 Coercible String targets include: `Float32`, `UInt8`, `Boolean`, `Date`,
 `DateTime`, `Time`, `Duration`, `Uuid`, and `JsonValue`. Types like `Vector`,
 `Matrix`, `Tensor`, `Image`, and `UInt8Array` cannot be coerced from String.
+
+## Common Patterns
+
+**Binning continuous values:**
+
+```sql
+SELECT CASE WHEN score >= 90 THEN 'A' WHEN score >= 80 THEN 'B' ELSE 'C' END AS grade
+FROM students
+```
+
+**Label mapping:**
+
+```sql
+SELECT CASE status WHEN 1 THEN 'active' WHEN 2 THEN 'churned' ELSE 'unknown' END AS label
+FROM users
+```
 
 ## See Also
 

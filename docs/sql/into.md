@@ -2,6 +2,10 @@
 title: INTO
 ---
 
+## Why Use This
+
+Once you've transformed your data, you need to save it somewhere. INTO writes query results directly to a file — CSV for spreadsheets, Parquet for efficient columnar storage, or HDF5 for ML frameworks. Sharding splits large outputs into manageable chunks, and checkpointing lets you resume after a crash.
+
 Write query results to a file. The output format is inferred from the file extension (`.csv`, `.parquet`, `.h5`/`.hdf5`):
 
 ```sql

@@ -2,6 +2,17 @@
 title: TABLESAMPLE
 ---
 
+## Why Use This
+
+Your dataset has 10 million rows but you just need a quick look at the shape of the data, or your classes are imbalanced (95% cats, 5% dogs) and you need to balance them for model training. TABLESAMPLE gives you controlled sampling without loading everything.
+
+## Choosing a Method
+
+- **Quick exploration**: Use BERNOULLI — fast, random, no setup.
+- **Preserving class balance**: Use STRATIFIED — samples proportionally from each class.
+- **Equalizing class balance**: Use BALANCED — same number of rows per class, great for imbalanced datasets.
+- **Reproducibility**: Add REPEATABLE(seed) to any method for deterministic results.
+
 TABLESAMPLE limits the rows returned from a table source to an approximate sample. It is part of the table reference — placed after the table name and before any alias.
 
 ## Syntax

@@ -2,6 +2,10 @@
 title: Parameterized Queries
 ---
 
+## Why Use This
+
+Parameterized queries let you write a query once and run it with different values — change the threshold, switch the category, adjust the date range — without editing the SQL. This is essential for automation, scripts, and API integration.
+
 Named parameters use PostgreSQL-style `$name` syntax. Parameters can appear anywhere an expression is valid — WHERE, SELECT, JOIN ON, ORDER BY, HAVING, CASE, and function arguments.
 
 ```sql

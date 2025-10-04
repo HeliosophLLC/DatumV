@@ -2,6 +2,10 @@
 title: Set Operations
 ---
 
+## Why Use This
+
+When your data lives in separate tables with the same structure — training set and test set, this month and last month, version A and version B — set operations combine, intersect, or subtract them.
+
 Set operations combine the results of two or more SELECT statements. All six variants are supported:
 
 ```sql
@@ -96,6 +100,20 @@ For single-column results, `HashSet<DataValue>` is used directly. For multi-colu
 UNION DISTINCT supports **spill-to-disk** when a memory budget is configured: when the in-memory hash set exceeds the budget (tracked by `MemoryEstimator`), unseen rows are spilled to 64 hash-partitioned temporary files and deduplicated in a drain phase. INTERSECT and EXCEPT (all four variants) also support **spill-to-disk**: when the right-branch materialisation exceeds the memory budget, remaining right rows are hash-partitioned to spill files; left rows whose partitions were spilled are buffered to corresponding left-side spill files and processed partition-by-partition in a drain phase. This ensures arbitrarily large set operations complete without out-of-memory failures.
 
 Set operations add no Query Units (0 QU).
+
+## Common Patterns
+
+**Combining train/test splits:**
+
+```sql
+SELECT * FROM train UNION ALL SELECT * FROM test
+```
+
+**Finding IDs present in one set but not another:**
+
+```sql
+SELECT id FROM all_data EXCEPT SELECT id FROM processed_data
+```
 
 ## See Also
 

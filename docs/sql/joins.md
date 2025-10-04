@@ -2,28 +2,75 @@
 title: JOIN
 ---
 
+## Why Use This
+
+Most real datasets live in multiple tables — customers in one, their orders in another, product details in a third. JOINs bring related data together into a single result.
+
 All five standard join types are supported:
 
 ```sql
 -- INNER JOIN: only matching rows
-SELECT * FROM a INNER JOIN b ON a.id = b.id
+SELECT * FROM customers INNER JOIN orders ON customers.customer_id = orders.customer_id
 
 -- LEFT JOIN: all rows from left, matching from right
-SELECT * FROM a LEFT JOIN b ON a.id = b.id
+SELECT * FROM customers LEFT JOIN orders ON customers.customer_id = orders.customer_id
 
 -- RIGHT JOIN: all rows from right, matching from left
-SELECT * FROM a RIGHT JOIN b ON a.id = b.id
+SELECT * FROM orders RIGHT JOIN products ON orders.product_id = products.product_id
 
 -- FULL OUTER JOIN: all rows from both sides
-SELECT * FROM a FULL OUTER JOIN b ON a.id = b.id
+SELECT * FROM images FULL OUTER JOIN captions ON images.image_id = captions.image_id
 
 -- CROSS JOIN: cartesian product
-SELECT * FROM a CROSS JOIN b
+SELECT * FROM products CROSS JOIN departments
 ```
 
 NULL keys never match (SQL three-valued logic). Hash join is used for INNER/LEFT/RIGHT/FULL OUTER; nested loop for CROSS.
 
+## Common Patterns
+
+### Customer-order lookup (INNER JOIN)
+
+Find every customer and their orders. Customers without orders and orders without customers are excluded:
+
+```sql
+SELECT c.name, c.email, o.order_id, o.total_amount, o.order_date
+FROM customers c
+INNER JOIN orders o ON c.customer_id = o.customer_id
+```
+
+### Keeping all customers even without orders (LEFT JOIN)
+
+List every customer. Those who have not placed an order still appear, with NULL in the order columns:
+
+```sql
+SELECT c.name, c.email, o.order_id, o.total_amount
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id
+```
+
+### Pairing images with captions for training (LEFT JOIN with null handling)
+
+Build a training dataset where every image is included. Images without captions get a default placeholder:
+
+```sql
+SELECT
+    i.image_id,
+    i.file_path,
+    COALESCE(cap.caption_text, 'no caption available') AS caption
+FROM images i
+LEFT JOIN captions cap ON i.image_id = cap.image_id
+```
+
+## Gotchas
+
+- **NULL keys never match in any join type** — rows with NULL join keys are silently excluded from INNER JOIN results.
+- **LEFT JOIN preserves all left rows but right columns become NULL for non-matches** — filter carefully. A WHERE clause on a right-side column (e.g., `WHERE o.status = 'shipped'`) converts the LEFT JOIN into an INNER JOIN because NULLs fail the filter.
+- **CROSS JOIN produces N x M rows** — use only when you intentionally want every combination (e.g., generating all product-region pairs for a report template).
+
 ### LATERAL JOIN / APPLY
+
+Sometimes the right side of a join needs to reference each row from the left — like expanding an array column per row. That's what LATERAL does.
 
 A **lateral join** re-executes the right-hand source for every row from the left side, allowing the right side to reference columns from the left. The explicit `LATERAL` keyword is required after `CROSS JOIN` or `LEFT [OUTER] JOIN`. The T-SQL `CROSS APPLY` and `OUTER APPLY` syntax is also supported.
 

@@ -36,6 +36,13 @@
           href: sql/tablesample.md#stratified
         - name: BALANCED
           href: sql/tablesample.md#balanced
+    - name: CROSS VALIDATE
+      href: sql/cross-validate.md
+      items:
+        - name: Stratified CV
+          href: sql/cross-validate.md#stratified-cross-validation
+        - name: Group CV
+          href: sql/cross-validate.md#group-cross-validation
     - name: WHERE
       href: sql/filtering.md
       items:
@@ -63,6 +70,8 @@
           href: sql/window-functions.md#value-functions
         - name: Window Frames
           href: sql/window-functions.md#window-frames
+    - name: SCAN
+      href: sql/scan.md
     - name: QUALIFY
       href: sql/qualify.md
     - name: ASSERT

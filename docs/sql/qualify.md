@@ -2,6 +2,14 @@
 title: QUALIFY
 ---
 
+## Why Use This
+
+The most common use of QUALIFY is "give me the top N rows per group" — the top 3 products per category, the latest order per customer, the best score per student. Without QUALIFY, you'd need to wrap your query in a subquery just to filter on a window function result.
+
+## How It Works
+
+QUALIFY is a filter that runs after window functions have been computed. Window functions like ROW_NUMBER() assign a ranking to each row within a group, but there's no standard SQL way to filter on that ranking without wrapping the whole thing in a subquery. QUALIFY lets you write the filter directly: "keep only the rows where the ranking meets my condition." The window function runs first, QUALIFY filters second — one query, no nesting.
+
 Filter rows based on the result of a window function, without needing a subquery wrapper. QUALIFY is evaluated after window functions but before SELECT projection.
 
 ```sql

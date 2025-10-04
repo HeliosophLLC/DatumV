@@ -619,3 +619,72 @@ INTO 'balanced_train.parquet'
 | Reduce dataset size while preserving class ratios | STRATIFIED | `STRATIFIED(10) ON label` — 10% of each class |
 | Equalize underrepresented classes for training | BALANCED | `BALANCED(1000) ON label` — exactly 1000 per class |
 | Quick exploratory sample | BERNOULLI | `BERNOULLI(1)` — ~1% random sample |
+
+---
+
+## CROSS VALIDATE — k-Fold Cross-Validation
+
+CROSS VALIDATE assigns each row a deterministic fold index in `[0, k)` for k-fold cross-validation. It desugars to a synthetic LET binding at plan time — no new operator, no buffering, zero query units.
+
+### Syntax
+
+```sql
+SELECT *, fold
+FROM table
+CROSS VALIDATE(k = N [, seed = S]) ON key_column [STRATIFY BY col] [GROUP BY col] AS alias
+```
+
+- `k` — number of folds (integer >= 2, required)
+- `seed` — deterministic seed (default 0)
+- `ON key` — hash key column(s); composite: `ON (col1, col2)`
+- `STRATIFY BY col` — balanced class distribution per fold
+- `GROUP BY col` — all rows with same group key get the same fold
+- `AS alias` — output column name (required)
+
+### Fold assignment algorithm
+
+```
+fold = CAST(FLOOR(hash_split(key, seed) * k) AS Int32)
+```
+
+Uses XxHash64 via `hash_split` for deterministic, uniform distribution. Same key + seed + k = same fold, always, across runs and machines.
+
+### Examples
+
+```sql
+-- 5-fold CV
+SELECT *, fold FROM data CROSS VALIDATE(k = 5, seed = 42) ON id AS fold
+
+-- Stratified: balanced class distribution per fold
+SELECT *, fold FROM data CROSS VALIDATE(k = 5, seed = 42) ON id STRATIFY BY label AS fold
+
+-- Group: prevent data leakage (all patient visits in same fold)
+SELECT *, fold FROM visits CROSS VALIDATE(k = 5) ON patient_id GROUP BY patient_id AS fold
+
+-- Nested CV: outer for evaluation, inner for tuning
+SELECT *, outer_fold, inner_fold FROM data
+CROSS VALIDATE(k = 5, seed = 1) ON id AS outer_fold
+CROSS VALIDATE(k = 3, seed = 2) ON id AS inner_fold
+```
+
+### Composition with TABLESAMPLE BALANCED
+
+Balance classes first, then assign folds — the common ML training pipeline:
+
+```sql
+SELECT fold, label, COUNT(*) AS cnt
+FROM training_data
+TABLESAMPLE BALANCED(500) ON label REPEATABLE(42)
+CROSS VALIDATE(k = 5, seed = 7) ON id AS fold
+GROUP BY fold, label
+ORDER BY fold, label
+```
+
+### When to use CROSS VALIDATE vs. manual hash_split
+
+| Approach | Declarative | Deterministic | Stratified | Group-aware |
+|----------|:-----------:|:-------------:|:----------:|:-----------:|
+| `CROSS VALIDATE` | Yes | Yes | Yes | Yes |
+| Manual `FLOOR(hash_split(...) * k)` | No (boilerplate) | Yes | Manual | Manual |
+
+CROSS VALIDATE is syntactic sugar over `hash_split` — use it for the common case. Use `hash_split` directly for custom splitting logic (time-based splits, non-uniform fractions, etc.).

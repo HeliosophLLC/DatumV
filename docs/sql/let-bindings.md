@@ -2,7 +2,59 @@
 title: LET Bindings
 ---
 
-`LET` declares named, memoized intermediate expressions in the SELECT list. Each binding is evaluated once per row and its value is cached for all subsequent references. LET bindings are **not included in the output** unless explicitly aliased with `AS`.
+## Why Use This
+
+When your query computes the same expensive thing twice -- like resizing an image to get both its tensor and its dimensions -- LET computes it once and reuses the result. Think of it as assigning a variable inside your SELECT.
+
+## How It Works
+
+When the SQL engine encounters a LET binding, it evaluates the expression once and stores the result for the duration of that row. Every time you reference the binding name later in the same SELECT — whether in another LET, an output column, or even in QUALIFY — it uses the stored value, not the expression. This is value caching, not textual substitution. If the expression calls `uuidv4()`, you get one UUID that's reused everywhere, not a different UUID each time.
+
+LET bindings are invisible by default — they don't appear in the output. To include one, add `AS alias`. This separation means you can use LET as pure internal plumbing (compute intermediate values) without cluttering your output schema.
+
+## Common Patterns
+
+### 1. Image pipeline: compute a tensor once, derive multiple features
+
+```sql
+SELECT
+  LET tensor = image_to_tensor_hwc(image),       -- expensive: runs only once per row
+  LET resized = resize_tensor(tensor, 224, 224),
+  rank(tensor) AS ndim,                           -- reuse tensor
+  vec_mean(resized) AS avg_pixel,                 -- reuse resized
+  shape(resized) AS dimensions                    -- reuse resized again
+FROM training_images
+```
+
+### 2. Price calculation: compute a subtotal once, use for tax and discount
+
+```sql
+SELECT
+  LET subtotal = unit_price * quantity,
+  subtotal * 0.08 AS tax,
+  CASE WHEN subtotal > 100 THEN subtotal * 0.10 ELSE 0 END AS discount,
+  subtotal AS line_total
+FROM orders
+```
+
+### 3. Feature engineering: compute a derived metric, use in multiple output columns
+
+```sql
+SELECT
+  LET avg_order = total_spent / order_count,
+  avg_order AS avg_order_value,
+  avg_order / category_avg * 100 AS pct_of_category,
+  CASE WHEN avg_order > 500 THEN 'high' ELSE 'standard' END AS tier
+FROM customers
+```
+
+## Gotchas
+
+- **LET bindings are NOT visible in WHERE** -- WHERE runs before SELECT, so you cannot filter on a LET binding. Repeat the expression in the WHERE clause or use a subquery.
+- **SELECT * does NOT include LET bindings** -- even aliased ones. You must name each output column explicitly.
+- **Later LET bindings can reference earlier ones, but not the reverse** -- bindings are evaluated left to right. Referencing a binding that appears later is a parse error.
+
+`LET` declares named, reusable computed values in the SELECT list. Each binding is evaluated once per row and its value is cached for all subsequent references. LET bindings are **not included in the output** unless explicitly aliased with `AS`.
 
 ```sql
 SELECT

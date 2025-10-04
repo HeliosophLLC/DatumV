@@ -2,6 +2,46 @@
 title: DEFINE
 ---
 
+## Why Use This
+
+When you have several LET bindings and data quality checks (ASSERTs) in one query, they can clutter the SELECT list. DEFINE groups them in a block at the top so you can see all your setup in one place -- like a variable declaration section at the top of a function.
+
+## Before and After
+
+The same query written both ways:
+
+**Without DEFINE** -- inline LET bindings and a trailing ASSERT:
+
+```sql
+SELECT
+  LET subtotal = unit_price * quantity,
+  LET tax = subtotal * 0.08,
+  order_id,
+  subtotal AS line_total,
+  tax AS tax_amount,
+  subtotal + tax AS grand_total
+FROM orders
+ASSERT subtotal > 0 MESSAGE 'subtotal must be positive' ON FAIL SKIP
+ASSERT tax >= 0 MESSAGE 'tax cannot be negative' ON FAIL WARN
+```
+
+**With DEFINE** -- all setup grouped at the top:
+
+```sql
+SELECT DEFINE {
+    LET subtotal = unit_price * quantity;
+    LET tax = subtotal * 0.08;
+    ASSERT subtotal > 0 MESSAGE 'subtotal must be positive' ON FAIL SKIP;
+    ASSERT tax >= 0 MESSAGE 'tax cannot be negative' ON FAIL WARN;
+} order_id,
+  subtotal AS line_total,
+  tax AS tax_amount,
+  subtotal + tax AS grand_total
+FROM orders
+```
+
+Both produce identical results. DEFINE just moves the setup out of the column list.
+
 DEFINE is syntactic sugar that groups LET bindings and ASSERT clauses inside a brace-delimited block placed directly after SELECT. It is purely a readability aid — at parse time the block is flattened into the query's LET bindings and ASSERT clauses.
 
 ### Syntax
@@ -71,6 +111,12 @@ DEFINE assertions from the block and any trailing ASSERT clauses written after t
 
 - A SELECT may have at most one DEFINE block.
 - DEFINE cannot be combined with inline LET bindings in the same SELECT.
+
+## Gotchas
+
+- **A SELECT can have at most one DEFINE block** -- you cannot split definitions across multiple blocks.
+- **You cannot mix DEFINE with inline LET in the same SELECT** -- pick one style. If you use a DEFINE block, all LET bindings must go inside it.
+- **Inside the block, all LET bindings are evaluated before any ASSERT, regardless of declaration order** -- even if you write an ASSERT above a LET, the LET runs first. This means ASSERTs can safely reference any LET binding in the block.
 
 ## See Also
 

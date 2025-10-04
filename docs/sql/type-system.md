@@ -2,6 +2,40 @@
 title: Type System
 ---
 
+## Why Use This
+
+DatumIngest has more types than standard SQL -- vectors for embeddings, tensors for image data, durations for time spans. If you are coming from a regular SQL database, the type system is where you will notice the difference first. Understanding it helps you avoid unexpected cast errors and pick the right types for your ML features.
+
+## Quick Start
+
+Three common type tasks:
+
+**"What type is this column?"**
+
+```sql
+SELECT typeof(column_name) FROM my_table LIMIT 1
+```
+
+**"Convert a string to a number"**
+
+```sql
+-- Hard cast: errors if conversion fails
+SELECT CAST(score AS Float64) FROM data
+
+-- Safe cast: returns NULL instead of erroring
+SELECT try_cast(score, Float64) FROM data
+```
+
+**"Handle mixed types in a column"**
+
+```sql
+-- Filter to only rows where value is a number
+SELECT * FROM data WHERE value IS Float64
+
+-- Type-narrowing bind: check and use the typed value in one step
+SELECT * FROM data WHERE value AS Float64 v AND v > 0.5
+```
+
 ### DataKind values
 
 | DataKind | Description | Internal representation |

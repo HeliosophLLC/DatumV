@@ -2,6 +2,10 @@
 title: WHERE
 ---
 
+## Why Use This
+
+WHERE filters rows before any grouping, aggregation, or window functions run. It's your first line of defense against noisy data — remove nulls, exclude outliers, focus on a date range.
+
 The WHERE clause filters rows before grouping and aggregation.
 
 ```sql
@@ -54,6 +58,12 @@ SELECT * FROM users WHERE name ILIKE '\_%' ESCAPE '\'
 ```
 
 The escape character must be a single character. It only affects the immediately following `%` or `_`.
+
+## Gotchas
+
+- `NULL = NULL` is not true — use `IS NULL` instead of `= NULL`.
+- `NOT IN` with a subquery that contains NULLs returns no rows (SQL three-valued logic) — use `NOT EXISTS` instead.
+- `LIKE` is case-sensitive; use `ILIKE` for case-insensitive matching.
 
 ## See Also
 

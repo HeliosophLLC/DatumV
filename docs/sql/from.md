@@ -2,6 +2,10 @@
 title: FROM
 ---
 
+## Why Use This
+
+FROM specifies where your data comes from. Besides regular tables, you can query subqueries as inline tables, or use table-valued functions like RANGE to generate data on the fly — useful for creating sequences, synthetic test data, or cross-joining with computed values.
+
 The FROM clause specifies the data sources for a query.
 
 ```sql

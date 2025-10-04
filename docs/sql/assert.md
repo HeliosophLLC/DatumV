@@ -2,6 +2,10 @@
 title: ASSERT
 ---
 
+## Why Use This
+
+When building an ML pipeline, bad data slipping through silently is worse than a crash. ASSERT acts as a data quality gate — it checks every row against a condition and can abort the query, skip bad rows, or log a warning. Think of it as unit tests for your data.
+
 ASSERT validates a predicate against every projected row. Unlike WHERE (which filters silently before projection), ASSERT runs after projection and can abort the query, skip failing rows, or emit diagnostic warnings depending on the configured failure mode.
 
 ### Syntax
