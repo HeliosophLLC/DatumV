@@ -19,7 +19,7 @@ namespace DatumIngest.Model;
 /// Fixed-size primitives (integers, floats, dates, booleans, UUIDs) are stored inline
 /// in the 16-byte payload (<c>_p0</c>–<c>_p3</c>). Reference-type payloads (strings,
 /// float arrays, byte arrays, image handles, typed arrays) are stored in an
-/// <see cref="IStringStore"/> or <see cref="ReferenceStore"/> and accessed via an
+/// <see cref="IValueStore"/> or <see cref="ReferenceStore"/> and accessed via an
 /// integer index in <c>_referenceIndex</c>. Arena-backed strings use offset/length
 /// in the inline payload.
 /// </para>
@@ -37,7 +37,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Bit mask for the null flag in <see cref="_flags"/>.</summary>
     private const byte FlagIsNull = 0x01;
 
-    /// <summary>Bit mask indicating the value has a payload in an <see cref="IStringStore"/> or <see cref="ReferenceStore"/>.</summary>
+    /// <summary>Bit mask indicating the value has a payload in an <see cref="IValueStore"/> or <see cref="ReferenceStore"/>.</summary>
     private const byte FlagHasReference = 0x02;
 
     // ───────────────────────── Fields (20 bytes) ─────────────────────────
@@ -45,7 +45,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     // Header (4 bytes)
     [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
     [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: HasReference
-    [FieldOffset(2)]  private readonly byte _storeId;      //  1 byte  — IStringStore identity (0 = default)
+    [FieldOffset(2)]  private readonly byte _storeId;      //  1 byte  — reserved
     [FieldOffset(3)]  private readonly byte _spare;        //  1 byte  — reserved
 
     // Payload — inline interpretation (16 bytes)
@@ -58,13 +58,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     [FieldOffset(4)]  private readonly int _referenceIndex; // overlaps _p0
     [FieldOffset(8)]  private readonly short _meta;         // overlaps low 2 bytes of _p1
 
-    private DataValue(DataKind kind, byte flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0,
-                      byte storeId = 0, short meta = 0)
+    private DataValue(DataKind kind, byte flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0)
     {
         Unsafe.SkipInit(out this);
         _kind = kind;
         _flags = flags;
-        _storeId = storeId;
+        _storeId = 0;
         _spare = 0;
         _p0 = p0;
         _p1 = p1;
@@ -76,12 +75,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Constructor for reference types that need <c>_meta</c>.
     /// Sets <c>_p0</c> = referenceIndex and <c>_meta</c> at the overlapping offset.
     /// </summary>
-    private DataValue(DataKind kind, byte flags, int referenceIndex, short meta, byte storeId = 0)
+    private DataValue(DataKind kind, byte flags, int referenceIndex, short meta)
     {
         Unsafe.SkipInit(out this);
         _kind = kind;
         _flags = flags;
-        _storeId = storeId;
+        _storeId = 0;
         _spare = 0;
         _referenceIndex = referenceIndex;
         _meta = meta;
@@ -95,7 +94,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Whether this value represents a typed null.</summary>
     public bool IsNull => (_flags & FlagIsNull) != 0;
 
-    /// <summary>Whether this value has a reference-type payload in an <see cref="IStringStore"/> or <see cref="ReferenceStore"/>.</summary>
+    /// <summary>Whether this value has a reference-type payload in an <see cref="IValueStore"/> or <see cref="ReferenceStore"/>.</summary>
     internal bool HasReference => (_flags & FlagHasReference) != 0;
 
     // ───────────────────────── Cached common instances ─────────────────────────
@@ -167,18 +166,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ReferenceStore store = ReferenceStore.Current();
         int index = store.InternString(value);
-        return new(DataKind.String, flags: FlagHasReference, p0: index, storeId: store.StoreId);
+        return new(DataKind.String, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>
-    /// Creates a value from a text string using an explicit <see cref="IStringStore"/>.
+    /// Creates a value from a text string using an explicit <see cref="IValueStore"/>.
     /// </summary>
     /// <param name="value">The string to store.</param>
     /// <param name="store">The store to use for storage and later retrieval.</param>
-    public static DataValue FromString(string value, IStringStore store)
+    public static DataValue FromString(string value, IValueStore store)
     {
-        var (p0, p1) = store.Store(value);
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, storeId: store.StoreId);
+        var (p0, p1) = store.StoreString(value);
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1);
     }
 
     /// <summary>
@@ -190,29 +189,19 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="kind">The data kind (must be a reference-backed kind such as
     /// <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>).</param>
     /// <param name="referenceIndex">Index returned by a prior intern call.</param>
-    internal static DataValue FromInternedReference(DataKind kind, int referenceIndex)
-    {
-        ReferenceStore store = ReferenceStore.Current();
-        return new(kind, flags: FlagHasReference, p0: referenceIndex, storeId: store.StoreId);
-    }
+    internal static DataValue FromInternedReference(DataKind kind, int referenceIndex) =>
+        new(kind, flags: FlagHasReference, p0: referenceIndex);
 
     /// <summary>
     /// Creates an arena-backed string value from an offset and length within a
     /// <see cref="Arena"/>.  The actual bytes are not stored in this struct;
     /// callers must resolve via <see cref="AsString(Arena)"/> or the
-    /// <see cref="IStringStore"/> registry.
+    /// <see cref="IValueStore"/> registry.
     /// </summary>
     /// <param name="offset">Byte offset into the owning <see cref="Arena"/>.</param>
     /// <param name="length">Byte length of the UTF-8 encoded string.</param>
     public static DataValue FromStringSlice(int offset, int length) =>
         new(DataKind.String, flags: 0, p0: offset, p1: length);
-
-    /// <summary>
-    /// Creates an arena-backed string value with an explicit <see cref="IStringStore"/>
-    /// so it can be resolved via <see cref="AsString()"/> without a separate arena parameter.
-    /// </summary>
-    public static DataValue FromStringSlice(int offset, int length, IStringStore store) =>
-        new(DataKind.String, flags: 0, p0: offset, p1: length, storeId: store.StoreId);
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
     public static DataValue FromVector(float[] value)
@@ -296,16 +285,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ReferenceStore store = ReferenceStore.Current();
         int index = store.InternString(value);
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index, storeId: store.StoreId);
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>
-    /// Creates a value from a raw JSON string using an explicit <see cref="IStringStore"/>.
+    /// Creates a value from a raw JSON string using an explicit <see cref="IValueStore"/>.
     /// </summary>
-    public static DataValue FromJsonValue(string value, IStringStore store)
+    public static DataValue FromJsonValue(string value, IValueStore store)
     {
-        var (p0, p1) = store.Store(value);
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1, storeId: store.StoreId);
+        var (p0, p1) = store.StoreString(value);
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1);
     }
 
     /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
@@ -377,7 +366,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <returns>An adjusted value whose length is unchanged.</returns>
     internal DataValue WithArenaOffset(int delta)
     {
-        return new DataValue(_kind, flags: 0, p0: _p0 + delta, p1: _p1, storeId: _storeId);
+        return new DataValue(_kind, flags: 0, p0: _p0 + delta, p1: _p1);
     }
 
     /// <summary>
@@ -961,11 +950,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsString()
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        if (_storeId != 0)
-        {
-            return StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1);
-        }
-
         if ((_flags & FlagHasReference) == 0)
         {
             throw new InvalidOperationException(
@@ -988,8 +972,6 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if ((_flags & FlagHasReference) != 0)
         {
-            if (_storeId != 0)
-                return StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1);
             return ReferenceStore.Current().Get<string>(_referenceIndex);
         }
 
@@ -1107,8 +1089,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsJsonValue()
     {
         ThrowIfNullOrWrongKind(DataKind.JsonValue);
-        if (_storeId != 0)
-            return StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1);
         return ReferenceStore.Current().Get<string>(_referenceIndex);
     }
 
@@ -1362,9 +1342,7 @@ public readonly struct DataValue : IEquatable<DataValue>
             // Reference types:
             DataKind.String or DataKind.JsonValue
                 => HasReference
-                    ? HashCode.Combine(_kind, (_storeId != 0
-                        ? StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1)
-                        : ReferenceStore.Current().Get<string>(_referenceIndex)))
+                    ? HashCode.Combine(_kind, ReferenceStore.Current().Get<string>(_referenceIndex))
                     : HashCode.Combine(_kind, _p0, _p1),
             DataKind.DateTime
                 => HashCode.Combine(_kind, _p0, _p1, _p2),
@@ -1410,12 +1388,9 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (leftHasRef && rightHasRef)
         {
             // Both reference-backed: resolve via store and compare strings.
-            string leftStr = left._storeId != 0
-                ? StringStoreRegistry.Get(left._storeId).Retrieve(left._p0, left._p1)
-                : ReferenceStore.Current().Get<string>(left._referenceIndex);
-            string rightStr = right._storeId != 0
-                ? StringStoreRegistry.Get(right._storeId).Retrieve(right._p0, right._p1)
-                : ReferenceStore.Current().Get<string>(right._referenceIndex);
+            ReferenceStore store = ReferenceStore.Current();
+            string leftStr = store.Get<string>(left._referenceIndex);
+            string rightStr = store.Get<string>(right._referenceIndex);
             return leftStr == rightStr;
         }
 
@@ -1565,12 +1540,12 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt64 => unchecked((ulong)ReadLong()).ToString(),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()).ToString("G"),
             DataKind.String => HasReference
-                ? (_storeId != 0 ? StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1) : ReferenceStore.Current().Get<string>(_referenceIndex))
+                ? ReferenceStore.Current().Get<string>(_referenceIndex)
                 : $"String[arena@{_p0}+{_p1}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.JsonValue => HasReference
-                ? (_storeId != 0 ? StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1) : ReferenceStore.Current().Get<string>(_referenceIndex))
+                ? ReferenceStore.Current().Get<string>(_referenceIndex)
                 : $"JsonValue[arena@{_p0}+{_p1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _p0 != 0 ? "true" : "false",

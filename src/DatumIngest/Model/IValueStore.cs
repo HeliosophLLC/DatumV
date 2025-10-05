@@ -1,0 +1,68 @@
+namespace DatumIngest.Model;
+
+/// <summary>
+/// Unified contract for storing and retrieving reference-type payloads from a
+/// backing store. Implemented by <see cref="ReferenceStore"/> (per-query object
+/// registry) and <see cref="Arena"/> (contiguous byte buffer).
+/// </summary>
+/// <remarks>
+/// Callers pass an <see cref="IValueStore"/> to <see cref="DataValue"/> factory
+/// methods (write path) and to <c>As*</c> accessor methods (read path).
+/// </remarks>
+public interface IValueStore
+{
+    // ───────────────────────── Strings ─────────────────────────
+
+    /// <summary>
+    /// Stores a string value and returns two payload words to embed in a <see cref="DataValue"/>.
+    /// </summary>
+    /// <param name="value">The string to store.</param>
+    /// <returns>
+    /// A pair of ints: for <see cref="ReferenceStore"/>, (index, 0);
+    /// for <see cref="Arena"/>, (offset, length).
+    /// </returns>
+    (int P0, int P1) StoreString(string value);
+
+    /// <summary>
+    /// Retrieves a previously stored string using the payload words from a <see cref="DataValue"/>.
+    /// </summary>
+    string RetrieveString(int p0, int p1);
+
+    // ───────────────────────── Byte arrays ─────────────────────────
+
+    /// <summary>
+    /// Stores a byte array and returns two payload words.
+    /// </summary>
+    (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes);
+
+    /// <summary>
+    /// Retrieves a previously stored byte array.
+    /// </summary>
+    byte[] RetrieveBytes(int p0, int p1);
+
+    // ───────────────────────── Float arrays ─────────────────────────
+
+    /// <summary>
+    /// Stores a float array and returns two payload words.
+    /// </summary>
+    (int P0, int P1) StoreFloats(ReadOnlySpan<float> floats);
+
+    /// <summary>
+    /// Retrieves a previously stored float array.
+    /// </summary>
+    float[] RetrieveFloats(int p0, int p1);
+
+    // ───────────────────────── Arbitrary objects ─────────────────────────
+
+    /// <summary>
+    /// Stores an arbitrary managed object (e.g. <c>DataValue[]</c>, <c>ImageHandle</c>).
+    /// Only supported by <see cref="ReferenceStore"/>; <see cref="Arena"/> throws
+    /// <see cref="NotSupportedException"/>.
+    /// </summary>
+    (int P0, int P1) StoreObject(object value);
+
+    /// <summary>
+    /// Retrieves a previously stored object.
+    /// </summary>
+    object RetrieveObject(int p0, int p1);
+}

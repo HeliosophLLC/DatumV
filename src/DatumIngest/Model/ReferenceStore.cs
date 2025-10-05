@@ -17,7 +17,7 @@ namespace DatumIngest.Model;
 /// reset and discard the scoped store.  Every code path that creates reference-backed
 /// <see cref="DataValue"/> instances must run inside an active scope.
 /// </remarks>
-internal sealed class ReferenceStore : IStringStore
+internal sealed class ReferenceStore : IValueStore
 {
     private static readonly AsyncLocal<ReferenceStore?> _current = new();
 
@@ -25,7 +25,6 @@ internal sealed class ReferenceStore : IStringStore
     private int _count;
     private readonly Lock _growLock = new();
     private Dictionary<string, int>? _stringIntern;
-    private readonly byte _storeId;
 
     /// <summary>
     /// Creates a new reference store with the given initial capacity.
@@ -34,7 +33,6 @@ internal sealed class ReferenceStore : IStringStore
     private ReferenceStore(int initialCapacity = 4096)
     {
         _items = new object?[initialCapacity];
-        _storeId = StringStoreRegistry.Register(this);
     }
 
     /// <summary>
@@ -48,16 +46,39 @@ internal sealed class ReferenceStore : IStringStore
         _current.Value ?? throw new InvalidOperationException(
             "No ReferenceStore scope is active. Call ReferenceStore.BeginQueryScope() before creating reference-backed DataValues.");
 
-    // ───────────────────────── IStringStore ─────────────────────────
+    // ───────────────────────── IValueStore ─────────────────────────
 
     /// <inheritdoc />
-    public byte StoreId => _storeId;
+    public (int P0, int P1) StoreString(string value) => (InternString(value), 0);
 
     /// <inheritdoc />
-    public (int P0, int P1) Store(string value) => (InternString(value), 0);
+    public string RetrieveString(int p0, int p1) => Get<string>(p0);
 
     /// <inheritdoc />
-    public string Retrieve(int p0, int p1) => Get<string>(p0);
+    public (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes)
+    {
+        byte[] copy = bytes.ToArray();
+        return (Add(copy), 0);
+    }
+
+    /// <inheritdoc />
+    public byte[] RetrieveBytes(int p0, int p1) => Get<byte[]>(p0);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreFloats(ReadOnlySpan<float> floats)
+    {
+        float[] copy = floats.ToArray();
+        return (Add(copy), 0);
+    }
+
+    /// <inheritdoc />
+    public float[] RetrieveFloats(int p0, int p1) => Get<float[]>(p0);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreObject(object value) => (Add(value), 0);
+
+    /// <inheritdoc />
+    public object RetrieveObject(int p0, int p1) => Get(p0);
 
     // ───────────────────────── Scope management ─────────────────────────
 
@@ -76,7 +97,6 @@ internal sealed class ReferenceStore : IStringStore
         ReferenceStore? store = _current.Value;
         if (store is not null)
         {
-            StringStoreRegistry.Deregister(store._storeId);
             store.Reset();
         }
 

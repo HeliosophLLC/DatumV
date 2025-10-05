@@ -27,14 +27,13 @@ namespace DatumIngest.Model;
 /// and merge via <see cref="CopyFrom"/>.
 /// </para>
 /// </remarks>
-public sealed class Arena : IStringStore, IDisposable
+public sealed class Arena : IValueStore, IDisposable
 {
     private const int DefaultCapacity = 4096;
 
     private byte[] _buffer;
     private int _position;
     private bool _disposed;
-    private readonly byte _storeId;
 
     /// <summary>Creates an arena with the specified initial byte capacity.</summary>
     /// <param name="initialCapacity">
@@ -43,23 +42,49 @@ public sealed class Arena : IStringStore, IDisposable
     public Arena(int initialCapacity = DefaultCapacity)
     {
         _buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
-        _storeId = StringStoreRegistry.Register(this);
     }
 
-    // ───────────────────────── IStringStore ─────────────────────────
+    // ───────────────────────── IValueStore ─────────────────────────
 
     /// <inheritdoc />
-    public byte StoreId => _storeId;
-
-    /// <inheritdoc />
-    public (int P0, int P1) Store(string value)
+    public (int P0, int P1) StoreString(string value)
     {
         var (offset, length) = AppendString(value);
         return (offset, length);
     }
 
     /// <inheritdoc />
-    public string Retrieve(int p0, int p1) => GetString(p0, p1);
+    public string RetrieveString(int p0, int p1) => GetString(p0, p1);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes)
+    {
+        var (offset, length) = AppendBytes(bytes);
+        return (offset, length);
+    }
+
+    /// <inheritdoc />
+    public byte[] RetrieveBytes(int p0, int p1) => MaterializeBytes(p0, p1);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreFloats(ReadOnlySpan<float> floats)
+    {
+        var (offset, count) = AppendFloats(floats);
+        return (offset, count);
+    }
+
+    /// <inheritdoc />
+    public float[] RetrieveFloats(int p0, int p1) => MaterializeFloats(p0, p1);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreObject(object value) =>
+        throw new NotSupportedException(
+            "Arena does not support arbitrary object storage. Use ReferenceStore for managed objects.");
+
+    /// <inheritdoc />
+    public object RetrieveObject(int p0, int p1) =>
+        throw new NotSupportedException(
+            "Arena does not support arbitrary object retrieval. Use ReferenceStore for managed objects.");
 
     // ───────────────────────── Common ─────────────────────────
 
@@ -209,7 +234,6 @@ public sealed class Arena : IStringStore, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        StringStoreRegistry.Deregister(_storeId);
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = Array.Empty<byte>();
         _position = 0;
