@@ -436,7 +436,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
     /// <summary>
     /// Holds pre-read columnar data for a single rank-3 HDF5 dataset, yielding one
-    /// <see cref="DataValue.FromMatrix"/> per row.
+    /// <see cref="DataValue.FromMatrix(float[], int, int)"/> per row.
     /// </summary>
     private sealed class MatrixColumnData : ColumnData
     {

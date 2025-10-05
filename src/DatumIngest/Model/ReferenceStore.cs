@@ -75,6 +75,12 @@ internal sealed class ReferenceStore : IValueStore
     public float[] RetrieveFloats(int p0, int p1) => Get<float[]>(p0);
 
     /// <inheritdoc />
+    public (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values) => (Add(values.ToArray()), 0);
+
+    /// <inheritdoc />
+    public DataValue[] RetrieveDataValues(int p0, int p1) => Get<DataValue[]>(p0);
+
+    /// <inheritdoc />
     public (int P0, int P1) StoreObject(object value) => (Add(value), 0);
 
     /// <inheritdoc />

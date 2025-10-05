@@ -6,7 +6,7 @@ namespace DatumIngest.Model;
 
 /// <summary>
 /// An immutable, discriminated union value that carries typed data through the query pipeline.
-/// Use the static factory methods (<see cref="FromFloat32"/>, <see cref="FromVector"/>, etc.)
+/// Use the static factory methods (<see cref="FromFloat32"/>, <see cref="FromVector(float[])"/>, etc.)
 /// to construct instances and the accessor methods to retrieve typed payloads.
 /// </summary>
 /// <remarks>
@@ -161,6 +161,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.UInt8Array, flags: FlagHasReference, p0: index);
     }
 
+    /// <summary>Creates a value from a byte array using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromUInt8Array(byte[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.UInt8Array, flags: FlagHasReference, p0: p0, p1: p1);
+    }
+
     /// <summary>Creates a value from a text string.</summary>
     public static DataValue FromString(string value)
     {
@@ -210,6 +217,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Vector, flags: FlagHasReference, p0: index);
     }
 
+    /// <summary>Creates a rank-1 tensor (vector) from a float array using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromVector(float[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreFloats(value);
+        return new(DataKind.Vector, flags: FlagHasReference, p0: p0, p1: p1);
+    }
+
     /// <summary>Creates a rank-2 tensor (matrix) from a flat float array and its dimensions.</summary>
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="rows"/> * <paramref name="columns"/> does not equal the data length.
@@ -224,6 +238,19 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         int index = ReferenceStore.Current().Add(data);
         return new(DataKind.Matrix, flags: FlagHasReference, p0: index, p1: rows, p2: columns);
+    }
+
+    /// <summary>Creates a rank-2 tensor (matrix) using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromMatrix(float[] data, int rows, int columns, IValueStore store)
+    {
+        if (data.Length != rows * columns)
+        {
+            throw new ArgumentException(
+                $"Data length {data.Length} does not match shape {rows}x{columns}.");
+        }
+
+        var (p0, _) = store.StoreFloats(data);
+        return new(DataKind.Matrix, flags: FlagHasReference, p0: p0, p1: rows, p2: columns);
     }
 
     /// <summary>Creates an arbitrary-rank tensor from a flat float array and its shape.</summary>
@@ -249,11 +276,23 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Tensor, flags: FlagHasReference, p0: index);
     }
 
+    // FromTensor(float[], int[], IValueStore) is deferred to Phase 4.
+    // Tensor uses AddPair for consecutive indices (data at p0, shape at p0+1),
+    // which requires ReferenceStore. Arena-backed tensors need a different
+    // encoding (e.g. shape as prefix before float data).
+
     /// <summary>Creates a value from encoded image bytes.</summary>
     public static DataValue FromImage(byte[] value)
     {
         int index = ReferenceStore.Current().Add(value);
         return new(DataKind.Image, flags: FlagHasReference, p0: index);
+    }
+
+    /// <summary>Creates a value from encoded image bytes using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromImage(byte[] value, IValueStore store)
+    {
+        var (p0, p1) = store.StoreBytes(value);
+        return new(DataKind.Image, flags: FlagHasReference, p0: p0, p1: p1);
     }
 
     /// <summary>
@@ -381,6 +420,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Array, FlagHasReference, referenceIndex: index, meta: (short)elementKind);
     }
 
+    /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromArray(DataKind elementKind, DataValue[] elements, IValueStore store)
+    {
+        var (p0, p1) = store.StoreDataValues(elements);
+        return new(DataKind.Array, flags: FlagHasReference, p0: p0, p1: p1, p2: (int)elementKind);
+    }
+
     /// <summary>Creates a typed null array with the given element kind.</summary>
     /// <param name="elementKind">The element kind of the null array.</param>
     public static DataValue NullArray(DataKind elementKind) =>
@@ -397,6 +443,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         int index = ReferenceStore.Current().Add(fields);
         return new(DataKind.Struct, FlagHasReference, referenceIndex: index, meta: fieldCount);
+    }
+
+    /// <summary>Creates a struct value using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromStruct(short fieldCount, DataValue[] fields, IValueStore store)
+    {
+        var (p0, p1) = store.StoreDataValues(fields);
+        return new(DataKind.Struct, flags: FlagHasReference, p0: p0, p1: p1, p2: fieldCount);
     }
 
     /// <summary>Creates a typed null struct with the given field count.</summary>
@@ -945,6 +998,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return ReferenceStore.Current().Get<byte[]>(_referenceIndex);
     }
 
+    /// <summary>Returns the byte array payload from an explicit <see cref="IValueStore"/>.</summary>
+    public byte[] AsUInt8Array(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.UInt8Array);
+        return store.RetrieveBytes(_p0, _p1);
+    }
+
     /// <summary>Returns the text string payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public string AsString()
@@ -957,6 +1017,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         return ReferenceStore.Current().Get<string>(_referenceIndex);
+    }
+
+    /// <summary>Returns the text string payload from an explicit <see cref="IValueStore"/>.</summary>
+    public string AsString(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        return store.RetrieveString(_p0, _p1);
     }
 
     /// <summary>
@@ -998,6 +1065,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return ReferenceStore.Current().Get<float[]>(_referenceIndex);
     }
 
+    /// <summary>Returns the vector (rank-1) float array payload from an explicit <see cref="IValueStore"/>.</summary>
+    public float[] AsVector(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Vector);
+        return store.RetrieveFloats(_p0, _p1);
+    }
+
     /// <summary>Returns the matrix (rank-2) flat float array and its dimensions.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public float[] AsMatrix(out int rows, out int columns)
@@ -1006,6 +1080,15 @@ public readonly struct DataValue : IEquatable<DataValue>
         rows = _p1;
         columns = _p2;
         return ReferenceStore.Current().Get<float[]>(_referenceIndex);
+    }
+
+    /// <summary>Returns the matrix (rank-2) flat float array and its dimensions from an explicit <see cref="IValueStore"/>.</summary>
+    public float[] AsMatrix(IValueStore store, out int rows, out int columns)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Matrix);
+        rows = _p1;
+        columns = _p2;
+        return store.RetrieveFloats(_p0, _p1);
     }
 
     /// <summary>Returns the tensor flat float array and its shape.</summary>
@@ -1036,6 +1119,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         return (byte[])payload;
+    }
+
+    /// <summary>Returns the encoded image byte array from an explicit <see cref="IValueStore"/>.</summary>
+    public byte[] AsImage(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Image);
+        return store.RetrieveBytes(_p0, _p1);
     }
 
     /// <summary>
@@ -1092,6 +1182,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return ReferenceStore.Current().Get<string>(_referenceIndex);
     }
 
+    /// <summary>Returns the raw JSON string payload from an explicit <see cref="IValueStore"/>.</summary>
+    public string AsJsonValue(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.JsonValue);
+        return store.RetrieveString(_p0, _p1);
+    }
+
     /// <summary>Returns the UUID payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public Guid AsUuid()
@@ -1140,6 +1237,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return ReferenceStore.Current().Get<DataValue[]>(_referenceIndex);
     }
 
+    /// <summary>Returns the typed array payload from an explicit <see cref="IValueStore"/>.</summary>
+    public DataValue[] AsArray(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Array);
+        return store.RetrieveDataValues(_p0, _p1);
+    }
+
     /// <summary>
     /// Returns the element <see cref="DataKind"/> for an <see cref="DataKind.Array"/> value.
     /// Available on both null and non-null array values.
@@ -1165,6 +1269,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.Struct);
         return ReferenceStore.Current().Get<DataValue[]>(_referenceIndex);
+    }
+
+    /// <summary>Returns the positional field-value array from an explicit <see cref="IValueStore"/>.</summary>
+    public DataValue[] AsStruct(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Struct);
+        return store.RetrieveDataValues(_p0, _p1);
     }
 
     /// <summary>

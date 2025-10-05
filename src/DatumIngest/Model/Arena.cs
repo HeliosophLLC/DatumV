@@ -77,6 +77,16 @@ public sealed class Arena : IValueStore, IDisposable
     public float[] RetrieveFloats(int p0, int p1) => MaterializeFloats(p0, p1);
 
     /// <inheritdoc />
+    public (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values)
+    {
+        var (offset, count) = AppendDataValues(values);
+        return (offset, count);
+    }
+
+    /// <inheritdoc />
+    public DataValue[] RetrieveDataValues(int p0, int p1) => MaterializeDataValues(p0, p1);
+
+    /// <inheritdoc />
     public (int P0, int P1) StoreObject(object value) =>
         throw new NotSupportedException(
             "Arena does not support arbitrary object storage. Use ReferenceStore for managed objects.");
@@ -207,6 +217,38 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>A new array containing the bytes.</returns>
     public byte[] MaterializeBytes(int offset, int length)
         => GetBytes(offset, length).ToArray();
+
+    // ───────────────────────── DataValue array operations ─────────────────────────
+
+    /// <summary>
+    /// Appends a <see cref="DataValue"/> array as raw bytes (20 bytes per element).
+    /// </summary>
+    /// <param name="values">The DataValue array to append.</param>
+    /// <returns>The byte offset and element count within this arena.</returns>
+    public (int Offset, int Count) AppendDataValues(ReadOnlySpan<DataValue> values)
+    {
+        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(values);
+        EnsureCapacity(bytes.Length);
+        int offset = _position;
+        bytes.CopyTo(_buffer.AsSpan(_position));
+        _position += bytes.Length;
+        return (offset, values.Length);
+    }
+
+    /// <summary>
+    /// Retrieves a <see cref="DataValue"/> array previously stored via <see cref="AppendDataValues"/>.
+    /// Allocates a new array — use at materialisation boundaries only.
+    /// </summary>
+    /// <param name="offset">Byte offset returned by <see cref="AppendDataValues"/>.</param>
+    /// <param name="count">Element count returned by <see cref="AppendDataValues"/>.</param>
+    /// <returns>A new array containing the DataValues.</returns>
+    public DataValue[] MaterializeDataValues(int offset, int count)
+    {
+        ReadOnlySpan<byte> bytes = _buffer.AsSpan(offset, count * 20);
+        DataValue[] result = new DataValue[count];
+        MemoryMarshal.Cast<byte, DataValue>(bytes).CopyTo(result);
+        return result;
+    }
 
     // ───────────────────────── Merging ─────────────────────────
 

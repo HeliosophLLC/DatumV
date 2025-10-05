@@ -52,10 +52,22 @@ public interface IValueStore
     /// </summary>
     float[] RetrieveFloats(int p0, int p1);
 
+    // ───────────────────────── DataValue arrays ─────────────────────────
+
+    /// <summary>
+    /// Stores a <see cref="DataValue"/> array and returns two payload words.
+    /// </summary>
+    (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values);
+
+    /// <summary>
+    /// Retrieves a previously stored <see cref="DataValue"/> array.
+    /// </summary>
+    DataValue[] RetrieveDataValues(int p0, int p1);
+
     // ───────────────────────── Arbitrary objects ─────────────────────────
 
     /// <summary>
-    /// Stores an arbitrary managed object (e.g. <c>DataValue[]</c>, <c>ImageHandle</c>).
+    /// Stores an arbitrary managed object (e.g. <c>ImageHandle</c>).
     /// Only supported by <see cref="ReferenceStore"/>; <see cref="Arena"/> throws
     /// <see cref="NotSupportedException"/>.
     /// </summary>
