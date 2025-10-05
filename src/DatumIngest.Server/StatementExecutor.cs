@@ -2,6 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Encoding;
 using DatumIngest.Execution;
+using DatumIngest.Execution.Pooling;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -371,7 +372,7 @@ internal sealed class StatementExecutor
         }
 
         QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry, _session.VirtualSchemaRegistry);
-        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
 
         try
         {
@@ -546,7 +547,7 @@ internal sealed class StatementExecutor
         List<ColumnPageReplacement> replacements = new();
         long updatedRows = 0;
 
-        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
         try
         {
             ExpressionEvaluator evaluator = new(_session.FunctionRegistry);
@@ -699,7 +700,7 @@ internal sealed class StatementExecutor
         Dictionary<CompositeKey, DataValue[]> assignmentMap = new();
 
         QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry, _session.VirtualSchemaRegistry);
-        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
 
         try
         {
@@ -951,7 +952,7 @@ internal sealed class StatementExecutor
                 nameIndex[columnNames[columnIndex]] = columnIndex;
             }
 
-            LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+            LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
 
             try
             {
@@ -1262,7 +1263,7 @@ internal sealed class StatementExecutor
         }
 
         QueryPlanner planner = new(_queryContext.Catalog, _session.FunctionRegistry, _session.VirtualSchemaRegistry);
-        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
 
         try
         {

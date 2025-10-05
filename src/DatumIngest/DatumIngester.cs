@@ -199,8 +199,8 @@ public static class DatumIngester
         ReferenceStore.BeginQueryScope();
         try
         {
-        return await IngestCoreScopedAsync(baseTableName, filePath, progress, cancellationToken)
-            .ConfigureAwait(false);
+            return await IngestCoreScopedAsync(baseTableName, filePath, progress, cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {

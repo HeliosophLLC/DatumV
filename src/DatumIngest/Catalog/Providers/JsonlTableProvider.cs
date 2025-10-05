@@ -149,7 +149,7 @@ public sealed class JsonlTableProvider : IChunkMeasuringProvider
                 continue;
             }
 
-            DataValue[] values = GlobalBufferPool.Rent(projectedColumns.Count);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedColumns.Count);
             for (int columnIndex = 0; columnIndex < projectedColumns.Count; columnIndex++)
             {
                 ColumnInfo column = projectedColumns[columnIndex];

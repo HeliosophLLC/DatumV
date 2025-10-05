@@ -107,7 +107,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
+                DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     if (isListColumn[fieldIndex] && listColumnValues is not null)
@@ -236,7 +236,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
+                DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     if (isListColumn[fieldIndex] && listColumnValues is not null)
@@ -437,7 +437,7 @@ public sealed class ParquetTableProvider : ITableProvider, IFilterableTableProvi
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                DataValue[] values = GlobalBufferPool.Rent(projectedFields.Length);
+                DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedFields.Length);
                 for (int fieldIndex = 0; fieldIndex < projectedFields.Length; fieldIndex++)
                 {
                     if (isListColumn[fieldIndex] && listColumnValues is not null)

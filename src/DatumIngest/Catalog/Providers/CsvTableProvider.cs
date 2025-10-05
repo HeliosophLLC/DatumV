@@ -407,7 +407,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
         // If headerless, the first line is data — emit it as a row.
         if (!hasHeader)
         {
-            DataValue[] firstValues = GlobalBufferPool.Rent(projectedIndices.Length);
+            DataValue[] firstValues = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
             for (int projectionIndex = 0; projectionIndex < projectedIndices.Length; projectionIndex++)
             {
                 int sourceIndex = projectedIndices[projectionIndex];
@@ -431,7 +431,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 break;
             }
 
-            DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
 
             // Fast path for unquoted lines: extract fields as spans and parse scalars
             // directly, avoiding per-field substring allocations. This is the common case
@@ -1420,7 +1420,7 @@ public sealed class CsvTableProvider : IChunkMeasuringProvider, IPartitionedTabl
                 break;
             }
 
-            DataValue[] values = GlobalBufferPool.Rent(projectedIndices.Length);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
 
             if (!lineSpan.Contains('"'))
             {

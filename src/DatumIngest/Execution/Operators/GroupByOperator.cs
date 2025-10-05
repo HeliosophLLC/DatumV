@@ -230,7 +230,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
                             ref outputNames, ref outputNameIndex));
-                        GlobalBufferPool.ReturnGroupState(currentGroup);
+                        Pooling.GlobalPool.Backing.Return(currentGroup);
                         currentGroup = null;
                         if (outputBatch.IsFull)
                         {
@@ -259,7 +259,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                         outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
                         outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
                             ref outputNames, ref outputNameIndex));
-                        GlobalBufferPool.ReturnGroupState(currentGroup);
+                        Pooling.GlobalPool.Backing.Return(currentGroup);
                         currentGroup = null;
                         if (outputBatch.IsFull)
                         {
@@ -297,7 +297,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             outputBatch ??= context.LocalBufferPool.RentBatch(context.BatchSize);
             outputBatch.Add(EmitGroupRow(currentGroup, isGlobalAggregation: false,
                 ref outputNames, ref outputNameIndex));
-            GlobalBufferPool.ReturnGroupState(currentGroup);
+            Pooling.GlobalPool.Backing.Return(currentGroup);
         }
 
         if (outputBatch is not null)
@@ -806,7 +806,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             // Return completed in-memory GroupState objects to the static pool.
             if (!isGlobalAggregation)
             {
-                GlobalBufferPool.ReturnGroupStates(
+                Pooling.GlobalPool.Backing.Return(
                     useSingleKey
                         ? singleKeyGroups!.Values
                         : compositeKeyGroups!.Values,
@@ -1315,7 +1315,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 }
 
                 // Return completed in-memory GroupState objects to the static pool.
-                GlobalBufferPool.ReturnGroupStates(workerGroups, _aggregateColumns.Count);
+                Pooling.GlobalPool.Backing.Return(workerGroups, _aggregateColumns.Count);
 
                 // Drain phase: re-aggregate spill files for this worker, skipping keys
                 // already complete in the worker's in-memory table.
@@ -1410,7 +1410,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     private GroupState CreateGroupState()
     {
         int count = _aggregateColumns.Count;
-        GroupState state = GlobalBufferPool.RentGroupState(count);
+        GroupState state = Pooling.GlobalPool.Backing.RentGroupState(count);
         RuntimeTypeHandle[]? innerTypes = _accumulatorInnerTypes;
 
         for (int index = 0; index < count; index++)
@@ -1698,7 +1698,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             }
         }
 
-        DataValue[] values = GlobalBufferPool.Rent(outputFieldCount);
+        DataValue[] values = Pooling.GlobalPool.Backing.RentDataValues(outputFieldCount);
 
         if (!isGlobalAggregation)
         {
@@ -2017,7 +2017,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         }
 
         // Return partition GroupState objects to the static pool.
-        GlobalBufferPool.ReturnGroupStates(allPartitionGroups, _aggregateColumns.Count);
+        Pooling.GlobalPool.Backing.Return(allPartitionGroups, _aggregateColumns.Count);
 
         return results;
     }

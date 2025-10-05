@@ -79,7 +79,7 @@ public readonly struct Row
         get
         {
 #if POOL_DIAGNOSTICS
-            GlobalBufferPool.AssertNotReturned(_values, "Row.RawValues");
+            DatumIngest.Execution.Pooling.PoolBacking.AssertNotReturned(_values, "Row.RawValues");
 #endif
             return _values;
         }

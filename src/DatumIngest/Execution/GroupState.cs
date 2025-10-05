@@ -6,7 +6,7 @@ namespace DatumIngest.Execution;
 
 /// <summary>
 /// Mutable state for a single group during hash aggregation.
-/// Pooled by <see cref="GlobalBufferPool"/> to avoid per-group heap allocations.
+/// Pooled by <see cref="Pooling.GlobalPool"/> to avoid per-group heap allocations.
 /// </summary>
 public sealed class GroupState
 {

@@ -38,6 +38,28 @@ public sealed class PoolBacking
             tracker.AssertNotReturned(context);
         }
     }
+
+    /// <summary>
+    /// Marks a buffer as rented in the diagnostic tracker.
+    /// </summary>
+    internal static void MarkRentedWithDiagnostics(DataValue[] buffer)
+    {
+        if (Trackers.TryGetValue(buffer, out PooledBuffer? tracker))
+        {
+            tracker.MarkRented();
+        }
+    }
+
+    /// <summary>
+    /// Marks a buffer as returned with full diagnostics: asserts not double-returned,
+    /// then marks as returned.
+    /// </summary>
+    internal static void MarkReturnedWithDiagnostics(DataValue[] buffer)
+    {
+        PooledBuffer tracker = Trackers.GetOrCreateValue(buffer);
+        tracker.AssertNotDoubleReturned();
+        tracker.MarkReturned();
+    }
 #endif
 
     private int _maxItemsPerBucket = 8_192;
@@ -123,19 +145,7 @@ public sealed class PoolBacking
     /// </summary>
     public RowBatch RentRowBatch(int capacity)
     {
-        RowBatch? batch;
-        if (rowBatchPools.TryGetValue(capacity, out CountedPool<RowBatch>? pool) && pool.TryDequeue(out RowBatch? buffer))
-        {
-            batch = buffer;
-        }
-        else
-        {
-            batch = new RowBatch();
-        }
-
-        batch.Initialize(new Row[capacity]);    
-
-        return batch;
+        return RowBatch.Rent(capacity);
     }
 
     /// <summary>
@@ -188,9 +198,7 @@ public sealed class PoolBacking
     public void Return(DataValue[] buffer)
     {
 #if POOL_DIAGNOSTICS
-        PooledBuffer tracker = Trackers.GetOrCreateValue(buffer);
-        tracker.AssertNotDoubleReturned();
-        tracker.MarkReturned();
+        MarkReturnedWithDiagnostics(buffer);
 #endif
 
         CountedPool<DataValue[]> pool = dataValuePools.GetOrAdd(buffer.Length, static _ => new CountedPool<DataValue[]>());
@@ -220,11 +228,7 @@ public sealed class PoolBacking
             }
         }
 
-        batch.Reset();
-
-        rowBatchPools
-            .GetOrAdd(batch.Capacity, static _ => new CountedPool<RowBatch>())
-            .Enqueue(batch);
+        batch.ReturnShell();
     }
 
     /// <summary>

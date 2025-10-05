@@ -5,7 +5,7 @@ namespace DatumIngest.Execution.Pooling;
 
 /// <summary>
 /// Diagnostic tracker for a <see cref="Model.DataValue"/> array that has passed through
-/// <see cref="GlobalBufferPool"/>. When the buffer is returned to the pool the
+/// <see cref="GlobalPool"/>. When the buffer is returned to the pool the
 /// tracker is marked as pooled, and any subsequent access through
 /// <see cref="Model.Row.RawValues"/> or the <see cref="Model.Row"/> indexers throws
 /// an <see cref="InvalidOperationException"/> with the return-site stack trace.

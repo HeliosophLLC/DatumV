@@ -1,9 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
-using DatumIngest.Execution.Pooling;
-using DatumIngest.Functions;
-using DatumIngest.Model;
 
 namespace DatumIngest.Execution.Pooling;
 
@@ -11,14 +6,15 @@ namespace DatumIngest.Execution.Pooling;
 /// <summary>
 /// Process-wide static pool.
 /// </summary>
-public static class GlobalBufferPool
+public static class GlobalPool
 {
     private static readonly ConcurrentQueue<Pool> pools = new();
-    
+    private static readonly ConcurrentQueue<LocalBufferPool> localBufferPools = new();
+
     /// <summary>
-    /// Gets a global backing object.
+    /// Gets the process-wide shared <see cref="PoolBacking"/> instance.
     /// </summary>
-    private static PoolBacking Backing { get; } = new PoolBacking();
+    internal static PoolBacking Backing { get; } = new PoolBacking();
 
 
     /// <summary>
@@ -41,9 +37,32 @@ public static class GlobalBufferPool
     {
         if (pool.Backing != Backing)
         {
-            throw new InvalidOperationException("Attempted to return a Pool instance that was not created by this GlobalBufferPool.");
+            throw new InvalidOperationException("Attempted to return a Pool instance that was not created by this GlobalPool.");
         }
-        
+
         pools.Enqueue(pool);
+    }
+
+    /// <summary>
+    /// Rents a <see cref="LocalBufferPool"/> for a single query. Returns a previously
+    /// returned instance when one is available; allocates otherwise.
+    /// </summary>
+    public static LocalBufferPool RentLocalBufferPool()
+    {
+        if (localBufferPools.TryDequeue(out LocalBufferPool? pool))
+        {
+            pool.Reset();
+            return pool;
+        }
+
+        return new LocalBufferPool(Backing);
+    }
+
+    /// <summary>
+    /// Returns a <see cref="LocalBufferPool"/> for reuse by a subsequent query.
+    /// </summary>
+    public static void ReturnLocalBufferPool(LocalBufferPool pool)
+    {
+        localBufferPools.Enqueue(pool);
     }
 }

@@ -100,7 +100,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            DataValue[] values = GlobalBufferPool.Rent(columnDataList.Count);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(columnDataList.Count);
             for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
             {
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);
@@ -229,7 +229,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            DataValue[] values = GlobalBufferPool.Rent(columnDataList.Count);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(columnDataList.Count);
             for (int columnIndex = 0; columnIndex < columnDataList.Count; columnIndex++)
             {
                 values[columnIndex] = columnDataList[columnIndex].GetValue(rowIndex);

@@ -114,7 +114,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
                 continue;
             }
 
-            DataValue[] values = GlobalBufferPool.Rent(names.Length);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(names.Length);
             int valueIndex = 0;
 
             if (includeFileName)
@@ -502,7 +502,7 @@ public sealed class ZipTableProvider : ITableProvider, IKeyedTableProvider
         bool includeFileName,
         bool includeFileBytes)
     {
-        DataValue[] values = GlobalBufferPool.Rent(names.Length);
+        DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(names.Length);
         int valueIndex = 0;
 
         if (includeFileName)

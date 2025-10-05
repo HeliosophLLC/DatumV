@@ -106,7 +106,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 stream.Seek(itemByteSize, SeekOrigin.Current);
             }
 
-            DataValue[] values = GlobalBufferPool.Rent(names.Length);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(names.Length);
             int valueIndex = 0;
 
             if (includeIndex)
@@ -222,7 +222,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
                 stream.Seek(itemByteSize, SeekOrigin.Current);
             }
 
-            DataValue[] values = GlobalBufferPool.Rent(names.Length);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(names.Length);
             int valueIndex = 0;
 
             if (includeIndex)
@@ -307,7 +307,7 @@ public sealed class IdxTableProvider : ISeekableTableProvider, IKeyedTableProvid
             long offset = dataStartPosition + (long)rowIndex * itemByteSize;
             stream.Seek(offset, SeekOrigin.Begin);
 
-            DataValue[] values = GlobalBufferPool.Rent(names.Length);
+            DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(names.Length);
             values[0] = DataValue.FromFloat32(rowIndex);
 
             if (includeData)

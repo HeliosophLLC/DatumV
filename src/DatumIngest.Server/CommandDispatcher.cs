@@ -1,6 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
+using DatumIngest.Execution.Pooling;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -184,7 +185,7 @@ public sealed class CommandDispatcher
         query = TemporalConstantFolder.Fold(query, effectiveBatchClock, statementClock);
 
         QueryPlanner planner = new(queryContext.Catalog, session.FunctionRegistry, session.VirtualSchemaRegistry);
-        LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+        LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
         AssertionDiagnostics assertionDiagnostics = new();
         ExecutionContext context = new(cancellationToken, session.FunctionRegistry, queryContext.Catalog, localBufferPool, queryMeter,
             memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
@@ -496,7 +497,7 @@ public sealed class CommandDispatcher
         if (analyze)
         {
             InstrumentedOperator instrumentedRoot = InstrumentedOperator.InstrumentTree(plan);
-            using LocalBufferPool localBufferPool = GlobalBufferPool.RentLocalBufferPool();
+            using LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
             ExecutionContext context = new(
                 cancellationToken,
                 session.FunctionRegistry,
