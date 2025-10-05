@@ -22,13 +22,14 @@ namespace DatumIngest.Model;
 /// private arena and merge afterwards via <see cref="CopyFrom"/>.
 /// </para>
 /// </remarks>
-public sealed class StringArena : IDisposable
+public sealed class StringArena : IStringStore, IDisposable
 {
     private const int DefaultCapacity = 4096;
 
     private byte[] _buffer;
     private int _position;
     private bool _disposed;
+    private readonly byte _storeId;
 
     /// <summary>Creates an arena with the specified initial byte capacity.</summary>
     /// <param name="initialCapacity">
@@ -37,7 +38,25 @@ public sealed class StringArena : IDisposable
     public StringArena(int initialCapacity = DefaultCapacity)
     {
         _buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
+        _storeId = StringStoreRegistry.Register(this);
     }
+
+    // ───────────────────────── IStringStore ─────────────────────────
+
+    /// <inheritdoc />
+    public byte StoreId => _storeId;
+
+    /// <inheritdoc />
+    public (int P0, int P1) Store(string value)
+    {
+        var (offset, length) = Append(value);
+        return (offset, length);
+    }
+
+    /// <inheritdoc />
+    public string Retrieve(int p0, int p1) => GetString(p0, p1);
+
+    // ───────────────────────── Arena operations ─────────────────────────
 
     /// <summary>Total bytes written so far.</summary>
     public int BytesWritten => _position;
@@ -111,6 +130,7 @@ public sealed class StringArena : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        StringStoreRegistry.Deregister(_storeId);
         ArrayPool<byte>.Shared.Return(_buffer);
         _buffer = Array.Empty<byte>();
         _position = 0;

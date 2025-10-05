@@ -1,9 +1,16 @@
+using System.Runtime.CompilerServices;
 using DatumIngest.Model;
 
 namespace DatumIngest.Tests.Model;
 
 public class DataValueTests
 {
+    [Fact]
+    public void DataValue_Is20Bytes()
+    {
+        Assert.Equal(20, Unsafe.SizeOf<DataValue>());
+    }
+
     [Fact]
     public void ScalarValueStoresFloat()
     {

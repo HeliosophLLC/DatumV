@@ -17,7 +17,7 @@ namespace DatumIngest.Model;
 /// reset and discard the scoped store.  Every code path that creates reference-backed
 /// <see cref="DataValue"/> instances must run inside an active scope.
 /// </remarks>
-internal sealed class ReferenceStore
+internal sealed class ReferenceStore : IStringStore
 {
     private static readonly AsyncLocal<ReferenceStore?> _current = new();
 
@@ -25,6 +25,7 @@ internal sealed class ReferenceStore
     private int _count;
     private readonly Lock _growLock = new();
     private Dictionary<string, int>? _stringIntern;
+    private readonly byte _storeId;
 
     /// <summary>
     /// Creates a new reference store with the given initial capacity.
@@ -33,6 +34,7 @@ internal sealed class ReferenceStore
     private ReferenceStore(int initialCapacity = 4096)
     {
         _items = new object?[initialCapacity];
+        _storeId = StringStoreRegistry.Register(this);
     }
 
     /// <summary>
@@ -46,6 +48,19 @@ internal sealed class ReferenceStore
         _current.Value ?? throw new InvalidOperationException(
             "No ReferenceStore scope is active. Call ReferenceStore.BeginQueryScope() before creating reference-backed DataValues.");
 
+    // ───────────────────────── IStringStore ─────────────────────────
+
+    /// <inheritdoc />
+    public byte StoreId => _storeId;
+
+    /// <inheritdoc />
+    public (int P0, int P1) Store(string value) => (InternString(value), 0);
+
+    /// <inheritdoc />
+    public string Retrieve(int p0, int p1) => Get<string>(p0);
+
+    // ───────────────────────── Scope management ─────────────────────────
+
     /// <summary>
     /// Starts a new isolated store for the current async query context.
     /// Must be called before any query work that produces <see cref="DataValue"/> references.
@@ -58,7 +73,13 @@ internal sealed class ReferenceStore
     /// </summary>
     internal static void EndQueryScope()
     {
-        _current.Value?.Reset();
+        ReferenceStore? store = _current.Value;
+        if (store is not null)
+        {
+            StringStoreRegistry.Deregister(store._storeId);
+            store.Reset();
+        }
+
         _current.Value = null;
     }
 

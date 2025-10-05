@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using DatumIngest.Functions.Image;
 
 namespace DatumIngest.Model;
@@ -10,16 +11,17 @@ namespace DatumIngest.Model;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The struct is 24 bytes and fully blittable — it contains no managed reference fields.
-/// This means <see cref="DataValue"/> arrays are invisible to the garbage collector,
-/// eliminating GC scanning overhead for column buffers and row value arrays.
+/// The struct is 20 bytes with 4-byte alignment (3 values per 64-byte cache line).
+/// It contains no managed reference fields, keeping <see cref="DataValue"/> arrays
+/// invisible to the garbage collector.
 /// </para>
 /// <para>
 /// Fixed-size primitives (integers, floats, dates, booleans, UUIDs) are stored inline
-/// in <c>_numericBits</c> and <c>_bits1</c>.  Reference-type payloads (strings, float
-/// arrays, byte arrays, image handles, typed arrays) are stored in a thread-local
-/// <see cref="ReferenceStore"/> and accessed via an integer index in <c>_referenceIndex</c>.
-/// Arena-backed strings bypass the store entirely, using offset/length in the inline fields.
+/// in the 16-byte payload (<c>_p0</c>–<c>_p3</c>). Reference-type payloads (strings,
+/// float arrays, byte arrays, image handles, typed arrays) are stored in an
+/// <see cref="IStringStore"/> or <see cref="ReferenceStore"/> and accessed via an
+/// integer index in <c>_referenceIndex</c>. Arena-backed strings use offset/length
+/// in the inline payload.
 /// </para>
 /// <para>
 /// <c>default(DataValue)</c> has <see cref="DataKind.Unknown"/> (= 0) and is not null.
@@ -27,6 +29,7 @@ namespace DatumIngest.Model;
 /// <see cref="Null"/> to construct intentional values.
 /// </para>
 /// </remarks>
+[StructLayout(LayoutKind.Explicit, Size = 20)]
 public readonly struct DataValue : IEquatable<DataValue>
 {
     // ───────────────────────── Flag constants ─────────────────────────
@@ -34,26 +37,56 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Bit mask for the null flag in <see cref="_flags"/>.</summary>
     private const byte FlagIsNull = 0x01;
 
-    /// <summary>Bit mask indicating the value has a payload in the thread-local <see cref="ReferenceStore"/>.</summary>
+    /// <summary>Bit mask indicating the value has a payload in an <see cref="IStringStore"/> or <see cref="ReferenceStore"/>.</summary>
     private const byte FlagHasReference = 0x02;
 
-    // ───────────────────────── Fields (24 bytes, blittable) ─────────────────────────
+    // ───────────────────────── Fields (20 bytes) ─────────────────────────
 
-    private readonly DataKind _kind;       //  1 byte  — type discriminator
-    private readonly byte _flags;          //  1 byte  — FlagIsNull | FlagHasReference
-    private readonly short _meta;          //  2 bytes — type-specific metadata (Array element kind)
-    private readonly int _referenceIndex;  //  4 bytes — index into ReferenceStore (when FlagHasReference set)
-    private readonly long _numericBits;    //  8 bytes — primary inline payload
-    private readonly long _bits1;          //  8 bytes — secondary inline payload
+    // Header (4 bytes)
+    [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
+    [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: HasReference
+    [FieldOffset(2)]  private readonly byte _storeId;      //  1 byte  — IStringStore identity (0 = default)
+    [FieldOffset(3)]  private readonly byte _spare;        //  1 byte  — reserved
 
-    private DataValue(DataKind kind, long numericBits, long bits1, byte flags, short meta = 0, int referenceIndex = 0)
+    // Payload — inline interpretation (16 bytes)
+    [FieldOffset(4)]  private readonly int _p0;            //  4 bytes — payload word 0
+    [FieldOffset(8)]  private readonly int _p1;            //  4 bytes — payload word 1
+    [FieldOffset(12)] private readonly int _p2;            //  4 bytes — payload word 2
+    [FieldOffset(16)] private readonly int _p3;            //  4 bytes — payload word 3
+
+    // Payload — reference interpretation (overlaps _p0/_p1)
+    [FieldOffset(4)]  private readonly int _referenceIndex; // overlaps _p0
+    [FieldOffset(8)]  private readonly short _meta;         // overlaps low 2 bytes of _p1
+
+    private DataValue(DataKind kind, byte flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0,
+                      byte storeId = 0, short meta = 0)
     {
+        Unsafe.SkipInit(out this);
         _kind = kind;
         _flags = flags;
-        _meta = meta;
+        _storeId = storeId;
+        _spare = 0;
+        _p0 = p0;
+        _p1 = p1;
+        _p2 = p2;
+        _p3 = p3;
+    }
+
+    /// <summary>
+    /// Constructor for reference types that need <c>_meta</c>.
+    /// Sets <c>_p0</c> = referenceIndex and <c>_meta</c> at the overlapping offset.
+    /// </summary>
+    private DataValue(DataKind kind, byte flags, int referenceIndex, short meta, byte storeId = 0)
+    {
+        Unsafe.SkipInit(out this);
+        _kind = kind;
+        _flags = flags;
+        _storeId = storeId;
+        _spare = 0;
         _referenceIndex = referenceIndex;
-        _numericBits = numericBits;
-        _bits1 = bits1;
+        _meta = meta;
+        _p2 = 0;
+        _p3 = 0;
     }
 
     /// <summary>The type discriminator for this value.</summary>
@@ -62,16 +95,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Whether this value represents a typed null.</summary>
     public bool IsNull => (_flags & FlagIsNull) != 0;
 
-    /// <summary>Whether this value has a reference-type payload in the <see cref="ReferenceStore"/>.</summary>
+    /// <summary>Whether this value has a reference-type payload in an <see cref="IStringStore"/> or <see cref="ReferenceStore"/>.</summary>
     internal bool HasReference => (_flags & FlagHasReference) != 0;
 
     // ───────────────────────── Cached common instances ─────────────────────────
 
-    private static readonly DataValue Float32Zero = new(DataKind.Float32, numericBits: 0L, bits1: 0L, flags: 0);
-    private static readonly DataValue Float32One = new(DataKind.Float32, numericBits: BitConverter.SingleToInt32Bits(1f), bits1: 0L, flags: 0);
-    private static readonly DataValue NullUnknown = new(DataKind.Unknown, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
-    private static readonly DataValue BooleanTrue = new(DataKind.Boolean, numericBits: 1L, bits1: 0L, flags: 0);
-    private static readonly DataValue BooleanFalse = new(DataKind.Boolean, numericBits: 0L, bits1: 0L, flags: 0);
+    private static readonly DataValue Float32Zero = new(DataKind.Float32, flags: 0, p0: 0);
+    private static readonly DataValue Float32One = new(DataKind.Float32, flags: 0, p0: BitConverter.SingleToInt32Bits(1f));
+    private static readonly DataValue NullUnknown = new(DataKind.Unknown, flags: FlagIsNull, p0: 0);
+    private static readonly DataValue BooleanTrue = new(DataKind.Boolean, flags: 0, p0: 1);
+    private static readonly DataValue BooleanFalse = new(DataKind.Boolean, flags: 0, p0: 0);
 
     // ───────────────────────── Factory methods ─────────────────────────
 
@@ -80,57 +113,72 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (value == 0f) return Float32Zero;
         if (value == 1f) return Float32One;
-        return new(DataKind.Float32, numericBits: BitConverter.SingleToInt32Bits(value), bits1: 0L, flags: 0);
+        return new(DataKind.Float32, flags: 0, p0: BitConverter.SingleToInt32Bits(value));
     }
 
     /// <summary>Creates a value from an unsigned 8-bit integer.</summary>
     public static DataValue FromUInt8(byte value) =>
-        new(DataKind.UInt8, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.UInt8, flags: 0, p0: value);
 
     /// <summary>Creates a value from a signed 8-bit integer.</summary>
     public static DataValue FromInt8(sbyte value) =>
-        new(DataKind.Int8, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.Int8, flags: 0, p0: value);
 
     /// <summary>Creates a value from a signed 16-bit integer.</summary>
     public static DataValue FromInt16(short value) =>
-        new(DataKind.Int16, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.Int16, flags: 0, p0: value);
 
     /// <summary>Creates a value from an unsigned 16-bit integer.</summary>
     public static DataValue FromUInt16(ushort value) =>
-        new(DataKind.UInt16, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.UInt16, flags: 0, p0: value);
 
     /// <summary>Creates a value from a signed 32-bit integer.</summary>
     public static DataValue FromInt32(int value) =>
-        new(DataKind.Int32, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.Int32, flags: 0, p0: value);
 
     /// <summary>Creates a value from an unsigned 32-bit integer.</summary>
     public static DataValue FromUInt32(uint value) =>
-        new(DataKind.UInt32, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.UInt32, flags: 0, p0: unchecked((int)value));
 
     /// <summary>Creates a value from a signed 64-bit integer.</summary>
     public static DataValue FromInt64(long value) =>
-        new(DataKind.Int64, numericBits: value, bits1: 0L, flags: 0);
+        new(DataKind.Int64, flags: 0, p0: (int)value, p1: (int)(value >> 32));
 
     /// <summary>Creates a value from an unsigned 64-bit integer.</summary>
     public static DataValue FromUInt64(ulong value) =>
-        new(DataKind.UInt64, numericBits: unchecked((long)value), bits1: 0L, flags: 0);
+        new(DataKind.UInt64, flags: 0, p0: (int)value, p1: (int)(value >> 32));
 
     /// <summary>Creates a value from a 64-bit double-precision floating-point number.</summary>
-    public static DataValue FromFloat64(double value) =>
-        new(DataKind.Float64, numericBits: BitConverter.DoubleToInt64Bits(value), bits1: 0L, flags: 0);
+    public static DataValue FromFloat64(double value)
+    {
+        long bits = BitConverter.DoubleToInt64Bits(value);
+        return new(DataKind.Float64, flags: 0, p0: (int)bits, p1: (int)(bits >> 32));
+    }
 
     /// <summary>Creates a value from a byte array.</summary>
     public static DataValue FromUInt8Array(byte[] value)
     {
         int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.UInt8Array, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        return new(DataKind.UInt8Array, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>Creates a value from a text string.</summary>
     public static DataValue FromString(string value)
     {
-        int index = ReferenceStore.Current().InternString(value);
-        return new(DataKind.String, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        ReferenceStore store = ReferenceStore.Current();
+        int index = store.InternString(value);
+        return new(DataKind.String, flags: FlagHasReference, p0: index, storeId: store.StoreId);
+    }
+
+    /// <summary>
+    /// Creates a value from a text string using an explicit <see cref="IStringStore"/>.
+    /// </summary>
+    /// <param name="value">The string to store.</param>
+    /// <param name="store">The store to use for storage and later retrieval.</param>
+    public static DataValue FromString(string value, IStringStore store)
+    {
+        var (p0, p1) = store.Store(value);
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, storeId: store.StoreId);
     }
 
     /// <summary>
@@ -142,24 +190,35 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="kind">The data kind (must be a reference-backed kind such as
     /// <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>).</param>
     /// <param name="referenceIndex">Index returned by a prior intern call.</param>
-    internal static DataValue FromInternedReference(DataKind kind, int referenceIndex) =>
-        new(kind, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: referenceIndex);
+    internal static DataValue FromInternedReference(DataKind kind, int referenceIndex)
+    {
+        ReferenceStore store = ReferenceStore.Current();
+        return new(kind, flags: FlagHasReference, p0: referenceIndex, storeId: store.StoreId);
+    }
 
     /// <summary>
     /// Creates an arena-backed string value from an offset and length within a
     /// <see cref="StringArena"/>.  The actual bytes are not stored in this struct;
-    /// callers must resolve via <see cref="AsString(StringArena)"/>.
+    /// callers must resolve via <see cref="AsString(StringArena)"/> or the
+    /// <see cref="IStringStore"/> registry.
     /// </summary>
     /// <param name="offset">Byte offset into the owning <see cref="StringArena"/>.</param>
     /// <param name="length">Byte length of the UTF-8 encoded string.</param>
     public static DataValue FromStringSlice(int offset, int length) =>
-        new(DataKind.String, numericBits: offset, bits1: length, flags: 0);
+        new(DataKind.String, flags: 0, p0: offset, p1: length);
+
+    /// <summary>
+    /// Creates an arena-backed string value with an explicit <see cref="IStringStore"/>
+    /// so it can be resolved via <see cref="AsString()"/> without a separate arena parameter.
+    /// </summary>
+    public static DataValue FromStringSlice(int offset, int length, IStringStore store) =>
+        new(DataKind.String, flags: 0, p0: offset, p1: length, storeId: store.StoreId);
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
     public static DataValue FromVector(float[] value)
     {
         int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.Vector, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        return new(DataKind.Vector, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>Creates a rank-2 tensor (matrix) from a flat float array and its dimensions.</summary>
@@ -175,8 +234,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         int index = ReferenceStore.Current().Add(data);
-        return new DataValue(DataKind.Matrix, numericBits: (long)rows | ((long)columns << 32),
-                             bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        return new(DataKind.Matrix, flags: FlagHasReference, p0: index, p1: rows, p2: columns);
     }
 
     /// <summary>Creates an arbitrary-rank tensor from a flat float array and its shape.</summary>
@@ -199,14 +257,14 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         ReferenceStore store = ReferenceStore.Current();
         int index = store.AddPair(data, shape);
-        return new DataValue(DataKind.Tensor, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        return new(DataKind.Tensor, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>Creates a value from encoded image bytes.</summary>
     public static DataValue FromImage(byte[] value)
     {
         int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.Image, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        return new(DataKind.Image, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>
@@ -217,29 +275,48 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal static DataValue FromImageHandle(ImageHandle handle)
     {
         int index = ReferenceStore.Current().Add(handle);
-        return new(DataKind.Image, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        return new(DataKind.Image, flags: FlagHasReference, p0: index);
     }
 
     /// <summary>Creates a value from a calendar date.</summary>
     public static DataValue FromDate(DateOnly value) =>
-        new(DataKind.Date, numericBits: value.DayNumber, bits1: 0L, flags: 0);
+        new(DataKind.Date, flags: 0, p0: value.DayNumber);
 
     /// <summary>Creates a value from a date and time with UTC offset.</summary>
-    public static DataValue FromDateTime(DateTimeOffset value) =>
-        new(DataKind.DateTime, numericBits: value.Ticks, bits1: value.Offset.Ticks / TimeSpan.TicksPerMinute, flags: 0);
+    public static DataValue FromDateTime(DateTimeOffset value)
+    {
+        long ticks = value.Ticks;
+        return new(DataKind.DateTime, flags: 0,
+            p0: (int)ticks, p1: (int)(ticks >> 32),
+            p2: (int)(value.Offset.Ticks / TimeSpan.TicksPerMinute));
+    }
 
     /// <summary>Creates a value from a raw JSON string.</summary>
     public static DataValue FromJsonValue(string value)
     {
-        int index = ReferenceStore.Current().InternString(value);
-        return new(DataKind.JsonValue, numericBits: 0L, bits1: 0L, flags: FlagHasReference, referenceIndex: index);
+        ReferenceStore store = ReferenceStore.Current();
+        int index = store.InternString(value);
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index, storeId: store.StoreId);
+    }
+
+    /// <summary>
+    /// Creates a value from a raw JSON string using an explicit <see cref="IStringStore"/>.
+    /// </summary>
+    public static DataValue FromJsonValue(string value, IStringStore store)
+    {
+        var (p0, p1) = store.Store(value);
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1, storeId: store.StoreId);
     }
 
     /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
     public static DataValue FromUuid(Guid value)
     {
-        ref long pair = ref Unsafe.As<Guid, long>(ref value);
-        return new(DataKind.Uuid, numericBits: pair, bits1: Unsafe.Add(ref pair, 1), flags: 0);
+        ref int words = ref Unsafe.As<Guid, int>(ref value);
+        return new(DataKind.Uuid, flags: 0,
+            p0: words,
+            p1: Unsafe.Add(ref words, 1),
+            p2: Unsafe.Add(ref words, 2),
+            p3: Unsafe.Add(ref words, 3));
     }
 
     /// <summary>Creates a boolean value.</summary>
@@ -247,22 +324,28 @@ public readonly struct DataValue : IEquatable<DataValue>
         value ? BooleanTrue : BooleanFalse;
 
     /// <summary>Creates a value from a time-of-day.</summary>
-    public static DataValue FromTime(TimeOnly value) =>
-        new(DataKind.Time, numericBits: value.Ticks, bits1: 0L, flags: 0);
+    public static DataValue FromTime(TimeOnly value)
+    {
+        long ticks = value.Ticks;
+        return new(DataKind.Time, flags: 0, p0: (int)ticks, p1: (int)(ticks >> 32));
+    }
 
     /// <summary>Creates a value from a duration (elapsed time span).</summary>
-    public static DataValue FromDuration(TimeSpan value) =>
-        new(DataKind.Duration, numericBits: value.Ticks, bits1: 0L, flags: 0);
+    public static DataValue FromDuration(TimeSpan value)
+    {
+        long ticks = value.Ticks;
+        return new(DataKind.Duration, flags: 0, p0: (int)ticks, p1: (int)(ticks >> 32));
+    }
 
     /// <summary>Creates a type tag value that describes another <see cref="DataKind"/>.</summary>
     public static DataValue FromType(DataKind value) =>
-        new(DataKind.Type, numericBits: (long)value, bits1: 0L, flags: 0);
+        new(DataKind.Type, flags: 0, p0: (int)value);
 
     // ───────────────────────── Arena state ─────────────────────────
 
     /// <summary>
     /// Whether this value stores an arena offset rather than a direct reference.
-    /// True for string/JSON values created via <see cref="FromStringSlice"/>.
+    /// True for string/JSON values created via <see cref="FromStringSlice(int, int)"/>.
     /// </summary>
     public bool IsArenaBacked =>
         (_kind is DataKind.String or DataKind.JsonValue) && (_flags & (FlagIsNull | FlagHasReference)) == 0;
@@ -280,8 +363,8 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
-            DataKind.String => FromString(stringArena.GetString((int)_numericBits, (int)_bits1)),
-            DataKind.JsonValue => FromJsonValue(stringArena.GetString((int)_numericBits, (int)_bits1)),
+            DataKind.String => FromString(stringArena.GetString(_p0, _p1)),
+            DataKind.JsonValue => FromJsonValue(stringArena.GetString(_p0, _p1)),
             _ => this,
         };
     }
@@ -295,7 +378,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <returns>An adjusted value whose length is unchanged.</returns>
     internal DataValue WithArenaOffset(int delta)
     {
-        return new DataValue(_kind, numericBits: _numericBits + delta, bits1: _bits1, flags: 0);
+        return new DataValue(_kind, flags: 0, p0: _p0 + delta, p1: _p1, storeId: _storeId);
     }
 
     /// <summary>
@@ -307,14 +390,13 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromArray(DataKind elementKind, DataValue[] elements)
     {
         int index = ReferenceStore.Current().Add(elements);
-        return new(DataKind.Array, numericBits: 0L, bits1: 0L, flags: FlagHasReference,
-                   meta: (short)elementKind, referenceIndex: index);
+        return new(DataKind.Array, FlagHasReference, referenceIndex: index, meta: (short)elementKind);
     }
 
     /// <summary>Creates a typed null array with the given element kind.</summary>
     /// <param name="elementKind">The element kind of the null array.</param>
     public static DataValue NullArray(DataKind elementKind) =>
-        new(DataKind.Array, numericBits: 0L, bits1: 0L, flags: FlagIsNull, meta: (short)elementKind);
+        new(DataKind.Array, FlagIsNull, referenceIndex: 0, meta: (short)elementKind);
 
     /// <summary>
     /// Creates a struct value from a positional array of field values.
@@ -326,17 +408,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromStruct(short fieldCount, DataValue[] fields)
     {
         int index = ReferenceStore.Current().Add(fields);
-        return new(DataKind.Struct, numericBits: 0L, bits1: 0L, flags: FlagHasReference,
-                   meta: fieldCount, referenceIndex: index);
+        return new(DataKind.Struct, FlagHasReference, referenceIndex: index, meta: fieldCount);
     }
 
     /// <summary>Creates a typed null struct with the given field count.</summary>
     public static DataValue NullStruct(short fieldCount) =>
-        new(DataKind.Struct, numericBits: 0L, bits1: 0L, flags: FlagIsNull, meta: fieldCount);
+        new(DataKind.Struct, FlagIsNull, referenceIndex: 0, meta: fieldCount);
 
     /// <summary>Creates a typed null value.</summary>
     public static DataValue Null(DataKind kind)
-        => new(kind, numericBits: 0L, bits1: 0L, flags: FlagIsNull);
+        => new(kind, flags: FlagIsNull, p0: 0);
 
     /// <summary>
     /// Creates a null value whose type is not statically known.
@@ -430,20 +511,28 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         return _kind switch
         {
-            DataKind.Float32 => BitConverter.Int32BitsToSingle((int)_numericBits),
-            DataKind.Float64 => BitConverter.Int64BitsToDouble(_numericBits),
-            DataKind.UInt8 => (byte)_numericBits,
-            DataKind.Int8 => (sbyte)_numericBits,
-            DataKind.Int16 => (short)_numericBits,
-            DataKind.UInt16 => (ushort)_numericBits,
-            DataKind.Int32 => (int)_numericBits,
-            DataKind.UInt32 => (uint)_numericBits,
-            DataKind.Int64 => _numericBits,
-            DataKind.UInt64 => (ulong)_numericBits,
-            DataKind.Boolean => _numericBits != 0L ? 1d : 0d,
+            DataKind.Float32 => BitConverter.Int32BitsToSingle(_p0),
+            DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()),
+            DataKind.UInt8 => (byte)_p0,
+            DataKind.Int8 => (sbyte)_p0,
+            DataKind.Int16 => (short)_p0,
+            DataKind.UInt16 => (ushort)_p0,
+            DataKind.Int32 => _p0,
+            DataKind.UInt32 => (uint)_p0,
+            DataKind.Int64 => ReadLong(),
+            DataKind.UInt64 => (ulong)ReadLong(),
+            DataKind.Boolean => _p0 != 0 ? 1d : 0d,
             _ => 0d,
         };
     }
+
+    /// <summary>
+    /// Reads <c>_p0</c> and <c>_p1</c> as a single <see cref="long"/> value.
+    /// Used by 64-bit types (Int64, UInt64, Float64, DateTime, Time, Duration).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long ReadLong() =>
+        Unsafe.As<int, long>(ref Unsafe.AsRef(in _p0));
 
     /// <summary>
     /// Creates a <see cref="DataValue"/> of the specified kind from a <see cref="double"/> value.
@@ -475,7 +564,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public float AsFloat32()
     {
         ThrowIfNullOrWrongKind(DataKind.Float32);
-        return BitConverter.Int32BitsToSingle((int)_numericBits);
+        return BitConverter.Int32BitsToSingle(_p0);
     }
 
     /// <summary>Returns the unsigned 8-bit integer payload.</summary>
@@ -483,7 +572,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public byte AsUInt8()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8);
-        return (byte)_numericBits;
+        return (byte)_p0;
     }
 
     /// <summary>Returns the signed 8-bit integer payload.</summary>
@@ -491,7 +580,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public sbyte AsInt8()
     {
         ThrowIfNullOrWrongKind(DataKind.Int8);
-        return (sbyte)_numericBits;
+        return (sbyte)_p0;
     }
 
     /// <summary>Returns the signed 16-bit integer payload.</summary>
@@ -499,7 +588,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public short AsInt16()
     {
         ThrowIfNullOrWrongKind(DataKind.Int16);
-        return (short)_numericBits;
+        return (short)_p0;
     }
 
     /// <summary>Returns the unsigned 16-bit integer payload.</summary>
@@ -507,7 +596,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public ushort AsUInt16()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt16);
-        return (ushort)_numericBits;
+        return (ushort)_p0;
     }
 
     /// <summary>Returns the signed 32-bit integer payload.</summary>
@@ -515,7 +604,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public int AsInt32()
     {
         ThrowIfNullOrWrongKind(DataKind.Int32);
-        return (int)_numericBits;
+        return _p0;
     }
 
     /// <summary>Returns the unsigned 32-bit integer payload.</summary>
@@ -523,7 +612,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public uint AsUInt32()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt32);
-        return (uint)_numericBits;
+        return unchecked((uint)_p0);
     }
 
     /// <summary>Returns the signed 64-bit integer payload.</summary>
@@ -531,7 +620,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public long AsInt64()
     {
         ThrowIfNullOrWrongKind(DataKind.Int64);
-        return _numericBits;
+        return ReadLong();
     }
 
     /// <summary>Returns the unsigned 64-bit integer payload.</summary>
@@ -539,7 +628,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public ulong AsUInt64()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt64);
-        return unchecked((ulong)_numericBits);
+        return unchecked((ulong)ReadLong());
     }
 
     /// <summary>Returns the 64-bit double-precision floating-point payload.</summary>
@@ -547,7 +636,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public double AsFloat64()
     {
         ThrowIfNullOrWrongKind(DataKind.Float64);
-        return BitConverter.Int64BitsToDouble(_numericBits);
+        return BitConverter.Int64BitsToDouble(ReadLong());
     }
 
     // ─────────────────────── Widening numeric conversions ───────────────────────
@@ -873,6 +962,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsString()
     {
         ThrowIfNullOrWrongKind(DataKind.String);
+        if (_storeId != 0)
+        {
+            return StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1);
+        }
+
         if ((_flags & FlagHasReference) == 0)
         {
             throw new InvalidOperationException(
@@ -895,10 +989,12 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if ((_flags & FlagHasReference) != 0)
         {
+            if (_storeId != 0)
+                return StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1);
             return ReferenceStore.Current().Get<string>(_referenceIndex);
         }
 
-        return arena.GetString((int)_numericBits, (int)_bits1);
+        return arena.GetString(_p0, _p1);
     }
 
     /// <summary>
@@ -910,7 +1006,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public ReadOnlySpan<byte> GetArenaStringSpan(StringArena arena)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        return arena.GetSpan((int)_numericBits, (int)_bits1);
+        return arena.GetSpan(_p0, _p1);
     }
 
     /// <summary>Returns the vector (rank-1) float array payload.</summary>
@@ -926,8 +1022,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     public float[] AsMatrix(out int rows, out int columns)
     {
         ThrowIfNullOrWrongKind(DataKind.Matrix);
-        rows = (int)_numericBits;
-        columns = (int)(_numericBits >> 32);
+        rows = _p1;
+        columns = _p2;
         return ReferenceStore.Current().Get<float[]>(_referenceIndex);
     }
 
@@ -996,7 +1092,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DateOnly AsDate()
     {
         ThrowIfNullOrWrongKind(DataKind.Date);
-        return DateOnly.FromDayNumber((int)_numericBits);
+        return DateOnly.FromDayNumber(_p0);
     }
 
     /// <summary>Returns the date and time payload with UTC offset.</summary>
@@ -1004,7 +1100,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DateTimeOffset AsDateTime()
     {
         ThrowIfNullOrWrongKind(DataKind.DateTime);
-        return new DateTimeOffset(_numericBits, new TimeSpan(_bits1 * TimeSpan.TicksPerMinute));
+        return new DateTimeOffset(ReadLong(), new TimeSpan((long)_p2 * TimeSpan.TicksPerMinute));
     }
 
     /// <summary>Returns the raw JSON string payload.</summary>
@@ -1012,6 +1108,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsJsonValue()
     {
         ThrowIfNullOrWrongKind(DataKind.JsonValue);
+        if (_storeId != 0)
+            return StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1);
         return ReferenceStore.Current().Get<string>(_referenceIndex);
     }
 
@@ -1020,10 +1118,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public Guid AsUuid()
     {
         ThrowIfNullOrWrongKind(DataKind.Uuid);
-        Guid result = default;
-        Unsafe.As<Guid, long>(ref result) = _numericBits;
-        Unsafe.Add(ref Unsafe.As<Guid, long>(ref result), 1) = _bits1;
-        return result;
+        return Unsafe.As<int, Guid>(ref Unsafe.AsRef(in _p0));
     }
 
     /// <summary>Returns the boolean payload.</summary>
@@ -1031,7 +1126,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public bool AsBoolean()
     {
         ThrowIfNullOrWrongKind(DataKind.Boolean);
-        return _numericBits != 0L;
+        return _p0 != 0;
     }
 
     /// <summary>Returns the time-of-day payload.</summary>
@@ -1039,7 +1134,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public TimeOnly AsTime()
     {
         ThrowIfNullOrWrongKind(DataKind.Time);
-        return new TimeOnly(_numericBits);
+        return new TimeOnly(ReadLong());
     }
 
     /// <summary>Returns the duration payload.</summary>
@@ -1047,7 +1142,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public TimeSpan AsDuration()
     {
         ThrowIfNullOrWrongKind(DataKind.Duration);
-        return new TimeSpan(_numericBits);
+        return new TimeSpan(ReadLong());
     }
 
     /// <summary>Returns the <see cref="DataKind"/> that this type tag describes.</summary>
@@ -1055,7 +1150,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public DataKind AsType()
     {
         ThrowIfNullOrWrongKind(DataKind.Type);
-        return (DataKind)(byte)_numericBits;
+        return (DataKind)(byte)_p0;
     }
 
     /// <summary>Returns the typed array payload.</summary>
@@ -1129,7 +1224,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
             DataKind.Matrix =>
                 FromTensor(ReferenceStore.Current().Get<float[]>(_referenceIndex),
-                           [(int)_numericBits, (int)(_numericBits >> 32)]),
+                           [_p1, _p2]),
 
             _ => throw new InvalidOperationException(
                 $"Cannot convert {_kind} to Tensor. Only Vector and Matrix are supported."),
@@ -1193,31 +1288,34 @@ public readonly struct DataValue : IEquatable<DataValue>
             // Unknown sentinel: no payload, so non-null Unknown values are always equal.
             DataKind.Unknown => true,
 
-            // Fixed-size integer types: compare bits directly (no -0 ambiguity for integers).
+            // Small integer types: compare _p0 directly (no -0 ambiguity for integers).
             DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Boolean or DataKind.Date or DataKind.Time or DataKind.Duration
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Boolean or DataKind.Date
             or DataKind.Type
-                => _numericBits == other._numericBits,
+                => _p0 == other._p0,
+
+            // 64-bit integer/temporal types: compare _p0 + _p1.
+            DataKind.Int64 or DataKind.UInt64 or DataKind.Time or DataKind.Duration
+                => _p0 == other._p0 && _p1 == other._p1,
 
             // Float types: recover the actual float so IEEE semantics (NaN != NaN, -0 == 0) are preserved.
             DataKind.Float32
-                => BitConverter.Int32BitsToSingle((int)_numericBits) == BitConverter.Int32BitsToSingle((int)other._numericBits),
+                => BitConverter.Int32BitsToSingle(_p0) == BitConverter.Int32BitsToSingle(other._p0),
             DataKind.Float64
-                => BitConverter.Int64BitsToDouble(_numericBits) == BitConverter.Int64BitsToDouble(other._numericBits),
+                => BitConverter.Int64BitsToDouble(ReadLong()) == BitConverter.Int64BitsToDouble(other.ReadLong()),
 
             // Reference types:
             DataKind.String or DataKind.JsonValue
                 => CompareStrings(in this, in other),
             DataKind.Uuid
-                => _numericBits == other._numericBits && _bits1 == other._bits1,
+                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
             DataKind.DateTime
-                => _numericBits == other._numericBits && _bits1 == other._bits1,
+                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             DataKind.Vector
                 => ReferenceStore.Current().Get<float[]>(_referenceIndex).AsSpan()
                        .SequenceEqual(ReferenceStore.Current().Get<float[]>(other._referenceIndex)),
             DataKind.Matrix
-                => _numericBits == other._numericBits
+                => _p1 == other._p1 && _p2 == other._p2
                    && ReferenceStore.Current().Get<float[]>(_referenceIndex).AsSpan()
                           .SequenceEqual(ReferenceStore.Current().Get<float[]>(other._referenceIndex)),
             DataKind.Tensor
@@ -1246,32 +1344,37 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
-            // Fixed-size integer types: hash bits directly.
+            // Small integer types: hash _p0 directly.
             DataKind.UInt8 or DataKind.Int8 or DataKind.Int16 or DataKind.UInt16
-            or DataKind.Int32 or DataKind.UInt32 or DataKind.Int64 or DataKind.UInt64
-            or DataKind.Boolean or DataKind.Date or DataKind.Time or DataKind.Duration
+            or DataKind.Int32 or DataKind.UInt32 or DataKind.Boolean or DataKind.Date
             or DataKind.Type
-                => HashCode.Combine(_kind, _numericBits),
+                => HashCode.Combine(_kind, _p0),
+
+            // 64-bit integer/temporal types: hash _p0 + _p1.
+            DataKind.Int64 or DataKind.UInt64 or DataKind.Time or DataKind.Duration
+                => HashCode.Combine(_kind, _p0, _p1),
 
             // Float types: delegate to float/double GetHashCode so -0 == 0 hashing is preserved.
             DataKind.Float32
-                => HashCode.Combine(_kind, BitConverter.Int32BitsToSingle((int)_numericBits)),
+                => HashCode.Combine(_kind, BitConverter.Int32BitsToSingle(_p0)),
             DataKind.Float64
-                => HashCode.Combine(_kind, BitConverter.Int64BitsToDouble(_numericBits)),
+                => HashCode.Combine(_kind, BitConverter.Int64BitsToDouble(ReadLong())),
 
             // Reference types:
             DataKind.String or DataKind.JsonValue
-                => (_flags & FlagHasReference) != 0
-                    ? HashCode.Combine(_kind, ReferenceStore.Current().Get<string>(_referenceIndex))
-                    : HashCode.Combine(_kind, _numericBits, _bits1),
+                => HasReference
+                    ? HashCode.Combine(_kind, (_storeId != 0
+                        ? StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1)
+                        : ReferenceStore.Current().Get<string>(_referenceIndex)))
+                    : HashCode.Combine(_kind, _p0, _p1),
             DataKind.DateTime
-                => HashCode.Combine(_kind, _numericBits, _bits1),
+                => HashCode.Combine(_kind, _p0, _p1, _p2),
             DataKind.Uuid
-                => HashCode.Combine(_kind, _numericBits, _bits1),
+                => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
             DataKind.Vector
                 => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex)),
             DataKind.Matrix
-                => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex), _numericBits),
+                => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex), _p1, _p2),
             DataKind.Tensor
                 => CombineTensorHash(_kind, _referenceIndex),
             DataKind.UInt8Array
@@ -1302,23 +1405,28 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     private static bool CompareStrings(in DataValue left, in DataValue right)
     {
-        bool leftArena = (left._flags & FlagHasReference) == 0;
-        bool rightArena = (right._flags & FlagHasReference) == 0;
+        bool leftHasRef = (left._flags & FlagHasReference) != 0;
+        bool rightHasRef = (right._flags & FlagHasReference) != 0;
 
-        if (!leftArena && !rightArena)
+        if (leftHasRef && rightHasRef)
         {
-            ReferenceStore store = ReferenceStore.Current();
-            return (string)store.Get(left._referenceIndex) == (string)store.Get(right._referenceIndex);
+            // Both reference-backed: resolve via store and compare strings.
+            string leftStr = left._storeId != 0
+                ? StringStoreRegistry.Get(left._storeId).Retrieve(left._p0, left._p1)
+                : ReferenceStore.Current().Get<string>(left._referenceIndex);
+            string rightStr = right._storeId != 0
+                ? StringStoreRegistry.Get(right._storeId).Retrieve(right._p0, right._p1)
+                : ReferenceStore.Current().Get<string>(right._referenceIndex);
+            return leftStr == rightStr;
         }
 
-        if (leftArena && rightArena)
+        if (!leftHasRef && !rightHasRef)
         {
-            // Same arena, same offset+length → same content.
-            return left._numericBits == right._numericBits && left._bits1 == right._bits1;
+            // Both arena-backed: same offset+length → same content.
+            return left._p0 == right._p0 && left._p1 == right._p1;
         }
 
         // Mixed arena/non-arena: cannot compare without arena context.
-        // Materialise before comparing.
         return false;
     }
 
@@ -1374,12 +1482,12 @@ public readonly struct DataValue : IEquatable<DataValue>
         return hash.ToHashCode();
     }
 
-    private static int CombineFloatArrayHash(DataKind kind, float[] data, long shapeBits)
+    private static int CombineFloatArrayHash(DataKind kind, float[] data, int rows, int columns)
     {
         HashCode hash = new();
         hash.Add(kind);
-        hash.Add((int)shapeBits);
-        hash.Add((int)(shapeBits >> 32));
+        hash.Add(rows);
+        hash.Add(columns);
 
         foreach (float element in data)
         {
@@ -1447,30 +1555,30 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         return _kind switch
         {
-            DataKind.Float32 => BitConverter.Int32BitsToSingle((int)_numericBits).ToString("G"),
-            DataKind.UInt8 => ((byte)_numericBits).ToString(),
-            DataKind.Int8 => ((sbyte)_numericBits).ToString(),
-            DataKind.Int16 => ((short)_numericBits).ToString(),
-            DataKind.UInt16 => ((ushort)_numericBits).ToString(),
-            DataKind.Int32 => ((int)_numericBits).ToString(),
-            DataKind.UInt32 => ((uint)_numericBits).ToString(),
-            DataKind.Int64 => _numericBits.ToString(),
-            DataKind.UInt64 => unchecked((ulong)_numericBits).ToString(),
-            DataKind.Float64 => BitConverter.Int64BitsToDouble(_numericBits).ToString("G"),
-            DataKind.String => (_flags & FlagHasReference) != 0
-                ? ReferenceStore.Current().Get<string>(_referenceIndex)
-                : $"String[arena@{_numericBits}+{_bits1}]",
-            DataKind.Date => DateOnly.FromDayNumber((int)_numericBits).ToString("yyyy-MM-dd"),
+            DataKind.Float32 => BitConverter.Int32BitsToSingle(_p0).ToString("G"),
+            DataKind.UInt8 => ((byte)_p0).ToString(),
+            DataKind.Int8 => ((sbyte)_p0).ToString(),
+            DataKind.Int16 => ((short)_p0).ToString(),
+            DataKind.UInt16 => ((ushort)_p0).ToString(),
+            DataKind.Int32 => _p0.ToString(),
+            DataKind.UInt32 => unchecked((uint)_p0).ToString(),
+            DataKind.Int64 => ReadLong().ToString(),
+            DataKind.UInt64 => unchecked((ulong)ReadLong()).ToString(),
+            DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()).ToString("G"),
+            DataKind.String => HasReference
+                ? (_storeId != 0 ? StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1) : ReferenceStore.Current().Get<string>(_referenceIndex))
+                : $"String[arena@{_p0}+{_p1}]",
+            DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
-            DataKind.JsonValue => (_flags & FlagHasReference) != 0
-                ? ReferenceStore.Current().Get<string>(_referenceIndex)
-                : $"JsonValue[arena@{_numericBits}+{_bits1}]",
+            DataKind.JsonValue => HasReference
+                ? (_storeId != 0 ? StringStoreRegistry.Get(_storeId).Retrieve(_p0, _p1) : ReferenceStore.Current().Get<string>(_referenceIndex))
+                : $"JsonValue[arena@{_p0}+{_p1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
-            DataKind.Boolean => _numericBits != 0L ? "true" : "false",
-            DataKind.Time => new TimeOnly(_numericBits).ToString("HH:mm:ss.FFFFFFF"),
-            DataKind.Duration => new TimeSpan(_numericBits).ToString("c"),
+            DataKind.Boolean => _p0 != 0 ? "true" : "false",
+            DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
+            DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
             DataKind.Vector => $"Vector[{ReferenceStore.Current().Get<float[]>(_referenceIndex).Length}]",
-            DataKind.Matrix => $"Matrix[{(int)_numericBits}x{(int)(_numericBits >> 32)}]",
+            DataKind.Matrix => $"Matrix[{_p1}x{_p2}]",
             DataKind.Tensor => $"Tensor[{string.Join("x", ReferenceStore.Current().Get<int[]>(_referenceIndex + 1))}]",
             DataKind.UInt8Array => $"UInt8Array[{ReferenceStore.Current().Get<byte[]>(_referenceIndex).Length}]",
             DataKind.Image => $"Image[{AsImage().Length} bytes]",

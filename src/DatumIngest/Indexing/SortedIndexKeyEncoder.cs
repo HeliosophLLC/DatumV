@@ -164,7 +164,7 @@ internal static class SortedIndexKeyEncoder
     /// <summary>
     /// Decodes a fixed-width key from the source span back into a <see cref="DataValue"/>.
     /// For <see cref="DataKind.String"/> keys, use <see cref="DecodeStringReference"/> and
-    /// resolve the string from the string table before calling <see cref="DataValue.FromString"/>.
+    /// resolve the string from the string table before calling <see cref="DataValue.FromString(string)"/>.
     /// </summary>
     /// <param name="kind">The data kind to decode as.</param>
     /// <param name="source">The encoded key bytes.</param>
