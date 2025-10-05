@@ -11,6 +11,7 @@
     <Project Path="src/DatumIngest.Parsing/DatumIngest.Parsing.csproj" />
     <Project Path="src/DatumIngest.Server/DatumIngest.Server.csproj" />
     <Project Path="src/DatumIngest.Wasm/DatumIngest.Wasm.csproj" />
+    <Project Path="src/DatumIngest.Serialization/DatumIngest.Serialization.csproj" />
     <Project Path="src/DatumIngest/DatumIngest.csproj" />
   </Folder>
   <Folder Name="/tests/">
