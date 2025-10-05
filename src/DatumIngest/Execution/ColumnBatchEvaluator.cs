@@ -909,7 +909,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 DataValue value = source[row];
                 if (value.IsArenaBacked)
                 {
-                    value = DataValue.FromString(value.AsString(batch.StringArena));
+                    value = DataValue.FromString(value.AsString(batch.Arena));
                 }
 
                 arguments[0] = value;
@@ -1050,7 +1050,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
                 {
                     DataValue arg = argumentColumns[argument][row];
                     arguments[argument] = arg.IsArenaBacked
-                        ? DataValue.FromString(arg.AsString(batch.StringArena))
+                        ? DataValue.FromString(arg.AsString(batch.Arena))
                         : arg;
                 }
 
@@ -1125,7 +1125,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     {
         if (value.IsArenaBacked)
         {
-            return value.AsString(batch.StringArena);
+            return value.AsString(batch.Arena);
         }
 
         return value.AsString();
@@ -1137,7 +1137,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
     /// </summary>
     private static int CompareDataValues(DataValue left, DataValue right, ColumnBatch batch)
     {
-        return DataValueComparer.Compare(left, right, batch.StringArena);
+        return DataValueComparer.Compare(left, right, batch.Arena);
     }
 
     private bool TryGetOrBuildLiteralValueSet(

@@ -192,7 +192,7 @@ public sealed class DatumFileReader : IDisposable
     /// <summary>
     /// Reads and decodes the specified columns for the given row group directly into
     /// a <see cref="ColumnBatch"/>.  String and JSON columns are decoded into the
-    /// batch's <see cref="StringArena"/> as raw UTF-8 bytes rather than managed strings.
+    /// batch's <see cref="Arena"/> as raw UTF-8 bytes rather than managed strings.
     /// </summary>
     /// <param name="rowGroupIndex">Zero-based row group index.</param>
     /// <param name="columnIndices">Schema column indices to decode.</param>
@@ -231,8 +231,7 @@ public sealed class DatumFileReader : IDisposable
                 descriptor,
                 context,
                 batch.GetColumnBuffer(i),
-                batch.StringArena,
-                batch.DataArena);
+                batch.Arena);
         }
 
         batch.SetRowCount(rowCount);

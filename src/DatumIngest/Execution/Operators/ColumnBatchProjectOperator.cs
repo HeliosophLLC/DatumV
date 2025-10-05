@@ -102,7 +102,7 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
 
     /// <summary>
     /// Copies column values from source to destination, transferring arena-backed
-    /// string data into the destination batch's <see cref="StringArena"/>.
+    /// string data into the destination batch's <see cref="Arena"/>.
     /// </summary>
     private static void CopyColumnWithArenaTransfer(
         DataValue[] source,
@@ -130,8 +130,8 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
             return;
         }
 
-        StringArena sourceArena = sourceBatch.StringArena;
-        StringArena destinationArena = destinationBatch.StringArena;
+        Arena sourceArena = sourceBatch.Arena;
+        Arena destinationArena = destinationBatch.Arena;
 
         for (int row = 0; row < rowCount; row++)
         {
@@ -140,7 +140,7 @@ public sealed class ColumnBatchProjectOperator : IColumnBatchOperator
             if (value.IsArenaBacked)
             {
                 ReadOnlySpan<byte> utf8Bytes = value.GetArenaStringSpan(sourceArena);
-                (int newOffset, int length) = destinationArena.Append(utf8Bytes);
+                (int newOffset, int length) = destinationArena.AppendUtf8(utf8Bytes);
                 destination[row] = DataValue.FromStringSlice(newOffset, length);
             }
             else

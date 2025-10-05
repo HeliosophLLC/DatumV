@@ -135,18 +135,15 @@ public sealed class DatumMemoryMappedReader : IDisposable
         ColumnBatch batch = ColumnBatch.Create(columnNames, nameIndex, rowCount);
         DatumDecoderContext context = new() { DatumFilePath = _filePath };
 
-        // Each parallel column gets a private arena pair; after decode completes,
-        // their contents are bulk-copied into the batch's shared arenas and offsets
+        // Each parallel column gets a private arena; after decode completes,
+        // its contents are bulk-copied into the batch's shared arena and offsets
         // in the DataValues are adjusted.
-        StringArena[] perColumnStringArenas = new StringArena[columnIndices.Length];
-        DataArena[] perColumnDataArenas = new DataArena[columnIndices.Length];
+        Arena[] perColumnArenas = new Arena[columnIndices.Length];
 
         Parallel.For(0, columnIndices.Length, resultIndex =>
         {
-            StringArena localStringArena = new();
-            DataArena localDataArena = new();
-            perColumnStringArenas[resultIndex] = localStringArena;
-            perColumnDataArenas[resultIndex] = localDataArena;
+            Arena localArena = new();
+            perColumnArenas[resultIndex] = localArena;
 
             int columnIndex = columnIndices[resultIndex];
             DatumColumnChunkDescriptor chunk = rowGroup.ColumnChunks[columnIndex];
@@ -164,32 +161,24 @@ public sealed class DatumMemoryMappedReader : IDisposable
                 descriptor,
                 context,
                 batch.GetColumnBuffer(resultIndex),
-                localStringArena,
-                localDataArena);
+                localArena);
         });
 
-        // Merge per-column arenas into the batch's shared arenas sequentially.
+        // Merge per-column arenas into the batch's shared arena sequentially.
         for (int i = 0; i < columnIndices.Length; i++)
         {
-            StringArena localStringArena = perColumnStringArenas[i];
-            DataArena localDataArena = perColumnDataArenas[i];
+            Arena localArena = perColumnArenas[i];
 
-            if (localStringArena.BytesWritten > 0)
+            if (localArena.BytesWritten > 0)
             {
-                int baseOffset = batch.StringArena.CopyFrom(localStringArena);
+                int baseOffset = batch.Arena.CopyFrom(localArena);
                 if (baseOffset > 0)
                 {
                     ColumnBatch.AdjustArenaOffsets(batch.GetColumnBuffer(i), rowCount, baseOffset);
                 }
             }
 
-            if (localDataArena.BytesWritten > 0)
-            {
-                batch.DataArena.CopyFrom(localDataArena);
-            }
-
-            localStringArena.Dispose();
-            localDataArena.Dispose();
+            localArena.Dispose();
         }
 
         batch.SetRowCount(rowCount);

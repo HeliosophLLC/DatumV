@@ -3,10 +3,10 @@ using System.Buffers;
 namespace DatumIngest.Model;
 
 /// <summary>
-/// A column-major batch of data that owns its backing storage and arenas.
+/// A column-major batch of data that owns its backing storage and arena.
 /// Each column is a contiguous <see cref="DataValue"/> array; string and binary
-/// payloads are stored in shared <see cref="StringArena"/> and <see cref="DataArena"/>
-/// buffers rather than individual heap objects.
+/// payloads are stored in a shared <see cref="Arena"/> buffer rather than
+/// individual heap objects.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,16 +33,14 @@ public sealed class ColumnBatch : IDisposable
         int rowCapacity,
         string[] columnNames,
         Dictionary<string, int> nameIndex,
-        StringArena stringArena,
-        DataArena dataArena)
+        Arena arena)
     {
         _columns = columns;
         ColumnCount = columnCount;
         RowCapacity = rowCapacity;
         _columnNames = columnNames;
         _nameIndex = nameIndex;
-        StringArena = stringArena;
-        DataArena = dataArena;
+        Arena = arena;
     }
 
     /// <summary>Number of columns in this batch.</summary>
@@ -54,11 +52,8 @@ public sealed class ColumnBatch : IDisposable
     /// <summary>Number of rows that have been written.</summary>
     public int RowCount { get; private set; }
 
-    /// <summary>The arena that owns UTF-8 encoded string data for this batch.</summary>
-    public StringArena StringArena { get; }
-
-    /// <summary>The arena that owns float/byte blob data for this batch.</summary>
-    public DataArena DataArena { get; }
+    /// <summary>The arena that owns all reference-type payloads (strings, floats, byte blobs) for this batch.</summary>
+    public Arena Arena { get; }
 
     /// <summary>The ordered column names.</summary>
     public IReadOnlyList<string> ColumnNames => _columnNames;
@@ -86,10 +81,9 @@ public sealed class ColumnBatch : IDisposable
             columns[column] = ArrayPool<DataValue>.Shared.Rent(rowCapacity);
         }
 
-        StringArena stringArena = new();
-        DataArena dataArena = new();
+        Arena arena = new();
 
-        return new ColumnBatch(columns, columnCount, rowCapacity, columnNames, nameIndex, stringArena, dataArena);
+        return new ColumnBatch(columns, columnCount, rowCapacity, columnNames, nameIndex, arena);
     }
 
     /// <summary>
@@ -190,7 +184,7 @@ public sealed class ColumnBatch : IDisposable
         DataValue value = _columns[column][row];
         if (value.IsArenaBacked)
         {
-            return value.AsString(StringArena);
+            return value.AsString(Arena);
         }
 
         return value.AsString();
@@ -205,7 +199,7 @@ public sealed class ColumnBatch : IDisposable
     public ReadOnlySpan<byte> GetStringBytes(int row, int column)
     {
         DataValue value = _columns[column][row];
-        return value.GetArenaStringSpan(StringArena);
+        return value.GetArenaStringSpan(Arena);
     }
 
     /// <summary>
@@ -230,7 +224,7 @@ public sealed class ColumnBatch : IDisposable
 
             if (value.IsArenaBacked)
             {
-                values[column] = value.Materialize(StringArena, DataArena);
+                values[column] = value.Materialize(Arena);
             }
             else
             {
@@ -258,7 +252,7 @@ public sealed class ColumnBatch : IDisposable
         {
             DataValue value = _columns[column][rowIndex];
             buffer[column] = value.IsArenaBacked
-                ? value.Materialize(StringArena, DataArena)
+                ? value.Materialize(Arena)
                 : value;
         }
 
@@ -270,7 +264,7 @@ public sealed class ColumnBatch : IDisposable
     /// <summary>
     /// Adjusts the arena offsets of all arena-backed <see cref="DataValue"/> entries in a
     /// column buffer by adding <paramref name="baseOffset"/>.
-    /// Used after merging a per-column private <see cref="StringArena"/> into the batch's
+    /// Used after merging a per-column private <see cref="Arena"/> into the batch's
     /// shared arena during parallel decode.
     /// </summary>
     /// <param name="column">The column buffer whose values may need offset adjustment.</param>
@@ -360,7 +354,6 @@ public sealed class ColumnBatch : IDisposable
 
         ArrayPool<DataValue[]>.Shared.Return(_columns, clearArray: true);
         _columns = Array.Empty<DataValue[]>();
-        StringArena.Dispose();
-        DataArena.Dispose();
+        Arena.Dispose();
     }
 }

@@ -3,7 +3,7 @@ namespace DatumIngest.Model;
 /// <summary>
 /// Unified contract for storing and retrieving strings from a backing store.
 /// Implemented by <see cref="ReferenceStore"/> (per-query object registry) and
-/// <see cref="StringArena"/> (contiguous UTF-8 byte buffer).
+/// <see cref="Arena"/> (contiguous UTF-8 byte buffer).
 /// </summary>
 /// <remarks>
 /// Each implementation is assigned a unique <see cref="StoreId"/> on construction
@@ -24,7 +24,7 @@ public interface IStringStore
     /// <param name="value">The string to store.</param>
     /// <returns>
     /// A pair of ints: for <see cref="ReferenceStore"/>, (index, 0);
-    /// for <see cref="StringArena"/>, (offset, length).
+    /// for <see cref="Arena"/>, (offset, length).
     /// </returns>
     (int P0, int P1) Store(string value);
 

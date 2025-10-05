@@ -557,11 +557,11 @@ public sealed class ColumnBatchEvaluatorTests
     public void CastColumn_ArenaBackedString_ToFloat64()
     {
         // Reproduces: CAST(arena_string AS FLOAT64) fails with
-        // "This string value is arena-backed. Use AsString(StringArena) to materialise it."
+        // "This string value is arena-backed. Use AsString(Arena) to materialise it."
         // because CastFunction.Execute calls .AsString() without an arena.
         using ColumnBatch batch = ColumnBatch.Create(["value"], rowCapacity: 2);
-        (int off1, int len1) = batch.StringArena.Append("3.14");
-        (int off2, int len2) = batch.StringArena.Append("2.72");
+        (int off1, int len1) = batch.Arena.AppendString("3.14");
+        (int off2, int len2) = batch.Arena.AppendString("2.72");
         batch.SetValue(0, 0, DataValue.FromStringSlice(off1, len1));
         batch.SetValue(0, 1, DataValue.FromStringSlice(off2, len2));
         batch.SetRowCount(2);
@@ -581,8 +581,8 @@ public sealed class ColumnBatchEvaluatorTests
     {
         // Scalar functions (e.g. lower()) must handle arena-backed string inputs.
         using ColumnBatch batch = ColumnBatch.Create(["name"], rowCapacity: 2);
-        (int off1, int len1) = batch.StringArena.Append("HELLO");
-        (int off2, int len2) = batch.StringArena.Append("WORLD");
+        (int off1, int len1) = batch.Arena.AppendString("HELLO");
+        (int off2, int len2) = batch.Arena.AppendString("WORLD");
         batch.SetValue(0, 0, DataValue.FromStringSlice(off1, len1));
         batch.SetValue(0, 1, DataValue.FromStringSlice(off2, len2));
         batch.SetRowCount(2);
@@ -601,8 +601,8 @@ public sealed class ColumnBatchEvaluatorTests
     {
         // Arithmetic on arena-backed string columns (implicit string-to-float coercion).
         using ColumnBatch batch = ColumnBatch.Create(["value"], rowCapacity: 2);
-        (int off1, int len1) = batch.StringArena.Append("10");
-        (int off2, int len2) = batch.StringArena.Append("20");
+        (int off1, int len1) = batch.Arena.AppendString("10");
+        (int off2, int len2) = batch.Arena.AppendString("20");
         batch.SetValue(0, 0, DataValue.FromStringSlice(off1, len1));
         batch.SetValue(0, 1, DataValue.FromStringSlice(off2, len2));
         batch.SetRowCount(2);
@@ -622,8 +622,8 @@ public sealed class ColumnBatchEvaluatorTests
     {
         // Arena-backed non-empty string should be truthy in AND/OR/CASE conditions.
         using ColumnBatch batch = ColumnBatch.Create(["flag"], rowCapacity: 2);
-        (int off1, int len1) = batch.StringArena.Append("yes");
-        (int off2, int len2) = batch.StringArena.Append("");
+        (int off1, int len1) = batch.Arena.AppendString("yes");
+        (int off2, int len2) = batch.Arena.AppendString("");
         batch.SetValue(0, 0, DataValue.FromStringSlice(off1, len1));
         batch.SetValue(0, 1, DataValue.FromStringSlice(off2, len2));
         batch.SetRowCount(2);
@@ -874,7 +874,7 @@ public sealed class ColumnBatchEvaluatorTests
         ColumnBatch batch = ColumnBatch.Create([columnName], values.Length);
         for (int i = 0; i < values.Length; i++)
         {
-            (int offset, int length) = batch.StringArena.Append(values[i]);
+            (int offset, int length) = batch.Arena.AppendString(values[i]);
             batch.SetValue(0, i, DataValue.FromStringSlice(offset, length));
         }
 
@@ -957,9 +957,9 @@ public sealed class ColumnBatchEvaluatorTests
         string[] vals = ["42", "3.14", "boom"];
         for (int i = 0; i < 3; i++)
         {
-            (int co, int cl) = batch.StringArena.Append(cols[i]);
+            (int co, int cl) = batch.Arena.AppendString(cols[i]);
             batch.SetValue(0, i, DataValue.FromStringSlice(co, cl));
-            (int vo, int vl) = batch.StringArena.Append(vals[i]);
+            (int vo, int vl) = batch.Arena.AppendString(vals[i]);
             batch.SetValue(1, i, DataValue.FromStringSlice(vo, vl));
         }
 
@@ -1172,7 +1172,7 @@ public sealed class ColumnBatchEvaluatorTests
         {
             // Even rows: parseable float. Odd rows: 'NULL' (poison for CAST).
             string value = i % 2 == 0 ? i.ToString() : "NULL";
-            (int offset, int length) = batch.StringArena.Append(value);
+            (int offset, int length) = batch.Arena.AppendString(value);
             batch.SetValue(0, i, DataValue.FromStringSlice(offset, length));
         }
 

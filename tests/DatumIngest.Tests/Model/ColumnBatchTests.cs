@@ -53,7 +53,7 @@ public class ColumnBatchTests
         string[] names = ["name"];
         using ColumnBatch batch = ColumnBatch.Create(names, rowCapacity: 4);
 
-        (int offset, int length) = batch.StringArena.Append("hello");
+        (int offset, int length) = batch.Arena.AppendString("hello");
         batch.SetValue(0, 0, DataValue.FromStringSlice(offset, length));
         batch.SetRowCount(1);
 
@@ -78,7 +78,7 @@ public class ColumnBatchTests
         string[] names = ["text"];
         using ColumnBatch batch = ColumnBatch.Create(names, rowCapacity: 4);
 
-        (int offset, int length) = batch.StringArena.Append("abc");
+        (int offset, int length) = batch.Arena.AppendString("abc");
         batch.SetValue(0, 0, DataValue.FromStringSlice(offset, length));
         batch.SetRowCount(1);
 
@@ -109,7 +109,7 @@ public class ColumnBatchTests
         using ColumnBatch batch = ColumnBatch.Create(names, rowCapacity: 4);
 
         batch.SetValue(0, 0, DataValue.FromInt32(42));
-        (int offset, int length) = batch.StringArena.Append("arena-string");
+        (int offset, int length) = batch.Arena.AppendString("arena-string");
         batch.SetValue(1, 0, DataValue.FromStringSlice(offset, length));
         batch.SetRowCount(1);
 

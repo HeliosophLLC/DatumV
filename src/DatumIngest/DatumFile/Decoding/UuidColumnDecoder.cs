@@ -59,8 +59,7 @@ internal sealed class UuidColumnDecoder : DatumColumnDecoder
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context,
         DataValue[] target,
-        StringArena stringArena,
-        DataArena dataArena)
+        Arena arena)
     {
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);

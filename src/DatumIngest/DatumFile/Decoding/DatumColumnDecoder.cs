@@ -23,8 +23,7 @@ public abstract class DatumColumnDecoder
     /// <param name="descriptor">Column schema descriptor.</param>
     /// <param name="context">Decoder context carrying the datum file path for sidecar blob resolution.</param>
     /// <param name="target">Pre-allocated column buffer with at least <paramref name="rowCount"/> slots.</param>
-    /// <param name="stringArena">Shared string arena for UTF-8 string payloads.</param>
-    /// <param name="dataArena">Shared data arena for float and byte array payloads.</param>
+    /// <param name="arena">Shared arena for UTF-8 string, float, and byte array payloads.</param>
     public virtual void DecodeIntoColumn(
         byte[] payload,
         DatumEncoding encoding,
@@ -34,8 +33,7 @@ public abstract class DatumColumnDecoder
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context,
         DataValue[] target,
-        StringArena stringArena,
-        DataArena dataArena)
+        Arena arena)
     {
         DataValue[] decoded = Decode(payload, encoding, compression, uncompressedByteLength, rowCount, descriptor, context);
         decoded.AsSpan(0, rowCount).CopyTo(target);

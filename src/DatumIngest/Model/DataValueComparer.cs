@@ -28,7 +28,7 @@ internal static class DataValueComparer
     /// e.g. an <c>INT32</c> column against a <c>FLOAT32</c> literal), both values
     /// are widened to <see cref="double"/> before comparison.
     /// </summary>
-    internal static int Compare(DataValue left, DataValue right, StringArena? arena = null)
+    internal static int Compare(DataValue left, DataValue right, Arena? arena = null)
     {
         // Cross-kind: widen both to double. This mirrors the ToFloat-based fallback in the
         // original per-class implementations and handles cases like INT column vs FLOAT literal.
@@ -245,7 +245,7 @@ internal static class DataValueComparer
     private static double ToDouble(DataValue value) =>
         value.TryToDouble(out double d) ? d : 0.0;
 
-    private static int CompareStrings(DataValue left, DataValue right, StringArena arena)
+    private static int CompareStrings(DataValue left, DataValue right, Arena arena)
     {
         if (left.IsArenaBacked && right.IsArenaBacked)
         {

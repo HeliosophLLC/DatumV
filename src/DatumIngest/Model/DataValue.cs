@@ -198,11 +198,11 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Creates an arena-backed string value from an offset and length within a
-    /// <see cref="StringArena"/>.  The actual bytes are not stored in this struct;
-    /// callers must resolve via <see cref="AsString(StringArena)"/> or the
+    /// <see cref="Arena"/>.  The actual bytes are not stored in this struct;
+    /// callers must resolve via <see cref="AsString(Arena)"/> or the
     /// <see cref="IStringStore"/> registry.
     /// </summary>
-    /// <param name="offset">Byte offset into the owning <see cref="StringArena"/>.</param>
+    /// <param name="offset">Byte offset into the owning <see cref="Arena"/>.</param>
     /// <param name="length">Byte length of the UTF-8 encoded string.</param>
     public static DataValue FromStringSlice(int offset, int length) =>
         new(DataKind.String, flags: 0, p0: offset, p1: length);
@@ -354,17 +354,16 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
     /// into self-contained managed objects.  Non-arena values are returned unchanged.
     /// </summary>
-    /// <param name="stringArena">Arena for string data.</param>
-    /// <param name="dataArena">Arena for float/byte blob data.</param>
+    /// <param name="arena">Arena for string and binary data.</param>
     /// <returns>A self-contained value that does not reference any arena.</returns>
-    public DataValue Materialize(StringArena stringArena, DataArena dataArena)
+    public DataValue Materialize(Arena arena)
     {
         if (!IsArenaBacked) return this;
 
         return _kind switch
         {
-            DataKind.String => FromString(stringArena.GetString(_p0, _p1)),
-            DataKind.JsonValue => FromJsonValue(stringArena.GetString(_p0, _p1)),
+            DataKind.String => FromString(arena.GetString(_p0, _p1)),
+            DataKind.JsonValue => FromJsonValue(arena.GetString(_p0, _p1)),
             _ => this,
         };
     }
@@ -970,7 +969,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         if ((_flags & FlagHasReference) == 0)
         {
             throw new InvalidOperationException(
-                "This string value is arena-backed. Use AsString(StringArena) to materialise it.");
+                "This string value is arena-backed. Use AsString(Arena) to materialise it.");
         }
 
         return ReferenceStore.Current().Get<string>(_referenceIndex);
@@ -978,13 +977,13 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the text string payload, resolving arena-backed values from the
-    /// given <see cref="StringArena"/>.  Falls back to the reference store for
+    /// given <see cref="Arena"/>.  Falls back to the reference store for
     /// non-arena values.
     /// </summary>
     /// <param name="arena">The arena that owns the UTF-8 bytes.</param>
     /// <returns>The decoded string.</returns>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
-    public string AsString(StringArena arena)
+    public string AsString(Arena arena)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         if ((_flags & FlagHasReference) != 0)
@@ -1003,7 +1002,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <param name="arena">The arena that owns the UTF-8 bytes.</param>
     /// <returns>A span of UTF-8 bytes.  Valid only while the arena is alive.</returns>
     /// <exception cref="InvalidOperationException">Wrong kind, null, or not arena-backed.</exception>
-    public ReadOnlySpan<byte> GetArenaStringSpan(StringArena arena)
+    public ReadOnlySpan<byte> GetArenaStringSpan(Arena arena)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         return arena.GetSpan(_p0, _p1);

@@ -110,8 +110,7 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
         DatumColumnDescriptor descriptor,
         DatumDecoderContext context,
         DataValue[] target,
-        StringArena stringArena,
-        DataArena dataArena)
+        Arena arena)
     {
         byte[] raw = DecompressPayload(payload, uncompressedByteLength, compression);
         int bitmapByteCount = DatumNullBitmap.ByteCount(rowCount);
@@ -133,7 +132,7 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
                 uint start = BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(offsetsStart + rowIndex * 4));
                 uint end   = BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(offsetsStart + (rowIndex + 1) * 4));
                 ReadOnlySpan<byte> utf8Bytes = raw.AsSpan(poolStart + (int)start, (int)(end - start));
-                (int arenaOffset, int arenaLength) = stringArena.Append(utf8Bytes);
+                (int arenaOffset, int arenaLength) = arena.AppendUtf8(utf8Bytes);
                 target[rowIndex] = DataValue.FromStringSlice(arenaOffset, arenaLength);
             }
         }

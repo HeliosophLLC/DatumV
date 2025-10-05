@@ -3,14 +3,14 @@ using DatumIngest.Model;
 namespace DatumIngest.Tests.Model;
 
 /// <summary>
-/// Tests for <see cref="DataArena"/> — float and byte append, retrieval, materialisation, and copy.
+/// Tests for <see cref="Arena"/> float and byte operations — append, retrieval, materialisation, and copy.
 /// </summary>
 public class DataArenaTests
 {
     [Fact]
     public void AppendAndRetrieveFloats()
     {
-        using DataArena arena = new();
+        using Arena arena = new();
         float[] values = [1.0f, 2.5f, 3.75f];
         (int offset, int count) = arena.AppendFloats(values);
 
@@ -22,7 +22,7 @@ public class DataArenaTests
     [Fact]
     public void AppendAndRetrieveBytes()
     {
-        using DataArena arena = new();
+        using Arena arena = new();
         byte[] data = [0xFF, 0x00, 0xAB, 0xCD];
         (int offset, int length) = arena.AppendBytes(data);
 
@@ -34,7 +34,7 @@ public class DataArenaTests
     [Fact]
     public void MaterializeFloatsCreatesNewArray()
     {
-        using DataArena arena = new();
+        using Arena arena = new();
         float[] values = [1.0f, 2.0f];
         (int offset, int count) = arena.AppendFloats(values);
 
@@ -47,7 +47,7 @@ public class DataArenaTests
     [Fact]
     public void MaterializeBytesCreatesNewArray()
     {
-        using DataArena arena = new();
+        using Arena arena = new();
         byte[] data = [0x01, 0x02, 0x03];
         (int offset, int length) = arena.AppendBytes(data);
 
@@ -60,7 +60,7 @@ public class DataArenaTests
     [Fact]
     public void BytesWrittenTracksTotal()
     {
-        using DataArena arena = new();
+        using Arena arena = new();
         Assert.Equal(0, arena.BytesWritten);
 
         arena.AppendFloats([1.0f, 2.0f]);
@@ -73,7 +73,7 @@ public class DataArenaTests
     [Fact]
     public void GrowsBeyondInitialCapacity()
     {
-        using DataArena arena = new(initialCapacity: 8);
+        using Arena arena = new(initialCapacity: 8);
         float[] large = new float[500];
         (int offset, int count) = arena.AppendFloats(large);
 
@@ -84,11 +84,11 @@ public class DataArenaTests
     [Fact]
     public void CopyFromTransfersAllBytes()
     {
-        using DataArena source = new();
+        using Arena source = new();
         float[] values = [42.0f, 99.0f];
         (int sourceOffset, int sourceCount) = source.AppendFloats(values);
 
-        using DataArena target = new();
+        using Arena target = new();
         target.AppendBytes([0x01]);
         int baseOffset = target.CopyFrom(source);
 
@@ -99,7 +99,7 @@ public class DataArenaTests
     [Fact]
     public void DisposeIsIdempotent()
     {
-        DataArena arena = new();
+        Arena arena = new();
         arena.AppendFloats([1.0f]);
         arena.Dispose();
         arena.Dispose();
