@@ -264,7 +264,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                 if (stmt is QueryStatement qs && HasIntoClause(qs.Query))
                 {
                     throw new RpcException(new Status(StatusCode.InvalidArgument,
-                        "INTO clauses are not permitted in gRPC queries. " +
+                        "INTO clauses are not permitted." +
                         "Query results are streamed back to the client."));
                 }
             }
@@ -368,7 +368,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
                                     await Task.Delay(throttleMilliseconds.Value, cancellationToken).ConfigureAwait(false);
                                 }
                             }
-                            batch.Return();
+                            result.Pool!.ReturnBatch(batch);
                         }
 
                         // Emit assertion diagnostics if any WARN or SKIP conditions fired during execution.

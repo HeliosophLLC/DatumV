@@ -75,11 +75,17 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
     /// <paramref name="memoryBudgetBytes"/> is set so that each spill partition can be
     /// drained with an independent accumulator instance.
     /// </param>
+    /// <param name="estimatedDistinctCount">
+    /// Optional estimated number of distinct values this accumulator will see.
+    /// Pre-sizes the internal <see cref="HashSet{T}"/> to avoid repeated resize
+    /// doublings that generate Gen2 garbage.
+    /// </param>
     public DistinctAccumulatorDecorator(
         IAggregateAccumulator inner,
         int argumentCount,
         long? memoryBudgetBytes = null,
-        Func<IAggregateAccumulator>? accumulatorFactory = null)
+        Func<IAggregateAccumulator>? accumulatorFactory = null,
+        int estimatedDistinctCount = 0)
     {
         _inner = inner;
         _argumentCount = argumentCount;
@@ -88,11 +94,15 @@ internal sealed class DistinctAccumulatorDecorator : IAggregateAccumulator, IDis
 
         if (argumentCount <= 1)
         {
-            _singleArgumentSet = new HashSet<DataValue>();
+            _singleArgumentSet = estimatedDistinctCount > 0
+                ? new HashSet<DataValue>(estimatedDistinctCount)
+                : new HashSet<DataValue>();
         }
         else
         {
-            _multiArgumentSet = new HashSet<CompositeKey>();
+            _multiArgumentSet = estimatedDistinctCount > 0
+                ? new HashSet<CompositeKey>(estimatedDistinctCount)
+                : new HashSet<CompositeKey>();
         }
     }
 

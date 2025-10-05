@@ -48,6 +48,15 @@ public sealed class CommandResult
     /// <summary>Gets assertion diagnostics accumulated during row streaming, or <c>null</c> when no assertions were active.</summary>
     public AssertionDiagnostics? AssertionDiagnostics { get; private init; }
 
+    /// <summary>
+    /// Gets the <see cref="Execution.LocalBufferPool"/> for returning consumed
+    /// <see cref="RowBatch"/> instances. The terminal consumer should call
+    /// <see cref="Execution.LocalBufferPool.ReturnBatch"/> after serializing each batch
+    /// to return the contained <see cref="DataValue"/> arrays to the pool.
+    /// <c>null</c> when the result does not carry streaming rows.
+    /// </summary>
+    public LocalBufferPool? Pool { get; private init; }
+
     /// <summary>Creates a success result with a message.</summary>
     /// <param name="message">Human-readable success message.</param>
     /// <returns>A success result.</returns>

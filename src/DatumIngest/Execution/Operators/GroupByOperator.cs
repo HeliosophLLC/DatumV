@@ -39,6 +39,21 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     private string? _spillDirectory;
 
     /// <summary>
+    /// Per-accumulator memory budget for DISTINCT hash sets. Computed once at the
+    /// start of <see cref="ExecuteHashAsync"/> and used by <see cref="CreateGroupState"/>.
+    /// <c>null</c> disables spill-to-disk for DISTINCT sets.
+    /// </summary>
+    private long? _distinctMemoryBudgetBytes;
+
+    /// <summary>
+    /// Estimated number of distinct values per group for DISTINCT aggregates.
+    /// Used to pre-size the <see cref="HashSet{T}"/> in
+    /// <see cref="DistinctAccumulatorDecorator"/> and avoid repeated resize
+    /// doublings that generate Gen2 garbage.
+    /// </summary>
+    private int _estimatedDistinctCountPerGroup;
+
+    /// <summary>
     /// Cached <see cref="RuntimeTypeHandle"/> of each aggregate column's inner
     /// accumulator type (before <see cref="DistinctAccumulatorDecorator"/> wrapping).
     /// Built lazily on the first <see cref="CreateGroupState"/> call so that
@@ -328,25 +343,58 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
         MemoryEstimator? estimator = memoryBudget.HasValue && !isGlobalAggregation
             ? new MemoryEstimator() : null;
 
-        // For global aggregation with DISTINCT aggregates, compute a per-accumulator
-        // memory budget so the decorator can spill to disk when the hash set grows
-        // beyond the budget. For keyed aggregation the GROUP BY spill mechanism
-        // bounds overall memory; per-group DISTINCT sets are typically small.
-        long? distinctMemoryBudgetBytes = null;
-
-        if (isGlobalAggregation && memoryBudget.HasValue)
+        // For DISTINCT aggregates, compute a per-accumulator memory budget so the
+        // DistinctAccumulatorDecorator can spill to disk when its hash set grows
+        // beyond the limit.
+        //
+        // For global aggregation (no GROUP BY), the full budget is split across
+        // the distinct aggregate count.
+        //
+        // For keyed aggregation, the budget is divided by the estimated group count
+        // so the total memory across all groups' DISTINCT sets stays within the
+        // overall budget. Uses max(estimated, 64) as a floor to avoid giving each
+        // group an excessively large budget when group count is unknown or small.
+        if (memoryBudget.HasValue)
         {
             int distinctAggregateCount = _aggregateColumns.Count(column => column.Distinct);
 
             if (distinctAggregateCount > 0)
             {
-                distinctMemoryBudgetBytes = memoryBudget.Value / distinctAggregateCount;
+                if (isGlobalAggregation)
+                {
+                    _distinctMemoryBudgetBytes = memoryBudget.Value / distinctAggregateCount;
+                }
+                else
+                {
+                    // The true group count is unknown at this point — we only have
+                    // the source row count. Use a capped heuristic: assume at most
+                    // 256 groups will hold DISTINCT sets concurrently. If there are
+                    // fewer groups, each gets a larger budget (less spilling). If
+                    // there are more, each group's DISTINCT set is typically small
+                    // (fewer values per group) and hits the budget infrequently.
+                    // This keeps total DISTINCT memory across all groups within the
+                    // overall budget while avoiding the pathological case where a
+                    // handful of groups accumulate millions of entries.
+                    const long MaxAssumedGroups = 256;
+                    _distinctMemoryBudgetBytes = memoryBudget.Value / MaxAssumedGroups / distinctAggregateCount;
+                }
             }
+        }
+
+        // Pre-size DISTINCT hash sets based on estimated distinct values per group.
+        // For global aggregation, the upper bound is the full source row count.
+        // For keyed aggregation, divide source rows by estimated groups (use 256 as
+        // a conservative floor). Cap at 1M to avoid over-allocating for skewed data.
+        if (_aggregateColumns.Any(c => c.Distinct) && estimatedSourceRows.HasValue)
+        {
+            long divisor = isGlobalAggregation ? 1 : Math.Max(initialCapacity, 256);
+            _estimatedDistinctCountPerGroup = (int)Math.Min(
+                estimatedSourceRows.Value / divisor, 1_000_000);
         }
 
         // For global aggregation (no GROUP BY), use a single group.
         GroupState? globalGroup = isGlobalAggregation
-            ? CreateGroupState(distinctMemoryBudgetBytes)
+            ? CreateGroupState()
             : null;
 
         BinaryWriter?[]? spillWriters = null;
@@ -1355,12 +1403,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// Creates a new <see cref="GroupState"/> for a single aggregation group,
     /// optionally passing a memory budget to DISTINCT accumulator decorators.
     /// </summary>
-    /// <param name="distinctMemoryBudgetBytes">
-    /// Per-accumulator memory budget for DISTINCT hash sets. When set, the
-    /// <see cref="DistinctAccumulatorDecorator"/> spills to disk if its hash set
-    /// exceeds this limit. <c>null</c> disables spill-to-disk.
-    /// </param>
-    private GroupState CreateGroupState(long? distinctMemoryBudgetBytes = null)
+    /// <remarks>
+    /// Uses <see cref="_distinctMemoryBudgetBytes"/> (computed once at the start of
+    /// <see cref="ExecuteHashAsync"/>) for per-group DISTINCT spill budgets.
+    /// </remarks>
+    private GroupState CreateGroupState()
     {
         int count = _aggregateColumns.Count;
         GroupState state = GlobalBufferPool.RentGroupState(count);
@@ -1388,7 +1435,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     accumulator = existing;
                 }
                 else if (column.Distinct
-                         && distinctMemoryBudgetBytes is null
+                         && _distinctMemoryBudgetBytes is null
                          && existing is DistinctAccumulatorDecorator decorator
                          && decorator.InnerAccumulator.GetType().TypeHandle.Equals(innerTypes[index]))
                 {
@@ -1406,10 +1453,11 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     accumulator = new DistinctAccumulatorDecorator(
                         accumulator,
                         column.ArgumentExpressions.Count,
-                        distinctMemoryBudgetBytes,
-                        distinctMemoryBudgetBytes.HasValue
+                        _distinctMemoryBudgetBytes,
+                        _distinctMemoryBudgetBytes.HasValue
                             ? column.Function.CreateAccumulator
-                            : null);
+                            : null,
+                        _estimatedDistinctCountPerGroup);
                 }
             }
 
