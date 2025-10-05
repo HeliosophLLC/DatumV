@@ -1168,6 +1168,18 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
+    /// Returns an <see cref="ImageHandle"/> for this image value, reconstructing from
+    /// encoded bytes stored in the given <see cref="IValueStore"/>. The bitmap is not
+    /// decoded until explicitly requested.
+    /// </summary>
+    internal ImageHandle GetImageHandle(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Image);
+        byte[] bytes = store.RetrieveBytes(_p0, _p1);
+        return new ImageHandle(bytes, ImageEncoder.ResolveFormat(bytes, formatOverride: null));
+    }
+
+    /// <summary>
     /// Returns the <see cref="ImageHandle"/> payload if this value already owns one,
     /// or <c>null</c> if the payload is raw bytes. Used by the evaluator to check
     /// for disposable intermediate handles without allocating a new wrapper.
