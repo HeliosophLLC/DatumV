@@ -439,6 +439,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Array, flags: FlagHasReference, p0: p0, p1: p1, p2: (int)elementKind);
     }
 
+    /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromArray(DataKind elementKind, List<DataValue> elements, IValueStore store)
+    {
+        var (p0, p1) = store.StoreDataValues(CollectionsMarshal.AsSpan(elements));
+        return new(DataKind.Array, flags: FlagHasReference, p0: p0, p1: p1, p2: (int)elementKind);
+    }
+
     /// <summary>Creates a typed null array with the given element kind.</summary>
     /// <param name="elementKind">The element kind of the null array.</param>
     public static DataValue NullArray(DataKind elementKind) =>
@@ -517,6 +524,13 @@ public readonly struct DataValue : IEquatable<DataValue>
                 $"Unsupported literal type: {rawLiteral.GetType().Name}.", nameof(rawLiteral)),
         };
     }
+
+    /// <summary>
+    /// Maps a CLR <see cref="Type"/> to the corresponding <see cref="DataKind"/>.
+    /// Unwraps <see cref="Nullable{T}"/> automatically. Falls back to
+    /// <see cref="DataKind.String"/> for unrecognised types.
+    /// </summary>
+    public static DataKind MapClrType(Type clrType) => DataValueComparer.MapClrType(clrType);
 
     /// <summary>
     /// Coerces this value to a different <see cref="DataKind"/>. Used when the column's

@@ -239,6 +239,38 @@ internal static class DataValueComparer
         };
     }
 
+    // ───────────────────── CLR type mapping ─────────────────────
+
+    /// <summary>
+    /// Maps a CLR <see cref="Type"/> to the engine's <see cref="DataKind"/>.
+    /// Unwraps <see cref="Nullable{T}"/> automatically. Falls back to
+    /// <see cref="DataKind.String"/> for unrecognised types.
+    /// </summary>
+    internal static DataKind MapClrType(Type clrType)
+    {
+        Type t = Nullable.GetUnderlyingType(clrType) ?? clrType;
+
+        if (t == typeof(float)) return DataKind.Float32;
+        if (t == typeof(double) || t == typeof(decimal)) return DataKind.Float64;
+        if (t == typeof(int)) return DataKind.Int32;
+        if (t == typeof(long)) return DataKind.Int64;
+        if (t == typeof(short)) return DataKind.Int16;
+        if (t == typeof(ushort)) return DataKind.UInt16;
+        if (t == typeof(uint)) return DataKind.UInt32;
+        if (t == typeof(ulong)) return DataKind.UInt64;
+        if (t == typeof(sbyte)) return DataKind.Int8;
+        if (t == typeof(byte)) return DataKind.UInt8;
+        if (t == typeof(string)) return DataKind.String;
+        if (t == typeof(byte[])) return DataKind.UInt8Array;
+        if (t == typeof(DateTime) || t == typeof(DateTimeOffset)) return DataKind.DateTime;
+        if (t == typeof(DateOnly)) return DataKind.Date;
+        if (t == typeof(bool)) return DataKind.Boolean;
+
+        return DataKind.String;
+    }
+
+    // ───────────────────── Widening helpers ─────────────────────
+
     /// <summary>Delegates to <see cref="DataValue.ToFloat"/>.</summary>
     internal static float ToFloat(DataValue value) => value.ToFloat();
 

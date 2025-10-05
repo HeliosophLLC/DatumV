@@ -168,8 +168,7 @@ internal sealed class LineReader : IDisposable
             : Math.Max(required, _multiLineBuffer.Length * 2);
 
         char[] grown = new char[newSize];
-        if (_multiLineBuffer is not null)
-            _multiLineBuffer.AsSpan().CopyTo(grown);
+        _multiLineBuffer?.AsSpan().CopyTo(grown);
         _multiLineBuffer = grown;
     }
 

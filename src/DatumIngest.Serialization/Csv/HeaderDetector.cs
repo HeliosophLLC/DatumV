@@ -34,7 +34,7 @@ internal static class HeaderDetector
 
         string[] firstRowFields = CsvParser.ParseCsvLine(firstLine, delimiter);
 
-        List<string[]> sampleRows = new();
+        List<string[]> sampleRows = new(100);
         for (int i = 0; i < 100; i++)
         {
             string? line = reader.ReadLine();
@@ -65,9 +65,7 @@ internal static class HeaderDetector
             for (int i = 0; i < firstRowFields.Length; i++)
                 headers[i] = $"col_{i}";
 
-            dataRows = new List<string[]>(sampleRows.Count + 1);
-            dataRows.Add(firstRowFields);
-            dataRows.AddRange(sampleRows);
+            dataRows = [firstRowFields, .. sampleRows];
         }
 
         // Trim header names.

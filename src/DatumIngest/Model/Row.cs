@@ -19,7 +19,7 @@ namespace DatumIngest.Model;
 /// </remarks>
 public readonly struct Row
 {
-    private readonly string[] _names;
+    private readonly IReadOnlyList<string> _names;
     private readonly DataValue[] _values;
     private readonly Dictionary<string, int> _nameIndex;
 
@@ -57,7 +57,7 @@ public readonly struct Row
     /// Callers must guarantee that <paramref name="names"/> and <paramref name="nameIndex"/>
     /// are never mutated after construction.
     /// </remarks>
-    public Row(string[] names, DataValue[] values, Dictionary<string, int> nameIndex)
+    public Row(IReadOnlyList<string> names, DataValue[] values, Dictionary<string, int> nameIndex)
     {
         _names = names;
         _values = values;
@@ -89,7 +89,7 @@ public readonly struct Row
     /// The raw column name array. Used internally by flat-buffer probe storage
     /// in <see cref="Execution.SpillPartition"/> to share schema across reconstructed rows.
     /// </summary>
-    internal string[] RawNames => _names;
+    internal IReadOnlyList<string> RawNames => _names;
 
     /// <summary>
     /// The raw name-to-ordinal dictionary. Used internally by flat-buffer probe storage
