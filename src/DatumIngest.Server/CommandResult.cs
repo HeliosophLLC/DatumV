@@ -78,9 +78,10 @@ public sealed class CommandResult
     /// <param name="rows">The async enumerable of result rows.</param>
     /// <param name="schema">The schema describing the row columns.</param>
     /// <param name="assertionDiagnostics">The diagnostics instance that will be populated as rows are consumed.</param>
+    /// <param name="pool">The buffer pool for returning consumed batches, or <c>null</c>.</param>
     /// <returns>A streaming rows result.</returns>
-    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema, AssertionDiagnostics assertionDiagnostics) =>
-        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema, AssertionDiagnostics = assertionDiagnostics };
+    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema, AssertionDiagnostics assertionDiagnostics, LocalBufferPool? pool = null) =>
+        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema, AssertionDiagnostics = assertionDiagnostics, Pool = pool };
 
     /// <summary>Creates a schema inspection result.</summary>
     /// <param name="schema">The schema of the inspected table.</param>

@@ -127,7 +127,7 @@ internal sealed class GraceHashJoinExecutor
         bool buildKeyIsRight = !_flipped;
 
         int partitionCount = ComputeInitialPartitionCount();
-        SpillPartition[] partitions = CreatePartitions(partitionCount);
+        SpillPartition[] partitions = CreatePartitions(partitionCount, context.LocalBufferPool);
 
         ExecutionTracer.Initialize();
         long ph1aStart = Stopwatch.GetTimestamp();
@@ -156,62 +156,63 @@ internal sealed class GraceHashJoinExecutor
                 {
                     ExecutionTracer.Write($"JOIN Phase1a first build batch  count={buildBatch.Count}");
                 }
+
                 for (int buildBatchIndex = 0; buildBatchIndex < buildBatch.Count; buildBatchIndex++)
                 {
-                Row buildRow = buildBatch[buildBatchIndex];
-                buildRowCount++;
-                firstBuildRow ??= buildRow;
+                    Row buildRow = buildBatch[buildBatchIndex];
+                    buildRowCount++;
+                    firstBuildRow ??= buildRow;
 
-                // Track null keys for NOT IN null semantics.
-                if (_nullSensitiveAntiSemi && !hasNullKey)
-                {
-                    if (useSingleKey)
+                    // Track null keys for NOT IN null semantics.
+                    if (_nullSensitiveAntiSemi && !hasNullKey)
                     {
-                        if (_evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow).IsNull)
+                        if (useSingleKey)
                         {
-                            hasNullKey = true;
+                            if (_evaluator.Evaluate(buildKeyIsRight ? keyPairs[0].Right : keyPairs[0].Left, buildRow).IsNull)
+                            {
+                                hasNullKey = true;
+                            }
+                        }
+                        else
+                        {
+                            EvaluateKeyPartsInto(keyPairs, buildRow, buildKeyIsRight, keyScratch);
+                            if (HasNull(keyScratch))
+                            {
+                                hasNullKey = true;
+                            }
                         }
                     }
-                    else
+
+                    int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch);
+                    partitions[partitionIndex].AddBuildRow(buildRow);
+
+                    // Only count rows that landed in memory (not appended to an already-spilled partition).
+                    if (!partitions[partitionIndex].IsBuildSpilled)
                     {
-                        EvaluateKeyPartsInto(keyPairs, buildRow, buildKeyIsRight, keyScratch);
-                        if (HasNull(keyScratch))
-                        {
-                            hasNullKey = true;
-                        }
+                        inMemoryRowCount++;
+                    }
+
+                    // Memory monitoring with sampling.
+                    if (buildEstimator.ShouldSample())
+                    {
+                        buildEstimator.RecordSample(buildRow);
+                    }
+
+                    buildEstimator.IncrementRowCount();
+
+                    // Estimate memory for in-memory rows only — spilled rows consume disk, not RAM.
+                    long estimatedMemory = buildEstimator.EstimateBytesForRowCount(inMemoryRowCount);
+
+                    if (estimatedMemory > _memoryBudgetBytes)
+                    {
+                        inMemoryRowCount -= SpillLargestPartition(partitions);
+                    }
+                    else if (estimatedMemory > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
+                    {
+                        buildEstimator.EscalateToEveryRow();
                     }
                 }
-
-                int partitionIndex = AssignPartition(buildRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: buildKeyIsRight, keyScratch);
-                partitions[partitionIndex].AddBuildRow(buildRow);
-
-                // Only count rows that landed in memory (not appended to an already-spilled partition).
-                if (!partitions[partitionIndex].IsBuildSpilled)
-                {
-                    inMemoryRowCount++;
-                }
-
-                // Memory monitoring with sampling.
-                if (buildEstimator.ShouldSample())
-                {
-                    buildEstimator.RecordSample(buildRow);
-                }
-
-                buildEstimator.IncrementRowCount();
-
-                // Estimate memory for in-memory rows only — spilled rows consume disk, not RAM.
-                long estimatedMemory = buildEstimator.EstimateBytesForRowCount(inMemoryRowCount);
-
-                if (estimatedMemory > _memoryBudgetBytes)
-                {
-                    inMemoryRowCount -= SpillLargestPartition(partitions);
-                }
-                else if (estimatedMemory > (long)(_memoryBudgetBytes * MemoryEstimator.EscalationThreshold))
-                {
-                    buildEstimator.EscalateToEveryRow();
-                }
-                }
-                buildBatch.Return();
+                context.LocalBufferPool.ReturnBatch(buildBatch);
             }
 
             if (ExecutionTracer.IsEnabled)
@@ -332,25 +333,25 @@ internal sealed class GraceHashJoinExecutor
                 {
                     for (int probeBatchIndex = 0; probeBatchIndex < probeBatch.Count; probeBatchIndex++)
                     {
-                    Row probeRow = probeBatch[probeBatchIndex];
-                    firstProbeRow ??= probeRow;
-                    phase1bProbeCount++;
-                    int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch);
-                    SpillPartition partition = partitions[partitionIndex];
+                        Row probeRow = probeBatch[probeBatchIndex];
+                        firstProbeRow ??= probeRow;
+                        phase1bProbeCount++;
+                        int partitionIndex = AssignPartition(probeRow, keyPairs, useSingleKey, partitionCount, recursionDepth: 0, rightSide: !buildKeyIsRight, keyScratch);
+                        SpillPartition partition = partitions[partitionIndex];
 
-                    if (partition.IsBuildSpilled)
-                    {
-                        if (!partition.IsProbeSpilled)
+                        if (partition.IsBuildSpilled)
                         {
-                            partition.SpillProbeToDisk();
-                        }
+                            if (!partition.IsProbeSpilled)
+                            {
+                                partition.SpillProbeToDisk();
+                            }
 
-                        partition.AddProbeRow(probeRow);
-                    }
-                    else
-                    {
-                        partition.AddProbeRow(probeRow);
-                    }
+                            partition.AddProbeRow(probeRow);
+                        }
+                        else
+                        {
+                            partition.AddProbeRow(probeRow);
+                        }
                     }
                     probeBatch.Return();
                 }
@@ -937,7 +938,7 @@ internal sealed class GraceHashJoinExecutor
 
         for (int index = 0; index < subPartitionCount; index++)
         {
-            subPartitions[index] = new SpillPartition(subSpillDir, index);
+            subPartitions[index] = new SpillPartition(subSpillDir, index, pool: context.LocalBufferPool);
         }
 
         DataValue[] keyScratch = useSingleKey ? [] : new DataValue[keyPairs.Count];
@@ -1084,7 +1085,7 @@ internal sealed class GraceHashJoinExecutor
         return 0;
     }
 
-    private SpillPartition[] CreatePartitions(int count)
+    private SpillPartition[] CreatePartitions(int count, LocalBufferPool pool)
     {
         int perPartitionEstimate = _estimatedBuildRows.HasValue
             ? (int)Math.Min(_estimatedBuildRows.Value / count, int.MaxValue)
@@ -1093,7 +1094,7 @@ internal sealed class GraceHashJoinExecutor
         SpillPartition[] partitions = new SpillPartition[count];
         for (int index = 0; index < count; index++)
         {
-            partitions[index] = new SpillPartition(_spillDirectory, index, perPartitionEstimate);
+            partitions[index] = new SpillPartition(_spillDirectory, index, perPartitionEstimate, pool);
         }
 
         return partitions;

@@ -9,14 +9,18 @@ namespace DatumIngest.Execution;
 /// <remarks>
 /// <para>
 /// Each partition maintains separate build-side and probe-side row collections.
-/// When <see cref="SpillBuildToDisk"/> or <see cref="SpillProbeToDisk"/> is called,
-/// the in-memory rows are flushed to a temporary file via <see cref="RowSerializer"/>
-/// and the in-memory list is cleared. Subsequent rows are appended directly to the
-/// spill file. Reading spilled rows back uses <see cref="ReadSpilledBuildRows"/> /
+/// Build-side rows are stored with pool-rented <see cref="DataValue"/> arrays
+/// (via <see cref="LocalBufferPool.RentCopy"/>) so the input batch can be
+/// returned immediately. When <see cref="SpillBuildToDisk"/> or
+/// <see cref="SpillProbeToDisk"/> is called, the in-memory rows are flushed
+/// to a temporary file via <see cref="RowSerializer"/> and pool-rented arrays
+/// are returned. Subsequent rows are appended directly to the spill file.
+/// Reading spilled rows back uses <see cref="ReadSpilledBuildRows"/> /
 /// <see cref="ReadSpilledProbeRows"/>.
 /// </para>
 /// <para>
-/// Callers must call <see cref="Dispose"/> to delete temporary files.
+/// Callers must call <see cref="Dispose"/> to delete temporary files and
+/// return any remaining pool-rented arrays.
 /// </para>
 /// </remarks>
 internal sealed class SpillPartition : IDisposable
@@ -35,6 +39,7 @@ internal sealed class SpillPartition : IDisposable
 
     private readonly string _spillDirectory;
     private readonly int _partitionIndex;
+    private readonly LocalBufferPool? _pool;
 
     /// <summary>
     /// Creates a new partition.
@@ -46,10 +51,16 @@ internal sealed class SpillPartition : IDisposable
     /// internal list and avoid repeated LOH-crossing doublings that drive Gen2 GC pressure.
     /// Zero or negative values fall back to the default list capacity.
     /// </param>
-    internal SpillPartition(string spillDirectory, int partitionIndex, int estimatedBuildRows = 0)
+    /// <param name="pool">
+    /// Optional buffer pool for renting <see cref="DataValue"/> array copies.
+    /// When provided, <see cref="AddBuildRow"/> copies the row's values into a
+    /// pool-rented array so the input batch can be returned immediately.
+    /// </param>
+    internal SpillPartition(string spillDirectory, int partitionIndex, int estimatedBuildRows = 0, LocalBufferPool? pool = null)
     {
         _spillDirectory = spillDirectory;
         _partitionIndex = partitionIndex;
+        _pool = pool;
         if (estimatedBuildRows > 0)
         {
             _buildRows = new List<Row>(estimatedBuildRows);
@@ -75,8 +86,9 @@ internal sealed class SpillPartition : IDisposable
     internal bool IsProbeSpilled => _probeSpillPath is not null;
 
     /// <summary>
-    /// Adds a build-side row. If the partition has been spilled, the row is written
-    /// directly to the spill file.
+    /// Adds a build-side row. When a pool is available, the row's <see cref="DataValue"/>
+    /// values are copied into a pool-rented array so the original batch can be returned.
+    /// If the partition has been spilled, the row is written directly to the spill file.
     /// </summary>
     internal void AddBuildRow(Row row)
     {
@@ -87,6 +99,14 @@ internal sealed class SpillPartition : IDisposable
         }
         else
         {
+            if (_pool is not null)
+            {
+                // Copy values into a pool-rented array so the input batch
+                // can be ReturnBatch'd without corrupting this partition's data.
+                DataValue[] copy = _pool.RentCopy(row.RawValues);
+                row = new Row(row.RawNames, copy, row.RawNameIndex);
+            }
+
             _buildRows!.Add(row);
         }
     }
@@ -110,6 +130,7 @@ internal sealed class SpillPartition : IDisposable
 
     /// <summary>
     /// Flushes in-memory build rows to a temporary file and clears them from memory.
+    /// Pool-rented <see cref="DataValue"/> arrays are returned after serialization.
     /// Subsequent <see cref="AddBuildRow"/> calls write directly to the spill file.
     /// </summary>
     internal void SpillBuildToDisk()
@@ -130,6 +151,12 @@ internal sealed class SpillPartition : IDisposable
             {
                 WriteRowToSpill(_buildSpillWriter, row, ref _buildSchemaWritten);
                 _spilledBuildRowCount++;
+
+                // Return pool-rented arrays — the row is now serialized to disk.
+                if (_pool is not null)
+                {
+                    _pool.ReturnValues(row);
+                }
             }
 
             _buildRows.Clear();
@@ -203,7 +230,8 @@ internal sealed class SpillPartition : IDisposable
     }
 
     /// <summary>
-    /// Disposes the partition, closing any open spill writers and deleting temporary files.
+    /// Disposes the partition, closing any open spill writers, deleting temporary files,
+    /// and returning any pool-rented <see cref="DataValue"/> arrays still held in memory.
     /// </summary>
     public void Dispose()
     {
@@ -211,6 +239,18 @@ internal sealed class SpillPartition : IDisposable
         _buildSpillWriter = null;
         _probeSpillWriter?.Dispose();
         _probeSpillWriter = null;
+
+        // Return pool-rented build row arrays that weren't spilled.
+        if (_buildRows is not null && _pool is not null)
+        {
+            foreach (Row row in _buildRows)
+            {
+                _pool.ReturnValues(row);
+            }
+        }
+
+        _buildRows = null;
+        _probeRows = null;
 
         if (_buildSpillPath is not null && File.Exists(_buildSpillPath))
         {
@@ -223,9 +263,6 @@ internal sealed class SpillPartition : IDisposable
             File.Delete(_probeSpillPath);
             _probeSpillPath = null;
         }
-
-        _buildRows = null;
-        _probeRows = null;
     }
 
     private static void WriteRowToSpill(BinaryWriter writer, Row row, ref bool schemaWritten)
