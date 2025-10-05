@@ -5,6 +5,7 @@
     <RootNamespace>DatumIngest.Serialization</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +14,8 @@
 
   <ItemGroup>
     <PackageReference Include="Parquet.Net" Version="5.5.0" />
+    <PackageReference Include="PureHDF" Version="2.1.1" />
+    <PackageReference Include="SkiaSharp" Version="3.119.0" />
   </ItemGroup>
 
   <ItemGroup>
