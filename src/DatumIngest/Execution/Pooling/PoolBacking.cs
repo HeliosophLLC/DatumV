@@ -1,0 +1,337 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using DatumIngest.Functions;
+using DatumIngest.Model;
+
+namespace DatumIngest.Execution.Pooling;
+
+/// <summary>
+/// 
+/// </summary>
+public sealed class PoolBacking
+{   
+#if POOL_DIAGNOSTICS
+    /// <summary>
+    /// Maps each <see cref="DataValue"/> array that has ever passed through the pool to
+    /// its <see cref="PooledBuffer"/> tracker. Uses <see cref="ConditionalWeakTable{TKey,TValue}"/>
+    /// so entries are automatically removed when the buffer is garbage-collected — no leaks,
+    /// no identity-hash collisions from address reuse.
+    /// </summary>
+    private static readonly ConditionalWeakTable<DataValue[], PooledBuffer> Trackers = new();
+
+    /// <summary>
+    /// Returns the <see cref="PooledBuffer"/> tracker for a buffer, or <see langword="null"/>
+    /// if the buffer was never pooled (e.g. test-constructed rows).
+    /// </summary>
+    internal static PooledBuffer? GetTracker(DataValue[] buffer) =>
+        Trackers.TryGetValue(buffer, out PooledBuffer? tracker) ? tracker : null;
+
+    /// <summary>
+    /// Throws if the buffer has been returned to the pool and not yet re-rented.
+    /// No-op for buffers that were never pooled. Only active under POOL_DIAGNOSTICS.
+    /// </summary>
+    internal static void AssertNotReturned(DataValue[] buffer, string context = "")
+    {
+        if (Trackers.TryGetValue(buffer, out PooledBuffer? tracker))
+        {
+            tracker.AssertNotReturned(context);
+        }
+    }
+#endif
+
+    private int _maxItemsPerBucket = 8_192;
+    private readonly ConcurrentDictionary<int, CountedPool<DataValue[]>> dataValuePools = new();
+    //private readonly ConcurrentDictionary<int, CountedPool<Row[]>> rowPools = new();
+    private readonly ConcurrentDictionary<int, CountedPool<RowBatch>> rowBatchPools = new();
+    private readonly ConcurrentDictionary<int, CountedPool<GroupState>> groupStatePools = new();
+    private readonly ConcurrentDictionary<int, CountedPool<IAggregateAccumulator[]>> accumulatorArrayPools = new();
+  
+    /// <summary>
+    /// Initializes a new <see cref="PoolBacking"/>.
+    /// </summary>
+    public PoolBacking()
+    {
+        // if (maxItemsPerBucket > 0)
+        // {
+        //     _maxItemsPerBucket = maxItemsPerBucket;
+        // }
+    }
+
+
+    /// <summary>
+    /// Burst-allocates <paramref name="count"/> <see cref="DataValue"/> arrays of
+    /// <paramref name="fieldCount"/> elements. The arrays are allocated contiguously to
+    /// ensure dense packing in the managed heap, then enqueued into the pool for
+    /// immediate reuse.
+    /// </summary>
+    /// <param name="fieldCount">Number of fields (columns) per array.</param>
+    /// <param name="count">Number of arrays to pre-allocate.</param>
+    public void Warmup(int fieldCount, int count)
+    {
+        CountedPool<DataValue[]> pool = dataValuePools.GetOrAdd(fieldCount, static _ => new CountedPool<DataValue[]>());
+
+        for (int i = 0; i < count; i++)
+        {
+            DataValue[] values = new DataValue[fieldCount];
+            pool.Enqueue(values);
+        }
+    }
+    
+    /// <summary>
+    /// Rents a <see cref="DataValue"/> array of exactly <paramref name="length"/> elements.
+    /// Returns a previously returned buffer when one is available; allocates otherwise.
+    /// Callers must overwrite every slot before reading — the buffer may contain stale
+    /// values from a previous query. Correctness is enforced at development time by the
+    /// <c>PooledBuffer</c> tracker (<c>POOL_DIAGNOSTICS</c>), which prevents any access
+    /// to a returned buffer until it is re-rented.
+    /// </summary>
+    public DataValue[] RentDataValues(int length)
+    {
+        if (dataValuePools.TryGetValue(length, out CountedPool<DataValue[]>? pool)
+            && pool.TryDequeue(out DataValue[]? buffer))
+        {
+#if POOL_DIAGNOSTICS
+            if (Trackers.TryGetValue(buffer, out PooledBuffer? tracker))
+            {
+                tracker.MarkRented();
+            }
+#endif
+            return buffer;
+        }
+
+        return new DataValue[length];
+    }
+
+    // /// <summary>
+    // /// Rents a <see cref="Row"/> array of exactly <paramref name="length"/> elements.
+    // /// </summary>
+    // public Row[] RentRows(int length)
+    // {
+    //     if (rowPools.TryGetValue(length, out CountedPool<Row[]>? pool)
+    //         && pool.TryDequeue(out Row[]? buffer))
+    //     {
+    //         return buffer;
+    //     }
+
+    //     return new Row[length];
+    // }
+
+    /// <summary>
+    /// Rents a <see cref="RowBatch"/> with a backing <see cref="Row"/> array of exactly
+    /// <paramref name="capacity"/> elements.
+    /// </summary>
+    public RowBatch RentRowBatch(int capacity)
+    {
+        RowBatch? batch;
+        if (rowBatchPools.TryGetValue(capacity, out CountedPool<RowBatch>? pool) && pool.TryDequeue(out RowBatch? buffer))
+        {
+            batch = buffer;
+        }
+        else
+        {
+            batch = new RowBatch();
+        }
+
+        batch.Initialize(new Row[capacity]);    
+
+        return batch;
+    }
+
+    /// <summary>
+    /// Rents a <see cref="GroupState"/> shell with an <see cref="IAggregateAccumulator"/>
+    /// array of exactly <paramref name="accumulatorCount"/> elements. The array may
+    /// still contain accumulators from the previous owner — the caller should
+    /// type-check each slot and <see cref="IAggregateAccumulator.Reset">Reset</see>
+    /// matching accumulators rather than creating fresh ones.
+    /// </summary>
+    /// <param name="accumulatorCount">Number of aggregate columns.</param>
+    /// <returns>
+    /// A <see cref="GroupState"/> with an <see cref="GroupState.Accumulators"/>
+    /// array ready to be populated by the caller.
+    /// </returns>
+    public GroupState RentGroupState(int accumulatorCount)
+    {
+        GroupState state;
+
+        if (groupStatePools.TryGetValue(accumulatorCount, out CountedPool<GroupState>? pool)
+            && pool.TryDequeue(out GroupState? pooled))
+        {
+            state = pooled;
+        }
+        else
+        {
+            state = new GroupState();
+        }
+
+        if (accumulatorArrayPools.TryGetValue(accumulatorCount, out CountedPool<IAggregateAccumulator[]>? arrayPool)
+            && arrayPool.TryDequeue(out IAggregateAccumulator[]? array))
+        {
+            state.Accumulators = array;
+        }
+        else
+        {
+            state.Accumulators = new IAggregateAccumulator[accumulatorCount];
+        }
+
+        state.AccumulatorCount = accumulatorCount;
+        state.OrderedBuffers = null;
+        state.KeyValues = null;
+
+        return state;
+    }
+    
+    /// <summary>
+    /// Returns a <see cref="DataValue"/> array so it can be reused by a future
+    /// <see cref="RentDataValues"/> call of the same length.
+    /// </summary>
+    public void Return(DataValue[] buffer)
+    {
+#if POOL_DIAGNOSTICS
+        PooledBuffer tracker = Trackers.GetOrCreateValue(buffer);
+        tracker.AssertNotDoubleReturned();
+        tracker.MarkReturned();
+#endif
+
+        CountedPool<DataValue[]> pool = dataValuePools.GetOrAdd(buffer.Length, static _ => new CountedPool<DataValue[]>());
+        pool.EnqueueIfUnderLimit(buffer, _maxItemsPerBucket);
+    }
+
+    /// <summary>
+    /// Returns a <see cref="DataValue"/> array extracted from a <see cref="Row"/> to
+    /// the pool. Convenience overload for callers that hold a <see cref="Row"/> struct
+    /// and need to recycle its backing buffer.
+    /// </summary>
+    public void Return(Row row)
+    {
+        Return(row.RawValues);
+    }
+
+    /// <summary>
+    /// Returns a <see cref="RowBatch"/> to the pool.
+    /// </summary>
+    public void Return(RowBatch batch, bool returnDataValues)
+    {
+        if (returnDataValues)
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                Return(batch[i]);
+            }
+        }
+
+        batch.Reset();
+
+        rowBatchPools
+            .GetOrAdd(batch.Capacity, static _ => new CountedPool<RowBatch>())
+            .Enqueue(batch);
+    }
+
+    /// <summary>
+    /// Returns multiple <see cref="GroupState"/> objects to the pool in bulk.
+    /// </summary>
+    public void Return(IEnumerable<GroupState> groups, int accumulatorCount)
+    {
+        CountedPool<GroupState> pool = groupStatePools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<GroupState>());
+        CountedPool<IAggregateAccumulator[]> arrayPool = accumulatorArrayPools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<IAggregateAccumulator[]>());
+
+        foreach (GroupState state in groups)
+        {
+            arrayPool.EnqueueIfUnderLimit(state.Accumulators, _maxItemsPerBucket);
+
+            state.Accumulators = [];
+            state.AccumulatorCount = 0;
+            state.KeyValues = null;
+            state.OrderedBuffers = null;
+
+            pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
+        }
+    }
+
+    /// <summary>
+    /// Returns a <see cref="GroupState"/> to the pool. The backing
+    /// <see cref="IAggregateAccumulator"/> array is returned to the exact-length
+    /// pool <em>without</em> clearing accumulator references — the next renter can
+    /// type-check and <see cref="IAggregateAccumulator.Reset">Reset</see> them
+    /// rather than allocating fresh accumulators.
+    /// </summary>
+    public void Return(GroupState state)
+    {
+        IAggregateAccumulator[] array = state.Accumulators;
+        int accumulatorCount = state.AccumulatorCount;
+
+        CountedPool<IAggregateAccumulator[]> arrayPool = accumulatorArrayPools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<IAggregateAccumulator[]>());
+        arrayPool.EnqueueIfUnderLimit(array, _maxItemsPerBucket);
+
+        state.Accumulators = [];
+        state.AccumulatorCount = 0;
+        state.KeyValues = null;
+        state.OrderedBuffers = null;
+
+        CountedPool<GroupState> pool = groupStatePools.GetOrAdd(
+            accumulatorCount, static _ => new CountedPool<GroupState>());
+        pool.EnqueueIfUnderLimit(state, _maxItemsPerBucket);
+    }
+
+}
+
+/// <summary>
+/// A <see cref="ConcurrentQueue{T}"/> paired with an atomic approximate count.
+/// <see cref="ConcurrentQueue{T}.Count"/> traverses internal segments with memory
+/// barriers on every call — O(segments), not O(1). At 65 million returns per query
+/// this dominated 24% of wall-clock time. The atomic counter eliminates that cost
+/// at the expense of a slight over-count race (harmless: we may enqueue a few items
+/// past the cap, which is only a soft limit).
+/// </summary>
+internal sealed class CountedPool<T>
+{
+    private readonly ConcurrentQueue<T> _queue = new();
+    private int _approximateCount;
+
+    /// <summary>Approximate number of items in the pool. May briefly over- or under-count.</summary>
+    public int ApproximateCount => Volatile.Read(ref _approximateCount);
+
+    /// <summary>Attempts to dequeue an item. Decrements the counter on success.</summary>
+    public bool TryDequeue([MaybeNullWhen(false)] out T result)
+    {
+        if (_queue.TryDequeue(out result))
+        {
+            Interlocked.Decrement(ref _approximateCount);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Enqueues an item if the approximate count is below <paramref name="limit"/>.
+    /// Uses a racy read — may slightly exceed the limit, which is acceptable for a soft cap.
+    /// </summary>
+    public void EnqueueIfUnderLimit(T item, int limit)
+    {
+        if (Volatile.Read(ref _approximateCount) < limit)
+        {
+            _queue.Enqueue(item);
+            Interlocked.Increment(ref _approximateCount);
+        }
+    }
+
+    /// <summary>Unconditionally enqueues an item.</summary>
+    public void Enqueue(T item)
+    {
+        _queue.Enqueue(item);
+        Interlocked.Increment(ref _approximateCount);
+    }
+
+    /// <summary>Drains all items from the pool.</summary>
+    public void Clear()
+    {
+        while (_queue.TryDequeue(out _))
+        {
+            Interlocked.Decrement(ref _approximateCount);
+        }
+    }
+}
