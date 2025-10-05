@@ -28,6 +28,8 @@ internal static class QueryOperatorExtensions
             {
                 rows.Add(batch[i].Clone());
             }
+
+            context.LocalBufferPool.ReturnBatch(batch);
         }
 
         return rows;

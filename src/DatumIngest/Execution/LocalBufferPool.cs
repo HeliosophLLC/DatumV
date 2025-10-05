@@ -193,6 +193,23 @@ public sealed class LocalBufferPool : IDisposable
     /// </summary>
     public void Dispose()
     {
+#if POOL_DIAGNOSTICS
+        long rents = Interlocked.Read(ref _rentCount);
+        long returns = Interlocked.Read(ref _returnCount);
+        long leaked = rents - returns;
+
+        if (leaked > 0)
+        {
+            // Log the imbalance. In Debug builds with POOL_DIAGNOSTICS, this surfaces
+            // operators that rent DataValue[] arrays but never return them via
+            // ReturnBatch. The threshold allows for arrays legitimately held by
+            // operators that outlive the pool (e.g., join build-side partitions
+            // that are cleaned up by the operator, not the pool).
+            System.Diagnostics.Debug.WriteLine(
+                $"[POOL_DIAGNOSTICS] Rent/Return imbalance: rented={rents:N0} returned={returns:N0} leaked={leaked:N0}");
+        }
+#endif
+
         while (_ownedArrays.TryDequeue(out DataValue[]? buffer))
         {
             GlobalBufferPool.Return(buffer);

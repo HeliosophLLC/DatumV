@@ -62,6 +62,34 @@ public sealed class OperatorBufferReturnTests
     }
 
     /// <summary>
+    /// Verifies that accessing a row's DataValue[] after the batch has been returned
+    /// throws under POOL_DIAGNOSTICS — the array was returned to the pool and may
+    /// have been re-rented by another consumer.
+    /// </summary>
+    [Fact]
+    public void ReturnBatch_AccessAfterReturn_Throws()
+    {
+        LocalBufferPool pool = new();
+
+        RowBatch batch = pool.RentBatch(10);
+        DataValue[] values = pool.Rent(2);
+        values[0] = DataValue.FromFloat32(1);
+        values[1] = DataValue.FromFloat32(2);
+        string[] names = ["a", "b"];
+        batch.Add(new Row(names, values, new() { ["a"] = 0, ["b"] = 1 }));
+
+        // Capture the row before returning.
+        Row row = batch[0];
+
+        pool.ReturnBatch(batch);
+
+#if POOL_DIAGNOSTICS
+        // Under POOL_DIAGNOSTICS, accessing the returned array throws.
+        Assert.Throws<InvalidOperationException>(() => _ = row.RawValues);
+#endif
+    }
+
+    /// <summary>
     /// Verifies that returning a batch twice throws — a double return is a bug,
     /// not a no-op, because it indicates two code paths claiming ownership of the
     /// same batch.
@@ -300,6 +328,49 @@ public sealed class OperatorBufferReturnTests
         Assert.True(pool.ReturnCount >= outputCount,
             $"Expected at least {outputCount:N0} returns, but got {pool.ReturnCount:N0}. " +
             "Spilled probe row DataValue[] arrays may not be returned to the pool.");
+    }
+
+    // ────────────────── Rent/Return balance ──────────────────
+
+    /// <summary>
+    /// Verifies that a Source → Project → terminal consumer pipeline returns every
+    /// <see cref="DataValue"/> array that was rented. A non-zero delta indicates a
+    /// leak — arrays orphaned without returning to the pool.
+    ///
+    /// This test runs under POOL_DIAGNOSTICS (Debug builds) which also catches
+    /// use-after-return and double-return violations.
+    /// </summary>
+    [Fact]
+    public async Task Pipeline_RentCountEqualsReturnCount()
+    {
+        LocalBufferPool pool = new();
+        ExecutionContext context = CreateContext(pool);
+
+        PooledMockOperator source = new(pool, RowCount, columnCount: 3);
+
+        // Project: transforms (rents new output arrays, returns input batch).
+        ProjectOperator project = new(
+            source,
+            [
+                new SelectColumn(new ColumnReference("c0")),
+                new SelectColumn(new ColumnReference("c1")),
+            ]);
+
+        // Terminal consumer: clones and returns output batch.
+        await foreach (RowBatch batch in project.ExecuteAsync(context))
+        {
+            for (int i = 0; i < batch.Count; i++)
+            {
+                batch[i].Clone(); // Simulate reading values
+            }
+
+            pool.ReturnBatch(batch);
+        }
+
+        long leaked = pool.RentCount - pool.ReturnCount;
+        Assert.True(leaked == 0,
+            $"Rent/Return imbalance: rented={pool.RentCount:N0} returned={pool.ReturnCount:N0} leaked={leaked:N0}. " +
+            "Every DataValue[] array rented from the pool should be returned.");
     }
 
     // ────────────────── Helpers ──────────────────

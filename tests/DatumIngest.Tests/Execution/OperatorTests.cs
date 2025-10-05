@@ -30,7 +30,7 @@ internal sealed class MockOperator : IQueryOperator
         foreach (Row row in _rows)
         {
             outputBatch ??= RowBatch.Rent(64);
-            outputBatch.Add(row);
+            outputBatch.Add(row.Clone());
             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
         }
 
@@ -63,7 +63,7 @@ internal sealed class CountingOperator : IQueryOperator
         {
             _onRowYielded();
             outputBatch ??= RowBatch.Rent(64);
-            outputBatch.Add(row);
+            outputBatch.Add(row.Clone());
             if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
         }
 

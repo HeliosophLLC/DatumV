@@ -923,84 +923,11 @@ public sealed class CommonTableExpressionTests
             foreach (Row row in _rows)
             {
                 outputBatch ??= RowBatch.Rent(64);
-                outputBatch.Add(row);
+                outputBatch.Add(row.Clone());
                 if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
             if (outputBatch is not null) yield return outputBatch;
-            await Task.CompletedTask;
-        }
-    }
-
-    /// <summary>
-    /// Simple in-memory table provider for testing.
-    /// </summary>
-    private sealed class InMemoryTableProvider : ITableProvider
-    {
-        private readonly Row[] _rows;
-
-        /// <summary>
-        /// Creates a provider that yields the given rows.
-        /// </summary>
-        public InMemoryTableProvider(Row[] rows)
-        {
-            _rows = rows;
-        }
-
-        /// <inheritdoc/>
-        public Task<Schema> GetSchemaAsync(TableDescriptor descriptor, CancellationToken cancellationToken)
-        {
-            if (_rows.Length == 0)
-            {
-                return Task.FromResult(new Schema([new ColumnInfo("empty", DataKind.String, nullable: true)]));
-            }
-
-            List<ColumnInfo> columns = [];
-            foreach (string name in _rows[0].ColumnNames)
-            {
-                columns.Add(new ColumnInfo(name, _rows[0][name].Kind, nullable: true));
-            }
-
-            return Task.FromResult(new Schema(columns));
-        }
-
-        /// <inheritdoc/>
-        public Task<ProviderCapabilities> GetCapabilitiesAsync(
-            TableDescriptor descriptor, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new ProviderCapabilities(
-                EstimatedRowCount: _rows.Length,
-                EstimatedRowSizeBytes: null,
-                SupportsSeek: false,
-                ColumnCosts: new Dictionary<string, ColumnCost>()));
-        }
-
-        /// <inheritdoc/>
-        public async IAsyncEnumerable<RowBatch> OpenAsync(
-            TableDescriptor descriptor,
-            IReadOnlySet<string>? requiredColumns,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            RowBatch batch = RowBatch.Rent(64);
-
-            foreach (Row row in _rows)
-            {
-                // Clone so the batch owns independent DataValue[] arrays,
-                // matching the production ScanOperator's pool.Rent behavior.
-                batch.Add(row.Clone());
-
-                if (batch.IsFull)
-                {
-                    yield return batch;
-                    batch = RowBatch.Rent(64);
-                }
-            }
-
-            if (batch.Count > 0)
-            {
-                yield return batch;
-            }
-
             await Task.CompletedTask;
         }
     }
@@ -1030,7 +957,7 @@ public sealed class CommonTableExpressionTests
             foreach (Row row in _rows)
             {
                 outputBatch ??= RowBatch.Rent(64);
-                outputBatch.Add(row);
+                outputBatch.Add(row.Clone());
                 if (outputBatch.IsFull) { yield return outputBatch; outputBatch = null; }
             }
 
