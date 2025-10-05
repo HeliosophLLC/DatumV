@@ -75,6 +75,21 @@ internal sealed class ReferenceStore : IValueStore
     public float[] RetrieveFloats(int p0, int p1) => Get<float[]>(p0);
 
     /// <inheritdoc />
+    public (int P0, int P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
+    {
+        int index = AddPair(data.ToArray(), shape.ToArray());
+        return (index, 0);
+    }
+
+    /// <inheritdoc />
+    public float[] RetrieveTensor(int p0, int p1, out int[] shape)
+    {
+        float[] data = Get<float[]>(p0);
+        shape = Get<int[]>(p0 + 1);
+        return data;
+    }
+
+    /// <inheritdoc />
     public (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values) => (Add(values.ToArray()), 0);
 
     /// <inheritdoc />
@@ -126,7 +141,7 @@ internal sealed class ReferenceStore : IValueStore
     /// <summary>
     /// Atomically reserves two consecutive slots and stores both objects.
     /// Returns the index of the first slot; the second is at <c>index + 1</c>.
-    /// Used by <see cref="DataValue.FromTensor"/> which needs data and shape
+    /// Used by <see cref="DataValue.FromTensor(float[], int[])"/> which needs data and shape
     /// at adjacent indices.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -77,6 +77,16 @@ public sealed class Arena : IValueStore, IDisposable
     public float[] RetrieveFloats(int p0, int p1) => MaterializeFloats(p0, p1);
 
     /// <inheritdoc />
+    public (int P0, int P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
+    {
+        var (offset, length) = AppendTensor(data, shape);
+        return (offset, length);
+    }
+
+    /// <inheritdoc />
+    public float[] RetrieveTensor(int p0, int p1, out int[] shape) => MaterializeTensor(p0, p1, out shape);
+
+    /// <inheritdoc />
     public (int P0, int P1) StoreDataValues(ReadOnlySpan<DataValue> values)
     {
         var (offset, count) = AppendDataValues(values);
@@ -248,6 +258,65 @@ public sealed class Arena : IValueStore, IDisposable
         DataValue[] result = new DataValue[count];
         MemoryMarshal.Cast<byte, DataValue>(bytes).CopyTo(result);
         return result;
+    }
+
+    // ───────────────────────── Tensor operations ─────────────────────────
+
+    /// <summary>
+    /// Appends a tensor as a single contiguous region: shape prefix followed by float data.
+    /// Layout: <c>[rank:int32][dim0:int32]...[dimN:int32][float0:float32]...[floatM:float32]</c>.
+    /// </summary>
+    /// <param name="data">The flat float data.</param>
+    /// <param name="shape">The dimension sizes.</param>
+    /// <returns>The byte offset and total byte length of the combined region.</returns>
+    public (int Offset, int Length) AppendTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape)
+    {
+        int shapeBytes = (1 + shape.Length) * sizeof(int); // rank + dimensions
+        int dataBytes = data.Length * sizeof(float);
+        int totalBytes = shapeBytes + dataBytes;
+        EnsureCapacity(totalBytes);
+
+        int offset = _position;
+        Span<byte> dest = _buffer.AsSpan(_position);
+
+        // Write rank
+        MemoryMarshal.Write(dest, shape.Length);
+        dest = dest[sizeof(int)..];
+
+        // Write shape dimensions
+        MemoryMarshal.AsBytes(shape).CopyTo(dest);
+        dest = dest[(shape.Length * sizeof(int))..];
+
+        // Write float data
+        MemoryMarshal.AsBytes(data).CopyTo(dest);
+
+        _position += totalBytes;
+        return (offset, totalBytes);
+    }
+
+    /// <summary>
+    /// Retrieves a tensor previously stored via <see cref="AppendTensor"/>,
+    /// parsing the shape prefix and returning the float data and shape.
+    /// </summary>
+    /// <param name="offset">Byte offset returned by <see cref="AppendTensor"/>.</param>
+    /// <param name="length">Byte length returned by <see cref="AppendTensor"/>.</param>
+    /// <param name="shape">The reconstructed dimension sizes.</param>
+    /// <returns>A new float array containing the tensor data.</returns>
+    public float[] MaterializeTensor(int offset, int length, out int[] shape)
+    {
+        ReadOnlySpan<byte> region = _buffer.AsSpan(offset, length);
+
+        int rank = MemoryMarshal.Read<int>(region);
+        region = region[sizeof(int)..];
+
+        shape = new int[rank];
+        MemoryMarshal.Cast<byte, int>(region[..(rank * sizeof(int))]).CopyTo(shape);
+        region = region[(rank * sizeof(int))..];
+
+        int floatCount = region.Length / sizeof(float);
+        float[] data = new float[floatCount];
+        MemoryMarshal.Cast<byte, float>(region).CopyTo(data);
+        return data;
     }
 
     // ───────────────────────── Merging ─────────────────────────

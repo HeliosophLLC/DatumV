@@ -276,10 +276,22 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Tensor, flags: FlagHasReference, p0: index);
     }
 
-    // FromTensor(float[], int[], IValueStore) is deferred to Phase 4.
-    // Tensor uses AddPair for consecutive indices (data at p0, shape at p0+1),
-    // which requires ReferenceStore. Arena-backed tensors need a different
-    // encoding (e.g. shape as prefix before float data).
+    /// <summary>Creates an arbitrary-rank tensor using an explicit <see cref="IValueStore"/>.</summary>
+    public static DataValue FromTensor(float[] data, int[] shape, IValueStore store)
+    {
+        int expectedLength = 1;
+        foreach (int dimension in shape)
+            expectedLength *= dimension;
+
+        if (data.Length != expectedLength)
+        {
+            throw new ArgumentException(
+                $"Data length {data.Length} does not match shape [{string.Join(", ", shape)}].");
+        }
+
+        var (p0, p1) = store.StoreTensor(data, shape);
+        return new(DataKind.Tensor, flags: FlagHasReference, p0: p0, p1: p1);
+    }
 
     /// <summary>Creates a value from encoded image bytes.</summary>
     public static DataValue FromImage(byte[] value)
@@ -1100,6 +1112,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         float[] data = store.Get<float[]>(_referenceIndex);
         shape = store.Get<int[]>(_referenceIndex + 1);
         return data;
+    }
+
+    /// <summary>Returns the tensor flat float array and its shape from an explicit <see cref="IValueStore"/>.</summary>
+    public float[] AsTensor(IValueStore store, out int[] shape)
+    {
+        ThrowIfNullOrWrongKind(DataKind.Tensor);
+        return store.RetrieveTensor(_p0, _p1, out shape);
     }
 
     /// <summary>

@@ -464,7 +464,7 @@ public sealed class Hdf5TableProvider : ITableProvider, ISeekableTableProvider
 
     /// <summary>
     /// Holds pre-read columnar data for a single rank-4 or higher HDF5 dataset, yielding
-    /// one <see cref="DataValue.FromTensor"/> per row.
+    /// one <see cref="DataValue.FromTensor(float[], int[])"/> per row.
     /// </summary>
     private sealed class TensorColumnData : ColumnData
     {

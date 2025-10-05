@@ -52,6 +52,18 @@ public interface IValueStore
     /// </summary>
     float[] RetrieveFloats(int p0, int p1);
 
+    // ───────────────────────── Tensors ─────────────────────────
+
+    /// <summary>
+    /// Stores a tensor (float data + int shape) and returns two payload words.
+    /// </summary>
+    (int P0, int P1) StoreTensor(ReadOnlySpan<float> data, ReadOnlySpan<int> shape);
+
+    /// <summary>
+    /// Retrieves a previously stored tensor, returning the float data and shape.
+    /// </summary>
+    float[] RetrieveTensor(int p0, int p1, out int[] shape);
+
     // ───────────────────────── DataValue arrays ─────────────────────────
 
     /// <summary>
