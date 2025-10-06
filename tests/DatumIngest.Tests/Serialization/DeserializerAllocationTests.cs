@@ -85,6 +85,33 @@ public sealed class DeserializerAllocationTests
             $"CSV: {bytesPerRow:F2} bytes/row ({allocated:N0} bytes / {rowCount:N0} rows).");
     }
 
+    // ───────────────────────── JSONL numeric hot path ─────────────────────────
+
+    [Fact]
+    public async Task JsonlDeserializer_NumericRowAccess_NearZeroAllocations()
+    {
+        StringBuilder sb = new();
+        for (int i = 0; i < 10_000; i++)
+            sb.AppendLine($"{{\"a\":{i},\"b\":{i * 1.5},\"c\":{(i % 2 == 0).ToString().ToLower()}}}");
+
+        string jsonlContent = sb.ToString();
+
+        using var context = CreateContext();
+        var descriptor = new MemoryDescriptor(jsonlContent, "measure.jsonl");
+        var jsonl = new DatumIngest.Serialization.Jsonl.JsonlDeserializer(descriptor);
+
+        var (allocated, rowCount) = await MeasureBatchConsumptionAsync(jsonl, context, row =>
+        {
+            _ = row["a"].AsInt64();
+            _ = row["b"].AsFloat64();
+            _ = row["c"].AsBoolean();
+        });
+
+        double bytesPerRow = rowCount > 0 ? allocated / (double)rowCount : 0;
+        Assert.True(bytesPerRow < 1.0,
+            $"JSONL: {bytesPerRow:F2} bytes/row ({allocated:N0} bytes / {rowCount:N0} rows).");
+    }
+
     // ───────────────────────── Parquet numeric hot path ─────────────────────────
 
     [Fact]
