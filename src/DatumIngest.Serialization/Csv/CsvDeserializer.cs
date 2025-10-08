@@ -55,11 +55,13 @@ public sealed class CsvDeserializer : IFormatDeserializer
 
         IValueStore store = context.Arena;
         RowBatch? batch = null;
+        int lineNumber = hasHeader ? 1 : 0; // Header line already consumed.
 
         while (!cancellationToken.IsCancellationRequested)
         {
             if (!lineReader.TryReadLogicalLine(out ReadOnlySpan<char> lineSpan))
                 break;
+            lineNumber++;
 
             DataValue[] values = context.Pool.RentDataValues(names.Length);
 
