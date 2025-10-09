@@ -8,7 +8,7 @@ namespace DatumIngest.Serialization.Parquet;
 /// <summary>
 /// Deserializes Apache Parquet files into <see cref="RowBatch"/> streams.
 /// Uses typed array casts to avoid boxing, and stores strings via
-/// <see cref="DeserializationContext.Arena"/> instead of <see cref="ReferenceStore"/>.
+/// <see cref="SerializationContext.Arena"/> instead of <see cref="ReferenceStore"/>.
 /// </summary>
 public sealed class ParquetDeserializer : IFormatDeserializer
 {
@@ -24,7 +24,7 @@ public sealed class ParquetDeserializer : IFormatDeserializer
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> DeserializeAsync(
-        DeserializationContext context,
+        SerializationContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);

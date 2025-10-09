@@ -23,7 +23,7 @@ public sealed class ZipDeserializer : IFormatDeserializer
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> DeserializeAsync(
-        DeserializationContext context,
+        SerializationContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);

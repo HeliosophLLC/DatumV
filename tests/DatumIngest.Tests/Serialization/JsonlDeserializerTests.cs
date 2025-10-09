@@ -27,11 +27,11 @@ public sealed class JsonlDeserializerTests
         }
     }
 
-    private static DeserializationContext CreateContext()
+    private static SerializationContext CreateContext()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
-        return new DeserializationContext(pool);
+        return new SerializationContext(pool);
     }
 
     private static string GetString(DataValue v, IValueStore store)

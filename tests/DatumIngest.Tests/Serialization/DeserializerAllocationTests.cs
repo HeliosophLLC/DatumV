@@ -17,11 +17,11 @@ public sealed class DeserializerAllocationTests
     private static readonly string FixturesPath = Path.Combine(
         AppContext.BaseDirectory, "Fixtures");
 
-    private static DeserializationContext CreateContext()
+    private static SerializationContext CreateContext()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
-        return new DeserializationContext(pool);
+        return new SerializationContext(pool);
     }
 
     /// <summary>
@@ -30,7 +30,7 @@ public sealed class DeserializerAllocationTests
     /// </summary>
     private static async Task<(long Allocated, int RowCount)> MeasureBatchConsumptionAsync(
         IFormatDeserializer deserializer,
-        DeserializationContext context,
+        SerializationContext context,
         Action<Row>? perRow = null)
     {
         long totalAllocated = 0;

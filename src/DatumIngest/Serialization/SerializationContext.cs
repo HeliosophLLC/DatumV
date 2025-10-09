@@ -4,10 +4,11 @@ using DatumIngest.Model;
 namespace DatumIngest.Serialization;
 
 /// <summary>
-/// Provides shared resources for format deserialization: a <see cref="Pool"/> for
-/// renting <see cref="DataValue"/> arrays and <see cref="RowBatch"/> instances, and
-/// an <see cref="Arena"/> for storing reference-type payloads (strings, byte blobs)
-/// without <see cref="ReferenceStore"/> or <c>AsyncLocal</c> ambient state.
+/// Provides shared resources for format serialization and deserialization: a
+/// <see cref="Pool"/> for renting <see cref="DataValue"/> arrays and
+/// <see cref="RowBatch"/> instances, and an <see cref="Arena"/> for storing
+/// reference-type payloads (strings, byte blobs) without <see cref="ReferenceStore"/>
+/// or <c>AsyncLocal</c> ambient state.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,14 +18,14 @@ namespace DatumIngest.Serialization;
 /// <see cref="IAsyncEnumerable{T}"/>.
 /// </para>
 /// </remarks>
-public sealed class DeserializationContext : IDisposable
+public sealed class SerializationContext : IDisposable
 {
     /// <summary>
-    /// Creates a new <see cref="DeserializationContext"/> with the given pool and
+    /// Creates a new <see cref="SerializationContext"/> with the given pool and
     /// a fresh <see cref="Arena"/>.
     /// </summary>
     /// <param name="pool">The pool for renting DataValue arrays and RowBatch instances.</param>
-    public DeserializationContext(Pool pool)
+    public SerializationContext(Pool pool)
     {
         Pool = pool;
         Arena = new Arena();
@@ -33,7 +34,7 @@ public sealed class DeserializationContext : IDisposable
     /// <summary>Pool for renting <see cref="DataValue"/> arrays and <see cref="RowBatch"/> instances.</summary>
     public Pool Pool { get; }
 
-    /// <summary>Arena for storing string and binary payloads during deserialization.</summary>
+    /// <summary>Arena for storing string and binary payloads during serialization.</summary>
     public Arena Arena { get; }
 
     /// <inheritdoc/>

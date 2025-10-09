@@ -5,7 +5,7 @@ namespace DatumIngest.Serialization.Csv;
 
 /// <summary>
 /// Deserializes CSV files into <see cref="RowBatch"/> streams. Uses
-/// <see cref="DeserializationContext.Arena"/> as the <see cref="IValueStore"/>
+/// <see cref="SerializationContext.Arena"/> as the <see cref="IValueStore"/>
 /// for string values — no <see cref="ReferenceStore"/> or <c>AsyncLocal</c> needed.
 /// </summary>
 public sealed class CsvDeserializer : IFormatDeserializer
@@ -22,7 +22,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> DeserializeAsync(
-        DeserializationContext context,
+        SerializationContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);

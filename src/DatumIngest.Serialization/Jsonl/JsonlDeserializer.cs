@@ -8,7 +8,7 @@ namespace DatumIngest.Serialization.Jsonl;
 /// <summary>
 /// Deserializes newline-delimited JSON (JSONL/NDJSON) files into <see cref="RowBatch"/>
 /// streams. Streams line-by-line for constant memory usage. Schema is inferred from the
-/// first 100 lines. Strings are stored via <see cref="DeserializationContext.Arena"/>.
+/// first 100 lines. Strings are stored via <see cref="SerializationContext.Arena"/>.
 /// </summary>
 public sealed class JsonlDeserializer : IFormatDeserializer
 {
@@ -25,7 +25,7 @@ public sealed class JsonlDeserializer : IFormatDeserializer
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> DeserializeAsync(
-        DeserializationContext context,
+        SerializationContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using Stream stream = await _descriptor.OpenAsync(cancellationToken).ConfigureAwait(false);

@@ -5,7 +5,7 @@ namespace DatumIngest.Serialization;
 /// <summary>
 /// Deserializes a file format into a stream of <see cref="RowBatch"/> instances.
 /// Implementations are stateless — all per-deserialization state lives in the
-/// <see cref="DeserializationContext"/> and the <see cref="FileFormatDescriptor"/>.
+/// <see cref="SerializationContext"/> and the <see cref="FileFormatDescriptor"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,14 +22,14 @@ public interface IFormatDeserializer
     /// Deserializes the source file into a stream of row batches.
     /// </summary>
     /// <param name="context">
-    /// Shared deserialization resources: <see cref="DeserializationContext.Pool"/> for
-    /// renting arrays and batches, <see cref="DeserializationContext.Arena"/> for
+    /// Shared deserialization resources: <see cref="SerializationContext.Pool"/> for
+    /// renting arrays and batches, <see cref="SerializationContext.Arena"/> for
     /// string storage.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async stream of <see cref="RowBatch"/> instances. The consumer
     /// must return each batch to the pool after processing.</returns>
     IAsyncEnumerable<RowBatch> DeserializeAsync(
-        DeserializationContext context,
+        SerializationContext context,
         CancellationToken cancellationToken = default);
 }

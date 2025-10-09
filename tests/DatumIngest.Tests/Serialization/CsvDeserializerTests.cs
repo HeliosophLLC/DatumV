@@ -28,11 +28,11 @@ public sealed class CsvDeserializerTests
         }
     }
 
-    private static DeserializationContext CreateContext()
+    private static SerializationContext CreateContext()
     {
         PoolBacking backing = new();
         Pool pool = new(backing);
-        return new DeserializationContext(pool);
+        return new SerializationContext(pool);
     }
 
     /// <summary>
