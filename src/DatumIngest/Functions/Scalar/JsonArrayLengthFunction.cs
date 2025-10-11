@@ -34,7 +34,7 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
             throw new ArgumentException($"json_array_length() second argument must be String, got {argumentKinds[1]}.");
         }
 
-        return DataKind.Float32;
+        return DataKind.Int32;
     }
 
     /// <inheritdoc />
@@ -43,7 +43,7 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
         DataValue input = arguments[0];
         if (input.IsNull)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
         string json = input.Kind == DataKind.JsonValue ? input.AsJsonValue() : input.AsString();
@@ -63,15 +63,53 @@ public sealed class JsonArrayLengthFunction : IScalarFunction
             }
             catch (JsonException)
             {
-                return DataValue.Null(DataKind.Float32);
+                return DataValue.Null(DataKind.Int32);
             }
         }
 
         if (element is null || element.Value.ValueKind != JsonValueKind.Array)
         {
-            return DataValue.Null(DataKind.Float32);
+            return DataValue.Null(DataKind.Int32);
         }
 
-        return DataValue.FromFloat32(element.Value.GetArrayLength());
+        return DataValue.FromInt32(element.Value.GetArrayLength());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        ReadOnlySpan<byte> utf8 = input.AsUtf8Span(store);
+
+        JsonElement? element;
+        if (arguments.Length == 2)
+        {
+            string path = arguments[1].AsString(store);
+            element = JsonValueFunction.NavigatePathUtf8(utf8, path);
+        }
+        else
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(new ReadOnlyMemory<byte>(utf8.ToArray()));
+                element = document.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                return DataValue.Null(DataKind.Int32);
+            }
+        }
+
+        if (element is null || element.Value.ValueKind != JsonValueKind.Array)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        return DataValue.FromInt32(element.Value.GetArrayLength());
     }
 }

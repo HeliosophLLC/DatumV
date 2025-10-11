@@ -40,4 +40,20 @@ public sealed class GetFileExtensionFunction : IScalarFunction
         string? extension = Path.GetExtension(input.AsString());
         return DataValue.FromString(extension ?? string.Empty);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        ReadOnlySpan<char> extension = Path.GetExtension(span);
+        DataValue result = DataValue.FromCharSpan(extension, store);
+        System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        return result;
+    }
 }

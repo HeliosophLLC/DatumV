@@ -149,4 +149,84 @@ public sealed class RegexpInstrFunction : IScalarFunction
         int matchPos = start + match.Index;
         return DataValue.FromInt32(endoption == 0 ? matchPos + 1 : matchPos + match.Length + 1);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        string input = arguments[0].AsString(store);
+        string pattern = arguments[1].AsString(store);
+
+        int start = 0;
+        if (arguments.Length >= 3 && !arguments[2].IsNull)
+        {
+            start = arguments[2].ToInt32() - 1;
+            if (start < 0) start = 0;
+        }
+
+        int n = 1;
+        if (arguments.Length >= 4 && !arguments[3].IsNull)
+        {
+            n = arguments[3].ToInt32();
+        }
+
+        int endoption = 0;
+        if (arguments.Length >= 5 && !arguments[4].IsNull)
+        {
+            endoption = arguments[4].ToInt32();
+        }
+
+        RegexOptions options = RegexOptions.None;
+        if (arguments.Length >= 6 && !arguments[5].IsNull)
+        {
+            string flags = arguments[5].AsString(store);
+            if (flags.Contains('i')) options |= RegexOptions.IgnoreCase;
+        }
+
+        int subexpr = 0;
+        if (arguments.Length == 7 && !arguments[6].IsNull)
+        {
+            subexpr = arguments[6].ToInt32();
+        }
+
+        if (start >= input.Length)
+        {
+            return DataValue.FromInt32(0);
+        }
+
+        string searchIn = input[start..];
+        MatchCollection matches = Regex.Matches(searchIn, pattern, options);
+
+        if (n < 1 || n > matches.Count)
+        {
+            return DataValue.FromInt32(0);
+        }
+
+        Match match = matches[n - 1];
+
+        if (subexpr > 0)
+        {
+            if (subexpr >= match.Groups.Count)
+            {
+                return DataValue.FromInt32(0);
+            }
+
+            Group group = match.Groups[subexpr];
+            if (!group.Success)
+            {
+                return DataValue.FromInt32(0);
+            }
+
+            // Return 1-based position relative to original string
+            int pos = start + group.Index;
+            return DataValue.FromInt32(endoption == 0 ? pos + 1 : pos + group.Length + 1);
+        }
+
+        int matchPos = start + match.Index;
+        return DataValue.FromInt32(endoption == 0 ? matchPos + 1 : matchPos + match.Length + 1);
+    }
 }

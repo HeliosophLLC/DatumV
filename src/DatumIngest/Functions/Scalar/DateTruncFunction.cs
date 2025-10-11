@@ -73,6 +73,42 @@ public sealed class DateTruncFunction : IScalarFunction
         return DateFunctionUtilities.WrapResult(result, dateValue.Kind);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue partValue = arguments[0];
+        DataValue dateValue = arguments[1];
+
+        if (dateValue.IsNull)
+        {
+            return DataValue.Null(dateValue.Kind);
+        }
+
+        DatePartName part = DatePartParser.Parse(partValue.AsString(store));
+        DateTimeOffset original = DateFunctionUtilities.ToDateTimeOffset(dateValue);
+
+        DateTimeOffset result = part switch
+        {
+            DatePartName.Year => new DateTimeOffset(original.Year, 1, 1, 0, 0, 0, original.Offset),
+            DatePartName.Quarter => new DateTimeOffset(original.Year, ((original.Month - 1) / 3) * 3 + 1, 1, 0, 0, 0, original.Offset),
+            DatePartName.Month => new DateTimeOffset(original.Year, original.Month, 1, 0, 0, 0, original.Offset),
+            DatePartName.Week => TruncateToWeek(original),
+            DatePartName.Day => new DateTimeOffset(original.Year, original.Month, original.Day, 0, 0, 0, original.Offset),
+            DatePartName.Hour => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, 0, 0, original.Offset),
+            DatePartName.Minute => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, 0, original.Offset),
+            DatePartName.Second => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, original.Second, original.Offset),
+            DatePartName.Millisecond => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, original.Second, original.Millisecond, original.Offset),
+            DatePartName.Microsecond => new DateTimeOffset(original.Year, original.Month, original.Day, original.Hour, original.Minute, original.Second, original.Millisecond, original.Offset)
+                .AddTicks(original.Microsecond * TimeSpan.TicksPerMicrosecond),
+            DatePartName.Decade => new DateTimeOffset(original.Year - original.Year % 10, 1, 1, 0, 0, 0, original.Offset),
+            DatePartName.Century => new DateTimeOffset((original.Year - 1) / 100 * 100 + 1, 1, 1, 0, 0, 0, original.Offset),
+            DatePartName.Millennium => new DateTimeOffset((original.Year - 1) / 1000 * 1000 + 1, 1, 1, 0, 0, 0, original.Offset),
+            _ => throw new ArgumentException($"Unsupported date part for date_trunc: {part}."),
+        };
+
+        return DateFunctionUtilities.WrapResult(result, dateValue.Kind);
+    }
+
     /// <summary>
     /// Truncates to the ISO 8601 week start (Monday).
     /// </summary>

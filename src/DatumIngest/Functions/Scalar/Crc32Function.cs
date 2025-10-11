@@ -55,4 +55,28 @@ public sealed class Crc32Function : IScalarFunction
         uint crc = Crc32.HashToUInt32(inputBytes);
         return DataValue.FromFloat32(crc);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        if (input.Kind == DataKind.String)
+        {
+            ReadOnlySpan<byte> inputBytes = input.AsUtf8Span(store);
+            uint crc = Crc32.HashToUInt32(inputBytes);
+            return DataValue.FromFloat32(crc);
+        }
+        else
+        {
+            ReadOnlySpan<byte> inputBytes = input.AsUInt8Array();
+            uint crc = Crc32.HashToUInt32(inputBytes);
+            return DataValue.FromFloat32(crc);
+        }
+    }
 }

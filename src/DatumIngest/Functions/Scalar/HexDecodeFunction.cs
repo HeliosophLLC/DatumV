@@ -40,4 +40,20 @@ public sealed class HexDecodeFunction : IScalarFunction
         byte[] result = Convert.FromHexString(input.AsString());
         return DataValue.FromUInt8Array(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.UInt8Array);
+        }
+
+        ReadOnlySpan<char> chars = input.AsStringSpan(store, out char[] rented);
+        byte[] result = Convert.FromHexString(chars);
+        System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        return DataValue.FromUInt8Array(result, store);
+    }
 }

@@ -72,4 +72,39 @@ public sealed class RegexpCountFunction : IScalarFunction
         int count = Regex.Matches(searchIn, pattern, options).Count;
         return DataValue.FromInt32(count);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        string input = arguments[0].AsString(store);
+        string pattern = arguments[1].AsString(store);
+
+        int start = 0;
+        if (arguments.Length >= 3 && !arguments[2].IsNull)
+        {
+            start = arguments[2].ToInt32() - 1; // 1-based to 0-based
+            if (start < 0) start = 0;
+        }
+
+        RegexOptions options = RegexOptions.None;
+        if (arguments.Length == 4 && !arguments[3].IsNull)
+        {
+            string flags = arguments[3].AsString(store);
+            if (flags.Contains('i')) options |= RegexOptions.IgnoreCase;
+        }
+
+        if (start >= input.Length)
+        {
+            return DataValue.FromInt32(0);
+        }
+
+        string searchIn = input[start..];
+        int count = Regex.Matches(searchIn, pattern, options).Count;
+        return DataValue.FromInt32(count);
+    }
 }

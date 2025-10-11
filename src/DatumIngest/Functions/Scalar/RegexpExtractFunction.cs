@@ -83,4 +83,45 @@ public sealed class RegexpExtractFunction : IScalarFunction
             ? DataValue.FromString(group.Value)
             : DataValue.Null(DataKind.String);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue pattern = arguments[1];
+
+        if (input.IsNull || pattern.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        int groupIndex = 0;
+        if (arguments.Length == 3)
+        {
+            if (arguments[2].IsNull)
+            {
+                return DataValue.Null(DataKind.String);
+            }
+
+            groupIndex = arguments[2].ToInt32();
+        }
+
+        Match match = Regex.Match(input.AsString(store), pattern.AsString(store));
+
+        if (!match.Success)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        if (groupIndex < 0 || groupIndex >= match.Groups.Count)
+        {
+            throw new InvalidOperationException(
+                $"regexp_extract(): group index {groupIndex} is out of range (pattern has {match.Groups.Count - 1} capture groups).");
+        }
+
+        Group group = match.Groups[groupIndex];
+        return group.Success
+            ? DataValue.FromString(group.Value, store)
+            : DataValue.Null(DataKind.String);
+    }
 }

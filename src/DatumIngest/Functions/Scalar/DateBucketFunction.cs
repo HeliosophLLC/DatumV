@@ -91,6 +91,48 @@ public sealed class DateBucketFunction : IScalarFunction
         return DateFunctionUtilities.WrapResult(result, dateValue.Kind);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue partValue = arguments[0];
+        DataValue widthValue = arguments[1];
+        DataValue dateValue = arguments[2];
+
+        if (dateValue.IsNull)
+        {
+            return DataValue.Null(dateValue.Kind);
+        }
+
+        DatePartName part = DatePartParser.Parse(partValue.AsString(store));
+        int width = widthValue.ToInt32();
+
+        if (width <= 0)
+        {
+            throw new ArgumentException("date_bucket() width must be a positive integer.");
+        }
+
+        DateTimeOffset date = DateFunctionUtilities.ToDateTimeOffset(dateValue);
+        DateTimeOffset origin = arguments.Length == 4 && !arguments[3].IsNull
+            ? DateFunctionUtilities.ToDateTimeOffset(arguments[3])
+            : DefaultOrigin;
+
+        DateTimeOffset result = part switch
+        {
+            DatePartName.Year => BucketByMonths(date, origin, width * 12),
+            DatePartName.Quarter => BucketByMonths(date, origin, width * 3),
+            DatePartName.Month => BucketByMonths(date, origin, width),
+            DatePartName.Week => BucketByTicks(date, origin, TimeSpan.FromDays(width * 7).Ticks),
+            DatePartName.Day => BucketByTicks(date, origin, TimeSpan.FromDays(width).Ticks),
+            DatePartName.Hour => BucketByTicks(date, origin, TimeSpan.FromHours(width).Ticks),
+            DatePartName.Minute => BucketByTicks(date, origin, TimeSpan.FromMinutes(width).Ticks),
+            DatePartName.Second => BucketByTicks(date, origin, TimeSpan.FromSeconds(width).Ticks),
+            DatePartName.Millisecond => BucketByTicks(date, origin, TimeSpan.FromMilliseconds(width).Ticks),
+            _ => throw new ArgumentException($"Unsupported date part for date_bucket: {part}."),
+        };
+
+        return DateFunctionUtilities.WrapResult(result, dateValue.Kind);
+    }
+
     /// <summary>
     /// Buckets by calendar months (non-uniform intervals).
     /// </summary>

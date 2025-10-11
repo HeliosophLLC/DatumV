@@ -55,4 +55,22 @@ public sealed class StrftimeFunction : IScalarFunction
 
         return DataValue.FromString(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue dateValue = arguments[0];
+        DataValue formatValue = arguments[1];
+
+        if (dateValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        string format = formatValue.AsString(store);
+
+        string result = dateValue.ToDateTimeOffset().ToString(format, CultureInfo.InvariantCulture);
+
+        return DataValue.FromString(result, store);
+    }
 }

@@ -78,6 +78,47 @@ public sealed class JsonQueryFunction : IScalarFunction
         return DataValue.FromJsonValue(element.Value.GetRawText());
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.JsonValue);
+        }
+
+        ReadOnlySpan<byte> utf8 = input.AsUtf8Span(store);
+        string path = arguments[1].AsString(store);
+
+        JsonElement? element = JsonValueFunction.NavigatePathUtf8(utf8, path);
+        if (element is null)
+        {
+            return DataValue.Null(DataKind.JsonValue);
+        }
+
+        // If it's a numeric array, return as Vector.
+        if (element.Value.ValueKind == JsonValueKind.Array && IsAllNumericArray(element.Value))
+        {
+            int count = element.Value.GetArrayLength();
+            float[] values = new float[count];
+            int index = 0;
+            foreach (JsonElement item in element.Value.EnumerateArray())
+            {
+                values[index++] = item.GetSingle();
+            }
+            return DataValue.FromVector(values);
+        }
+
+        // Return as JsonValue for objects, mixed arrays, etc.
+        if (element.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+        {
+            return DataValue.FromJsonValue(element.Value.GetRawText());
+        }
+
+        // Scalar values — return as JsonValue text.
+        return DataValue.FromJsonValue(element.Value.GetRawText());
+    }
+
     private static bool IsAllNumericArray(JsonElement array)
     {
         foreach (JsonElement item in array.EnumerateArray())

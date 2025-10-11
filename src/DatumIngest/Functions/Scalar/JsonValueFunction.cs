@@ -68,6 +68,35 @@ public sealed class JsonValueFunction : IScalarFunction
         };
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<byte> utf8 = input.AsUtf8Span(store);
+        string path = arguments[1].AsString(store);
+
+        JsonElement? element = NavigatePathUtf8(utf8, path);
+        if (element is null)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        return element.Value.ValueKind switch
+        {
+            JsonValueKind.String => DataValue.FromString(element.Value.GetString()!, store),
+            JsonValueKind.Number => DataValue.FromFloat64(element.Value.GetDouble()),
+            JsonValueKind.True => DataValue.FromBoolean(true),
+            JsonValueKind.False => DataValue.FromBoolean(false),
+            JsonValueKind.Null => DataValue.Null(DataKind.String),
+            _ => DataValue.Null(DataKind.String),
+        };
+    }
+
     /// <summary>
     /// Navigates a dot-separated path within a JSON document.
     /// Supports paths like "name", "address.city", "items.0.name".
@@ -84,6 +113,33 @@ public sealed class JsonValueFunction : IScalarFunction
             return null;
         }
 
+        return NavigateDocument(document, path);
+    }
+
+    /// <summary>
+    /// Navigates a dot-separated path within a JSON document parsed from raw UTF-8 bytes.
+    /// Avoids the UTF-16 string intermediate when the source is Arena-backed.
+    /// </summary>
+    internal static JsonElement? NavigatePathUtf8(ReadOnlySpan<byte> utf8, string path)
+    {
+        JsonDocument document;
+        try
+        {
+            // JsonDocument.Parse accepts ReadOnlySequence<byte> — for a contiguous span
+            // we pass as a byte array to avoid the UTF-8 → UTF-16 → UTF-8 round-trip
+            // that the string overload performs.
+            document = JsonDocument.Parse(new ReadOnlyMemory<byte>(utf8.ToArray()));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return NavigateDocument(document, path);
+    }
+
+    private static JsonElement? NavigateDocument(JsonDocument document, string path)
+    {
         using (document)
         {
             JsonElement current = document.RootElement;

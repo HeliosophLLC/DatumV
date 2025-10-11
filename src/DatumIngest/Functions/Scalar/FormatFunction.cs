@@ -123,4 +123,97 @@ public sealed class FormatFunction : IScalarFunction
 
         return DataValue.FromString(sb.ToString());
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        string fmt = arguments[0].AsString(store);
+        StringBuilder sb = new();
+        int autoIndex = 1; // 1-based index for sequential args
+
+        for (int i = 0; i < fmt.Length; i++)
+        {
+            if (fmt[i] != '%')
+            {
+                sb.Append(fmt[i]);
+                continue;
+            }
+
+            i++;
+            if (i >= fmt.Length) break;
+
+            // %% → literal %
+            if (fmt[i] == '%')
+            {
+                sb.Append('%');
+                continue;
+            }
+
+            // Check for positional: %n$s
+            int argIndex = -1;
+            int numStart = i;
+            while (i < fmt.Length && char.IsDigit(fmt[i])) i++;
+
+            if (i < fmt.Length && fmt[i] == '$' && i > numStart)
+            {
+                argIndex = int.Parse(fmt.AsSpan(numStart, i - numStart));
+                i++; // skip '$'
+            }
+            else
+            {
+                i = numStart; // reset, not positional
+            }
+
+            if (i >= fmt.Length) break;
+
+            char spec = fmt[i];
+            int idx = argIndex > 0 ? argIndex : autoIndex++;
+
+            if (idx >= arguments.Length)
+            {
+                throw new InvalidOperationException(
+                    $"format(): not enough arguments for format specifier at position {i}.");
+            }
+
+            DataValue arg = arguments[idx];
+            string value = arg.IsNull ? "" : arg.ToDisplayString();
+
+            switch (spec)
+            {
+                case 's':
+                    sb.Append(value);
+                    break;
+                case 'I':
+                    // SQL identifier quoting
+                    sb.Append('"').Append(value.Replace("\"", "\"\"")).Append('"');
+                    break;
+                case 'L':
+                    // SQL literal quoting
+                    if (arg.IsNull)
+                    {
+                        sb.Append("NULL");
+                    }
+                    else
+                    {
+                        sb.Append('\'').Append(value.Replace("'", "''")).Append('\'');
+                    }
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"format(): unrecognized format specifier '%{spec}'.");
+            }
+
+            if (argIndex > 0)
+            {
+                // Positional arg doesn't advance autoIndex
+            }
+        }
+
+        return DataValue.FromString(sb.ToString(), store);
+    }
 }

@@ -110,6 +110,69 @@ public sealed class DatePartFunction : IScalarFunction
         return DataValue.FromFloat32(result);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue partValue = arguments[0];
+        DataValue input = arguments[1];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        string partName = partValue.AsString(store);
+
+        // Time-only inputs are handled separately — they only support time-related parts.
+        if (input.Kind == DataKind.Time)
+        {
+            return DataValue.FromFloat32(ExtractFromTime(input.AsTime(), partName));
+        }
+
+        // Normalize to a DateTime for uniform extraction. For offset-aware parts,
+        // read the offset from the original DateTimeOffset before calling .DateTime.
+        DateTimeOffset dto = input.ToDateTimeOffset();
+        DateTime dateTime = dto.DateTime;
+        TimeSpan offset = dto.Offset;
+
+        float result = partName.ToLowerInvariant() switch
+        {
+            // PostgreSQL-compatible fields
+            "year" => dateTime.Year,
+            "month" => dateTime.Month,
+            "day" => dateTime.Day,
+            "hour" => dateTime.Hour,
+            "minute" => dateTime.Minute,
+            "second" => dateTime.Second + dateTime.Millisecond / 1000f,
+            "quarter" => (dateTime.Month - 1) / 3 + 1,
+            "week" or "week_of_year" => ISOWeek.GetWeekOfYear(dateTime),
+            "dow" or "day_of_week" => (int)dateTime.DayOfWeek,
+            "doy" or "day_of_year" => dateTime.DayOfYear,
+            "isodow" => dateTime.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)dateTime.DayOfWeek,
+            "isoyear" => ISOWeek.GetYear(dateTime),
+            "epoch" => (float)(dto.ToUnixTimeMilliseconds() / 1000.0),
+            "century" => (int)System.Math.Ceiling(dateTime.Year / 100.0),
+            "decade" => dateTime.Year / 10,
+            "millennium" => (int)System.Math.Ceiling(dateTime.Year / 1000.0),
+            "julian" => (float)(dateTime.ToOADate() + OleAutomationEpochJulianDay),
+            "millisecond" or "milliseconds" => dateTime.Second * 1000f + dateTime.Millisecond,
+            "microsecond" or "microseconds" => dateTime.Second * 1_000_000f + dateTime.Millisecond * 1000f,
+            "timezone" => (float)offset.TotalSeconds,
+            "timezone_hour" => offset.Hours,
+            "timezone_minute" => offset.Minutes,
+
+            // DatumIngest extension
+            "is_weekend" => dateTime.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1f : 0f,
+
+            _ => throw new ArgumentException(
+                $"Unknown date part '{partName}'. Supported: year, month, day, hour, minute, second, quarter, week, dow, doy, " +
+                "isodow, isoyear, epoch, century, decade, millennium, julian, millisecond, microsecond, " +
+                "timezone, timezone_hour, timezone_minute, day_of_week, day_of_year, week_of_year, is_weekend."),
+        };
+
+        return DataValue.FromFloat32(result);
+    }
+
     private static float ExtractFromTime(TimeOnly time, string partName)
     {
         return partName.ToLowerInvariant() switch

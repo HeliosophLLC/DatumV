@@ -40,4 +40,20 @@ public sealed class GetFilenameFunction : IScalarFunction
         string? fileName = Path.GetFileName(input.AsString());
         return DataValue.FromString(fileName ?? string.Empty);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        ReadOnlySpan<char> fileName = Path.GetFileName(span);
+        DataValue result = DataValue.FromCharSpan(fileName, store);
+        System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        return result;
+    }
 }

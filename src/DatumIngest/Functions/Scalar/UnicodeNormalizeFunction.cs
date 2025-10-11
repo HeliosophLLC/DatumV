@@ -63,4 +63,31 @@ public sealed class UnicodeNormalizeFunction : IScalarFunction
 
         return DataValue.FromString(input.Normalize(form));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        string input = arguments[0].AsString(store);
+
+        NormalizationForm form = NormalizationForm.FormC;
+        if (arguments.Length == 2 && !arguments[1].IsNull)
+        {
+            form = arguments[1].AsString(store).ToUpperInvariant() switch
+            {
+                "NFC" => NormalizationForm.FormC,
+                "NFD" => NormalizationForm.FormD,
+                "NFKC" => NormalizationForm.FormKC,
+                "NFKD" => NormalizationForm.FormKD,
+                _ => throw new InvalidOperationException(
+                    $"normalize(): unrecognized normalization form '{arguments[1].AsString(store)}'. Expected NFC, NFD, NFKC, or NFKD."),
+            };
+        }
+
+        return DataValue.FromString(input.Normalize(form), store);
+    }
 }

@@ -36,4 +36,19 @@ public sealed class QuoteNullableFunction : IScalarFunction
 
         return DataValue.FromString($"'{value.Replace("'", "''")}'");
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.FromString("NULL", store);
+        }
+
+        string value = arguments[0].Kind == DataKind.String
+            ? arguments[0].AsString(store)
+            : arguments[0].ToDisplayString();
+
+        return DataValue.FromString($"'{value.Replace("'", "''")}'", store);
+    }
 }

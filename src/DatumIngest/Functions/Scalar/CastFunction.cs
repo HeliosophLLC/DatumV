@@ -217,6 +217,188 @@ public sealed class CastFunction : IScalarFunction
         };
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        // Accept both Type literals (cast(x, Int32)) and String names (CAST(x AS Int32) desugaring).
+        string targetKindName = arguments[1].Kind == DataKind.Type
+            ? arguments[1].AsType().ToString()
+            : arguments[1].AsString(store);
+
+        if (!Enum.TryParse<DataKind>(targetKindName, ignoreCase: true, out DataKind targetKind))
+        {
+            // Accept common aliases that don't match enum names.
+            if (string.Equals(targetKindName, "bool", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Boolean;
+            }
+            else if (string.Equals(targetKindName, "time", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Time;
+            }
+            else if (string.Equals(targetKindName, "duration", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Duration;
+            }
+            else if (string.Equals(targetKindName, "scalar", StringComparison.OrdinalIgnoreCase))
+            {
+                targetKind = DataKind.Float32;
+            }
+            else
+            {
+                throw new ArgumentException($"Unknown target kind '{targetKindName}'.");
+            }
+        }
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(targetKind);
+        }
+
+        // Same kind — return as-is.
+        if (input.Kind == targetKind)
+        {
+            return input;
+        }
+
+        // ── Numeric ↔ numeric: use double as a common intermediate. ──────────
+        if (TryExtractAsDouble(input, out double inputAsDouble))
+        {
+            if (TryMakeNumeric(inputAsDouble, targetKind) is { } numericResult)
+            {
+                return numericResult;
+            }
+
+            // Numeric → Boolean (non-zero = true).
+            if (targetKind == DataKind.Boolean)
+            {
+                return DataValue.FromBoolean(inputAsDouble != 0.0);
+            }
+
+            // Numeric → String: format via the native type to preserve integer precision.
+            if (targetKind == DataKind.String)
+            {
+                return DataValue.FromString(FormatNumericAsString(input), store);
+            }
+        }
+
+        // Boolean → any numeric type (true=1, false=0).
+        if (input.Kind == DataKind.Boolean && IsNumericKind(targetKind))
+        {
+            return TryMakeNumeric(input.AsBoolean() ? 1.0 : 0.0, targetKind)
+                ?? throw new InvalidOperationException($"Internal error: TryMakeNumeric returned null for numeric kind {targetKind}.");
+        }
+
+        // String → any numeric type.
+        if (input.Kind == DataKind.String && IsNumericKind(targetKind))
+        {
+            return ParseStringToNumeric(input.AsString(store), targetKind);
+        }
+
+        return (input.Kind, targetKind) switch
+        {
+            // Date -> DateTime
+            (DataKind.Date, DataKind.DateTime) => DataValue.FromDateTime(
+                new DateTimeOffset(input.AsDate().ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)),
+
+            // DateTime -> Date
+            (DataKind.DateTime, DataKind.Date) => DataValue.FromDate(
+                DateOnly.FromDateTime(input.AsDateTime().DateTime)),
+
+            // String -> Date
+            (DataKind.String, DataKind.Date) => DataValue.FromDate(
+                DateOnly.Parse(input.AsString(store), CultureInfo.InvariantCulture)),
+
+            // String -> DateTime
+            (DataKind.String, DataKind.DateTime) => DataValue.FromDateTime(
+                DateTimeOffset.Parse(input.AsString(store), CultureInfo.InvariantCulture)),
+
+            // Date -> String
+            (DataKind.Date, DataKind.String) => DataValue.FromString(
+                input.AsDate().ToString("O", CultureInfo.InvariantCulture), store),
+
+            // DateTime -> String
+            (DataKind.DateTime, DataKind.String) => DataValue.FromString(
+                input.AsDateTime().ToString("O", CultureInfo.InvariantCulture), store),
+
+            // Date -> Scalar (epoch days since 1970-01-01)
+            (DataKind.Date, DataKind.Float32) => DataValue.FromFloat32(
+                input.AsDate().DayNumber - DateOnly.FromDateTime(DateTimeOffset.UnixEpoch.DateTime).DayNumber),
+
+            // DateTime -> Scalar (epoch seconds since 1970-01-01T00:00:00Z)
+            (DataKind.DateTime, DataKind.Float32) => DataValue.FromFloat32(
+                (float)(input.AsDateTime().ToUniversalTime() - DateTimeOffset.UnixEpoch).TotalSeconds),
+
+            // String -> JsonValue
+            (DataKind.String, DataKind.JsonValue) => DataValue.FromJsonValue(input.AsString(store)),
+
+            // JsonValue -> String
+            (DataKind.JsonValue, DataKind.String) => DataValue.FromString(input.AsJsonValue(), store),
+
+            // UInt8Array -> Image (reinterpret bytes as image)
+            (DataKind.UInt8Array, DataKind.Image) => DataValue.FromImage(input.AsUInt8Array()),
+
+            // Image -> UInt8Array (reinterpret image as bytes)
+            (DataKind.Image, DataKind.UInt8Array) => DataValue.FromUInt8Array(input.AsImage()),
+
+            // String -> Uuid
+            (DataKind.String, DataKind.Uuid) => DataValue.FromUuid(
+                Guid.Parse(input.AsString(store))),
+
+            // Uuid -> String
+            (DataKind.Uuid, DataKind.String) => DataValue.FromString(
+                input.AsUuid().ToString("D"), store),
+
+            // String -> Boolean
+            (DataKind.String, DataKind.Boolean) => ParseStringToBoolean(input.AsString(store)),
+
+            // Boolean -> String
+            (DataKind.Boolean, DataKind.String) => DataValue.FromString(
+                input.AsBoolean() ? "true" : "false", store),
+
+            // String -> Time
+            (DataKind.String, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.Parse(input.AsString(store), CultureInfo.InvariantCulture)),
+
+            // Time -> String
+            (DataKind.Time, DataKind.String) => DataValue.FromString(
+                input.AsTime().ToString("HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture), store),
+
+            // DateTime -> Time (extract time component)
+            (DataKind.DateTime, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.FromTimeSpan(input.AsDateTime().TimeOfDay)),
+
+            // Time -> Scalar (seconds since midnight)
+            (DataKind.Time, DataKind.Float32) => DataValue.FromFloat32(
+                (float)(input.AsTime().Hour * 3600 + input.AsTime().Minute * 60 + input.AsTime().Second + input.AsTime().Millisecond / 1000.0)),
+
+            // Scalar -> Time (seconds since midnight)
+            (DataKind.Float32, DataKind.Time) => DataValue.FromTime(
+                TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(input.AsFloat32()))),
+
+            // String -> Duration
+            (DataKind.String, DataKind.Duration) => DataValue.FromDuration(
+                TimeSpan.Parse(input.AsString(store), CultureInfo.InvariantCulture)),
+
+            // Duration -> String
+            (DataKind.Duration, DataKind.String) => DataValue.FromString(
+                input.AsDuration().ToString("c"), store),
+
+            // Duration -> Scalar (total seconds)
+            (DataKind.Duration, DataKind.Float32) => DataValue.FromFloat32(
+                (float)input.AsDuration().TotalSeconds),
+
+            // Scalar -> Duration (seconds)
+            (DataKind.Float32, DataKind.Duration) => DataValue.FromDuration(
+                TimeSpan.FromSeconds(input.AsFloat32())),
+
+            _ => throw new InvalidOperationException(
+                $"cast() does not support conversion from {input.Kind} to {targetKind}."),
+        };
+    }
+
     private static DataValue ParseStringToBoolean(string value)
     {
         if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)

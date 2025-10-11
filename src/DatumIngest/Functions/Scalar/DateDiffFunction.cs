@@ -73,4 +73,37 @@ public sealed class DateDiffFunction : IScalarFunction
 
         return DataValue.FromFloat32(difference);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue partValue = arguments[0];
+        DataValue startValue = arguments[1];
+        DataValue endValue = arguments[2];
+
+        if (startValue.IsNull || endValue.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        DatePartName part = DatePartParser.Parse(partValue.AsString(store));
+        DateTimeOffset start = DateFunctionUtilities.ToDateTimeOffset(startValue);
+        DateTimeOffset end = DateFunctionUtilities.ToDateTimeOffset(endValue);
+
+        float difference = part switch
+        {
+            DatePartName.Year => end.Year - start.Year,
+            DatePartName.Quarter => (end.Year - start.Year) * 4 + ((end.Month - 1) / 3 - (start.Month - 1) / 3),
+            DatePartName.Month => (end.Year - start.Year) * 12 + (end.Month - start.Month),
+            DatePartName.Week => (float)System.Math.Truncate((end - start).TotalDays / 7),
+            DatePartName.Day => (float)System.Math.Truncate((end - start).TotalDays),
+            DatePartName.Hour => (float)System.Math.Truncate((end - start).TotalHours),
+            DatePartName.Minute => (float)System.Math.Truncate((end - start).TotalMinutes),
+            DatePartName.Second => (float)System.Math.Truncate((end - start).TotalSeconds),
+            DatePartName.Millisecond => (float)System.Math.Truncate((end - start).TotalMilliseconds),
+            _ => throw new ArgumentException($"Unsupported date part for date_diff: {part}."),
+        };
+
+        return DataValue.FromFloat32(difference);
+    }
 }

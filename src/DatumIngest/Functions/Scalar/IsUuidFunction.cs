@@ -39,4 +39,20 @@ public sealed class IsUuidFunction : IScalarFunction
 
         return DataValue.FromBoolean(Guid.TryParse(input.AsString(), out _));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        ReadOnlySpan<char> text = input.AsStringSpan(store, out char[] rented);
+        bool valid = Guid.TryParse(text, out _);
+        System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        return DataValue.FromBoolean(valid);
+    }
 }

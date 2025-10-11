@@ -71,4 +71,33 @@ public sealed class RegexpSplitToArrayFunction : IScalarFunction
 
         return DataValue.FromArray(DataKind.String, elements);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull)
+        {
+            return DataValue.NullArray(DataKind.String);
+        }
+
+        string input = arguments[0].AsString(store);
+        string pattern = arguments[1].AsString(store);
+
+        RegexOptions options = RegexOptions.None;
+        if (arguments.Length == 3 && !arguments[2].IsNull)
+        {
+            string flags = arguments[2].AsString(store);
+            if (flags.Contains('i')) options |= RegexOptions.IgnoreCase;
+        }
+
+        string[] parts = Regex.Split(input, pattern, options);
+
+        DataValue[] elements = new DataValue[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            elements[i] = DataValue.FromString(parts[i], store);
+        }
+
+        return DataValue.FromArray(DataKind.String, elements);
+    }
 }

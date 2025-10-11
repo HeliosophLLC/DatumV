@@ -1110,7 +1110,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public ReadOnlySpan<byte> AsUtf8Span(IValueStore store)
     {
-        ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
+            ThrowIfNullOrWrongKind(DataKind.String); // throws with a clear message
         return store.RetrieveUtf8Span(_p0, _p1);
     }
 
@@ -1128,7 +1129,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
     public ReadOnlySpan<char> AsStringSpan(IValueStore store, out char[] rentedBuffer)
     {
-        ThrowIfNullOrWrongKind(DataKind.String);
+        if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
+            ThrowIfNullOrWrongKind(DataKind.String);
         ReadOnlySpan<byte> utf8 = store.RetrieveUtf8Span(_p0, _p1);
         int maxChars = System.Text.Encoding.UTF8.GetMaxCharCount(utf8.Length);
         rentedBuffer = System.Buffers.ArrayPool<char>.Shared.Rent(maxChars);

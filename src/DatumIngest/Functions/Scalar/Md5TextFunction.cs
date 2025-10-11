@@ -44,4 +44,19 @@ public sealed class Md5TextFunction : IScalarFunction
         byte[] hash = MD5.HashData(inputBytes);
         return DataValue.FromString(Convert.ToHexStringLower(hash));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<byte> inputBytes = arguments[0].AsUtf8Span(store);
+        byte[] hash = MD5.HashData(inputBytes);
+        Span<char> hex = stackalloc char[hash.Length * 2];
+        Convert.TryToHexStringLower(hash, hex, out _);
+        return DataValue.FromCharSpan(hex, store);
+    }
 }

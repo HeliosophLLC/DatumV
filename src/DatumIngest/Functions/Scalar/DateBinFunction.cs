@@ -83,4 +83,39 @@ public sealed class DateBinFunction : IScalarFunction
 
         return DateFunctionUtilities.WrapResult(result, sourceValue.Kind);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue intervalValue = arguments[0];
+        DataValue sourceValue = arguments[1];
+        DataValue originValue = arguments[2];
+
+        if (sourceValue.IsNull)
+        {
+            return DataValue.Null(sourceValue.Kind);
+        }
+
+        TimeSpan interval = IntervalParser.Parse(intervalValue.AsString(store));
+
+        if (interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentException("date_bin() interval must be greater than zero.");
+        }
+
+        DateTimeOffset source = DateFunctionUtilities.ToDateTimeOffset(sourceValue);
+        DateTimeOffset origin = DateFunctionUtilities.ToDateTimeOffset(originValue);
+
+        long widthTicks = interval.Ticks;
+        long ticksDelta = source.Ticks - origin.Ticks;
+
+        // Floor toward negative infinity for sources before origin.
+        long bucketIndex = ticksDelta >= 0
+            ? ticksDelta / widthTicks
+            : (ticksDelta - widthTicks + 1) / widthTicks;
+
+        DateTimeOffset result = new(origin.Ticks + bucketIndex * widthTicks, origin.Offset);
+
+        return DateFunctionUtilities.WrapResult(result, sourceValue.Kind);
+    }
 }

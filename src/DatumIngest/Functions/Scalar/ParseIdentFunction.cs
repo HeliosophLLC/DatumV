@@ -126,4 +126,94 @@ public sealed class ParseIdentFunction : IScalarFunction
 
         return DataValue.FromArray(DataKind.String, elements);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.NullArray(DataKind.String);
+        }
+
+        string input = arguments[0].AsString(store);
+        bool strict = true;
+        if (arguments.Length == 2 && !arguments[1].IsNull)
+        {
+            strict = arguments[1].AsBoolean();
+        }
+
+        List<string> identifiers = [];
+        int pos = 0;
+
+        while (pos < input.Length)
+        {
+            // Skip whitespace
+            while (pos < input.Length && char.IsWhiteSpace(input[pos])) pos++;
+            if (pos >= input.Length) break;
+
+            if (input[pos] == '"')
+            {
+                // Quoted identifier
+                pos++;
+                StringBuilder sb = new();
+                while (pos < input.Length)
+                {
+                    if (input[pos] == '"')
+                    {
+                        pos++;
+                        if (pos < input.Length && input[pos] == '"')
+                        {
+                            sb.Append('"');
+                            pos++;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        sb.Append(input[pos]);
+                        pos++;
+                    }
+                }
+
+                identifiers.Add(sb.ToString());
+            }
+            else if (char.IsLetter(input[pos]) || input[pos] == '_')
+            {
+                // Unquoted identifier — fold to lowercase
+                int start = pos;
+                while (pos < input.Length && (char.IsLetterOrDigit(input[pos]) || input[pos] == '_'))
+                {
+                    pos++;
+                }
+
+                identifiers.Add(input[start..pos].ToLowerInvariant());
+            }
+            else if (input[pos] == '.')
+            {
+                pos++;
+                continue;
+            }
+            else
+            {
+                if (strict)
+                {
+                    throw new InvalidOperationException(
+                        $"parse_ident(): unexpected character '{input[pos]}' at position {pos + 1}.");
+                }
+
+                break;
+            }
+        }
+
+        DataValue[] elements = new DataValue[identifiers.Count];
+        for (int i = 0; i < identifiers.Count; i++)
+        {
+            elements[i] = DataValue.FromString(identifiers[i], store);
+        }
+
+        return DataValue.FromArray(DataKind.String, elements);
+    }
 }

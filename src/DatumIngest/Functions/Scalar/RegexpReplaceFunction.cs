@@ -84,4 +84,38 @@ public sealed class RegexpReplaceFunction : IScalarFunction
         Regex regex = new(pattern, options);
         return DataValue.FromString(regex.Replace(input, replacement, 1));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull || arguments[2].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        string input = arguments[0].AsString(store);
+        string pattern = arguments[1].AsString(store);
+        string replacement = arguments[2].AsString(store);
+
+        bool global = true;
+        RegexOptions options = RegexOptions.None;
+
+        if (arguments.Length == 4 && !arguments[3].IsNull)
+        {
+            string flags = arguments[3].AsString(store);
+            global = flags.Contains('g');
+            if (flags.Contains('i'))
+            {
+                options |= RegexOptions.IgnoreCase;
+            }
+        }
+
+        if (global)
+        {
+            return DataValue.FromString(Regex.Replace(input, pattern, replacement, options), store);
+        }
+
+        Regex regex = new(pattern, options);
+        return DataValue.FromString(regex.Replace(input, replacement, 1), store);
+    }
 }

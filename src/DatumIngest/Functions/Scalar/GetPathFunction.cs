@@ -40,4 +40,20 @@ public sealed class GetPathFunction : IScalarFunction
         string? directoryPath = Path.GetDirectoryName(input.AsString());
         return DataValue.FromString(directoryPath ?? string.Empty);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        ReadOnlySpan<char> directoryPath = Path.GetDirectoryName(span);
+        DataValue result = DataValue.FromCharSpan(directoryPath, store);
+        System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        return result;
+    }
 }

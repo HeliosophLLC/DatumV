@@ -55,4 +55,28 @@ public sealed class Sha512Function : IScalarFunction
         byte[] hash = SHA512.HashData(inputBytes);
         return DataValue.FromUInt8Array(hash);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.UInt8Array);
+        }
+
+        if (input.Kind == DataKind.String)
+        {
+            ReadOnlySpan<byte> inputBytes = input.AsUtf8Span(store);
+            byte[] hash = SHA512.HashData(inputBytes);
+            return DataValue.FromUInt8Array(hash);
+        }
+        else
+        {
+            ReadOnlySpan<byte> inputBytes = input.AsUInt8Array();
+            byte[] hash = SHA512.HashData(inputBytes);
+            return DataValue.FromUInt8Array(hash);
+        }
+    }
 }

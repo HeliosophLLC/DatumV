@@ -51,4 +51,20 @@ public sealed class JsonExistsFunction : IScalarFunction
         bool exists = JsonValueFunction.NavigatePath(json, path) is not null;
         return DataValue.FromBoolean(exists);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.FromBoolean(false);
+        }
+
+        ReadOnlySpan<byte> utf8 = input.AsUtf8Span(store);
+        string path = arguments[1].AsString(store);
+
+        bool exists = JsonValueFunction.NavigatePathUtf8(utf8, path) is not null;
+        return DataValue.FromBoolean(exists);
+    }
 }

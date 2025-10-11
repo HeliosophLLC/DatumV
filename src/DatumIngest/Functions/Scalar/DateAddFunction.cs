@@ -72,4 +72,37 @@ public sealed class DateAddFunction : IScalarFunction
 
         return DateFunctionUtilities.WrapResult(result, dateValue.Kind);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue partValue = arguments[0];
+        DataValue amountValue = arguments[1];
+        DataValue dateValue = arguments[2];
+
+        if (dateValue.IsNull || amountValue.IsNull)
+        {
+            return DataValue.Null(dateValue.Kind);
+        }
+
+        DatePartName part = DatePartParser.Parse(partValue.AsString(store));
+        int amount = amountValue.ToInt32();
+        DateTimeOffset original = DateFunctionUtilities.ToDateTimeOffset(dateValue);
+
+        DateTimeOffset result = part switch
+        {
+            DatePartName.Year => original.AddMonths(amount * 12),
+            DatePartName.Quarter => original.AddMonths(amount * 3),
+            DatePartName.Month => original.AddMonths(amount),
+            DatePartName.Week => original.AddDays(amount * 7),
+            DatePartName.Day => original.AddDays(amount),
+            DatePartName.Hour => original.AddHours(amount),
+            DatePartName.Minute => original.AddMinutes(amount),
+            DatePartName.Second => original.AddSeconds(amount),
+            DatePartName.Millisecond => original.AddMilliseconds(amount),
+            _ => throw new ArgumentException($"Unsupported date part for date_add: {part}."),
+        };
+
+        return DateFunctionUtilities.WrapResult(result, dateValue.Kind);
+    }
 }

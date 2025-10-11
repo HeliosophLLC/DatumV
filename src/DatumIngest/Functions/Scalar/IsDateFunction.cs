@@ -55,4 +55,28 @@ public sealed class IsDateFunction : IScalarFunction
 
         return DataValue.FromBoolean(canParse);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        // Already a Date or DateTime — trivially true.
+        if (input.Kind is DataKind.Date or DataKind.DateTime)
+        {
+            return DataValue.FromBoolean(true);
+        }
+
+        ReadOnlySpan<char> text = input.AsStringSpan(store, out char[] rented);
+        bool canParse = DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind, out _);
+        System.Buffers.ArrayPool<char>.Shared.Return(rented);
+
+        return DataValue.FromBoolean(canParse);
+    }
 }

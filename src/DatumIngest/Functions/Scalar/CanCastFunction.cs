@@ -49,6 +49,18 @@ internal sealed class CanCastFunction : IScalarFunction
         return DataValue.FromBoolean(result);
     }
 
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataKind targetKind = arguments[1].AsType();
+
+        if (input.IsNull) return DataValue.FromBoolean(true);
+        if (input.Kind == targetKind) return DataValue.FromBoolean(true);
+
+        bool result = CanConvertWithStore(input, targetKind, store);
+        return DataValue.FromBoolean(result);
+    }
+
     private static bool CanConvert(DataValue input, DataKind targetKind)
     {
         // Numeric → Numeric (range check via double intermediate).
@@ -69,6 +81,32 @@ internal sealed class CanCastFunction : IScalarFunction
         if (input.Kind == DataKind.String)
         {
             return DataValueComparer.CanParseString(input.AsString(), targetKind);
+        }
+
+        // Semantic conversions (Date↔DateTime, Uuid↔String, temporal↔numeric, etc.).
+        return DataValueComparer.HasSemanticCastPath(input.Kind, targetKind);
+    }
+
+    private static bool CanConvertWithStore(DataValue input, DataKind targetKind, IValueStore store)
+    {
+        // Numeric → Numeric (range check via double intermediate).
+        if (input.TryToDouble(out double asDouble))
+        {
+            if (DataValueComparer.CanFitNumeric(asDouble, targetKind)) return true;
+            if (targetKind == DataKind.Boolean) return true;
+            if (targetKind == DataKind.String) return true;
+        }
+
+        // Boolean → numeric: always valid (true=1, false=0).
+        if (input.Kind == DataKind.Boolean && DataValueComparer.IsNumericScalar(targetKind))
+        {
+            return true;
+        }
+
+        // String parsing.
+        if (input.Kind == DataKind.String)
+        {
+            return DataValueComparer.CanParseString(input.AsString(store), targetKind);
         }
 
         // Semantic conversions (Date↔DateTime, Uuid↔String, temporal↔numeric, etc.).
