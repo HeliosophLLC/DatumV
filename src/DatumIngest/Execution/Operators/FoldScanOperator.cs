@@ -103,7 +103,7 @@ public sealed class FoldScanOperator : IQueryOperator
         }
 
         // Step 3: For each unique spec, partition + sort + fold.
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, store: context.Store);
         foreach (KeyValuePair<WindowSpecificationKey, List<int>> specGroup in specGroups)
         {
             WindowSpecification spec = _scanColumns[specGroup.Value[0]].WindowSpecification;

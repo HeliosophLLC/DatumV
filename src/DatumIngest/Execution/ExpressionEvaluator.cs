@@ -17,6 +17,7 @@ public sealed class ExpressionEvaluator
 {
     private readonly FunctionRegistry _functions;
     private readonly QueryMeter? _meter;
+    private readonly IValueStore? _store;
     private readonly Row? _outerRow;
     private readonly Schema? _sourceSchema;
 
@@ -81,14 +82,19 @@ public sealed class ExpressionEvaluator
     /// referenced binding's expression is a struct literal, field positions are recovered from
     /// the AST. Enables named destructuring of struct literals through hidden bindings.
     /// </param>
-    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null)
+    /// <param name="store">Optional value store for resolving reference-type payloads (strings, arrays).</param>
+    public ExpressionEvaluator(FunctionRegistry functions, QueryMeter? meter = null, Row? outerRow = null, Schema? sourceSchema = null, IReadOnlyDictionary<string, Expression>? letBindingExpressions = null, IValueStore? store = null)
     {
         _functions = functions;
         _meter = meter;
+        _store = store;
         _outerRow = outerRow;
         _sourceSchema = sourceSchema;
         _letBindingExpressions = letBindingExpressions;
     }
+
+    /// <summary>Resolves a string DataValue, delegating to the current resolution path.</summary>
+    private string Str(DataValue v) => v.AsString();
 
     /// <summary>
     /// Evaluates an expression tree against the given row and returns the result.
@@ -178,7 +184,7 @@ public sealed class ExpressionEvaluator
             DataKind.UInt32 => result.AsUInt32() != 0,
             DataKind.Int64 => result.AsInt64() != 0,
             DataKind.UInt64 => result.AsUInt64() != 0,
-            DataKind.String => !string.IsNullOrEmpty(result.AsString()),
+            DataKind.String => !string.IsNullOrEmpty(Str(result)),
             _ => true,
         };
     }
@@ -808,7 +814,7 @@ public sealed class ExpressionEvaluator
         }
 
         DataValue tzValue = Evaluate(atz.TimeZone, row);
-        string tzName = tzValue.AsString();
+        string tzName = Str(tzValue);
 
         if (!_timeZoneCache.TryGetValue(tzName, out TimeZoneInfo? tz))
         {
@@ -1081,7 +1087,7 @@ public sealed class ExpressionEvaluator
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
-                    $"Named field access ('{index.AsString()}') is not supported on Array: " +
+                    $"Named field access ('{Str(index)}') is not supported on Array: " +
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
@@ -1102,7 +1108,7 @@ public sealed class ExpressionEvaluator
             if (index.Kind == DataKind.String)
             {
                 throw new InvalidOperationException(
-                    $"Named field access ('{index.AsString()}') is not supported on Vector — " +
+                    $"Named field access ('{Str(index)}') is not supported on Vector — " +
                     $"use positional destructuring: LET (a, b, ...) = expr.");
             }
 
@@ -1144,7 +1150,7 @@ public sealed class ExpressionEvaluator
         DataValue source, DataValue index, IndexAccessExpression indexAccess, Row row)
     {
         DataValue[] fields = source.AsStruct();
-        string fieldName = index.AsString();
+        string fieldName = Str(index);
 
         // Try to resolve field position from schema when source is a column reference.
         if (indexAccess.Source is ColumnReference colRef)
@@ -1253,8 +1259,8 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("LIKE requires string operands.");
         }
 
-        string input = left.AsString();
-        string pattern = right.AsString();
+        string input = Str(left);
+        string pattern = Str(right);
 
         if (!_likeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
@@ -1281,8 +1287,8 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("ILIKE requires string operands.");
         }
 
-        string input = left.AsString();
-        string pattern = right.AsString();
+        string input = Str(left);
+        string pattern = Str(right);
 
         if (!_iLikeRegexCache.TryGetValue(pattern, out Regex? regex))
         {
@@ -1311,8 +1317,8 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("REGEXP requires string operands.");
         }
 
-        string input = left.AsString();
-        string pattern = right.AsString();
+        string input = Str(left);
+        string pattern = Str(right);
 
         if (!_regexpCache.TryGetValue(pattern, out Regex? regex))
         {
@@ -1345,14 +1351,14 @@ public sealed class ExpressionEvaluator
             throw new InvalidOperationException("LIKE ... ESCAPE requires string operands.");
         }
 
-        string escapeString = escapeValue.AsString();
+        string escapeString = Str(escapeValue);
         if (escapeString.Length != 1)
         {
             throw new InvalidOperationException("ESCAPE character must be a single character.");
         }
 
         char escapeChar = escapeString[0];
-        string sqlPattern = pattern.AsString();
+        string sqlPattern = Str(pattern);
         string cacheKey = $"{sqlPattern}\0{escapeChar}\0{(like.CaseInsensitive ? 'i' : 'c')}";
 
         if (!_likeRegexCache.TryGetValue(cacheKey, out Regex? regex))
@@ -1396,7 +1402,7 @@ public sealed class ExpressionEvaluator
             _likeRegexCache[cacheKey] = regex;
         }
 
-        bool matches = regex.IsMatch(input.AsString());
+        bool matches = regex.IsMatch(Str(input));
         return DataValue.FromBoolean(matches);
     }
 }

@@ -86,7 +86,7 @@ public sealed class OrderByOperator : IQueryOperator, IDisposable
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
         if (_topNRows is int topN and > 0)
         {

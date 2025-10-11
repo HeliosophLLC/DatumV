@@ -377,7 +377,7 @@ internal sealed class StatementExecutor
         try
         {
             ExecutionContext context = new(cancellationToken, _session.FunctionRegistry, _queryContext.Catalog, localBufferPool, queryMeter,
-                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
+                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes, store: ReferenceStore.Current())
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,
@@ -710,7 +710,8 @@ internal sealed class StatementExecutor
                 _queryContext.Catalog,
                 localBufferPool,
                 queryMeter,
-                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
+                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes,
+                store: ReferenceStore.Current())
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,
@@ -1268,7 +1269,7 @@ internal sealed class StatementExecutor
         try
         {
             ExecutionContext context = new(cancellationToken, _session.FunctionRegistry, _queryContext.Catalog, localBufferPool, queryMeter,
-                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes)
+                memoryBudgetBytes: _session.Governor.MemoryBudgetBytes, store: ReferenceStore.Current())
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,

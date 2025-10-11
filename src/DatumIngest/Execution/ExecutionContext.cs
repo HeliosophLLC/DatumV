@@ -20,6 +20,7 @@ public sealed class ExecutionContext
         FunctionRegistry = context.FunctionRegistry;
         Catalog = context.Catalog;
         LocalBufferPool = context.LocalBufferPool;
+        Store = context.Store;
         QueryMeter = context.QueryMeter;
         MemoryBudgetBytes = context.MemoryBudgetBytes;
         BatchSize = context.BatchSize;
@@ -45,18 +46,24 @@ public sealed class ExecutionContext
     /// Pool for reusing <see cref="Model.Row"/> objects and their backing
     /// <see cref="Model.DataValue"/> arrays in join operators.
     /// </param>
+    /// <param name="store">
+    /// Optional value store for reference-type payloads. Defaults to a new <see cref="Arena"/>
+    /// if not provided.
+    /// </param>
     public ExecutionContext(
         CancellationToken cancellationToken,
         FunctionRegistry functionRegistry,
         TableCatalog catalog,
         LocalBufferPool localBufferPool,
         QueryMeter? queryMeter = null,
-        long? memoryBudgetBytes = null)
+        long? memoryBudgetBytes = null,
+        IValueStore? store = null)
     {
         CancellationToken = cancellationToken;
         FunctionRegistry = functionRegistry;
         Catalog = catalog;
         LocalBufferPool = localBufferPool;
+        Store = store ?? new Arena();
         QueryMeter = queryMeter;
         MemoryBudgetBytes = memoryBudgetBytes;
     }
@@ -70,6 +77,13 @@ public sealed class ExecutionContext
 
     /// <summary>Registry of named tables and provider factories.</summary>
     public TableCatalog Catalog { get; }
+
+    /// <summary>
+    /// Value store for string, byte, float, and object payloads during query execution.
+    /// Operators use this store for all reference-type <see cref="DataValue"/> access
+    /// instead of the ambient <see cref="ReferenceStore"/>.
+    /// </summary>
+    public IValueStore Store { get; }
 
     /// <summary>
     /// Optional meter for accumulating Query Unit costs during execution.
@@ -154,7 +168,8 @@ public sealed class ExecutionContext
             Catalog,
             LocalBufferPool,
             QueryMeter,
-            MemoryBudgetBytes)
+            MemoryBudgetBytes,
+            Store)
         {
             OuterRow = outerRow,
             RowLimit = RowLimit,

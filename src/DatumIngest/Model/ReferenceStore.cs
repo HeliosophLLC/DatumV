@@ -46,6 +46,12 @@ internal sealed class ReferenceStore : IValueStore
         _current.Value ?? throw new InvalidOperationException(
             "No ReferenceStore scope is active. Call ReferenceStore.BeginQueryScope() before creating reference-backed DataValues.");
 
+    /// <summary>
+    /// Returns the store for the current query scope, or <see langword="null"/> if no scope is active.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static ReferenceStore? TryGetCurrent() => _current.Value;
+
     // ───────────────────────── IValueStore ─────────────────────────
 
     /// <inheritdoc />

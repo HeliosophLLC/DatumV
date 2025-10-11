@@ -190,7 +190,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// </summary>
     private async IAsyncEnumerable<RowBatch> ExecuteStreamingAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
         bool useSingleKey = _groupByExpressions.Count == 1;
 
@@ -312,7 +312,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
     /// </summary>
     private async IAsyncEnumerable<RowBatch> ExecuteHashAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
         bool useSingleKey = _groupByExpressions.Count == 1;
         bool isGlobalAggregation = _groupByExpressions.Count == 0;
@@ -981,7 +981,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                     globalWorkers[wi] = Task.Run(async () =>
                     {
                         ExpressionEvaluator workerEvaluator = new(
-                            context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+                            context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
                         (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =
                             CreateAggregateArgumentScratch();
@@ -1089,7 +1089,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
             Task feederTask = Task.Run(async () =>
             {
                 ExpressionEvaluator routingEvaluator = new(
-                    context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+                    context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
                 try
                 {
                     await foreach (RowBatch inputBatch in _source.ExecuteAsync(context).ConfigureAwait(false))
@@ -1139,7 +1139,7 @@ public sealed class GroupByOperator : IQueryOperator, IDisposable
                 workers[wi] = Task.Run(async () =>
                 {
                     ExpressionEvaluator workerEvaluator = new(
-                        context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+                        context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
                     MemoryEstimator? estimator = workerEstimators[wi];
 
                     (DataValue[][] workerArgScratch, DataValue[]?[]? workerSortScratch) =

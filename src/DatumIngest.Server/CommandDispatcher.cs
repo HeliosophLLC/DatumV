@@ -188,7 +188,7 @@ public sealed class CommandDispatcher
         LocalBufferPool localBufferPool = GlobalPool.RentLocalBufferPool();
         AssertionDiagnostics assertionDiagnostics = new();
         ExecutionContext context = new(cancellationToken, session.FunctionRegistry, queryContext.Catalog, localBufferPool, queryMeter,
-            memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
+            memoryBudgetBytes: session.Governor.MemoryBudgetBytes, store: ReferenceStore.Current())
         {
             DegreeOfParallelism = Environment.ProcessorCount,
             ParallelismBudget = _parallelismBudget,
@@ -503,7 +503,8 @@ public sealed class CommandDispatcher
                 session.FunctionRegistry,
                 queryContext.Catalog,
                 localBufferPool,
-                memoryBudgetBytes: session.Governor.MemoryBudgetBytes)
+                memoryBudgetBytes: session.Governor.MemoryBudgetBytes,
+                store: ReferenceStore.Current())
             {
                 DegreeOfParallelism = Environment.ProcessorCount,
                 ParallelismBudget = _parallelismBudget,

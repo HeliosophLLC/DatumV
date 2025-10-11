@@ -111,7 +111,7 @@ public sealed class PivotOperator : IQueryOperator, IDisposable
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
 
         // Pass 1: buffer all input rows and collect distinct pivot values (if auto-discover).
         List<Row> bufferedRows = new();

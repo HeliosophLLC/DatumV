@@ -53,7 +53,7 @@ public sealed class FilterOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
         LocalBufferPool pool = context.LocalBufferPool;
         RowBatch? outputBatch = null;
 

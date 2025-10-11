@@ -102,7 +102,7 @@ public sealed class ProjectOperator : IQueryOperator
             letBindingExpressions = map;
         }
 
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, letBindingExpressions: letBindingExpressions);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, letBindingExpressions: letBindingExpressions, store: context.Store);
         ProjectionSchema? schema = null;
         LocalBufferPool pool = context.LocalBufferPool;
         AssertionDiagnostics? assertionDiagnostics = context.AssertionDiagnostics;

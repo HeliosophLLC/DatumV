@@ -105,7 +105,7 @@ public sealed class MergeJoinOperator : IQueryOperator
     /// <inheritdoc/>
     public async IAsyncEnumerable<RowBatch> ExecuteAsync(ExecutionContext context)
     {
-        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow);
+        ExpressionEvaluator evaluator = new(context.FunctionRegistry, context.QueryMeter, context.OuterRow, store: context.Store);
         Expression leftKeyExpression = _extraction.KeyPairs[0].Left;
         Expression rightKeyExpression = _extraction.KeyPairs[0].Right;
 
