@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -24,20 +25,26 @@ namespace DatumIngest.Model;
 /// copies existing data.
 /// </para>
 /// <para>
-/// This type is not thread-safe. Parallel decoders should use private arenas
-/// and merge via <see cref="CopyFrom"/>.
+/// All writes are serialized via an internal lock, making concurrent appends
+/// safe from parallel operators. Reads are lock-free since they only access
+/// data at offsets returned by prior writes.
 /// </para>
 /// </remarks>
 public sealed class Arena : IValueStore, IDisposable
 {
     private const int DefaultCapacity = 4096;
 
+    private readonly Lock _writeLock = new();
     private MemoryMappedFile _mmf;
     private MemoryMappedViewAccessor _accessor;
     private unsafe byte* _pointer;
     private int _capacity;
     private int _position;
     private bool _disposed;
+
+    // Side-list for managed objects that cannot be byte-serialized (e.g. ImageHandle).
+    // Accessed under _writeLock for thread safety.
+    private List<object>? _objects;
 
     /// <summary>Creates an arena with the specified initial byte capacity.</summary>
     /// <param name="initialCapacity">
@@ -102,19 +109,47 @@ public sealed class Arena : IValueStore, IDisposable
     public DataValue[] RetrieveDataValues(int p0, int p1) => MaterializeDataValues(p0, p1);
 
     /// <inheritdoc />
-    public (int P0, int P1) StoreObject(object value) =>
-        throw new NotSupportedException(
-            "Arena does not support arbitrary object storage. Use ReferenceStore for managed objects.");
+    public (int P0, int P1) StoreObject(object value)
+    {
+        lock (_writeLock)
+        {
+            _objects ??= [];
+            _objects.Add(value);
+            return (_objects.Count - 1, 0);
+        }
+    }
 
     /// <inheritdoc />
-    public object RetrieveObject(int p0, int p1) =>
-        throw new NotSupportedException(
-            "Arena does not support arbitrary object retrieval. Use ReferenceStore for managed objects.");
+    public object RetrieveObject(int p0, int p1)
+    {
+        if (_objects is null || (uint)p0 >= (uint)_objects.Count)
+            throw new InvalidOperationException($"No object stored at index {p0}.");
+        return _objects[p0];
+    }
 
     // ───────────────────────── Common ─────────────────────────
 
     /// <summary>Total bytes written so far.</summary>
     public int BytesWritten => _position;
+
+    // ───────────────────────── Core write path ─────────────────────────
+
+    /// <summary>
+    /// Appends raw bytes to the arena under a lock. All typed append methods
+    /// flow through this single write path.
+    /// </summary>
+    /// <returns>The byte offset and length of the written region.</returns>
+    private (int Offset, int Length) WriteBytes(ReadOnlySpan<byte> data)
+    {
+        lock (_writeLock)
+        {
+            EnsureCapacity(data.Length);
+            int offset = _position;
+            data.CopyTo(GetSpanForWrite(offset, data.Length));
+            _position += data.Length;
+            return (offset, data.Length);
+        }
+    }
 
     // ───────────────────────── String operations ─────────────────────────
 
@@ -125,13 +160,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="utf8">The encoded bytes to append.</param>
     /// <returns>The byte offset and length within this arena.</returns>
     public (int Offset, int Length) AppendUtf8(ReadOnlySpan<byte> utf8)
-    {
-        EnsureCapacity(utf8.Length);
-        int offset = _position;
-        utf8.CopyTo(GetSpanForWrite(_position, utf8.Length));
-        _position += utf8.Length;
-        return (offset, utf8.Length);
-    }
+        => WriteBytes(utf8);
 
     /// <summary>
     /// Appends a managed <see cref="string"/> by encoding it as UTF-8.
@@ -141,11 +170,20 @@ public sealed class Arena : IValueStore, IDisposable
     public (int Offset, int Length) AppendString(string value)
     {
         int maxByteCount = Encoding.UTF8.GetMaxByteCount(value.Length);
-        EnsureCapacity(maxByteCount);
-        int written = Encoding.UTF8.GetBytes(value, GetSpanForWrite(_position, maxByteCount));
-        int offset = _position;
-        _position += written;
-        return (offset, written);
+
+        // Encode to a temporary buffer, then write the exact bytes.
+        byte[]? rented = null;
+        Span<byte> temp = maxByteCount <= 256
+            ? stackalloc byte[maxByteCount]
+            : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
+
+        int written = Encoding.UTF8.GetBytes(value, temp);
+        var result = WriteBytes(temp[..written]);
+
+        if (rented is not null)
+            ArrayPool<byte>.Shared.Return(rented);
+
+        return result;
     }
 
     /// <summary>Returns the raw UTF-8 bytes for a previously appended string.</summary>
@@ -174,11 +212,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>The byte offset in this arena and the number of elements.</returns>
     public (int Offset, int Count) AppendFloats(ReadOnlySpan<float> values)
     {
-        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(values);
-        EnsureCapacity(bytes.Length);
-        int offset = _position;
-        bytes.CopyTo(GetSpanForWrite(_position, bytes.Length));
-        _position += bytes.Length;
+        var (offset, _) = WriteBytes(MemoryMarshal.AsBytes(values));
         return (offset, values.Length);
     }
 
@@ -208,13 +242,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="bytes">The bytes to append.</param>
     /// <returns>The byte offset and length within this arena.</returns>
     public (int Offset, int Length) AppendBytes(ReadOnlySpan<byte> bytes)
-    {
-        EnsureCapacity(bytes.Length);
-        int offset = _position;
-        bytes.CopyTo(GetSpanForWrite(_position, bytes.Length));
-        _position += bytes.Length;
-        return (offset, bytes.Length);
-    }
+        => WriteBytes(bytes);
 
     /// <summary>Returns raw bytes previously appended.</summary>
     /// <param name="offset">Byte offset returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
@@ -242,11 +270,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>The byte offset and element count within this arena.</returns>
     public (int Offset, int Count) AppendDataValues(ReadOnlySpan<DataValue> values)
     {
-        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(values);
-        EnsureCapacity(bytes.Length);
-        int offset = _position;
-        bytes.CopyTo(GetSpanForWrite(_position, bytes.Length));
-        _position += bytes.Length;
+        var (offset, _) = WriteBytes(MemoryMarshal.AsBytes(values));
         return (offset, values.Length);
     }
 
@@ -279,10 +303,14 @@ public sealed class Arena : IValueStore, IDisposable
         int shapeBytes = (1 + shape.Length) * sizeof(int); // rank + dimensions
         int dataBytes = data.Length * sizeof(float);
         int totalBytes = shapeBytes + dataBytes;
-        EnsureCapacity(totalBytes);
 
-        int offset = _position;
-        Span<byte> dest = GetSpanForWrite(_position, totalBytes);
+        // Build the tensor layout in a temporary buffer, then write atomically.
+        byte[]? rented = null;
+        Span<byte> temp = totalBytes <= 1024
+            ? stackalloc byte[totalBytes]
+            : (rented = ArrayPool<byte>.Shared.Rent(totalBytes));
+
+        Span<byte> dest = temp[..totalBytes];
 
         // Write rank
         MemoryMarshal.Write(dest, shape.Length);
@@ -295,8 +323,12 @@ public sealed class Arena : IValueStore, IDisposable
         // Write float data
         MemoryMarshal.AsBytes(data).CopyTo(dest);
 
-        _position += totalBytes;
-        return (offset, totalBytes);
+        var result = WriteBytes(temp[..totalBytes]);
+
+        if (rented is not null)
+            ArrayPool<byte>.Shared.Return(rented);
+
+        return result;
     }
 
     /// <summary>
@@ -336,11 +368,8 @@ public sealed class Arena : IValueStore, IDisposable
     public int CopyFrom(Arena source)
     {
         ReadOnlySpan<byte> data = source.GetSpanForRead(0, source._position);
-        EnsureCapacity(data.Length);
-        int baseOffset = _position;
-        data.CopyTo(GetSpanForWrite(_position, data.Length));
-        _position += data.Length;
-        return baseOffset;
+        var (offset, _) = WriteBytes(data);
+        return offset;
     }
 
     // ───────────────────────── Disposal ─────────────────────────
@@ -377,6 +406,9 @@ public sealed class Arena : IValueStore, IDisposable
         _mmf.Dispose();
     }
 
+    /// <summary>
+    /// Grows the backing mapping. Must be called under <see cref="_writeLock"/>.
+    /// </summary>
     private unsafe void EnsureCapacity(int additionalBytes)
     {
         int required = _position + additionalBytes;
