@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using DatumIngest.Model;
 
@@ -111,6 +112,92 @@ public sealed class UnistrFunction : IScalarFunction
         }
 
         return DataValue.FromString(sb.ToString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        string input = arguments[0].AsString(store);
+        StringBuilder sb = new(input.Length);
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            if (input[i] != '\\')
+            {
+                sb.Append(input[i]);
+                continue;
+            }
+
+            i++;
+            if (i >= input.Length) break;
+
+            switch (input[i])
+            {
+                case '\\':
+                    sb.Append('\\');
+                    break;
+
+                case '+' when i + 6 < input.Length:
+                {
+                    // \+XXXXXX (6 hex digits)
+                    string hex = input.Substring(i + 1, 6);
+                    int codePoint = Convert.ToInt32(hex, 16);
+                    sb.Append(char.ConvertFromUtf32(codePoint));
+                    i += 6;
+                    break;
+                }
+
+                case 'U' when i + 8 < input.Length:
+                {
+                    // \UXXXXXXXX (8 hex digits)
+                    string hex = input.Substring(i + 1, 8);
+                    int codePoint = Convert.ToInt32(hex, 16);
+                    sb.Append(char.ConvertFromUtf32(codePoint));
+                    i += 8;
+                    break;
+                }
+
+                case 'u' when i + 4 < input.Length:
+                {
+                    // \uXXXX (4 hex digits)
+                    string hex = input.Substring(i + 1, 4);
+                    int codePoint = Convert.ToInt32(hex, 16);
+                    sb.Append(char.ConvertFromUtf32(codePoint));
+                    i += 4;
+                    break;
+                }
+
+                default:
+                {
+                    // \XXXX (4 hex digits — PostgreSQL default form)
+                    if (i + 3 < input.Length && IsHexSequence(input, i, 4))
+                    {
+                        string hex = input.Substring(i, 4);
+                        int codePoint = Convert.ToInt32(hex, 16);
+                        sb.Append(char.ConvertFromUtf32(codePoint));
+                        i += 3;
+                    }
+                    else
+                    {
+                        // Not a recognized escape — keep literal
+                        sb.Append('\\');
+                        sb.Append(input[i]);
+                    }
+                    break;
+                }
+            }
+        }
+
+        char[] resultBuf = ArrayPool<char>.Shared.Rent(sb.Length);
+        sb.CopyTo(0, resultBuf.AsSpan(), sb.Length);
+        DataValue result = DataValue.FromCharSpan(resultBuf.AsSpan(0, sb.Length), store);
+        ArrayPool<char>.Shared.Return(resultBuf);
+        return result;
     }
 
     private static bool IsHexSequence(string s, int start, int length)

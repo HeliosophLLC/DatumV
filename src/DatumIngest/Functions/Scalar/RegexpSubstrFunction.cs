@@ -185,7 +185,7 @@ public sealed class RegexpSubstrFunction : IScalarFunction
 
         Group group = match.Groups[subexpr];
         return group.Success
-            ? DataValue.FromString(group.Value, store)
+            ? DataValue.FromCharSpan(group.ValueSpan, store)
             : DataValue.Null(DataKind.String);
     }
 }

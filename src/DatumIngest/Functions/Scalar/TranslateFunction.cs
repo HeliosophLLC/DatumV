@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using DatumIngest.Model;
 
@@ -70,5 +71,47 @@ public sealed class TranslateFunction : IScalarFunction
         }
 
         return DataValue.FromString(builder.ToString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull || arguments[2].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> text = arguments[0].AsStringSpan(store, out char[] textRented);
+        ReadOnlySpan<char> from = arguments[1].AsStringSpan(store, out char[] fromRented);
+        ReadOnlySpan<char> to   = arguments[2].AsStringSpan(store, out char[] toRented);
+
+        char[] outputRented = ArrayPool<char>.Shared.Rent(text.Length);
+        int written = 0;
+
+        try
+        {
+            for (int i = 0; i < text.Length; i++)
+            {
+                int mappingIndex = from.IndexOf(text[i]);
+                if (mappingIndex < 0)
+                {
+                    outputRented[written++] = text[i];
+                }
+                else if (mappingIndex < to.Length)
+                {
+                    outputRented[written++] = to[mappingIndex];
+                }
+                // else: character is in 'from' but has no 'to' counterpart — delete it
+            }
+
+            return DataValue.FromCharSpan(outputRented.AsSpan(0, written), store);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(outputRented);
+            if (textRented is not null) ArrayPool<char>.Shared.Return(textRented);
+            if (fromRented is not null) ArrayPool<char>.Shared.Return(fromRented);
+            if (toRented is not null)   ArrayPool<char>.Shared.Return(toRented);
+        }
     }
 }

@@ -121,7 +121,7 @@ public sealed class RegexpExtractFunction : IScalarFunction
 
         Group group = match.Groups[groupIndex];
         return group.Success
-            ? DataValue.FromString(group.Value, store)
+            ? DataValue.FromCharSpan(group.ValueSpan, store)
             : DataValue.Null(DataKind.String);
     }
 }

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using DatumIngest.Model;
 
@@ -214,6 +215,10 @@ public sealed class FormatFunction : IScalarFunction
             }
         }
 
-        return DataValue.FromString(sb.ToString(), store);
+        char[] resultBuf = ArrayPool<char>.Shared.Rent(sb.Length);
+        sb.CopyTo(0, resultBuf.AsSpan(), sb.Length);
+        DataValue result = DataValue.FromCharSpan(resultBuf.AsSpan(0, sb.Length), store);
+        ArrayPool<char>.Shared.Return(resultBuf);
+        return result;
     }
 }

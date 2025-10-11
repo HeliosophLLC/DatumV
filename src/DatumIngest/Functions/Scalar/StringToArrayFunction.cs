@@ -87,4 +87,84 @@ public sealed class StringToArrayFunction : IScalarFunction
 
         return DataValue.FromArray(DataKind.String, elements);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.NullArray(DataKind.String);
+        }
+
+        ReadOnlySpan<char> input = arguments[0].AsStringSpan(store, out char[] inputRented);
+
+        ReadOnlySpan<char> nullStr = default;
+        char[]? nullRented = null;
+        bool hasNullStr = arguments.Length == 3 && !arguments[2].IsNull;
+        if (hasNullStr)
+            nullStr = arguments[2].AsStringSpan(store, out nullRented);
+
+        try
+        {
+            if (arguments[1].IsNull)
+            {
+                // NULL delimiter: split into individual characters.
+                DataValue[] charElements = new DataValue[input.Length];
+                for (int i = 0; i < input.Length; i++)
+                    charElements[i] = DataValue.FromCharSpan(input.Slice(i, 1), store);
+                return DataValue.FromArray(DataKind.String, charElements);
+            }
+
+            ReadOnlySpan<char> delimiter = arguments[1].AsStringSpan(store, out char[] delimRented);
+
+            try
+            {
+                if (delimiter.Length == 0)
+                {
+                    DataValue[] single = [DataValue.FromCharSpan(input, store)];
+                    return DataValue.FromArray(DataKind.String, single);
+                }
+
+                // Count segments first, then split.
+                int segmentCount = 1;
+                ReadOnlySpan<char> scan = input;
+                while (true)
+                {
+                    int pos = delimiter.Length == 1
+                        ? scan.IndexOf(delimiter[0])
+                        : scan.IndexOf(delimiter);
+                    if (pos < 0) break;
+                    segmentCount++;
+                    scan = scan[(pos + delimiter.Length)..];
+                }
+
+                Span<Range> ranges = segmentCount <= 64
+                    ? stackalloc Range[segmentCount]
+                    : new Range[segmentCount];
+                int count = delimiter.Length == 1
+                    ? input.Split(ranges, delimiter[0])
+                    : input.Split(ranges, delimiter);
+
+                DataValue[] elements = new DataValue[count];
+                for (int i = 0; i < count; i++)
+                {
+                    ReadOnlySpan<char> part = input[ranges[i]];
+                    elements[i] = hasNullStr && part.SequenceEqual(nullStr)
+                        ? DataValue.Null(DataKind.String)
+                        : DataValue.FromCharSpan(part, store);
+                }
+
+                return DataValue.FromArray(DataKind.String, elements);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(delimRented);
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<char>.Shared.Return(inputRented);
+            if (nullRented is not null) System.Buffers.ArrayPool<char>.Shared.Return(nullRented);
+        }
+    }
 }

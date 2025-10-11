@@ -88,4 +88,47 @@ public sealed class RegexpMatchFunction : IScalarFunction
         // No capture groups — return the whole match
         return DataValue.FromArray(DataKind.String, [DataValue.FromString(match.Value)]);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull)
+        {
+            return DataValue.NullArray(DataKind.String);
+        }
+
+        string input = arguments[0].AsString(store);
+        string pattern = arguments[1].AsString(store);
+
+        RegexOptions options = RegexOptions.None;
+        if (arguments.Length == 3 && !arguments[2].IsNull)
+        {
+            string flags = arguments[2].AsString(store);
+            if (flags.Contains('i')) options |= RegexOptions.IgnoreCase;
+        }
+
+        Match match = Regex.Match(input, pattern, options);
+
+        if (!match.Success)
+        {
+            return DataValue.NullArray(DataKind.String);
+        }
+
+        // If pattern has capture groups, return them (skip group 0 = full match)
+        if (match.Groups.Count > 1)
+        {
+            DataValue[] elements = new DataValue[match.Groups.Count - 1];
+            for (int i = 1; i < match.Groups.Count; i++)
+            {
+                elements[i - 1] = match.Groups[i].Success
+                    ? DataValue.FromCharSpan(match.Groups[i].ValueSpan, store)
+                    : DataValue.Null(DataKind.String);
+            }
+
+            return DataValue.FromArray(DataKind.String, elements);
+        }
+
+        // No capture groups — return the whole match
+        return DataValue.FromArray(DataKind.String, [DataValue.FromCharSpan(match.ValueSpan, store)]);
+    }
 }

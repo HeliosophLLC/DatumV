@@ -71,6 +71,67 @@ public static partial class SqlIdentifier
         return name;
     }
 
+    /// <summary>
+    /// Returns <see langword="true"/> when the name span requires quoting.
+    /// Span-based overload that avoids allocating a managed string.
+    /// </summary>
+    public static bool NeedsQuoting(ReadOnlySpan<char> name)
+    {
+        if (name.IsEmpty) return true;
+
+        if (!IsBareIdentifier(name)) return true;
+
+        // HashSet doesn't support span lookup directly — allocate only for the keyword check.
+        return ReservedKeywords.Contains(name.ToString());
+    }
+
+    /// <summary>
+    /// Writes the quoted form of an identifier into the destination span if quoting is needed,
+    /// or copies the original name. Returns the number of chars written.
+    /// </summary>
+    /// <param name="name">The identifier to quote.</param>
+    /// <param name="destination">Buffer to write the result into. Must be large enough
+    /// (worst case: <c>name.Length * 2 + 2</c> for all-quote characters).</param>
+    /// <returns>The number of chars written to <paramref name="destination"/>.</returns>
+    public static int QuoteIfNeeded(ReadOnlySpan<char> name, Span<char> destination)
+    {
+        if (!NeedsQuoting(name))
+        {
+            name.CopyTo(destination);
+            return name.Length;
+        }
+
+        int pos = 0;
+        destination[pos++] = '"';
+        foreach (char c in name)
+        {
+            if (c == '"') destination[pos++] = '"';
+            destination[pos++] = c;
+        }
+        destination[pos++] = '"';
+        return pos;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when every character in the span is a valid
+    /// bare identifier character: <c>[a-zA-Z_][a-zA-Z0-9_]*</c>.
+    /// </summary>
+    private static bool IsBareIdentifier(ReadOnlySpan<char> name)
+    {
+        char first = name[0];
+        if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_'))
+            return false;
+
+        for (int i = 1; i < name.Length; i++)
+        {
+            char c = name[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+                return false;
+        }
+
+        return true;
+    }
+
     /// <summary>Matches a valid C-style identifier: <c>[a-zA-Z_][a-zA-Z0-9_]*</c>.</summary>
     [GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*$")]
     private static partial Regex BareIdentifierPattern();

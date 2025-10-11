@@ -63,4 +63,28 @@ public sealed class RegexpLikeFunction : IScalarFunction
 
         return DataValue.FromBoolean(Regex.IsMatch(input, pattern, options));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        ReadOnlySpan<char> input = arguments[0].AsStringSpan(store, out char[] rentedInput);
+        string pattern = arguments[1].AsString(store); // Regex pattern must be string
+
+        RegexOptions options = RegexOptions.None;
+        if (arguments.Length == 3 && !arguments[2].IsNull)
+        {
+            ReadOnlySpan<char> flags = arguments[2].AsStringSpan(store, out char[] rentedFlags);
+            if (flags.Contains('i')) options |= RegexOptions.IgnoreCase;
+            System.Buffers.ArrayPool<char>.Shared.Return(rentedFlags);
+        }
+
+        bool result = Regex.IsMatch(input, pattern, options);
+        System.Buffers.ArrayPool<char>.Shared.Return(rentedInput);
+        return DataValue.FromBoolean(result);
+    }
 }

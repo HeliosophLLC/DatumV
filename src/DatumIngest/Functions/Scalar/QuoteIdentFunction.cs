@@ -1,4 +1,6 @@
+using System.Buffers;
 using DatumIngest.Model;
+using DatumIngest.Parsing.Tokens;
 
 namespace DatumIngest.Functions.Scalar;
 
@@ -65,5 +67,22 @@ public sealed class QuoteIdentFunction : IScalarFunction
         }
 
         return DataValue.FromString($"\"{ident.Replace("\"", "\"\"")}\"");
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> ident = arguments[0].AsStringSpan(store, out char[] rented);
+        char[] resultBuf = ArrayPool<char>.Shared.Rent(ident.Length * 2 + 2);
+        int written = SqlIdentifier.QuoteIfNeeded(ident, resultBuf);
+        DataValue result = DataValue.FromCharSpan(resultBuf.AsSpan(0, written), store);
+        ArrayPool<char>.Shared.Return(resultBuf);
+        ArrayPool<char>.Shared.Return(rented);
+        return result;
     }
 }

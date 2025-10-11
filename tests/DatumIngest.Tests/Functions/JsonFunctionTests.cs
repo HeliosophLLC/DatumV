@@ -252,7 +252,7 @@ public class JsonFunctionTests
         DataValue result = function.Execute([
             DataValue.FromJsonValue("[1, 2, 3, 4, 5]")
         ]);
-        Assert.Equal(5f, result.AsFloat32());
+        Assert.Equal(5, result.AsInt32());
     }
 
     [Fact]
@@ -263,7 +263,7 @@ public class JsonFunctionTests
             DataValue.FromJsonValue("{\"items\": [\"a\", \"b\"]}"),
             DataValue.FromString("items")
         ]);
-        Assert.Equal(2f, result.AsFloat32());
+        Assert.Equal(2, result.AsInt32());
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class JsonFunctionTests
         DataValue result = function.Execute([
             DataValue.FromJsonValue("[]")
         ]);
-        Assert.Equal(0f, result.AsFloat32());
+        Assert.Equal(0, result.AsInt32());
     }
 
     [Fact]

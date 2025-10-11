@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -71,5 +72,46 @@ public sealed class SplitPartFunction : IScalarFunction
         }
 
         return DataValue.FromString(parts[index]);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull || arguments[2].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> text      = arguments[0].AsStringSpan(store, out char[] textRented);
+        ReadOnlySpan<char> delimiter = arguments[1].AsStringSpan(store, out char[] delimRented);
+        int fieldNumber = arguments[2].ToInt32();
+
+        try
+        {
+            if (fieldNumber == 0)
+                return DataValue.FromCharSpan(ReadOnlySpan<char>.Empty, store);
+
+            // Split into ranges on the stack. If more segments than the buffer,
+            // the last range captures the remainder — still correct for forward access.
+            Span<Range> ranges = stackalloc Range[64];
+            int count = delimiter.Length == 1
+                ? text.Split(ranges, delimiter[0])
+                : text.Split(ranges, delimiter);
+
+            // Resolve 1-based (positive) or end-relative (negative) to 0-based index.
+            int index = fieldNumber > 0
+                ? fieldNumber - 1
+                : count + fieldNumber;
+
+            if (index < 0 || index >= count)
+                return DataValue.FromCharSpan(ReadOnlySpan<char>.Empty, store);
+
+            return DataValue.FromCharSpan(text[ranges[index]], store);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(textRented);
+            ArrayPool<char>.Shared.Return(delimRented);
+        }
     }
 }

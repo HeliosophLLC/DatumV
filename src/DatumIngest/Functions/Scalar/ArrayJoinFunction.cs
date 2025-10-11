@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using DatumIngest.Model;
 
@@ -94,7 +95,11 @@ public sealed class ArrayJoinFunction : IScalarFunction
             builder.Append(FormatElementWithStore(element, store));
         }
 
-        return DataValue.FromString(builder.ToString(), store);
+        char[] resultBuf = ArrayPool<char>.Shared.Rent(builder.Length);
+        builder.CopyTo(0, resultBuf.AsSpan(), builder.Length);
+        DataValue result = DataValue.FromCharSpan(resultBuf.AsSpan(0, builder.Length), store);
+        ArrayPool<char>.Shared.Return(resultBuf);
+        return result;
     }
 
     /// <summary>
