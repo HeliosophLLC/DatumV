@@ -11,7 +11,7 @@ namespace DatumIngest.Functions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The standard <see cref="IScalarFunction.Execute"/> path eagerly evaluates all
+/// The standard <see cref="IScalarFunction.Execute(ReadOnlySpan{DataValue})"/> path eagerly evaluates all
 /// arguments to <see cref="DataValue"/> before invocation. This is incompatible
 /// with lambdas — a lambda is not a value, it is a deferred expression that the
 /// function invokes zero or more times with different bindings.

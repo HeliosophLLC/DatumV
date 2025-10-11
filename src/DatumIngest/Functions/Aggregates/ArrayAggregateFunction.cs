@@ -11,7 +11,7 @@ namespace DatumIngest.Functions.Aggregates;
 /// Supports intra-aggregate <c>ORDER BY</c> to control element order:
 /// <c>ARRAY_AGG(name ORDER BY name ASC)</c>. When ORDER BY is specified, the
 /// <see cref="Execution.Operators.GroupByOperator"/> sorts buffered rows before
-/// calling <see cref="IAggregateAccumulator.Accumulate"/>.
+/// calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue})"/>.
 /// </para>
 /// <para>
 /// Returns null if all values are null. Null values are skipped.

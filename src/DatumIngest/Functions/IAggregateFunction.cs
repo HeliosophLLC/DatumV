@@ -58,6 +58,14 @@ public interface IAggregateAccumulator
     void Accumulate(ReadOnlySpan<DataValue> arguments);
 
     /// <summary>
+    /// Incorporates one row's argument values with an explicit value store
+    /// for resolving reference-type payloads.
+    /// </summary>
+    /// <param name="arguments">The evaluated argument values for this row.</param>
+    /// <param name="store">The value store for reading/writing reference-type payloads.</param>
+    void Accumulate(ReadOnlySpan<DataValue> arguments, IValueStore store) => Accumulate(arguments);
+
+    /// <summary>
     /// Merges the state of another accumulator (of the same concrete type) into
     /// this one. Used by parallel hash aggregate to combine thread-local partial
     /// aggregations into a single result per group. The <paramref name="other"/>

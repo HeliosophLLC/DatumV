@@ -1017,7 +1017,7 @@ public sealed class ColumnBatchEvaluator : IDisposable
 
     /// <summary>
     /// Evaluates a function call column-at-a-time by calling
-    /// <see cref="IScalarFunction.Execute"/> per row.  Vectorized function
+    /// <see cref="IScalarFunction.Execute(ReadOnlySpan{DataValue})"/> per row.  Vectorized function
     /// variants are planned for Phase 6.
     /// </summary>
     private DataValue[] EvaluateFunctionColumn(FunctionCallExpression function, ColumnBatch batch, bool[]? active)

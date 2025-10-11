@@ -15,7 +15,7 @@ namespace DatumIngest.Functions.Aggregates;
 /// <para>
 /// Returns null if all values are null. Null values are skipped.
 /// When ORDER BY is specified, the GroupByOperator
-/// sorts buffered rows before calling <see cref="IAggregateAccumulator.Accumulate"/>.
+/// sorts buffered rows before calling <see cref="IAggregateAccumulator.Accumulate(ReadOnlySpan{DataValue})"/>.
 /// </para>
 /// </summary>
 public sealed class StringAggregateFunction : IAggregateFunction

@@ -401,7 +401,9 @@ public sealed class ExpressionEvaluator
                 arguments[index] = Evaluate(function.Arguments[index], row);
             }
 
-            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
+            DataValue result = _store is not null
+                ? scalarFunction.Execute(arguments.AsSpan(0, argumentCount), _store)
+                : scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
 
             _meter?.Add(scalarFunction.QueryUnitCost);
         if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
@@ -788,7 +790,9 @@ public sealed class ExpressionEvaluator
         {
             arguments[0] = value;
             arguments[1] = targetTypeValue;
-            DataValue result = castFunction.Execute(arguments.AsSpan(0, 2));
+            DataValue result = _store is not null
+                ? castFunction.Execute(arguments.AsSpan(0, 2), _store)
+                : castFunction.Execute(arguments.AsSpan(0, 2));
             _meter?.Add(castFunction.QueryUnitCost);
             return result;
         }
