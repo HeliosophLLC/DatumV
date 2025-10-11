@@ -52,4 +52,21 @@ public sealed class ReplaceFunction : IScalarFunction
         string result = input.AsString().Replace(oldValue.AsString(), newValue.AsString(), StringComparison.Ordinal);
         return DataValue.FromString(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue oldValue = arguments[1];
+        DataValue newValue = arguments[2];
+
+        if (input.IsNull || oldValue.IsNull || newValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        // string.Replace requires string inputs; use AsString for all three and store for output.
+        string result = input.AsString(store).Replace(oldValue.AsString(store), newValue.AsString(store), StringComparison.Ordinal);
+        return DataValue.FromString(result, store);
+    }
 }

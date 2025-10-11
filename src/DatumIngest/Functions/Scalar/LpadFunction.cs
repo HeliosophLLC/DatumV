@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -90,5 +91,63 @@ public sealed class LpadFunction : IScalarFunction
 
         inputString.CopyTo(0, padded, paddingNeeded, inputString.Length);
         return DataValue.FromString(new string(padded));
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue lengthValue = arguments[1];
+
+        if (input.IsNull || lengthValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        if (arguments.Length == 3 && arguments[2].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> inputSpan = input.AsStringSpan(store, out char[] rentedInput);
+        int targetLength = lengthValue.ToInt32();
+
+        if (targetLength <= 0)
+        {
+            ArrayPool<char>.Shared.Return(rentedInput);
+            return DataValue.FromCharSpan(ReadOnlySpan<char>.Empty, store);
+        }
+
+        if (inputSpan.Length >= targetLength)
+        {
+            DataValue truncated = DataValue.FromCharSpan(inputSpan[..targetLength], store);
+            ArrayPool<char>.Shared.Return(rentedInput);
+            return truncated;
+        }
+
+        char[]? rentedFillArray = null;
+        ReadOnlySpan<char> fillSpan = arguments.Length == 3
+            ? arguments[2].AsStringSpan(store, out rentedFillArray)
+            : " ".AsSpan();
+
+        int paddingNeeded = targetLength - inputSpan.Length;
+        char[] padded = ArrayPool<char>.Shared.Rent(targetLength);
+
+        for (int i = 0; i < paddingNeeded; i++)
+        {
+            padded[i] = fillSpan[i % fillSpan.Length];
+        }
+
+        inputSpan.CopyTo(padded.AsSpan(paddingNeeded));
+
+        DataValue result = DataValue.FromCharSpan(padded.AsSpan(0, targetLength), store);
+        ArrayPool<char>.Shared.Return(padded);
+        ArrayPool<char>.Shared.Return(rentedInput);
+        if (rentedFillArray is not null)
+        {
+            ArrayPool<char>.Shared.Return(rentedFillArray);
+        }
+
+        return result;
     }
 }

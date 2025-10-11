@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -72,5 +73,69 @@ public sealed class OverlayFunction : IScalarFunction
 
         int end = System.Math.Min(start + count, text.Length);
         return DataValue.FromString(string.Concat(text.AsSpan(0, start), replacement, text.AsSpan(end)));
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue newSubstring = arguments[1];
+        DataValue startValue = arguments[2];
+
+        if (input.IsNull || newSubstring.IsNull || startValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> textSpan = input.AsStringSpan(store, out char[] rentedText);
+        ReadOnlySpan<char> replacementSpan = newSubstring.AsStringSpan(store, out char[] rentedReplacement);
+        int start = startValue.ToInt32() - 1; // convert to 0-based
+
+        int count = replacementSpan.Length;
+        if (arguments.Length == 4)
+        {
+            if (arguments[3].IsNull)
+            {
+                ArrayPool<char>.Shared.Return(rentedText);
+                ArrayPool<char>.Shared.Return(rentedReplacement);
+                return DataValue.Null(DataKind.String);
+            }
+
+            count = arguments[3].ToInt32();
+        }
+
+        if (start < 0)
+        {
+            start = 0;
+        }
+
+        DataValue result;
+        if (start >= textSpan.Length)
+        {
+            // Append replacement after the text.
+            int totalLength = textSpan.Length + replacementSpan.Length;
+            char[] buf = ArrayPool<char>.Shared.Rent(totalLength);
+            textSpan.CopyTo(buf.AsSpan(0));
+            replacementSpan.CopyTo(buf.AsSpan(textSpan.Length));
+            result = DataValue.FromCharSpan(buf.AsSpan(0, totalLength), store);
+            ArrayPool<char>.Shared.Return(buf);
+        }
+        else
+        {
+            int end = System.Math.Min(start + count, textSpan.Length);
+            ReadOnlySpan<char> prefix = textSpan[..start];
+            ReadOnlySpan<char> suffix = textSpan[end..];
+            int totalLength = prefix.Length + replacementSpan.Length + suffix.Length;
+            char[] buf = ArrayPool<char>.Shared.Rent(totalLength);
+            prefix.CopyTo(buf.AsSpan(0));
+            replacementSpan.CopyTo(buf.AsSpan(prefix.Length));
+            suffix.CopyTo(buf.AsSpan(prefix.Length + replacementSpan.Length));
+            result = DataValue.FromCharSpan(buf.AsSpan(0, totalLength), store);
+            ArrayPool<char>.Shared.Return(buf);
+        }
+
+        ArrayPool<char>.Shared.Return(rentedText);
+        ArrayPool<char>.Shared.Return(rentedReplacement);
+        return result;
     }
 }

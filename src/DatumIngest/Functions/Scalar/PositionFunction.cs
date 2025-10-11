@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -44,6 +45,25 @@ public sealed class PositionFunction : IScalarFunction
         }
 
         int index = input.AsString().IndexOf(substring.AsString(), StringComparison.Ordinal);
+        return DataValue.FromInt32(index + 1);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue substring = arguments[1];
+
+        if (input.IsNull || substring.IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        ReadOnlySpan<char> inputSpan = input.AsStringSpan(store, out char[] rentedInput);
+        ReadOnlySpan<char> substringSpan = substring.AsStringSpan(store, out char[] rentedSubstring);
+        int index = inputSpan.IndexOf(substringSpan, StringComparison.Ordinal);
+        ArrayPool<char>.Shared.Return(rentedInput);
+        ArrayPool<char>.Shared.Return(rentedSubstring);
         return DataValue.FromInt32(index + 1);
     }
 }

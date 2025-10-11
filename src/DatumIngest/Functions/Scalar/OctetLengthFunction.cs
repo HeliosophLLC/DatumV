@@ -39,4 +39,16 @@ public sealed class OctetLengthFunction : IScalarFunction
 
         return DataValue.FromInt32(Encoding.UTF8.GetByteCount(input.AsString()));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        return DataValue.FromInt32(input.AsUtf8Span(store).Length);
+    }
 }

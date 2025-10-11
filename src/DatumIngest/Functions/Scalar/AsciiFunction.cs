@@ -34,4 +34,18 @@ public sealed class AsciiFunction : IScalarFunction
         string text = input.AsString();
         return DataValue.FromInt32(text.Length == 0 ? 0 : text[0]);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        // For ASCII-range characters the first UTF-8 byte equals the ASCII code point.
+        ReadOnlySpan<byte> utf8 = input.AsUtf8Span(store);
+        return DataValue.FromInt32(utf8.Length == 0 ? 0 : utf8[0]);
+    }
 }

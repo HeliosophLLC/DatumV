@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using DatumIngest.Model;
 
@@ -64,5 +65,63 @@ public sealed class ConcatWsFunction : IScalarFunction
         }
 
         return DataValue.FromString(builder.ToString());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue separatorArgument = arguments[0];
+        if (separatorArgument.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> separatorSpan = separatorArgument.AsStringSpan(store, out char[] rentedSep);
+
+        // Calculate total length: values + separators between them.
+        int nonNullCount = 0;
+        int totalLength = 0;
+        for (int i = 1; i < arguments.Length; i++)
+        {
+            if (!arguments[i].IsNull)
+            {
+                totalLength += arguments[i].StringCharCount(store);
+                nonNullCount++;
+            }
+        }
+
+        if (nonNullCount > 1)
+        {
+            totalLength += separatorSpan.Length * (nonNullCount - 1);
+        }
+
+        char[] rented = ArrayPool<char>.Shared.Rent(totalLength);
+        int position = 0;
+        bool first = true;
+
+        for (int i = 1; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull)
+            {
+                continue;
+            }
+
+            if (!first)
+            {
+                separatorSpan.CopyTo(rented.AsSpan(position));
+                position += separatorSpan.Length;
+            }
+
+            ReadOnlySpan<char> part = arguments[i].AsStringSpan(store, out char[] rentedPart);
+            part.CopyTo(rented.AsSpan(position));
+            position += part.Length;
+            ArrayPool<char>.Shared.Return(rentedPart);
+            first = false;
+        }
+
+        DataValue result = DataValue.FromCharSpan(rented.AsSpan(0, totalLength), store);
+        ArrayPool<char>.Shared.Return(rented);
+        ArrayPool<char>.Shared.Return(rentedSep);
+        return result;
     }
 }

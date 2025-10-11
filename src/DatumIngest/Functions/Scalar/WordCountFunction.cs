@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -59,6 +60,43 @@ public sealed class WordCountFunction : IScalarFunction
             }
         }
 
+        return DataValue.FromInt32(count);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+
+        if (span.Length == 0)
+        {
+            ArrayPool<char>.Shared.Return(rented);
+            return DataValue.FromInt32(0);
+        }
+
+        int count = 0;
+        bool inWord = false;
+
+        foreach (char character in span)
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                inWord = false;
+            }
+            else if (!inWord)
+            {
+                inWord = true;
+                count++;
+            }
+        }
+
+        ArrayPool<char>.Shared.Return(rented);
         return DataValue.FromInt32(count);
     }
 }
