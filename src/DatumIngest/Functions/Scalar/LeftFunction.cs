@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -55,5 +56,34 @@ public sealed class LeftFunction : IScalarFunction
 
         string result = inputString[..System.Math.Min(count, inputString.Length)];
         return DataValue.FromString(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue countValue = arguments[1];
+
+        if (input.IsNull || countValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        int count = countValue.ToInt32();
+
+        DataValue result;
+        if (count < 0)
+        {
+            int end = span.Length + count;
+            result = end <= 0 ? DataValue.FromCharSpan(ReadOnlySpan<char>.Empty, store) : DataValue.FromCharSpan(span[..end], store);
+        }
+        else
+        {
+            result = DataValue.FromCharSpan(span[..System.Math.Min(count, span.Length)], store);
+        }
+
+        ArrayPool<char>.Shared.Return(rented);
+        return result;
     }
 }

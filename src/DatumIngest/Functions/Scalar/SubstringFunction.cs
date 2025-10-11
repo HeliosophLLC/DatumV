@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -72,5 +73,48 @@ public sealed class SubstringFunction : IScalarFunction
         }
 
         return DataValue.FromString(text[start..]);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        int start = arguments[1].ToInt32() - 1;
+
+        if (start < 0)
+        {
+            start = 0;
+        }
+
+        if (start >= span.Length)
+        {
+            ArrayPool<char>.Shared.Return(rented);
+            return DataValue.FromCharSpan(ReadOnlySpan<char>.Empty, store);
+        }
+
+        DataValue result;
+        if (arguments.Length == 3)
+        {
+            int length = arguments[2].ToInt32();
+            int availableLength = span.Length - start;
+            if (length > availableLength)
+            {
+                length = availableLength;
+            }
+            result = DataValue.FromCharSpan(span.Slice(start, length), store);
+        }
+        else
+        {
+            result = DataValue.FromCharSpan(span[start..], store);
+        }
+
+        ArrayPool<char>.Shared.Return(rented);
+        return result;
     }
 }

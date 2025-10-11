@@ -69,6 +69,15 @@ public sealed class Arena : IValueStore, IDisposable
     public string RetrieveString(int p0, int p1) => GetString(p0, p1);
 
     /// <inheritdoc />
+    public ReadOnlySpan<byte> RetrieveUtf8Span(int p0, int p1) => GetSpan(p0, p1);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreUtf8(ReadOnlySpan<byte> utf8) => AppendUtf8(utf8);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreChars(ReadOnlySpan<char> chars) => AppendChars(chars);
+
+    /// <inheritdoc />
     public (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes)
     {
         var (offset, length) = AppendBytes(bytes);
@@ -178,6 +187,28 @@ public sealed class Arena : IValueStore, IDisposable
             : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
 
         int written = Encoding.UTF8.GetBytes(value, temp);
+        var result = WriteBytes(temp[..written]);
+
+        if (rented is not null)
+            ArrayPool<byte>.Shared.Return(rented);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Appends a span of chars by encoding as UTF-8, without allocating a managed string.
+    /// </summary>
+    /// <param name="chars">The char span to encode and append.</param>
+    /// <returns>The byte offset and length within this arena.</returns>
+    public (int Offset, int Length) AppendChars(ReadOnlySpan<char> chars)
+    {
+        int maxByteCount = Encoding.UTF8.GetMaxByteCount(chars.Length);
+        byte[]? rented = null;
+        Span<byte> temp = maxByteCount <= 256
+            ? stackalloc byte[maxByteCount]
+            : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
+
+        int written = Encoding.UTF8.GetBytes(chars, temp);
         var result = WriteBytes(temp[..written]);
 
         if (rented is not null)

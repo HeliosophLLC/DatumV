@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -38,5 +39,22 @@ public sealed class CasefoldFunction : IScalarFunction
         }
 
         return DataValue.FromString(arguments[0].AsString().ToLowerInvariant());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = arguments[0].AsStringSpan(store, out char[] rented);
+        char[] resultBuf = ArrayPool<char>.Shared.Rent(span.Length);
+        int written = span.ToLowerInvariant(resultBuf);
+        DataValue result = DataValue.FromCharSpan(resultBuf.AsSpan(0, written), store);
+        ArrayPool<char>.Shared.Return(resultBuf);
+        ArrayPool<char>.Shared.Return(rented);
+        return result;
     }
 }

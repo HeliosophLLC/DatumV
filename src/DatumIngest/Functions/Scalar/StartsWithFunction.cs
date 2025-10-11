@@ -46,4 +46,19 @@ public sealed class StartsWithFunction : IScalarFunction
         bool result = input.AsString().StartsWith(prefix.AsString(), StringComparison.Ordinal);
         return DataValue.FromBoolean(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue prefix = arguments[1];
+
+        if (input.IsNull || prefix.IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        bool result = input.AsUtf8Span(store).StartsWith(prefix.AsUtf8Span(store));
+        return DataValue.FromBoolean(result);
+    }
 }

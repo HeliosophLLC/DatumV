@@ -1,3 +1,4 @@
+using System.Text;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -74,5 +75,28 @@ public sealed class LenFunction : IScalarFunction
             default:
                 throw new InvalidOperationException($"len() does not support {input.Kind}.");
         }
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Int32);
+        }
+
+        // Fast path: element count is cached inline for most collection types.
+        int elementCount = input.ElementCount;
+        if (elementCount >= 0)
+            return DataValue.FromInt32(elementCount);
+
+        return input.Kind switch
+        {
+            DataKind.String => DataValue.FromInt32(input.StringCharCount(store)),
+            DataKind.JsonValue => DataValue.FromInt32(Encoding.UTF8.GetCharCount(input.AsUtf8Span(store))),
+            DataKind.Array => DataValue.FromInt32(input.AsArray().Length),
+            _ => throw new InvalidOperationException($"len() does not support {input.Kind}."),
+        };
     }
 }

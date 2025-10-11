@@ -28,6 +28,27 @@ public interface IValueStore
     /// </summary>
     string RetrieveString(int p0, int p1);
 
+    /// <summary>
+    /// Retrieves the raw UTF-8 bytes of a previously stored string without allocating
+    /// a managed <see cref="string"/>. For <see cref="Arena"/>-backed stores this is a
+    /// zero-copy slice of the backing buffer.
+    /// </summary>
+    ReadOnlySpan<byte> RetrieveUtf8Span(int p0, int p1);
+
+    /// <summary>
+    /// Stores raw UTF-8 bytes as a string value and returns two payload words.
+    /// Avoids the intermediate <see cref="string"/> allocation when the source is
+    /// already encoded (e.g. from <see cref="RetrieveUtf8Span"/>).
+    /// </summary>
+    (int P0, int P1) StoreUtf8(ReadOnlySpan<byte> utf8);
+
+    /// <summary>
+    /// Stores a <see cref="ReadOnlySpan{T}"/> of <see cref="char"/> by encoding it as
+    /// UTF-8 and returns two payload words. Avoids a managed <see cref="string"/>
+    /// allocation when the source is a decoded char span.
+    /// </summary>
+    (int P0, int P1) StoreChars(ReadOnlySpan<char> chars);
+
     // ───────────────────────── Byte arrays ─────────────────────────
 
     /// <summary>

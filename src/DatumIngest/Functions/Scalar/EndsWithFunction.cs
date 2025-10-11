@@ -46,4 +46,21 @@ public sealed class EndsWithFunction : IScalarFunction
         bool result = input.AsString().EndsWith(suffix.AsString(), StringComparison.Ordinal);
         return DataValue.FromBoolean(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue suffix = arguments[1];
+
+        if (input.IsNull || suffix.IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        bool result = input
+            .AsUtf8Span(store)
+            .EndsWith(suffix.AsUtf8Span(store));
+        return DataValue.FromBoolean(result);
+    }
 }

@@ -61,6 +61,18 @@ internal sealed class ReferenceStore : IValueStore
     public string RetrieveString(int p0, int p1) => Get<string>(p0);
 
     /// <inheritdoc />
+    public ReadOnlySpan<byte> RetrieveUtf8Span(int p0, int p1) =>
+        System.Text.Encoding.UTF8.GetBytes(Get<string>(p0));
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreUtf8(ReadOnlySpan<byte> utf8) =>
+        (InternString(System.Text.Encoding.UTF8.GetString(utf8)), 0);
+
+    /// <inheritdoc />
+    public (int P0, int P1) StoreChars(ReadOnlySpan<char> chars) =>
+        (InternString(new string(chars)), 0);
+
+    /// <inheritdoc />
     public (int P0, int P1) StoreBytes(ReadOnlySpan<byte> bytes)
     {
         byte[] copy = bytes.ToArray();

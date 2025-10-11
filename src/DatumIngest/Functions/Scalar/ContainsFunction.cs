@@ -46,4 +46,21 @@ public sealed class ContainsFunction : IScalarFunction
         bool result = input.AsString().Contains(substring.AsString(), StringComparison.Ordinal);
         return DataValue.FromBoolean(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue substring = arguments[1];
+
+        if (input.IsNull || substring.IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        bool result = input
+            .AsUtf8Span(store)
+            .IndexOf(substring.AsUtf8Span(store)) >= 0;
+        return DataValue.FromBoolean(result);
+    }
 }

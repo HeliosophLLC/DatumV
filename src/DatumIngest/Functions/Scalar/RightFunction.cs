@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -55,5 +56,34 @@ public sealed class RightFunction : IScalarFunction
 
         string result = inputString[System.Math.Max(0, inputString.Length - count)..];
         return DataValue.FromString(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue countValue = arguments[1];
+
+        if (input.IsNull || countValue.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        int count = countValue.ToInt32();
+
+        DataValue result;
+        if (count < 0)
+        {
+            int start = System.Math.Abs(count);
+            result = start >= span.Length ? DataValue.FromCharSpan(ReadOnlySpan<char>.Empty, store) : DataValue.FromCharSpan(span[start..], store);
+        }
+        else
+        {
+            result = DataValue.FromCharSpan(span[System.Math.Max(0, span.Length - count)..], store);
+        }
+
+        ArrayPool<char>.Shared.Return(rented);
+        return result;
     }
 }

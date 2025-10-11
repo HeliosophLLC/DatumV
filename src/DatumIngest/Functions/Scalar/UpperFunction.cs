@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -37,5 +38,23 @@ public sealed class UpperFunction : IScalarFunction
         }
 
         return DataValue.FromString(input.AsString().ToUpperInvariant());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+        char[] resultBuf = ArrayPool<char>.Shared.Rent(span.Length);
+        int written = span.ToUpperInvariant(resultBuf);
+        DataValue result = DataValue.FromCharSpan(resultBuf.AsSpan(0, written), store);
+        ArrayPool<char>.Shared.Return(resultBuf);
+        ArrayPool<char>.Shared.Return(rented);
+        return result;
     }
 }

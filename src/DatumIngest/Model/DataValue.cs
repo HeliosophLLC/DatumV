@@ -158,7 +158,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromUInt8Array(byte[] value)
     {
         int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.UInt8Array, flags: FlagHasReference, p0: index);
+        return new(DataKind.UInt8Array, flags: FlagHasReference, p0: index, p1: value.Length);
     }
 
     /// <summary>Creates a value from a byte array using an explicit <see cref="IValueStore"/>.</summary>
@@ -173,7 +173,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ReferenceStore store = ReferenceStore.Current();
         int index = store.InternString(value);
-        return new(DataKind.String, flags: FlagHasReference, p0: index);
+        return new(DataKind.String, flags: FlagHasReference, p0: index, p2: value.Length);
     }
 
     /// <summary>
@@ -184,7 +184,21 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromString(string value, IValueStore store)
     {
         var (p0, p1) = store.StoreString(value);
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: value.Length);
+    }
+
+    /// <summary>Creates a string value from a char span without allocating a managed string.</summary>
+    public static DataValue FromCharSpan(ReadOnlySpan<char> chars, IValueStore store)
+    {
+        var (p0, p1) = store.StoreChars(chars);
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: chars.Length);
+    }
+
+    /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
+    public static DataValue FromUtf8Span(ReadOnlySpan<byte> utf8, int charCount, IValueStore store)
+    {
+        var (p0, p1) = store.StoreUtf8(utf8);
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: charCount);
     }
 
     /// <summary>
@@ -214,7 +228,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromVector(float[] value)
     {
         int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.Vector, flags: FlagHasReference, p0: index);
+        return new(DataKind.Vector, flags: FlagHasReference, p0: index, p1: value.Length);
     }
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array using an explicit <see cref="IValueStore"/>.</summary>
@@ -273,7 +287,7 @@ public readonly struct DataValue : IEquatable<DataValue>
 
         ReferenceStore store = ReferenceStore.Current();
         int index = store.AddPair(data, shape);
-        return new(DataKind.Tensor, flags: FlagHasReference, p0: index);
+        return new(DataKind.Tensor, flags: FlagHasReference, p0: index, p2: expectedLength);
     }
 
     /// <summary>Creates an arbitrary-rank tensor using an explicit <see cref="IValueStore"/>.</summary>
@@ -290,7 +304,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         }
 
         var (p0, p1) = store.StoreTensor(data, shape);
-        return new(DataKind.Tensor, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.Tensor, flags: FlagHasReference, p0: p0, p1: p1, p2: expectedLength);
     }
 
     /// <summary>Creates a value from encoded image bytes.</summary>
@@ -336,7 +350,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ReferenceStore store = ReferenceStore.Current();
         int index = store.InternString(value);
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index);
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index, p2: value.Length);
     }
 
     /// <summary>
@@ -345,7 +359,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromJsonValue(string value, IValueStore store)
     {
         var (p0, p1) = store.StoreString(value);
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1);
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1, p2: value.Length);
     }
 
     /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
@@ -1050,6 +1064,76 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ThrowIfNullOrWrongKind(DataKind.String);
         return store.RetrieveString(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Returns the character count of a string or JSON value without accessing the store.
+    /// Cached in <c>_p2</c> at creation time for values built from a managed <see cref="string"/>.
+    /// For arena-slice values where <c>_p2</c> is 0, falls back to UTF-8 decode counting
+    /// via <paramref name="store"/>.
+    /// </summary>
+    /// <param name="store">Fallback store for arena-slice values where the char count was not cached.</param>
+    /// <returns>The number of <see cref="char"/> units in the string.</returns>
+    public int StringCharCount(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        return _p2 != 0 ? _p2 : System.Text.Encoding.UTF8.GetCharCount(store.RetrieveUtf8Span(_p0, _p1));
+    }
+
+    /// <summary>
+    /// Returns the element count for collection-type values without accessing the store.
+    /// <list type="bullet">
+    /// <item><see cref="DataKind.Vector"/>: number of float elements (<c>_p1</c>)</item>
+    /// <item><see cref="DataKind.UInt8Array"/>: number of bytes (<c>_p1</c>)</item>
+    /// <item><see cref="DataKind.Matrix"/>: rows × columns (<c>_p1 * _p2</c>)</item>
+    /// <item><see cref="DataKind.Tensor"/>: total elements (<c>_p2</c>, cached at creation)</item>
+    /// </list>
+    /// </summary>
+    /// <returns>The element count, or -1 if not available inline.</returns>
+    public int ElementCount => _kind switch
+    {
+        DataKind.Vector => _p1,
+        DataKind.UInt8Array => _p1,
+        DataKind.Matrix => _p1 * _p2,
+        DataKind.Tensor when _p2 != 0 => _p2,
+        _ => -1,
+    };
+
+    /// <summary>
+    /// Returns the raw UTF-8 bytes for a string value without allocating a managed
+    /// <see cref="string"/>. For <see cref="Arena"/>-backed stores this is a zero-copy
+    /// slice of the backing buffer. Ideal for hashing, equality checks, serialization,
+    /// and byte-level operations.
+    /// </summary>
+    /// <param name="store">The value store that owns the string data.</param>
+    /// <returns>A span of UTF-8 bytes. Valid only while the store is alive.</returns>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public ReadOnlySpan<byte> AsUtf8Span(IValueStore store)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        return store.RetrieveUtf8Span(_p0, _p1);
+    }
+
+    /// <summary>
+    /// Decodes the string value into a <see cref="ReadOnlySpan{T}"/> of <see cref="char"/>
+    /// without allocating a managed <see cref="string"/>. The caller must return the
+    /// rented buffer to <see cref="System.Buffers.ArrayPool{T}.Shared"/> after use.
+    /// </summary>
+    /// <param name="store">The value store that owns the string data.</param>
+    /// <param name="rentedBuffer">
+    /// Receives the rented char buffer. The caller must return it via
+    /// <c>ArrayPool&lt;char&gt;.Shared.Return(rentedBuffer)</c> after consuming the span.
+    /// </param>
+    /// <returns>A span of chars backed by <paramref name="rentedBuffer"/>.</returns>
+    /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    public ReadOnlySpan<char> AsStringSpan(IValueStore store, out char[] rentedBuffer)
+    {
+        ThrowIfNullOrWrongKind(DataKind.String);
+        ReadOnlySpan<byte> utf8 = store.RetrieveUtf8Span(_p0, _p1);
+        int maxChars = System.Text.Encoding.UTF8.GetMaxCharCount(utf8.Length);
+        rentedBuffer = System.Buffers.ArrayPool<char>.Shared.Rent(maxChars);
+        int charCount = System.Text.Encoding.UTF8.GetChars(utf8, rentedBuffer);
+        return rentedBuffer.AsSpan(0, charCount);
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Buffers;
 using DatumIngest.Model;
 
 namespace DatumIngest.Functions.Scalar;
@@ -52,5 +53,33 @@ public sealed class RtrimFunction : IScalarFunction
 
         char[] trimChars = arguments[1].AsString().ToCharArray();
         return DataValue.FromString(text.TrimEnd(trimChars));
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        ReadOnlySpan<char> span = input.AsStringSpan(store, out char[] rented);
+
+        DataValue result;
+        if (arguments.Length == 1 || arguments[1].IsNull)
+        {
+            result = DataValue.FromCharSpan(span.TrimEnd(), store);
+            ArrayPool<char>.Shared.Return(rented);
+        }
+        else
+        {
+            ReadOnlySpan<char> trimSpan = arguments[1].AsStringSpan(store, out char[] rentedTrim);
+            result = DataValue.FromCharSpan(span.TrimEnd(trimSpan), store);
+            ArrayPool<char>.Shared.Return(rented);
+            ArrayPool<char>.Shared.Return(rentedTrim);
+        }
+
+        return result;
     }
 }
