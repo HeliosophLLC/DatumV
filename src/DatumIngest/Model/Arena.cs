@@ -1,4 +1,4 @@
-using System.Buffers;
+using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -19,8 +19,9 @@ namespace DatumIngest.Model;
 /// <para>
 /// Data is appended via typed methods (<see cref="AppendString(string)"/>,
 /// <see cref="AppendFloats"/>, <see cref="AppendBytes(ReadOnlySpan{byte})"/>)
-/// and later retrieved by offset and length. The backing storage is rented from
-/// <see cref="ArrayPool{T}.Shared"/> and returned on <see cref="Dispose"/>.
+/// and later retrieved by offset and length. The backing storage is an anonymous
+/// memory-mapped region managed by the OS. Growth allocates a new mapping and
+/// copies existing data.
 /// </para>
 /// <para>
 /// This type is not thread-safe. Parallel decoders should use private arenas
@@ -31,17 +32,21 @@ public sealed class Arena : IValueStore, IDisposable
 {
     private const int DefaultCapacity = 4096;
 
-    private byte[] _buffer;
+    private MemoryMappedFile _mmf;
+    private MemoryMappedViewAccessor _accessor;
+    private unsafe byte* _pointer;
+    private int _capacity;
     private int _position;
     private bool _disposed;
 
     /// <summary>Creates an arena with the specified initial byte capacity.</summary>
     /// <param name="initialCapacity">
-    /// Initial size of the backing buffer in bytes. Rounded up by <see cref="ArrayPool{T}"/>.
+    /// Initial size of the anonymous memory-mapped region in bytes.
     /// </param>
-    public Arena(int initialCapacity = DefaultCapacity)
+    public unsafe Arena(int initialCapacity = DefaultCapacity)
     {
-        _buffer = ArrayPool<byte>.Shared.Rent(initialCapacity);
+        _capacity = Math.Max(initialCapacity, DefaultCapacity);
+        CreateMapping(_capacity, out _mmf, out _accessor, out _pointer);
     }
 
     // ───────────────────────── IValueStore ─────────────────────────
@@ -123,7 +128,7 @@ public sealed class Arena : IValueStore, IDisposable
     {
         EnsureCapacity(utf8.Length);
         int offset = _position;
-        utf8.CopyTo(_buffer.AsSpan(_position));
+        utf8.CopyTo(GetSpanForWrite(_position, utf8.Length));
         _position += utf8.Length;
         return (offset, utf8.Length);
     }
@@ -137,7 +142,7 @@ public sealed class Arena : IValueStore, IDisposable
     {
         int maxByteCount = Encoding.UTF8.GetMaxByteCount(value.Length);
         EnsureCapacity(maxByteCount);
-        int written = Encoding.UTF8.GetBytes(value, _buffer.AsSpan(_position));
+        int written = Encoding.UTF8.GetBytes(value, GetSpanForWrite(_position, maxByteCount));
         int offset = _position;
         _position += written;
         return (offset, written);
@@ -148,7 +153,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="length">Byte length returned by <see cref="AppendUtf8"/>.</param>
     /// <returns>A span over the stored bytes. Valid only while this arena is alive.</returns>
     public ReadOnlySpan<byte> GetSpan(int offset, int length)
-        => _buffer.AsSpan(offset, length);
+        => GetSpanForRead(offset, length);
 
     /// <summary>
     /// Materialises a stored UTF-8 slice into a managed <see cref="string"/>.
@@ -157,8 +162,8 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="offset">Byte offset returned by <see cref="AppendUtf8"/>.</param>
     /// <param name="length">Byte length returned by <see cref="AppendUtf8"/>.</param>
     /// <returns>The decoded string.</returns>
-    public string GetString(int offset, int length)
-        => Encoding.UTF8.GetString(_buffer, offset, length);
+    public unsafe string GetString(int offset, int length)
+        => Encoding.UTF8.GetString(_pointer + offset, length);
 
     // ───────────────────────── Float operations ─────────────────────────
 
@@ -172,7 +177,7 @@ public sealed class Arena : IValueStore, IDisposable
         ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(values);
         EnsureCapacity(bytes.Length);
         int offset = _position;
-        bytes.CopyTo(_buffer.AsSpan(_position));
+        bytes.CopyTo(GetSpanForWrite(_position, bytes.Length));
         _position += bytes.Length;
         return (offset, values.Length);
     }
@@ -182,7 +187,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="count">Element count returned by <see cref="AppendFloats"/>.</param>
     /// <returns>A span over the stored floats. Valid only while this arena is alive.</returns>
     public ReadOnlySpan<float> GetFloats(int offset, int count)
-        => MemoryMarshal.Cast<byte, float>(_buffer.AsSpan(offset, count * sizeof(float)));
+        => MemoryMarshal.Cast<byte, float>(GetSpanForRead(offset, count * sizeof(float)));
 
     /// <summary>
     /// Copies a span of floats from the arena into a newly allocated <see cref="float"/> array.
@@ -206,7 +211,7 @@ public sealed class Arena : IValueStore, IDisposable
     {
         EnsureCapacity(bytes.Length);
         int offset = _position;
-        bytes.CopyTo(_buffer.AsSpan(_position));
+        bytes.CopyTo(GetSpanForWrite(_position, bytes.Length));
         _position += bytes.Length;
         return (offset, bytes.Length);
     }
@@ -216,7 +221,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="length">Byte length returned by <see cref="AppendBytes(ReadOnlySpan{byte})"/>.</param>
     /// <returns>A span over the stored bytes. Valid only while this arena is alive.</returns>
     public ReadOnlySpan<byte> GetBytes(int offset, int length)
-        => _buffer.AsSpan(offset, length);
+        => GetSpanForRead(offset, length);
 
     /// <summary>
     /// Copies bytes from the arena into a newly allocated <see cref="byte"/> array.
@@ -240,7 +245,7 @@ public sealed class Arena : IValueStore, IDisposable
         ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(values);
         EnsureCapacity(bytes.Length);
         int offset = _position;
-        bytes.CopyTo(_buffer.AsSpan(_position));
+        bytes.CopyTo(GetSpanForWrite(_position, bytes.Length));
         _position += bytes.Length;
         return (offset, values.Length);
     }
@@ -254,7 +259,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>A new array containing the DataValues.</returns>
     public DataValue[] MaterializeDataValues(int offset, int count)
     {
-        ReadOnlySpan<byte> bytes = _buffer.AsSpan(offset, count * 20);
+        ReadOnlySpan<byte> bytes = GetSpanForRead(offset, count * 20);
         DataValue[] result = new DataValue[count];
         MemoryMarshal.Cast<byte, DataValue>(bytes).CopyTo(result);
         return result;
@@ -277,7 +282,7 @@ public sealed class Arena : IValueStore, IDisposable
         EnsureCapacity(totalBytes);
 
         int offset = _position;
-        Span<byte> dest = _buffer.AsSpan(_position);
+        Span<byte> dest = GetSpanForWrite(_position, totalBytes);
 
         // Write rank
         MemoryMarshal.Write(dest, shape.Length);
@@ -304,7 +309,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>A new float array containing the tensor data.</returns>
     public float[] MaterializeTensor(int offset, int length, out int[] shape)
     {
-        ReadOnlySpan<byte> region = _buffer.AsSpan(offset, length);
+        ReadOnlySpan<byte> region = GetSpanForRead(offset, length);
 
         int rank = MemoryMarshal.Read<int>(region);
         region = region[sizeof(int)..];
@@ -330,10 +335,10 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>The base offset in this arena where the copy begins.</returns>
     public int CopyFrom(Arena source)
     {
-        ReadOnlySpan<byte> data = source._buffer.AsSpan(0, source._position);
+        ReadOnlySpan<byte> data = source.GetSpanForRead(0, source._position);
         EnsureCapacity(data.Length);
         int baseOffset = _position;
-        data.CopyTo(_buffer.AsSpan(_position));
+        data.CopyTo(GetSpanForWrite(_position, data.Length));
         _position += data.Length;
         return baseOffset;
     }
@@ -345,20 +350,55 @@ public sealed class Arena : IValueStore, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        ArrayPool<byte>.Shared.Return(_buffer);
-        _buffer = Array.Empty<byte>();
+        ReleaseMapping();
         _position = 0;
     }
 
-    private void EnsureCapacity(int additionalBytes)
+    // ───────────────────────── Memory-mapped backing ─────────────────────────
+
+    private static unsafe void CreateMapping(int capacity,
+        out MemoryMappedFile mmf, out MemoryMappedViewAccessor accessor, out byte* pointer)
+    {
+        mmf = MemoryMappedFile.CreateNew(null, capacity, MemoryMappedFileAccess.ReadWrite);
+        accessor = mmf.CreateViewAccessor(0, capacity, MemoryMappedFileAccess.ReadWrite);
+        pointer = null;
+        accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+    }
+
+    private unsafe void ReleaseMapping()
+    {
+        if (_pointer != null)
+        {
+            _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
+            _pointer = null;
+        }
+
+        _accessor.Dispose();
+        _mmf.Dispose();
+    }
+
+    private unsafe void EnsureCapacity(int additionalBytes)
     {
         int required = _position + additionalBytes;
-        if (required <= _buffer.Length) return;
+        if (required <= _capacity) return;
 
-        int newCapacity = Math.Max(_buffer.Length * 2, required);
-        byte[] newBuffer = ArrayPool<byte>.Shared.Rent(newCapacity);
-        _buffer.AsSpan(0, _position).CopyTo(newBuffer);
-        ArrayPool<byte>.Shared.Return(_buffer);
-        _buffer = newBuffer;
+        int newCapacity = Math.Max(_capacity * 2, required);
+        CreateMapping(newCapacity, out var newMmf, out var newAccessor, out var newPointer);
+
+        // Copy existing data to the new mapping.
+        new ReadOnlySpan<byte>(_pointer, _position).CopyTo(new Span<byte>(newPointer, newCapacity));
+
+        ReleaseMapping();
+
+        _mmf = newMmf;
+        _accessor = newAccessor;
+        _pointer = newPointer;
+        _capacity = newCapacity;
     }
+
+    private unsafe Span<byte> GetSpanForWrite(int offset, int length)
+        => new(_pointer + offset, length);
+
+    private unsafe ReadOnlySpan<byte> GetSpanForRead(int offset, int length)
+        => new(_pointer + offset, length);
 }
