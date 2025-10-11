@@ -1,4 +1,3 @@
-using System.Text;
 using DatumIngest.Execution.Pooling;
 using DatumIngest.Model;
 using DatumIngest.Serialization;
@@ -9,23 +8,6 @@ namespace DatumIngest.Tests.Serialization;
 public sealed class JsonlDeserializerTests
 {
     // ───────────────────────── Helpers ─────────────────────────
-
-    private sealed class JsonlMockDescriptor : FileFormatDescriptor
-    {
-        private readonly string _content;
-
-        public JsonlMockDescriptor(string content, string fileName = "mock.jsonl")
-            : base(fileName)
-        {
-            _content = content;
-        }
-
-        public override Task<Stream> OpenAsync(CancellationToken cancellationToken = default)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(_content);
-            return Task.FromResult<Stream>(new MemoryStream(bytes));
-        }
-    }
 
     private static SerializationContext CreateContext()
     {
@@ -48,7 +30,7 @@ public sealed class JsonlDeserializerTests
             {"name":"Bob","age":25}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -76,7 +58,7 @@ public sealed class JsonlDeserializerTests
             {"i":7,"f":2.72,"b":false,"d":"2024-06-30","s":"world"}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -110,7 +92,7 @@ public sealed class JsonlDeserializerTests
             {"x":2,"y":null}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -136,7 +118,7 @@ public sealed class JsonlDeserializerTests
             {"a":3}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -157,7 +139,7 @@ public sealed class JsonlDeserializerTests
     public async Task EmptyFile_ProducesNoRows()
     {
         using var context = CreateContext();
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(""));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(""));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -184,7 +166,7 @@ public sealed class JsonlDeserializerTests
             {"x":3}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -208,7 +190,7 @@ public sealed class JsonlDeserializerTests
             {"id":2,"meta":[1,2,3]}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -234,7 +216,7 @@ public sealed class JsonlDeserializerTests
             {"city":"Tokyo"}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in jsonl.DeserializeAsync(context))
@@ -263,7 +245,7 @@ public sealed class JsonlDeserializerTests
             {"x":4}
             """;
 
-        var jsonl = new JsonlDeserializer(new JsonlMockDescriptor(data));
+        var jsonl = new JsonlDeserializer(new MemoryFileDescriptor(data));
 
         var ex = await Assert.ThrowsAsync<DeserializationException>(async () =>
         {

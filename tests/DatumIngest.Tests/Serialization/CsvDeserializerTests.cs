@@ -1,4 +1,3 @@
-using System.Text;
 using DatumIngest.Execution.Pooling;
 using DatumIngest.Model;
 using DatumIngest.Serialization;
@@ -9,24 +8,6 @@ namespace DatumIngest.Tests.Serialization;
 public sealed class CsvDeserializerTests
 {
     // ───────────────────────── Helpers ─────────────────────────
-
-    private sealed class CsvMockDescriptor : FileFormatDescriptor
-    {
-        private readonly string _csvContent;
-
-        public CsvMockDescriptor(string csvContent, string fileName = "mock.csv",
-            IReadOnlyDictionary<string, string>? options = null)
-            : base(fileName, options)
-        {
-            _csvContent = csvContent;
-        }
-
-        public override Task<Stream> OpenAsync(CancellationToken cancellationToken = default)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(_csvContent);
-            return Task.FromResult<Stream>(new MemoryStream(bytes));
-        }
-    }
 
     private static SerializationContext CreateContext()
     {
@@ -47,7 +28,7 @@ public sealed class CsvDeserializerTests
     public async Task BasicCsv_ProducesCorrectRows()
     {
         using var context = CreateContext();
-        var csv = new CsvDeserializer(new CsvMockDescriptor("name,age\nAlice,30\nBob,25"));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("name,age\nAlice,30\nBob,25"));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -72,7 +53,7 @@ public sealed class CsvDeserializerTests
         using var context = CreateContext();
         // Force headerless via option to avoid heuristic ambiguity with small numeric data.
         var options = new Dictionary<string, string> { ["header"] = "false" };
-        var csv = new CsvDeserializer(new CsvMockDescriptor("1,2,3\n4,5,6\n7,8,9", options: options));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("1,2,3\n4,5,6\n7,8,9", options: options));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -93,7 +74,7 @@ public sealed class CsvDeserializerTests
     public async Task TsvExtension_UsesTabDelimiter()
     {
         using var context = CreateContext();
-        var csv = new CsvDeserializer(new CsvMockDescriptor("name\tage\nAlice\t30", fileName: "data.tsv"));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("name\tage\nAlice\t30", fileName: "data.tsv"));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -115,7 +96,7 @@ public sealed class CsvDeserializerTests
     {
         using var context = CreateContext();
         var options = new Dictionary<string, string> { ["delimiter"] = ";" };
-        var csv = new CsvDeserializer(new CsvMockDescriptor("name;age\nAlice;30", options: options));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("name;age\nAlice;30", options: options));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -139,7 +120,7 @@ public sealed class CsvDeserializerTests
                          "42,3.14,2024-01-15,550e8400-e29b-41d4-a716-446655440000,true\n" +
                          "7,2.72,2024-06-30,660e8400-e29b-41d4-a716-446655440000,false";
 
-        var csv = new CsvDeserializer(new CsvMockDescriptor(csvData));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor(csvData));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -168,7 +149,7 @@ public sealed class CsvDeserializerTests
     {
         using var context = CreateContext();
         string csvData = "name,note\n\"Alice\",\"has a, comma\"\n\"Bob\",\"line1\nline2\"";
-        var csv = new CsvDeserializer(new CsvMockDescriptor(csvData));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor(csvData));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -189,7 +170,7 @@ public sealed class CsvDeserializerTests
     public async Task EmptyFile_ProducesNoRows()
     {
         using var context = CreateContext();
-        var csv = new CsvDeserializer(new CsvMockDescriptor(""));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor(""));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -209,7 +190,7 @@ public sealed class CsvDeserializerTests
     {
         using var context = CreateContext();
         var options = new Dictionary<string, string> { ["header"] = "false" };
-        var csv = new CsvDeserializer(new CsvMockDescriptor("Alice,30\nBob,25", options: options));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("Alice,30\nBob,25", options: options));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -229,7 +210,7 @@ public sealed class CsvDeserializerTests
     public async Task NullLiteral_ProducesNullDataValue()
     {
         using var context = CreateContext();
-        var csv = new CsvDeserializer(new CsvMockDescriptor("x,y\n1,NULL\n2,3"));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("x,y\n1,NULL\n2,3"));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -250,7 +231,7 @@ public sealed class CsvDeserializerTests
     public async Task QuotedNull_ProducesStringNotNull()
     {
         using var context = CreateContext();
-        var csv = new CsvDeserializer(new CsvMockDescriptor("x,y\n1,\"NULL\"\n2,NULL"));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("x,y\n1,\"NULL\"\n2,NULL"));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
@@ -276,7 +257,7 @@ public sealed class CsvDeserializerTests
         // Explicitly NOT calling ReferenceStore.BeginQueryScope().
         // Strings must be stored and retrieved via the Arena.
         using var context = CreateContext();
-        var csv = new CsvDeserializer(new CsvMockDescriptor("city\nNew York\nLondon\nTokyo"));
+        var csv = new CsvDeserializer(new MemoryFileDescriptor("city\nNew York\nLondon\nTokyo"));
 
         List<Row> rows = [];
         await foreach (RowBatch batch in csv.DeserializeAsync(context))
