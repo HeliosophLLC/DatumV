@@ -1,5 +1,4 @@
 using DatumIngest.Model;
-using DatumIngest.Output.Writers;
 using PureHDF;
 
 namespace DatumIngest.Serialization.Hdf5;
@@ -45,12 +44,12 @@ internal static class Hdf5SchemaMapper
 
     internal static bool HasTensorKindAttribute(IH5Dataset dataset)
     {
-        if (!dataset.AttributeExists(Hdf5OutputWriter.TensorKindAttributeName))
+        if (!dataset.AttributeExists(Hdf5Serializer.TensorKindAttributeName))
             return false;
 
-        IH5Attribute attribute = dataset.Attribute(Hdf5OutputWriter.TensorKindAttributeName);
+        IH5Attribute attribute = dataset.Attribute(Hdf5Serializer.TensorKindAttributeName);
         string value = attribute.Read<string>();
-        return string.Equals(value, Hdf5OutputWriter.TensorKindAttributeValue, StringComparison.Ordinal);
+        return string.Equals(value, Hdf5Serializer.TensorKindAttributeValue, StringComparison.Ordinal);
     }
 
     internal static Schema BuildSchema(List<Hdf5DatasetEntry> entries)
