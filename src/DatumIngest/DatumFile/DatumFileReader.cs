@@ -23,6 +23,12 @@ public sealed class DatumFileReader : IDisposable
     private readonly long _totalRowCount;
     private readonly DatumFileFlags _flags;
 
+    /// <summary>
+    /// Optional value store for decoding string columns into Arena-backed values
+    /// instead of ReferenceStore. Set by the caller after opening.
+    /// </summary>
+    public Model.IValueStore? Store { get; set; }
+
     private DatumFileReader(
         FileStream stream,
         string filePath,
@@ -102,7 +108,7 @@ public sealed class DatumFileReader : IDisposable
         int rowCount = (int)rowGroup.RowCount;
         DataValue[][] result = new DataValue[columnIndices.Length][];
 
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new() { DatumFilePath = _filePath, Store = Store };
 
         for (int i = 0; i < columnIndices.Length; i++)
         {
@@ -159,7 +165,7 @@ public sealed class DatumFileReader : IDisposable
     {
         DatumRowGroupDescriptor rowGroup = _rowGroups[rowGroupIndex];
         int rowCount = (int)rowGroup.RowCount;
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new() { DatumFilePath = _filePath, Store = Store };
 
         for (int i = 0; i < columnIndices.Length; i++)
         {
@@ -209,7 +215,7 @@ public sealed class DatumFileReader : IDisposable
         int rowCount = (int)rowGroup.RowCount;
 
         ColumnBatch batch = ColumnBatch.Create(columnNames, nameIndex, rowCount);
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new() { DatumFilePath = _filePath, Store = Store };
 
         for (int i = 0; i < columnIndices.Length; i++)
         {

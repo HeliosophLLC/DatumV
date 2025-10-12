@@ -29,7 +29,7 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
         DatumDecoderContext context)
     {
         DataValue[] result = new DataValue[rowCount];
-        DecodeCore(payload, payload.Length, compression, uncompressedByteLength, rowCount, descriptor, result, decompressedBuffer: null);
+        DecodeCore(payload, payload.Length, compression, uncompressedByteLength, rowCount, descriptor, context, result, decompressedBuffer: null);
         return result;
     }
 
@@ -47,7 +47,7 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
         byte[]? decompressedBuffer = null)
     {
         int effectiveLength = payloadLength >= 0 ? payloadLength : payload.Length;
-        DecodeCore(payload, effectiveLength, compression, uncompressedByteLength, rowCount, descriptor, target, decompressedBuffer);
+        DecodeCore(payload, effectiveLength, compression, uncompressedByteLength, rowCount, descriptor, context, target, decompressedBuffer);
     }
 
     private void DecodeCore(
@@ -57,6 +57,7 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
         int uncompressedByteLength,
         int rowCount,
         DatumColumnDescriptor descriptor,
+        DatumDecoderContext context,
         DataValue[] target,
         byte[]? decompressedBuffer)
     {
@@ -80,7 +81,10 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
 
         bool isJson = descriptor.Kind == DataKind.JsonValue;
         DataKind nullKind = isJson ? DataKind.JsonValue : DataKind.String;
-        ReferenceStore store = ReferenceStore.Current();
+        DataKind valueKind = isJson ? DataKind.JsonValue : DataKind.String;
+
+        // Use the context's store (Arena) when available; fall back to ReferenceStore.
+        IValueStore? arenaStore = context.Store;
 
         for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
         {
@@ -94,8 +98,17 @@ internal sealed class StringColumnDecoder : DatumColumnDecoder
             else
             {
                 ReadOnlySpan<byte> utf8Bytes = raw.AsSpan(poolStart + (int)start, (int)(end - start));
-                int index = store.InternStringFromUtf8(utf8Bytes);
-                target[rowIndex] = DataValue.FromInternedReference(isJson ? DataKind.JsonValue : DataKind.String, index);
+                if (arenaStore is not null)
+                {
+                    int charCount = System.Text.Encoding.UTF8.GetCharCount(utf8Bytes);
+                    target[rowIndex] = DataValue.FromUtf8Span(utf8Bytes, charCount, arenaStore);
+                }
+                else
+                {
+                    ReferenceStore refStore = ReferenceStore.Current();
+                    int index = refStore.InternStringFromUtf8(utf8Bytes);
+                    target[rowIndex] = DataValue.FromInternedReference(valueKind, index);
+                }
             }
         }
     }

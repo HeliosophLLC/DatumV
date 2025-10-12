@@ -32,6 +32,13 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
     private string[]? _seekProjectedNames;
     private Dictionary<string, int>? _seekNameIndex;
 
+    /// <summary>
+    /// Optional value store for decoding string columns into Arena-backed values.
+    /// Set by operators that have an <see cref="DatumIngest.Execution.ExecutionContext"/>
+    /// before calling <see cref="ITableProvider.OpenAsync"/>.
+    /// </summary>
+    public IValueStore? Store { get; set; }
+
     /// <summary>Total number of row groups examined in the most recent read.</summary>
     public int TotalRowGroups { get; private set; }
 
@@ -95,6 +102,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        reader.Store = Store;
         Schema schema = reader.Schema;
 
         // Resolve which column indices to decode (projection pushdown).
@@ -228,6 +236,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using DatumFileReader reader = DatumFileReader.Open(descriptor.FilePath);
+        reader.Store = Store;
         Schema schema = reader.Schema;
 
         int[] projectedIndices = ResolveProjection(schema, requiredColumns);
@@ -320,6 +329,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         {
             _cachedReader?.Dispose();
             _cachedReader = DatumFileReader.Open(descriptor.FilePath);
+            _cachedReader.Store = Store;
             _cachedReaderPath = descriptor.FilePath;
             // Invalidate seek buffers — they are sized to the previous file's row groups.
             InvalidateSeekBuffers();

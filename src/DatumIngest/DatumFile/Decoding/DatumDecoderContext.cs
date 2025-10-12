@@ -1,3 +1,5 @@
+using DatumIngest.Model;
+
 namespace DatumIngest.DatumFile.Decoding;
 
 /// <summary>
@@ -13,6 +15,13 @@ public sealed class DatumDecoderContext
     /// when externalization was triggered.
     /// </summary>
     public string DatumFilePath { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Optional value store for string and binary payloads. When set, decoders use this
+    /// store instead of <see cref="ReferenceStore.Current()"/>, enabling Arena-backed
+    /// string storage without ambient state.
+    /// </summary>
+    public IValueStore? Store { get; init; }
 
     /// <summary>
     /// A context with no file path, suitable for in-memory decode scenarios

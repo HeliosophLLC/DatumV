@@ -26,6 +26,11 @@ public sealed class DatumMemoryMappedReader : IDisposable
     private readonly DatumRowGroupDescriptor[] _rowGroups;
     private readonly long _totalRowCount;
 
+    /// <summary>
+    /// Optional value store for decoding string columns into Arena-backed values.
+    /// </summary>
+    public IValueStore? Store { get; set; }
+
     private DatumMemoryMappedReader(
         MemoryMappedFile mappedFile,
         string filePath,
@@ -87,7 +92,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
         int rowCount = (int)rowGroup.RowCount;
         DataValue[][] result = new DataValue[columnIndices.Length][];
 
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new() { DatumFilePath = _filePath, Store = Store };
 
         Parallel.For(0, columnIndices.Length, resultIndex =>
         {
@@ -133,7 +138,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
         int rowCount = (int)rowGroup.RowCount;
 
         ColumnBatch batch = ColumnBatch.Create(columnNames, nameIndex, rowCount);
-        DatumDecoderContext context = new() { DatumFilePath = _filePath };
+        DatumDecoderContext context = new() { DatumFilePath = _filePath, Store = Store };
 
         // Each parallel column gets a private arena; after decode completes,
         // its contents are bulk-copied into the batch's shared arena and offsets
