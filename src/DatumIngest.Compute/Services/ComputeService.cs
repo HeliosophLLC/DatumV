@@ -212,7 +212,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         try
         {
-            ReferenceStore.BeginQueryScope();
+            // Arena is created by ExecutionContext — no scope management needed.
 
             // Link the gRPC per-call token, the session-level token, and
             // the per-query token so that any of the three can stop the stream.
@@ -437,7 +437,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
         finally
         {
-            ReferenceStore.EndQueryScope();
+            // No scope cleanup needed — Arena is disposed with ExecutionContext.
             session.UnregisterQuery(activeQuery.QueryId);
         }
     }
@@ -450,7 +450,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         QueryContext? queryContext = TryResolveQueryContext(session, request.ContextId);
         CancellationToken cancellationToken = LinkedToken(context, session);
 
-        ReferenceStore.BeginQueryScope();
+        // Arena is created by ExecutionContext.
         try
         {
             CommandResult result = queryContext is not null
@@ -479,7 +479,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
         finally
         {
-            ReferenceStore.EndQueryScope();
+            // No scope cleanup needed — Arena is disposed with ExecutionContext.
         }
     }
 
@@ -564,7 +564,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
         string explainSql = request.Analyze ? $"analyze {request.Sql}" : request.Sql;
 
-        ReferenceStore.BeginQueryScope();
+        // Arena is created by ExecutionContext.
         try
         {
             CommandResult result = queryContext is not null
@@ -589,7 +589,7 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
         }
         finally
         {
-            ReferenceStore.EndQueryScope();
+            // No scope cleanup needed — Arena is disposed with ExecutionContext.
         }
     }
 

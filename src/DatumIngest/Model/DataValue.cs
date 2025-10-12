@@ -20,9 +20,9 @@ namespace DatumIngest.Model;
 /// Fixed-size primitives (integers, floats, dates, booleans, UUIDs) are stored inline
 /// in the 16-byte payload (<c>_p0</c>–<c>_p3</c>). Reference-type payloads (strings,
 /// float arrays, byte arrays, image handles, typed arrays) are stored in an
-/// <see cref="IValueStore"/> or <see cref="ReferenceStore"/> and accessed via an
+/// <see cref="IValueStore"/> and accessed via an
 /// integer index in <c>_referenceIndex</c>. Arena-backed strings use offset/length
-/// in the inline payload.
+/// in the inline payload. Always pass an <see cref="IValueStore"/> to factory and accessor methods.
 /// </para>
 /// <para>
 /// <c>default(DataValue)</c> has <see cref="DataKind.Unknown"/> (= 0) and is not null.
@@ -38,7 +38,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Bit mask for the null flag in <see cref="_flags"/>.</summary>
     private const byte FlagIsNull = 0x01;
 
-    /// <summary>Bit mask indicating the value has a payload in an <see cref="IValueStore"/> or <see cref="ReferenceStore"/>.</summary>
+    /// <summary>Bit mask indicating the value has a payload in an <see cref="IValueStore"/>.</summary>
     private const byte FlagHasReference = 0x02;
 
     // ───────────────────────── Fields (20 bytes) ─────────────────────────
@@ -92,7 +92,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// <summary>Whether this value represents a typed null.</summary>
     public bool IsNull => (_flags & FlagIsNull) != 0;
 
-    /// <summary>Whether this value has a reference-type payload in an <see cref="IValueStore"/> or <see cref="ReferenceStore"/>.</summary>
+    /// <summary>Whether this value has a reference-type payload in an <see cref="IValueStore"/>.</summary>
     internal bool HasReference => (_flags & FlagHasReference) != 0;
 
     // ───────────────────────── Cached common instances ─────────────────────────
@@ -153,11 +153,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Creates a value from a byte array.</summary>
-    public static DataValue FromUInt8Array(byte[] value)
-    {
-        int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.UInt8Array, flags: FlagHasReference, p0: index, p1: value.Length);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromUInt8Array(byte[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromUInt8Array(byte[] value) =>
+        throw new InvalidOperationException("Use FromUInt8Array(value, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a value from a byte array using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromUInt8Array(byte[] value, IValueStore store)
@@ -167,13 +165,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Creates a value from a text string.</summary>
-    public static DataValue FromString(string value)
-    {
-        ReferenceStore store = ReferenceStore.Current();
-        int index = store.InternString(value);
-        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.String, flags: FlagHasReference, p0: index, charCount: cc);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromString(string, IValueStore)"/> instead.</remarks>
+    public static DataValue FromString(string value) =>
+        throw new InvalidOperationException("Use FromString(value, store). ReferenceStore is no longer available.");
 
     /// <summary>
     /// Creates a value from a text string using an explicit <see cref="IValueStore"/>.
@@ -207,18 +201,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>
-    /// Creates a value from a reference index that has already been interned in the
-    /// current <see cref="ReferenceStore"/>. Used by decoders that call
-    /// <see cref="ReferenceStore.InternStringFromUtf8"/> directly to avoid a
-    /// redundant dictionary lookup.
-    /// </summary>
-    /// <param name="kind">The data kind (must be a reference-backed kind such as
-    /// <see cref="DataKind.String"/> or <see cref="DataKind.JsonValue"/>).</param>
-    /// <param name="referenceIndex">Index returned by a prior intern call.</param>
-    internal static DataValue FromInternedReference(DataKind kind, int referenceIndex) =>
-        new(kind, flags: FlagHasReference, p0: referenceIndex);
-
-    /// <summary>
     /// Creates an arena-backed string value from an offset and length within a
     /// <see cref="Arena"/>.  The actual bytes are not stored in this struct;
     /// callers must resolve via <see cref="AsString(Arena)"/> or the
@@ -230,11 +212,9 @@ public readonly struct DataValue : IEquatable<DataValue>
         new(DataKind.String, flags: 0, p0: offset, p1: length);
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array.</summary>
-    public static DataValue FromVector(float[] value)
-    {
-        int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.Vector, flags: FlagHasReference, p0: index, p1: value.Length);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromVector(float[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromVector(float[] value) =>
+        throw new InvalidOperationException("Use FromVector(value, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a rank-1 tensor (vector) from a float array using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromVector(float[] value, IValueStore store)
@@ -244,20 +224,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Creates a rank-2 tensor (matrix) from a flat float array and its dimensions.</summary>
-    /// <exception cref="ArgumentException">
-    /// Thrown when <paramref name="rows"/> * <paramref name="columns"/> does not equal the data length.
-    /// </exception>
-    public static DataValue FromMatrix(float[] data, int rows, int columns)
-    {
-        if (data.Length != rows * columns)
-        {
-            throw new ArgumentException(
-                $"Data length {data.Length} does not match shape {rows}x{columns}.");
-        }
-
-        int index = ReferenceStore.Current().Add(data);
-        return new(DataKind.Matrix, flags: FlagHasReference, p0: index, p1: rows, p2: columns);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromMatrix(float[], int, int, IValueStore)"/> instead.</remarks>
+    public static DataValue FromMatrix(float[] data, int rows, int columns) =>
+        throw new InvalidOperationException("Use FromMatrix(data, rows, columns, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a rank-2 tensor (matrix) using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromMatrix(float[] data, int rows, int columns, IValueStore store)
@@ -273,27 +242,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Creates an arbitrary-rank tensor from a flat float array and its shape.</summary>
-    /// <exception cref="ArgumentException">
-    /// Thrown when the product of <paramref name="shape"/> dimensions does not equal the data length.
-    /// </exception>
-    public static DataValue FromTensor(float[] data, int[] shape)
-    {
-        int expectedLength = 1;
-        foreach (int dimension in shape)
-        {
-            expectedLength *= dimension;
-        }
-
-        if (data.Length != expectedLength)
-        {
-            throw new ArgumentException(
-                $"Data length {data.Length} does not match shape [{string.Join(", ", shape)}].");
-        }
-
-        ReferenceStore store = ReferenceStore.Current();
-        int index = store.AddPair(data, shape);
-        return new(DataKind.Tensor, flags: FlagHasReference, p0: index, p2: expectedLength);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromTensor(float[], int[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromTensor(float[] data, int[] shape) =>
+        throw new InvalidOperationException("Use FromTensor(data, shape, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates an arbitrary-rank tensor using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromTensor(float[] data, int[] shape, IValueStore store)
@@ -313,11 +264,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Creates a value from encoded image bytes.</summary>
-    public static DataValue FromImage(byte[] value)
-    {
-        int index = ReferenceStore.Current().Add(value);
-        return new(DataKind.Image, flags: FlagHasReference, p0: index);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImage(byte[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromImage(byte[] value) =>
+        throw new InvalidOperationException("Use FromImage(value, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a value from encoded image bytes using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromImage(byte[] value, IValueStore store)
@@ -326,16 +275,10 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Image, flags: FlagHasReference, p0: p0, p1: p1);
     }
 
-    /// <summary>
-    /// Creates a value from an <see cref="ImageHandle"/>.
-    /// The handle carries a decoded bitmap and/or encoded bytes, enabling
-    /// fused image pipelines that avoid redundant decode/encode cycles.
-    /// </summary>
-    internal static DataValue FromImageHandle(ImageHandle handle)
-    {
-        int index = ReferenceStore.Current().Add(handle);
-        return new(DataKind.Image, flags: FlagHasReference, p0: index);
-    }
+    /// <summary>Creates a value from an <see cref="ImageHandle"/>.</summary>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromImageHandle(ImageHandle, IValueStore)"/> instead.</remarks>
+    internal static DataValue FromImageHandle(ImageHandle handle) =>
+        throw new InvalidOperationException("Use FromImageHandle(handle, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a value from an <see cref="ImageHandle"/> using an explicit store.</summary>
     internal static DataValue FromImageHandle(ImageHandle handle, IValueStore store)
@@ -358,13 +301,9 @@ public readonly struct DataValue : IEquatable<DataValue>
     }
 
     /// <summary>Creates a value from a raw JSON string.</summary>
-    public static DataValue FromJsonValue(string value)
-    {
-        ReferenceStore store = ReferenceStore.Current();
-        int index = store.InternString(value);
-        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index, charCount: cc);
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromJsonValue(string, IValueStore)"/> instead.</remarks>
+    public static DataValue FromJsonValue(string value) =>
+        throw new InvalidOperationException("Use FromJsonValue(value, store). ReferenceStore is no longer available.");
 
     /// <summary>
     /// Creates a value from a raw JSON string using an explicit <see cref="IValueStore"/>.
@@ -382,16 +321,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// Always hashes UTF-8 bytes for consistency with <see cref="HashUtf8"/>.
     /// </summary>
     /// <summary>
-    /// Computes GetHashCode for a ReferenceStore-backed string that has no cached hash.
-    /// Resolves the string via ReferenceStore, computes XxHash64, and returns a combined hash code.
+    /// Computes GetHashCode for a string value that has no cached hash (e.g. legacy arena-backed values).
+    /// Falls back to offset/length-based hash since we have no store to resolve content.
     /// </summary>
     private int ComputeStringHashCode()
     {
-        ReferenceStore? store = ReferenceStore.TryGetCurrent();
-        if (store is null) return HashCode.Combine(_kind, _p0, _p1);
-        string text = store.Get<string>(_referenceIndex);
-        var (lo, hi) = HashString(text.AsSpan());
-        return HashCode.Combine(_kind, lo, hi);
+        return HashCode.Combine(_kind, _p0, _p1);
     }
 
     private static (int Lo, int Hi) HashString(ReadOnlySpan<char> chars)
@@ -458,21 +393,30 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised
-    /// into self-contained managed objects.  Non-arena values are returned unchanged.
+    /// into self-contained managed objects stored in <paramref name="store"/>.
+    /// Non-arena values are returned unchanged.
     /// </summary>
-    /// <param name="arena">Arena for string and binary data.</param>
-    /// <returns>A self-contained value that does not reference any arena.</returns>
-    public DataValue Materialize(Arena arena)
+    /// <param name="arena">Arena that owns the UTF-8 bytes.</param>
+    /// <param name="store">Store to write the materialised string into.</param>
+    /// <returns>A self-contained value that does not reference the arena.</returns>
+    public DataValue Materialize(Arena arena, IValueStore store)
     {
         if (!IsArenaBacked) return this;
 
         return _kind switch
         {
-            DataKind.String => FromString(arena.GetString(_p0, _p1)),
-            DataKind.JsonValue => FromJsonValue(arena.GetString(_p0, _p1)),
+            DataKind.String => FromString(arena.GetString(_p0, _p1), store),
+            DataKind.JsonValue => FromJsonValue(arena.GetString(_p0, _p1), store),
             _ => this,
         };
     }
+
+    /// <summary>
+    /// Returns a new <see cref="DataValue"/> with all arena-backed data materialised.
+    /// </summary>
+    /// <param name="arena">Arena for string and binary data.</param>
+    /// <returns>A self-contained value that does not reference any arena.</returns>
+    public DataValue Materialize(Arena arena) => Materialize(arena, arena);
 
     /// <summary>
     /// Returns a new arena-backed <see cref="DataValue"/> whose offset has been shifted by
@@ -486,17 +430,10 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new DataValue(_kind, flags: 0, p0: _p0 + delta, p1: _p1);
     }
 
-    /// <summary>
-    /// Creates a typed array value from an element kind and an array of elements.
-    /// The element kind is stored in the <c>_meta</c> field so it can be recovered at runtime.
-    /// </summary>
-    /// <param name="elementKind">The <see cref="DataKind"/> shared by all elements.</param>
-    /// <param name="elements">The array of element values.</param>
-    public static DataValue FromArray(DataKind elementKind, DataValue[] elements)
-    {
-        int index = ReferenceStore.Current().Add(elements);
-        return new(DataKind.Array, FlagHasReference, referenceIndex: index, meta: (short)elementKind);
-    }
+    /// <summary>Creates a typed array value from an element kind and an array of elements.</summary>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromArray(DataKind, DataValue[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromArray(DataKind elementKind, DataValue[] elements) =>
+        throw new InvalidOperationException("Use FromArray(elementKind, elements, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a typed array value using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromArray(DataKind elementKind, DataValue[] elements, IValueStore store)
@@ -517,18 +454,10 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue NullArray(DataKind elementKind) =>
         new(DataKind.Array, FlagIsNull, referenceIndex: 0, meta: (short)elementKind);
 
-    /// <summary>
-    /// Creates a struct value from a positional array of field values.
-    /// The field names and kinds are not stored per-value — they live in the
-    /// <see cref="ColumnInfo.Fields"/> descriptor that is shared across all rows.
-    /// </summary>
-    /// <param name="fieldCount">The number of fields, stored in <c>_meta</c> for fast validation.</param>
-    /// <param name="fields">Positional field values, one entry per field in declaration order.</param>
-    public static DataValue FromStruct(short fieldCount, DataValue[] fields)
-    {
-        int index = ReferenceStore.Current().Add(fields);
-        return new(DataKind.Struct, FlagHasReference, referenceIndex: index, meta: fieldCount);
-    }
+    /// <summary>Creates a struct value from a positional array of field values.</summary>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="FromStruct(short, DataValue[], IValueStore)"/> instead.</remarks>
+    public static DataValue FromStruct(short fieldCount, DataValue[] fields) =>
+        throw new InvalidOperationException("Use FromStruct(fieldCount, fields, store). ReferenceStore is no longer available.");
 
     /// <summary>Creates a struct value using an explicit <see cref="IValueStore"/>.</summary>
     public static DataValue FromStruct(short fieldCount, DataValue[] fields, IValueStore store)
@@ -562,16 +491,39 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Converts a CLR literal value (typically from an AST <see cref="Parsing.Ast.LiteralExpression"/>)
-    /// to a <see cref="DataValue"/> using the natural type mapping. This is the single canonical
-    /// conversion point for all literal-to-DataValue bridging in the system.
+    /// to a <see cref="DataValue"/> using the natural type mapping.
     /// </summary>
     /// <param name="rawLiteral">
     /// A boxed CLR value: <see cref="double"/> (from the SQL parser), <see cref="int"/>,
     /// <see cref="long"/>, <see cref="float"/> (from rewriters), <see cref="string"/>,
     /// <see cref="bool"/>, or an existing <see cref="DataValue"/>.
     /// </param>
+    /// <param name="store">Store for reference-type payloads (strings, etc.).</param>
     /// <returns>A <see cref="DataValue"/> preserving the CLR type's natural precision.</returns>
     /// <exception cref="ArgumentException">The literal type is not supported.</exception>
+    public static DataValue FromLiteral(object rawLiteral, IValueStore store)
+    {
+        return rawLiteral switch
+        {
+            DataValue dataValue => dataValue,
+            sbyte int8Value => FromInt8(int8Value),
+            short int16Value => FromInt16(int16Value),
+            int intValue => FromInt32(intValue),
+            long longValue => FromInt64(longValue),
+            float floatValue => FromFloat32(floatValue),
+            double doubleValue => FromFloat64(doubleValue),
+            decimal decimalValue => FromFloat64((double)decimalValue),
+            string stringValue => FromString(stringValue, store),
+            bool boolValue => FromBoolean(boolValue),
+            _ => throw new ArgumentException(
+                $"Unsupported literal type: {rawLiteral.GetType().Name}.", nameof(rawLiteral)),
+        };
+    }
+
+    /// <summary>
+    /// Converts a CLR literal value to a <see cref="DataValue"/>.
+    /// </summary>
+    /// <remarks>Note: string literals require a store. Use <see cref="FromLiteral(object, IValueStore)"/> for string literals.</remarks>
     public static DataValue FromLiteral(object rawLiteral)
     {
         return rawLiteral switch
@@ -584,7 +536,8 @@ public readonly struct DataValue : IEquatable<DataValue>
             float floatValue => FromFloat32(floatValue),
             double doubleValue => FromFloat64(doubleValue),
             decimal decimalValue => FromFloat64((double)decimalValue),
-            string stringValue => FromString(stringValue),
+            string => throw new InvalidOperationException(
+                "Use FromLiteral(rawLiteral, store) for string literals. ReferenceStore is no longer available."),
             bool boolValue => FromBoolean(boolValue),
             _ => throw new ArgumentException(
                 $"Unsupported literal type: {rawLiteral.GetType().Name}.", nameof(rawLiteral)),
@@ -980,20 +933,12 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Int64     => AsInt64(),
             DataKind.UInt64    => AsUInt64(),
             DataKind.Boolean   => AsBoolean(),
-            DataKind.String    => AsString(),
             DataKind.Date      => AsDate(),
             DataKind.DateTime  => AsDateTime(),
             DataKind.Time      => AsTime(),
             DataKind.Duration  => AsDuration(),
             DataKind.Uuid      => AsUuid(),
-            DataKind.JsonValue => AsJsonValue(),
-            DataKind.Vector    => AsVector(),
-            DataKind.Matrix    => AsMatrix(out _, out _),
-            DataKind.Tensor    => AsTensor(out _),
-            DataKind.UInt8Array => AsUInt8Array(),
-            DataKind.Image     => AsImage(),
-            DataKind.Array     => AsArray(),
-            DataKind.Struct    => AsStruct(),
+            // Reference types require a store — return the ToString() summary without content.
             _ => ToString(),
         };
     }
@@ -1037,57 +982,28 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.Int64    => AsInt64().ToString(),
             DataKind.UInt64   => AsUInt64().ToString(),
             DataKind.Boolean  => AsBoolean() ? "true" : "false",
-            DataKind.String   => AsString(),
             DataKind.Date     => AsDate().ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.Time     => AsTime().ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => AsDuration().ToString("c"),
             DataKind.Uuid     => AsUuid().ToString("D"),
-            DataKind.JsonValue => AsJsonValue(),
-            DataKind.Vector   => $"[{string.Join(", ", AsVector().Select(v => v.ToString("G")))}]",
-            DataKind.Matrix   => FormatMatrixDisplay(),
-            DataKind.Tensor   => FormatTensorDisplay(),
-            DataKind.UInt8Array => $"UInt8Array[{AsUInt8Array().Length}]",
-            DataKind.Image    => $"Image[{AsImage().Length} bytes]",
-            DataKind.Array    => FormatArrayDisplay(),
-            DataKind.Struct   => FormatStructDisplay(),
             DataKind.Type     => AsType().ToString(),
+            // Reference types require a store — return ToString() summary without content.
             _ => ToString() ?? _kind.ToString(),
         };
     }
 
-    private string FormatMatrixDisplay()
-    {
-        float[] data = AsMatrix(out int rows, out int columns);
-        return $"Matrix[{rows}x{columns}]";
-    }
-
-    private string FormatTensorDisplay()
-    {
-        float[] data = AsTensor(out int[] shape);
-        return $"Tensor[{string.Join("x", shape)}]";
-    }
-
-    private string FormatArrayDisplay()
-    {
-        DataValue[] elements = AsArray();
-        return $"[{string.Join(", ", elements.Select(e => e.ToDisplayString()))}]";
-    }
-
-    private string FormatStructDisplay()
-    {
-        DataValue[] fields = AsStruct();
-        return $"{{{string.Join(", ", fields.Select(f => f.ToDisplayString()))}}}";
-    }
+    // Format*Display helpers removed — ToDisplayString falls back to ToString() for reference types.
 
     // ─────────────────────── Reference-type accessors ─────────────────────────
 
     /// <summary>Returns the byte array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsUInt8Array(IValueStore)"/> instead.</remarks>
     public byte[] AsUInt8Array()
     {
         ThrowIfNullOrWrongKind(DataKind.UInt8Array);
-        return ReferenceStore.Current().Get<byte[]>(_referenceIndex);
+        throw new InvalidOperationException("Use AsUInt8Array(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the byte array payload from an explicit <see cref="IValueStore"/>.</summary>
@@ -1099,30 +1015,17 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the text string payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsString(IValueStore)"/> or <see cref="AsString(Arena)"/> instead.</remarks>
     public string AsString()
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        if ((_flags & FlagHasReference) == 0)
-        {
-            throw new InvalidOperationException(
-                "This string value is arena-backed. Use AsString(Arena) to materialise it.");
-        }
-
-        return ReferenceStore.Current().Get<string>(_referenceIndex);
+        throw new InvalidOperationException("Use AsString(store) or AsString(arena). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the text string payload from an explicit <see cref="IValueStore"/>.</summary>
     public string AsString(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        // Values with a cached hash (_p2/_p3 non-zero) were created by the updated factories
-        // and can be resolved via the provided store. Legacy values without hashes fall back
-        // to ReferenceStore.
-        if ((_p2 | _p3) == 0 && !IsArenaBacked)
-        {
-            ReferenceStore? refStore = ReferenceStore.TryGetCurrent();
-            if (refStore is not null) return refStore.Get<string>(_referenceIndex);
-        }
         return store.RetrieveString(_p0, _p1);
     }
 
@@ -1176,11 +1079,6 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
             ThrowIfNullOrWrongKind(DataKind.String);
-        if ((_p2 | _p3) == 0 && !IsArenaBacked)
-        {
-            ReferenceStore? refStore = ReferenceStore.TryGetCurrent();
-            if (refStore is not null) return System.Text.Encoding.UTF8.GetBytes(refStore.Get<string>(_referenceIndex));
-        }
         return store.RetrieveUtf8Span(_p0, _p1);
     }
 
@@ -1220,7 +1118,8 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.String);
         if ((_flags & FlagHasReference) != 0)
         {
-            return ReferenceStore.Current().Get<string>(_referenceIndex);
+            // HasReference values need a full IValueStore. Arena can serve as one since it implements IValueStore.
+            return arena.RetrieveString(_p0, _p1);
         }
 
         return arena.GetString(_p0, _p1);
@@ -1240,10 +1139,11 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the vector (rank-1) float array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsVector(IValueStore)"/> instead.</remarks>
     public float[] AsVector()
     {
         ThrowIfNullOrWrongKind(DataKind.Vector);
-        return ReferenceStore.Current().Get<float[]>(_referenceIndex);
+        throw new InvalidOperationException("Use AsVector(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the vector (rank-1) float array payload from an explicit <see cref="IValueStore"/>.</summary>
@@ -1255,12 +1155,13 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the matrix (rank-2) flat float array and its dimensions.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsMatrix(IValueStore, out int, out int)"/> instead.</remarks>
     public float[] AsMatrix(out int rows, out int columns)
     {
         ThrowIfNullOrWrongKind(DataKind.Matrix);
         rows = _p1;
         columns = _p2;
-        return ReferenceStore.Current().Get<float[]>(_referenceIndex);
+        throw new InvalidOperationException("Use AsMatrix(store, out rows, out columns). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the matrix (rank-2) flat float array and its dimensions from an explicit <see cref="IValueStore"/>.</summary>
@@ -1274,13 +1175,12 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the tensor flat float array and its shape.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsTensor(IValueStore, out int[])"/> instead.</remarks>
     public float[] AsTensor(out int[] shape)
     {
         ThrowIfNullOrWrongKind(DataKind.Tensor);
-        ReferenceStore store = ReferenceStore.Current();
-        float[] data = store.Get<float[]>(_referenceIndex);
-        shape = store.Get<int[]>(_referenceIndex + 1);
-        return data;
+        shape = [];
+        throw new InvalidOperationException("Use AsTensor(store, out shape). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the tensor flat float array and its shape from an explicit <see cref="IValueStore"/>.</summary>
@@ -1292,21 +1192,13 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the encoded image byte array payload.
-    /// When the payload is an <see cref="ImageHandle"/> (from a fused pipeline),
-    /// the bytes are lazily encoded on first access.
     /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsImage(IValueStore)"/> instead.</remarks>
     public byte[] AsImage()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
-        object payload = ReferenceStore.Current().Get(_referenceIndex);
-
-        if (payload is ImageHandle handle)
-        {
-            return handle.GetEncodedBytes();
-        }
-
-        return (byte[])payload;
+        throw new InvalidOperationException("Use AsImage(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the encoded image byte array from an explicit <see cref="IValueStore"/>.</summary>
@@ -1318,22 +1210,13 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the <see cref="ImageHandle"/> for this image value.
-    /// If the payload is raw bytes, wraps them in a new handle (no bitmap decode yet).
-    /// If the payload is already an <see cref="ImageHandle"/>, returns it directly.
     /// </summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore)"/> instead.</remarks>
     internal ImageHandle GetImageHandle()
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
-        object payload = ReferenceStore.Current().Get(_referenceIndex);
-
-        if (payload is ImageHandle handle)
-        {
-            return handle;
-        }
-
-        byte[] bytes = (byte[])payload;
-        return new ImageHandle(bytes, ImageEncoder.ResolveFormat(bytes, formatOverride: null));
+        throw new InvalidOperationException("Use GetImageHandle(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>
@@ -1361,13 +1244,10 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Returns the <see cref="ImageHandle"/> payload if this value already owns one,
-    /// or <c>null</c> if the payload is raw bytes. Used by the evaluator to check
-    /// for disposable intermediate handles without allocating a new wrapper.
+    /// or <c>null</c> if the payload is raw bytes or no store is available.
     /// </summary>
-    internal ImageHandle? TryGetOwnedImageHandle()
-    {
-        return ReferenceStore.Current().Get(_referenceIndex) as ImageHandle;
-    }
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="GetImageHandle(IValueStore)"/> and check the store instead.</remarks>
+    internal ImageHandle? TryGetOwnedImageHandle() => null;
 
     /// <summary>Returns the calendar date payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
@@ -1387,10 +1267,11 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the raw JSON string payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsJsonValue(IValueStore)"/> instead.</remarks>
     public string AsJsonValue()
     {
         ThrowIfNullOrWrongKind(DataKind.JsonValue);
-        return ReferenceStore.Current().Get<string>(_referenceIndex);
+        throw new InvalidOperationException("Use AsJsonValue(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the raw JSON string payload from an explicit <see cref="IValueStore"/>.</summary>
@@ -1442,10 +1323,11 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the typed array payload.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsArray(IValueStore)"/> instead.</remarks>
     public DataValue[] AsArray()
     {
         ThrowIfNullOrWrongKind(DataKind.Array);
-        return ReferenceStore.Current().Get<DataValue[]>(_referenceIndex);
+        throw new InvalidOperationException("Use AsArray(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the typed array payload from an explicit <see cref="IValueStore"/>.</summary>
@@ -1476,10 +1358,11 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>Returns the positional field-value array for a struct value.</summary>
     /// <exception cref="InvalidOperationException">Wrong kind or null.</exception>
+    /// <remarks>Obsolete: ReferenceStore has been removed. Use <see cref="AsStruct(IValueStore)"/> instead.</remarks>
     public DataValue[] AsStruct()
     {
         ThrowIfNullOrWrongKind(DataKind.Struct);
-        return ReferenceStore.Current().Get<DataValue[]>(_referenceIndex);
+        throw new InvalidOperationException("Use AsStruct(store). ReferenceStore is no longer available.");
     }
 
     /// <summary>Returns the positional field-value array from an explicit <see cref="IValueStore"/>.</summary>
@@ -1512,36 +1395,39 @@ public readonly struct DataValue : IEquatable<DataValue>
 
     /// <summary>
     /// Converts a <see cref="DataKind.Vector"/> or <see cref="DataKind.Matrix"/> to a
-    /// <see cref="DataKind.Tensor"/> without copying the underlying data.
+    /// <see cref="DataKind.Tensor"/> using an explicit store.
     /// </summary>
     /// <exception cref="InvalidOperationException">Called on a non-vector, non-matrix value.</exception>
-    public DataValue ToTensor()
+    public DataValue ToTensor(IValueStore store)
     {
         return _kind switch
         {
             DataKind.Vector =>
-                FromTensor(ReferenceStore.Current().Get<float[]>(_referenceIndex),
-                           [ReferenceStore.Current().Get<float[]>(_referenceIndex).Length]),
-
+                FromTensor(store.RetrieveFloats(_p0, _p1), [_p1], store),
             DataKind.Matrix =>
-                FromTensor(ReferenceStore.Current().Get<float[]>(_referenceIndex),
-                           [_p1, _p2]),
-
+                FromTensor(store.RetrieveFloats(_p0, _p1 * _p2), [_p1, _p2], store),
             _ => throw new InvalidOperationException(
                 $"Cannot convert {_kind} to Tensor. Only Vector and Matrix are supported."),
         };
     }
 
     /// <summary>
+    /// Converts a <see cref="DataKind.Vector"/> or <see cref="DataKind.Matrix"/> to a
+    /// <see cref="DataKind.Tensor"/> without copying the underlying data.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Called on a non-vector, non-matrix value.</exception>
+    public DataValue ToTensor() =>
+        throw new InvalidOperationException("Use ToTensor(store). ReferenceStore is no longer available.");
+
+    /// <summary>
     /// Converts a rank-1 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Vector"/>
-    /// without copying the underlying data.
+    /// using an explicit store.
     /// </summary>
     /// <exception cref="InvalidOperationException">Called on a non-tensor or tensor with rank != 1.</exception>
-    public DataValue ToVector()
+    public DataValue ToVector(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.Tensor);
-        ReferenceStore store = ReferenceStore.Current();
-        int[] shape = store.Get<int[]>(_referenceIndex + 1);
+        store.RetrieveTensor(_p0, _p1, out int[] shape);
 
         if (shape.Length != 1)
         {
@@ -1549,19 +1435,25 @@ public readonly struct DataValue : IEquatable<DataValue>
                 $"Cannot convert rank-{shape.Length} tensor to Vector. Rank must be 1.");
         }
 
-        return FromVector(store.Get<float[]>(_referenceIndex));
+        return FromVector(store.RetrieveFloats(_p0, _p1), store);
     }
 
     /// <summary>
-    /// Converts a rank-2 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Matrix"/>
+    /// Converts a rank-1 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Vector"/>
     /// without copying the underlying data.
     /// </summary>
+    public DataValue ToVector() =>
+        throw new InvalidOperationException("Use ToVector(store). ReferenceStore is no longer available.");
+
+    /// <summary>
+    /// Converts a rank-2 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Matrix"/>
+    /// using an explicit store.
+    /// </summary>
     /// <exception cref="InvalidOperationException">Called on a non-tensor or tensor with rank != 2.</exception>
-    public DataValue ToMatrix()
+    public DataValue ToMatrix(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.Tensor);
-        ReferenceStore store = ReferenceStore.Current();
-        int[] shape = store.Get<int[]>(_referenceIndex + 1);
+        store.RetrieveTensor(_p0, _p1, out int[] shape);
 
         if (shape.Length != 2)
         {
@@ -1569,8 +1461,15 @@ public readonly struct DataValue : IEquatable<DataValue>
                 $"Cannot convert rank-{shape.Length} tensor to Matrix. Rank must be 2.");
         }
 
-        return FromMatrix(store.Get<float[]>(_referenceIndex), shape[0], shape[1]);
+        return FromMatrix(store.RetrieveFloats(_p0, _p1), shape[0], shape[1], store);
     }
+
+    /// <summary>
+    /// Converts a rank-2 <see cref="DataKind.Tensor"/> back to a <see cref="DataKind.Matrix"/>
+    /// without copying the underlying data.
+    /// </summary>
+    public DataValue ToMatrix() =>
+        throw new InvalidOperationException("Use ToMatrix(store). ReferenceStore is no longer available.");
 
     // ───────────────────────── Equality ─────────────────────────
 
@@ -1612,28 +1511,22 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3,
             DataKind.DateTime
                 => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
+            // For reference types without a store, use offset-equality: same (_p0,_p1) in the
+            // same store means identical content. Different offsets → unknown, return false.
             DataKind.Vector
-                => ReferenceStore.Current().Get<float[]>(_referenceIndex).AsSpan()
-                       .SequenceEqual(ReferenceStore.Current().Get<float[]>(other._referenceIndex)),
+                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Matrix
-                => _p1 == other._p1 && _p2 == other._p2
-                   && ReferenceStore.Current().Get<float[]>(_referenceIndex).AsSpan()
-                          .SequenceEqual(ReferenceStore.Current().Get<float[]>(other._referenceIndex)),
+                => _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2,
             DataKind.Tensor
-                => CompareTensors(in this, in other),
+                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.UInt8Array
-                => ReferenceStore.Current().Get<byte[]>(_referenceIndex).AsSpan()
-                       .SequenceEqual(ReferenceStore.Current().Get<byte[]>(other._referenceIndex)),
+                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Image
-                => AsImage().AsSpan().SequenceEqual(other.AsImage()),
+                => _p0 == other._p0 && _p1 == other._p1,
             DataKind.Array
-                => _meta == other._meta
-                   && ReferenceStore.Current().Get<DataValue[]>(_referenceIndex).AsSpan()
-                          .SequenceEqual(ReferenceStore.Current().Get<DataValue[]>(other._referenceIndex)),
+                => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
             DataKind.Struct
-                => _meta == other._meta
-                   && ReferenceStore.Current().Get<DataValue[]>(_referenceIndex).AsSpan()
-                          .SequenceEqual(ReferenceStore.Current().Get<DataValue[]>(other._referenceIndex)),
+                => _meta == other._meta && _p0 == other._p0 && _p1 == other._p1,
             _ => false,
         };
     }
@@ -1670,20 +1563,21 @@ public readonly struct DataValue : IEquatable<DataValue>
                 => HashCode.Combine(_kind, _p0, _p1, _p2),
             DataKind.Uuid
                 => HashCode.Combine(_kind, _p0, _p1, _p2, _p3),
+            // Offset-based hashing: consistent with offset-equality in Equals.
             DataKind.Vector
-                => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex)),
+                => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Matrix
-                => CombineFloatArrayHash(_kind, ReferenceStore.Current().Get<float[]>(_referenceIndex), _p1, _p2),
+                => HashCode.Combine(_kind, _p0, _p1, _p2),
             DataKind.Tensor
-                => CombineTensorHash(_kind, _referenceIndex),
+                => HashCode.Combine(_kind, _p0, _p1),
             DataKind.UInt8Array
-                => CombineByteArrayHash(_kind, ReferenceStore.Current().Get<byte[]>(_referenceIndex)),
+                => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Image
-                => CombineByteArrayHash(_kind, AsImage()),
+                => HashCode.Combine(_kind, _p0, _p1),
             DataKind.Array
-                => CombineArrayHash(_kind, ReferenceStore.Current().Get<DataValue[]>(_referenceIndex), _meta),
+                => HashCode.Combine(_kind, _p0, _p1, _meta),
             DataKind.Struct
-                => CombineArrayHash(_kind, ReferenceStore.Current().Get<DataValue[]>(_referenceIndex), _meta),
+                => HashCode.Combine(_kind, _p0, _p1, _meta),
             _ => HashCode.Combine(_kind),
         };
     }
@@ -1715,49 +1609,12 @@ public readonly struct DataValue : IEquatable<DataValue>
         if (leftHasHash && rightHasHash)
             return left._p2 == right._p2 && left._p3 == right._p3;
 
-        // Mixed: compute hash for the no-hash side on the fly and compare.
-        if (leftHasHash != rightHasHash)
-        {
-            ReferenceStore? store = ReferenceStore.TryGetCurrent();
-            if (store is null) return false;
-
-            // The no-hash side is ReferenceStore-backed — compute its hash.
-            if (!leftHasHash)
-            {
-                var (lo, hi) = HashString(store.Get<string>(left._referenceIndex).AsSpan());
-                return lo == right._p2 && hi == right._p3;
-            }
-            else
-            {
-                var (lo, hi) = HashString(store.Get<string>(right._referenceIndex).AsSpan());
-                return left._p2 == lo && left._p3 == hi;
-            }
-        }
-
-        // Neither has hash: both ReferenceStore-backed, compare strings.
-        ReferenceStore? refStore = ReferenceStore.TryGetCurrent();
-        if (refStore is null) return false;
-        return refStore.Get<string>(left._referenceIndex) == refStore.Get<string>(right._referenceIndex);
+        // Mixed or neither has hash: without a store we cannot resolve content, return false.
+        // Callers should use the store-based Equals overloads for cross-origin comparison.
+        return false;
     }
 
-    /// <summary>
-    /// Compares two tensor values by checking both shape and data arrays from
-    /// the <see cref="ReferenceStore"/>.
-    /// </summary>
-    private static bool CompareTensors(in DataValue left, in DataValue right)
-    {
-        ReferenceStore store = ReferenceStore.Current();
-        int[] leftShape = store.Get<int[]>(left._referenceIndex + 1);
-        int[] rightShape = store.Get<int[]>(right._referenceIndex + 1);
-
-        if (!leftShape.AsSpan().SequenceEqual(rightShape))
-        {
-            return false;
-        }
-
-        return store.Get<float[]>(left._referenceIndex).AsSpan()
-                   .SequenceEqual(store.Get<float[]>(right._referenceIndex));
-    }
+    // CompareTensors removed — tensor equality now uses offset-equality in Equals().
 
     private void ThrowIfNullOrWrongKind(DataKind expected)
     {
@@ -1807,27 +1664,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         return hash.ToHashCode();
     }
 
-    private static int CombineTensorHash(DataKind kind, int referenceIndex)
-    {
-        ReferenceStore store = ReferenceStore.Current();
-        float[] data = store.Get<float[]>(referenceIndex);
-        int[] shape = store.Get<int[]>(referenceIndex + 1);
-
-        HashCode hash = new();
-        hash.Add(kind);
-
-        foreach (int dimension in shape)
-        {
-            hash.Add(dimension);
-        }
-
-        foreach (float element in data)
-        {
-            hash.Add(element);
-        }
-
-        return hash.ToHashCode();
-    }
+    // CombineTensorHash removed — tensor hashing now uses offset-based approach in GetHashCode().
 
     private static int CombineByteArrayHash(DataKind kind, byte[] data)
     {
@@ -1876,24 +1713,24 @@ public readonly struct DataValue : IEquatable<DataValue>
             DataKind.UInt64 => unchecked((ulong)ReadLong()).ToString(),
             DataKind.Float64 => BitConverter.Int64BitsToDouble(ReadLong()).ToString("G"),
             DataKind.String => HasReference
-                ? ReferenceStore.Current().Get<string>(_referenceIndex)
+                ? $"String[offset={_p0}, len={_p1}]"
                 : $"String[arena@{_p0}+{_p1}]",
             DataKind.Date => DateOnly.FromDayNumber(_p0).ToString("yyyy-MM-dd"),
             DataKind.DateTime => AsDateTime().ToString("O"),
             DataKind.JsonValue => HasReference
-                ? ReferenceStore.Current().Get<string>(_referenceIndex)
+                ? $"JsonValue[offset={_p0}, len={_p1}]"
                 : $"JsonValue[arena@{_p0}+{_p1}]",
             DataKind.Uuid => AsUuid().ToString("D"),
             DataKind.Boolean => _p0 != 0 ? "true" : "false",
             DataKind.Time => new TimeOnly(ReadLong()).ToString("HH:mm:ss.FFFFFFF"),
             DataKind.Duration => new TimeSpan(ReadLong()).ToString("c"),
-            DataKind.Vector => $"Vector[{ReferenceStore.Current().Get<float[]>(_referenceIndex).Length}]",
+            DataKind.Vector => $"Vector[{_p1} elements]",
             DataKind.Matrix => $"Matrix[{_p1}x{_p2}]",
-            DataKind.Tensor => $"Tensor[{string.Join("x", ReferenceStore.Current().Get<int[]>(_referenceIndex + 1))}]",
-            DataKind.UInt8Array => $"UInt8Array[{ReferenceStore.Current().Get<byte[]>(_referenceIndex).Length}]",
-            DataKind.Image => $"Image[{AsImage().Length} bytes]",
-            DataKind.Array => $"Array<{(DataKind)_meta}>[{ReferenceStore.Current().Get<DataValue[]>(_referenceIndex).Length}]",
-            DataKind.Struct => $"Struct({_meta}){{{FormatStructFields(ReferenceStore.Current().Get<DataValue[]>(_referenceIndex))}}}",
+            DataKind.Tensor => $"Tensor[{_p2} elements]",
+            DataKind.UInt8Array => $"UInt8Array[{_p1} bytes]",
+            DataKind.Image => $"Image[offset={_p0}, len={_p1}]",
+            DataKind.Array => $"Array<{(DataKind)_meta}>",
+            DataKind.Struct => $"Struct({_meta} fields)",
             _ => _kind.ToString(),
         };
     }

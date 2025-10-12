@@ -23,7 +23,7 @@ public sealed class DatumEncoderContext
 
     /// <summary>
     /// Optional value store for resolving string and binary payloads. When set, encoders
-    /// use this store instead of <see cref="ReferenceStore.Current()"/>.
+    /// use this store.
     /// </summary>
     public IValueStore? Store { get; init; }
 }

@@ -2,8 +2,8 @@ namespace DatumIngest.Model;
 
 /// <summary>
 /// Unified contract for storing and retrieving reference-type payloads from a
-/// backing store. Implemented by <see cref="ReferenceStore"/> (per-query object
-/// registry) and <see cref="Arena"/> (contiguous byte buffer).
+/// backing store. Implemented by Arena-based stores (contiguous byte buffer)
+/// and object-registry implementations.
 /// </summary>
 /// <remarks>
 /// Callers pass an <see cref="IValueStore"/> to <see cref="DataValue"/> factory
@@ -18,7 +18,7 @@ public interface IValueStore
     /// </summary>
     /// <param name="value">The string to store.</param>
     /// <returns>
-    /// A pair of ints: for <see cref="ReferenceStore"/>, (index, 0);
+    /// A pair of ints: for object-registry stores, (index, 0);
     /// for <see cref="Arena"/>, (offset, length).
     /// </returns>
     (int P0, int P1) StoreString(string value);
@@ -101,7 +101,7 @@ public interface IValueStore
 
     /// <summary>
     /// Stores an arbitrary managed object (e.g. <c>ImageHandle</c>).
-    /// Only supported by <see cref="ReferenceStore"/>; <see cref="Arena"/> throws
+    /// Only supported by object-registry stores; <see cref="Arena"/> throws
     /// <see cref="NotSupportedException"/>.
     /// </summary>
     (int P0, int P1) StoreObject(object value);

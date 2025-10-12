@@ -6,7 +6,7 @@ namespace DatumIngest.Serialization.Csv;
 /// <summary>
 /// Deserializes CSV files into <see cref="RowBatch"/> streams. Uses
 /// <see cref="SerializationContext.Arena"/> as the <see cref="IValueStore"/>
-/// for string values — no <see cref="ReferenceStore"/> or <c>AsyncLocal</c> needed.
+/// for string values — no ambient state needed.
 /// </summary>
 public sealed class CsvDeserializer : IFormatDeserializer
 {

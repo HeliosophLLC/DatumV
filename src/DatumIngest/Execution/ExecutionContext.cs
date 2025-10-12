@@ -81,7 +81,7 @@ public sealed class ExecutionContext
     /// <summary>
     /// Value store for string, byte, float, and object payloads during query execution.
     /// Operators use this store for all reference-type <see cref="DataValue"/> access
-    /// instead of the ambient <see cref="ReferenceStore"/>.
+    /// for all reference-type payloads.
     /// </summary>
     public IValueStore Store { get; }
 

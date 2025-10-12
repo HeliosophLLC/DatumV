@@ -545,70 +545,9 @@ public sealed class GraceHashJoinTests
             "partitions were spilled despite the build side only slightly exceeding the budget.");
     }
 
-    /// <summary>
-    /// Verifies that repeated string values in build-side rows share ReferenceStore
-    /// entries rather than creating one per row. Without interning, scanning 10,000
-    /// rows with 5 distinct string values creates 10,000 ReferenceStore entries —
-    /// this is the root cause of the 5 GB memory spike observed on the gRPC server
-    /// when joining orders_csv (3.2M rows, low-cardinality eval_set column) against
-    /// order_products__prior_csv with a 256 MB memory budget.
-    /// </summary>
-    [Fact]
-    public async Task BuildPhase_RepeatedStrings_ReferenceStoreGrowthBounded()
-    {
-        // Simulate a low-cardinality string column (e.g., eval_set with 5 distinct
-        // values) across 10,000 build rows. In production, orders_csv has 3.2M rows
-        // with eval_set ∈ {"prior", "train", "test"}.
-        string[] categories = ["alpha", "beta", "gamma", "delta", "epsilon"];
-        int buildRowCount = 10_000;
-
-        ReferenceStore.BeginQueryScope();
-        try
-        {
-            Row[] buildRows = Enumerable.Range(0, buildRowCount)
-                .Select(i => MakeRow(
-                    ("r.id", DataValue.FromFloat32(i)),
-                    ("r.cat", DataValue.FromString(categories[i % categories.Length]))))
-                .ToArray();
-
-            Row[] probeRows = Enumerable.Range(0, 100)
-                .Select(i => MakeRow(
-                    ("l.id", DataValue.FromFloat32(i)),
-                    ("l.val", DataValue.FromFloat32(i * 10))))
-                .ToArray();
-
-            int refCountBefore = ReferenceStore.Current().Count;
-
-            JoinOperator join = new(
-                new MockOperator(probeRows),
-                new MockOperator(buildRows),
-                JoinType.Inner,
-                new BinaryExpression(
-                    new ColumnReference("l", "id"),
-                    BinaryOperator.Equal,
-                    new ColumnReference("r", "id")));
-
-            List<Row> results = await CollectAsync(join, CreateContext(TinyBudget));
-
-            int refCountAfter = ReferenceStore.Current().Count;
-            int newEntries = refCountAfter - refCountBefore;
-
-            // With interning, 10,000 rows × 1 low-cardinality string column should
-            // produce only ~5 ReferenceStore entries (one per distinct value), plus
-            // a small number for join-key intermediates. Without interning, this
-            // creates 10,000+ entries — one per FromString call — causing memory to
-            // grow linearly with row count regardless of the memory budget.
-            Assert.True(newEntries < buildRowCount / 2,
-                $"ReferenceStore grew by {newEntries:N0} entries for {buildRowCount:N0} build rows " +
-                $"with only {categories.Length} distinct string values. Expected significantly fewer " +
-                "entries due to string interning. Unbounded ReferenceStore growth causes memory to " +
-                "exceed the join memory budget by orders of magnitude.");
-        }
-        finally
-        {
-            ReferenceStore.EndQueryScope();
-        }
-    }
+    // ReferenceStore growth test removed — ReferenceStore has been deleted.
+    // Arena-backed string storage doesn't intern, but the memory model is
+    // fundamentally different (batch-scoped rather than query-scoped).
 
     private static ExecutionContext CreateContext(long memoryBudgetBytes, int batchSize = 1024)
     {

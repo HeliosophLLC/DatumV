@@ -31,10 +31,6 @@ public sealed class DatumSerializer : IFormatSerializer
     {
         DatumFileWriter? writer = null;
 
-        // A ReferenceStore scope is still needed for zone map min/max DataValues,
-        // which are serialized by the footer writer via parameterless AsString().
-        // This scope will be removed once the footer writer is store-aware.
-        ReferenceStore.BeginQueryScope();
         try
         {
             await foreach (RowBatch batch in rows.WithCancellation(cancellationToken))
@@ -59,7 +55,6 @@ public sealed class DatumSerializer : IFormatSerializer
         finally
         {
             writer?.Dispose();
-            ReferenceStore.EndQueryScope();
         }
     }
 

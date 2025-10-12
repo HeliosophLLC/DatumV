@@ -8,7 +8,7 @@ namespace DatumIngest.Serialization.Parquet;
 /// <summary>
 /// Deserializes Apache Parquet files into <see cref="RowBatch"/> streams.
 /// Uses typed array casts to avoid boxing, and stores strings via
-/// <see cref="SerializationContext.Arena"/> instead of <see cref="ReferenceStore"/>.
+/// <see cref="SerializationContext.Arena"/> for all reference-type payloads.
 /// </summary>
 public sealed class ParquetDeserializer : IFormatDeserializer
 {

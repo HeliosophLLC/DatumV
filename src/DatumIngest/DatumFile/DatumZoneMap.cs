@@ -59,7 +59,7 @@ public sealed record DatumZoneMap
     }
 
     /// <summary>Deserializes a zone map from the given binary reader.</summary>
-    internal static DatumZoneMap Deserialize(BinaryReader reader)
+    internal static DatumZoneMap Deserialize(BinaryReader reader, IValueStore? store = null)
     {
         uint nullCount = reader.ReadUInt32();
         bool hasMinMax = reader.ReadBoolean();
@@ -69,8 +69,12 @@ public sealed record DatumZoneMap
             return new DatumZoneMap(nullCount, null, null);
         }
 
-        DataValue minimum = IndexReader.ReadDataValue(reader);
-        DataValue maximum = IndexReader.ReadDataValue(reader);
+        DataValue minimum = store is not null
+            ? IndexReader.ReadDataValue(reader, store)
+            : IndexReader.ReadDataValue(reader);
+        DataValue maximum = store is not null
+            ? IndexReader.ReadDataValue(reader, store)
+            : IndexReader.ReadDataValue(reader);
         return new DatumZoneMap(nullCount, minimum, maximum);
     }
 }

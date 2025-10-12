@@ -128,7 +128,7 @@ public enum DataKind : byte
     /// <summary>
     /// A named-field composite value. Field names and kinds are stored once in the
     /// enclosing <see cref="ColumnInfo.Fields"/> descriptor; each value holds a
-    /// positional <see cref="DataValue"/>[] in the <see cref="ReferenceStore"/>.
+    /// positional <see cref="DataValue"/>[] in the value store.
     /// </summary>
     Struct = 68,
 }

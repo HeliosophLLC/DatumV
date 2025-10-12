@@ -47,22 +47,28 @@ public sealed class DatumFileReader : IDisposable
 
     /// <summary>Opens a <c>.datum</c> file and reads its footer and schema.</summary>
     /// <param name="filePath">Absolute path to the <c>.datum</c> file.</param>
+    /// <param name="store">Optional value store for zone map DataValues. Creates a new Arena if null.</param>
     /// <exception cref="InvalidDataException">
     /// Thrown when the file header or tail magic bytes do not match the expected values.
     /// </exception>
     /// <exception cref="NotSupportedException">
     /// Thrown when the file format version is not supported by this reader.
     /// </exception>
-    public static DatumFileReader Open(string filePath)
+    public static DatumFileReader Open(string filePath, Model.IValueStore? store = null)
     {
         FileStream stream = File.OpenRead(filePath);
 
         try
         {
+            // The footer contains zone map min/max DataValues that need a store.
+            // If the caller doesn't provide one, create a reader-owned Arena.
+            store ??= new Model.Arena();
             (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount, DatumFileFlags flags) =
-                ReadFooterAndHeader(stream);
+                ReadFooterAndHeader(stream, store);
 
-            return new DatumFileReader(stream, filePath, schema, rowGroups, totalRowCount, flags);
+            var reader = new DatumFileReader(stream, filePath, schema, rowGroups, totalRowCount, flags);
+            reader.Store = store;
+            return reader;
         }
         catch
         {
@@ -250,7 +256,7 @@ public sealed class DatumFileReader : IDisposable
     // ──────────────────── Footer reading ────────────────────
 
     internal static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount, DatumFileFlags Flags)
-        ReadFooterAndHeader(Stream stream)
+        ReadFooterAndHeader(Stream stream, Model.IValueStore? store = null)
     {
         // Validate header magic and read totalRowCount from position 12.
         byte[] headerBytes = new byte[DatumFileConstants.HeaderSize];
@@ -299,7 +305,7 @@ public sealed class DatumFileReader : IDisposable
 
         for (int groupIndex = 0; groupIndex < (int)rowGroupCount; groupIndex++)
         {
-            rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount, hasTombstones);
+            rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount, hasTombstones, store);
         }
 
         return (schema, rowGroups, totalRowCount, flags);

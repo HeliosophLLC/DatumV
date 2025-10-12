@@ -17,7 +17,7 @@ namespace DatumIngest.Indexing.Bitmap;
 /// </para>
 /// <para>
 /// String and JSON-keyed bitmap indexes use <see cref="string"/>-keyed dictionaries so
-/// that lookups are independent of <see cref="ReferenceStore"/> scope. This is necessary
+/// that lookups are store-independent. This is necessary
 /// because the index is cached long-term in the catalog while query scopes are per-request.
 /// Non-string keys (boolean, numeric, date, etc.) use <see cref="DataValue"/>-keyed
 /// dictionaries since their equality and hashing use only inline bit fields.
@@ -543,7 +543,7 @@ internal sealed class BitmapColumnIndex : IBitmapColumnIndex
 
     /// <summary>
     /// Converts a <see cref="DataValue"/>-keyed dictionary to a <see cref="string"/>-keyed
-    /// dictionary. Must be called at construction time while the <see cref="ReferenceStore"/>
+    /// dictionary. Must be called at construction time while the store
     /// that holds the key strings is still active.
     /// </summary>
     private static Dictionary<string, TValue> ConvertToStringKeys<TValue>(

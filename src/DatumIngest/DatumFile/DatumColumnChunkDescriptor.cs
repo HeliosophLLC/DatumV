@@ -63,14 +63,14 @@ public readonly record struct DatumColumnChunkDescriptor
     }
 
     /// <summary>Deserializes a column chunk descriptor from the binary reader.</summary>
-    internal static DatumColumnChunkDescriptor Deserialize(BinaryReader reader)
+    internal static DatumColumnChunkDescriptor Deserialize(BinaryReader reader, Model.IValueStore? store = null)
     {
         long pageOffset = reader.ReadInt64();
         uint compressedLength = reader.ReadUInt32();
         uint uncompressedLength = reader.ReadUInt32();
         DatumEncoding encoding = (DatumEncoding)reader.ReadByte();
         DatumCompression compression = (DatumCompression)reader.ReadByte();
-        DatumZoneMap zoneMap = DatumZoneMap.Deserialize(reader);
+        DatumZoneMap zoneMap = DatumZoneMap.Deserialize(reader, store);
 
         return new DatumColumnChunkDescriptor(
             pageOffset, compressedLength, uncompressedLength, encoding, compression, zoneMap);

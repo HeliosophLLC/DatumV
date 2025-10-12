@@ -18,7 +18,7 @@ public sealed class DatumDecoderContext
 
     /// <summary>
     /// Optional value store for string and binary payloads. When set, decoders use this
-    /// store instead of <see cref="ReferenceStore.Current()"/>, enabling Arena-backed
+    /// store, enabling Arena-backed
     /// string storage without ambient state.
     /// </summary>
     public IValueStore? Store { get; init; }

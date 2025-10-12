@@ -78,7 +78,7 @@ public sealed class DatumFileWriter : IDisposable
     /// <summary>
     /// Optional value store for resolving string payloads during encoding.
     /// When set, <see cref="StringColumnEncoder"/> reads strings via this store
-    /// instead of <see cref="ReferenceStore.Current()"/>.
+    /// instead of a global store.
     /// </summary>
     public Model.IValueStore? Store { get; set; }
 

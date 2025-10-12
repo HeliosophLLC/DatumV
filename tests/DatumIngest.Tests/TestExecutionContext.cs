@@ -16,21 +16,18 @@ internal static class TestExecutionContext
 {
     /// <summary>
     /// Creates a minimal execution context suitable for most unit tests.
-    /// Uses the current <see cref="ReferenceStore"/> as the value store
-    /// when a scope is active, otherwise defaults to a new <see cref="Arena"/>.
+    /// Uses a fresh <see cref="Arena"/> as the value store.
     /// </summary>
     internal static ExecutionContext Create(
         FunctionRegistry? functionRegistry = null,
         TableCatalog? catalog = null,
         long? memoryBudgetBytes = null)
     {
-        IValueStore? store = ReferenceStore.TryGetCurrent();
         return new ExecutionContext(
             CancellationToken.None,
             functionRegistry ?? FunctionRegistry.CreateDefault(),
             catalog ?? new TableCatalog(),
             new LocalBufferPool(),
-            memoryBudgetBytes: memoryBudgetBytes,
-            store: store);
+            memoryBudgetBytes: memoryBudgetBytes);
     }
 }

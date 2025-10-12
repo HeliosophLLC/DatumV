@@ -196,16 +196,8 @@ public static class DatumIngester
         Action<IngestionProgress>? progress,
         CancellationToken cancellationToken)
     {
-        ReferenceStore.BeginQueryScope();
-        try
-        {
-            return await IngestCoreScopedAsync(baseTableName, filePath, progress, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            ReferenceStore.EndQueryScope();
-        }
+        return await IngestCoreScopedAsync(baseTableName, filePath, progress, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static async Task<DatumIngestionResult> IngestCoreScopedAsync(
@@ -386,16 +378,8 @@ public static class DatumIngester
         Action<IndexingProgress>? progress,
         CancellationToken cancellationToken)
     {
-        ReferenceStore.BeginQueryScope();
-        try
-        {
         return await BuildIndexCoreScopedAsync(baseTableName, filePath, options, progress, cancellationToken)
             .ConfigureAwait(false);
-        }
-        finally
-        {
-            ReferenceStore.EndQueryScope();
-        }
     }
 
     private static async Task<DatumIndexResult> BuildIndexCoreScopedAsync(

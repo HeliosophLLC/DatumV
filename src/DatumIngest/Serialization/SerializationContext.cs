@@ -7,8 +7,7 @@ namespace DatumIngest.Serialization;
 /// Provides shared resources for format serialization and deserialization: a
 /// <see cref="Pool"/> for renting <see cref="DataValue"/> arrays and
 /// <see cref="RowBatch"/> instances, and an <see cref="Arena"/> for storing
-/// reference-type payloads (strings, byte blobs) without <see cref="ReferenceStore"/>
-/// or <c>AsyncLocal</c> ambient state.
+/// reference-type payloads (strings, byte blobs) without ambient state.
 /// </summary>
 /// <remarks>
 /// <para>
