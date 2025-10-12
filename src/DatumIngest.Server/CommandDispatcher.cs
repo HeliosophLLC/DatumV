@@ -210,7 +210,7 @@ public sealed class CommandDispatcher
         Schema schema = await ResolveQuerySchemaAsync(session, queryContext, schemaStatement, cancellationToken).ConfigureAwait(false);
         ExecutionTracer.Write($"DISPATCH schema resolved  columns={schema.Columns.Count}, returning streaming rows");
 
-        return CommandResult.StreamingRows(rows, schema, assertionDiagnostics, localBufferPool);
+        return CommandResult.StreamingRows(rows, schema, assertionDiagnostics, localBufferPool, store: context.Store);
     }
 
     private static async Task<Schema> ResolveQuerySchemaAsync(

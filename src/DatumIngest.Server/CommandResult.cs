@@ -57,6 +57,13 @@ public sealed class CommandResult
     /// </summary>
     public LocalBufferPool? Pool { get; private init; }
 
+    /// <summary>
+    /// Gets the <see cref="IValueStore"/> used during query execution for resolving
+    /// reference-type <see cref="DataValue"/> payloads (strings, arrays, etc.).
+    /// Must be used when serializing streaming row results.
+    /// </summary>
+    public IValueStore? Store { get; private init; }
+
     /// <summary>Creates a success result with a message.</summary>
     /// <param name="message">Human-readable success message.</param>
     /// <returns>A success result.</returns>
@@ -70,18 +77,20 @@ public sealed class CommandResult
     /// <summary>Creates a streaming rows result.</summary>
     /// <param name="rows">The async enumerable of result rows.</param>
     /// <param name="schema">The schema describing the row columns.</param>
+    /// <param name="store">The value store for resolving reference-type DataValue payloads.</param>
     /// <returns>A streaming rows result.</returns>
-    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema) =>
-        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema };
+    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema, IValueStore store) =>
+        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema, Store = store };
 
     /// <summary>Creates a streaming rows result with assertion diagnostics pre-wired.</summary>
     /// <param name="rows">The async enumerable of result rows.</param>
     /// <param name="schema">The schema describing the row columns.</param>
     /// <param name="assertionDiagnostics">The diagnostics instance that will be populated as rows are consumed.</param>
     /// <param name="pool">The buffer pool for returning consumed batches, or <c>null</c>.</param>
+    /// <param name="store">The value store for resolving reference-type DataValue payloads.</param>
     /// <returns>A streaming rows result.</returns>
-    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema, AssertionDiagnostics assertionDiagnostics, LocalBufferPool? pool = null) =>
-        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema, AssertionDiagnostics = assertionDiagnostics, Pool = pool };
+    public static CommandResult StreamingRows(IAsyncEnumerable<RowBatch> rows, Schema schema, AssertionDiagnostics assertionDiagnostics, LocalBufferPool? pool, IValueStore store) =>
+        new(CommandResultKind.StreamingRows) { Rows = rows, Schema = schema, AssertionDiagnostics = assertionDiagnostics, Pool = pool, Store = store };
 
     /// <summary>Creates a schema inspection result.</summary>
     /// <param name="schema">The schema of the inspected table.</param>

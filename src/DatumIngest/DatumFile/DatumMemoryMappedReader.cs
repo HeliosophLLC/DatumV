@@ -29,7 +29,7 @@ public sealed class DatumMemoryMappedReader : IDisposable
     /// <summary>
     /// Optional value store for decoding string columns into Arena-backed values.
     /// </summary>
-    public IValueStore? Store { get; set; }
+    public IValueStore Store { get; set; } = new Arena();
 
     private DatumMemoryMappedReader(
         MemoryMappedFile mappedFile,

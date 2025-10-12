@@ -22,8 +22,7 @@ public sealed class DatumEncoderContext
     public int RowGroupIndex { get; init; }
 
     /// <summary>
-    /// Optional value store for resolving string and binary payloads. When set, encoders
-    /// use this store.
+    /// Value store for resolving string and binary payloads during encoding.
     /// </summary>
-    public IValueStore? Store { get; init; }
+    public IValueStore Store { get; init; } = new Arena();
 }

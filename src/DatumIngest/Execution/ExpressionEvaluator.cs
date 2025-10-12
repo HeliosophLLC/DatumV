@@ -1135,7 +1135,7 @@ public sealed class ExpressionEvaluator
             // Integer index → positional (ordinal) access by declaration order.
             if (index.Kind is DataKind.Float32 or DataKind.Float64 or DataKind.Int32 or DataKind.Int64)
             {
-                DataValue[] fields = source.AsStruct();
+                DataValue[] fields = source.AsStruct(_store!);
                 int position = (int)ToFloat(index);
                 if (position < 0 || position >= fields.Length)
                 {
@@ -1155,7 +1155,7 @@ public sealed class ExpressionEvaluator
     private DataValue EvaluateStructFieldAccess(
         DataValue source, DataValue index, IndexAccessExpression indexAccess, Row row)
     {
-        DataValue[] fields = source.AsStruct();
+        DataValue[] fields = source.AsStruct(_store!);
         string fieldName = Str(index);
 
         // Try to resolve field position from schema when source is a column reference.

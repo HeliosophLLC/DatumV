@@ -37,7 +37,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
     /// Set by operators that have an <see cref="DatumIngest.Execution.ExecutionContext"/>
     /// before calling <see cref="ITableProvider.OpenAsync"/>.
     /// </summary>
-    public IValueStore? Store { get; set; }
+    public IValueStore Store { get; set; } = new Arena();
 
     /// <summary>Total number of row groups examined in the most recent read.</summary>
     public int TotalRowGroups { get; private set; }

@@ -60,8 +60,9 @@ public static class ProtoConverter
     /// Converts a domain <see cref="DataValue"/> to its Protobuf representation.
     /// </summary>
     /// <param name="value">The domain data value.</param>
+    /// <param name="store">The value store for resolving reference-type payloads.</param>
     /// <returns>The Protobuf data value message.</returns>
-    public static DataValueMessage ToProto(DataValue value)
+    public static DataValueMessage ToProto(DataValue value, Model.IValueStore store)
     {
         DataValueMessage message = new();
 
@@ -82,7 +83,7 @@ public static class ProtoConverter
                 break;
 
             case DataKind.String:
-                message.StringValue = value.AsString();
+                message.StringValue = value.AsString(store);
                 break;
 
             case DataKind.Date:
@@ -94,32 +95,32 @@ public static class ProtoConverter
                 break;
 
             case DataKind.JsonValue:
-                message.JsonValue = value.AsJsonValue();
+                message.JsonValue = value.AsJsonValue(store);
                 break;
 
             case DataKind.UInt8Array:
-                message.Uint8ArrayValue = Google.Protobuf.ByteString.CopyFrom(value.AsUInt8Array());
+                message.Uint8ArrayValue = Google.Protobuf.ByteString.CopyFrom(value.AsUInt8Array(store));
                 break;
 
             case DataKind.Image:
-                message.ImageValue = Google.Protobuf.ByteString.CopyFrom(value.AsImage());
+                message.ImageValue = Google.Protobuf.ByteString.CopyFrom(value.AsImage(store));
                 break;
 
             case DataKind.Vector:
                 VectorMessage vector = new();
-                vector.Values.AddRange(value.AsVector());
+                vector.Values.AddRange(value.AsVector(store));
                 message.VectorValue = vector;
                 break;
 
             case DataKind.Matrix:
-                float[] matrixData = value.AsMatrix(out int rows, out int columns);
+                float[] matrixData = value.AsMatrix(store, out int rows, out int columns);
                 MatrixMessage matrix = new() { Rows = rows, Columns = columns };
                 matrix.Values.AddRange(matrixData);
                 message.MatrixValue = matrix;
                 break;
 
             case DataKind.Tensor:
-                float[] tensorData = value.AsTensor(out int[] shape);
+                float[] tensorData = value.AsTensor(store, out int[] shape);
                 TensorMessage tensor = new();
                 tensor.Shape.AddRange(shape);
                 tensor.Values.AddRange(tensorData);
@@ -147,18 +148,18 @@ public static class ProtoConverter
                 {
                     ElementKind = ToProtoKind(value.ArrayElementKind),
                 };
-                foreach (DataValue element in value.AsArray())
+                foreach (DataValue element in value.AsArray(store))
                 {
-                    arrayMessage.Elements.Add(ToProto(element));
+                    arrayMessage.Elements.Add(ToProto(element, store));
                 }
                 message.ArrayValue = arrayMessage;
                 break;
 
             case DataKind.Struct:
                 StructMessage structMessage = new();
-                foreach (DataValue field in value.AsStruct())
+                foreach (DataValue field in value.AsStruct(store))
                 {
-                    structMessage.Fields.Add(ToProto(field));
+                    structMessage.Fields.Add(ToProto(field, store));
                 }
                 message.StructValue = structMessage;
                 break;

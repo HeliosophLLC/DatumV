@@ -24,10 +24,10 @@ public sealed class DatumFileReader : IDisposable
     private readonly DatumFileFlags _flags;
 
     /// <summary>
-    /// Optional value store for decoding string columns into Arena-backed values
-    /// instead of ReferenceStore. Set by the caller after opening.
+    /// Value store for decoding string columns into Arena-backed values.
+    /// Set by <see cref="Open"/> or by the caller after opening.
     /// </summary>
-    public Model.IValueStore? Store { get; set; }
+    public Model.IValueStore Store { get; set; } = new Model.Arena();
 
     private DatumFileReader(
         FileStream stream,

@@ -17,11 +17,10 @@ public sealed class DatumDecoderContext
     public string DatumFilePath { get; init; } = string.Empty;
 
     /// <summary>
-    /// Optional value store for string and binary payloads. When set, decoders use this
-    /// store, enabling Arena-backed
-    /// string storage without ambient state.
+    /// Value store for string and binary payloads. Decoders use this store for
+    /// Arena-backed string storage.
     /// </summary>
-    public IValueStore? Store { get; init; }
+    public IValueStore Store { get; init; } = new Arena();
 
     /// <summary>
     /// A context with no file path, suitable for in-memory decode scenarios

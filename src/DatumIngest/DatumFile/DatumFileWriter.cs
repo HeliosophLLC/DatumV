@@ -80,7 +80,7 @@ public sealed class DatumFileWriter : IDisposable
     /// When set, <see cref="StringColumnEncoder"/> reads strings via this store
     /// instead of a global store.
     /// </summary>
-    public Model.IValueStore? Store { get; set; }
+    public Model.IValueStore Store { get; set; } = new Model.Arena();
 
     /// <summary>
     /// Initializes the writer with a schema and writes the file header.

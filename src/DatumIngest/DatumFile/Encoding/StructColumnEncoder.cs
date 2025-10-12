@@ -53,7 +53,7 @@ internal sealed class StructColumnEncoder : DatumColumnEncoder
                     continue;
                 }
 
-                DataValue[] fields = value.AsStruct();
+                DataValue[] fields = value.AsStruct(context.Store);
                 using MemoryStream rowStream = new();
                 using BinaryWriter rowWriter = new(rowStream, System.Text.Encoding.UTF8, leaveOpen: true);
 

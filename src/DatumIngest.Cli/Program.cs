@@ -123,7 +123,9 @@ try
         foreach (KeyValuePair<string, string> entry in options.Parameters)
         {
             DataValue value = ParameterValueParser.Parse(entry.Value);
-            grpcParameters[entry.Key] = ProtoConverter.ToProto(value);
+            grpcParameters[entry.Key] = ProtoConverter.ToProto(value, new Arena());
+
+            throw new Exception("Arena logic above is incorrect!");
         }
     }
 
