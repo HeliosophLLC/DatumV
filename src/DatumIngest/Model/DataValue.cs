@@ -1,3 +1,4 @@
+using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using DatumIngest.Functions.Image;
@@ -45,8 +46,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     // Header (4 bytes)
     [FieldOffset(0)]  private readonly DataKind _kind;     //  1 byte  — type discriminator
     [FieldOffset(1)]  private readonly byte _flags;        //  1 byte  — bit 0: IsNull, bit 1: HasReference
-    [FieldOffset(2)]  private readonly byte _storeId;      //  1 byte  — reserved
-    [FieldOffset(3)]  private readonly byte _spare;        //  1 byte  — reserved
+    [FieldOffset(2)]  private readonly ushort _charCount;  //  2 bytes — string/JSON char count (0 = unknown, 65535 = overflow)
 
     // Payload — inline interpretation (16 bytes)
     [FieldOffset(4)]  private readonly int _p0;            //  4 bytes — payload word 0
@@ -58,13 +58,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     [FieldOffset(4)]  private readonly int _referenceIndex; // overlaps _p0
     [FieldOffset(8)]  private readonly short _meta;         // overlaps low 2 bytes of _p1
 
-    private DataValue(DataKind kind, byte flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0)
+    private DataValue(DataKind kind, byte flags, int p0, int p1 = 0, int p2 = 0, int p3 = 0, ushort charCount = 0)
     {
         Unsafe.SkipInit(out this);
         _kind = kind;
         _flags = flags;
-        _storeId = 0;
-        _spare = 0;
+        _charCount = charCount;
         _p0 = p0;
         _p1 = p1;
         _p2 = p2;
@@ -80,8 +79,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         Unsafe.SkipInit(out this);
         _kind = kind;
         _flags = flags;
-        _storeId = 0;
-        _spare = 0;
+        _charCount = 0;
         _referenceIndex = referenceIndex;
         _meta = meta;
         _p2 = 0;
@@ -173,7 +171,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ReferenceStore store = ReferenceStore.Current();
         int index = store.InternString(value);
-        return new(DataKind.String, flags: FlagHasReference, p0: index, p2: value.Length);
+        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
+        return new(DataKind.String, flags: FlagHasReference, p0: index, charCount: cc);
     }
 
     /// <summary>
@@ -184,21 +183,27 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromString(string value, IValueStore store)
     {
         var (p0, p1) = store.StoreString(value);
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: value.Length);
+        var (hashLo, hashHi) = HashString(value.AsSpan());
+        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>Creates a string value from a char span without allocating a managed string.</summary>
     public static DataValue FromCharSpan(ReadOnlySpan<char> chars, IValueStore store)
     {
         var (p0, p1) = store.StoreChars(chars);
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: chars.Length);
+        var (hashLo, hashHi) = HashString(chars);
+        ushort cc = chars.Length <= ushort.MaxValue ? (ushort)chars.Length : ushort.MaxValue;
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>Creates a string value from raw UTF-8 bytes without allocating a managed string.</summary>
     public static DataValue FromUtf8Span(ReadOnlySpan<byte> utf8, int charCount, IValueStore store)
     {
         var (p0, p1) = store.StoreUtf8(utf8);
-        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: charCount);
+        var (hashLo, hashHi) = HashUtf8(utf8);
+        ushort cc = charCount <= ushort.MaxValue ? (ushort)charCount : ushort.MaxValue;
+        return new(DataKind.String, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
     }
 
     /// <summary>
@@ -350,7 +355,8 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         ReferenceStore store = ReferenceStore.Current();
         int index = store.InternString(value);
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index, p2: value.Length);
+        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: index, charCount: cc);
     }
 
     /// <summary>
@@ -359,7 +365,46 @@ public readonly struct DataValue : IEquatable<DataValue>
     public static DataValue FromJsonValue(string value, IValueStore store)
     {
         var (p0, p1) = store.StoreString(value);
-        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1, p2: value.Length);
+        var (hashLo, hashHi) = HashString(value.AsSpan());
+        ushort cc = value.Length <= ushort.MaxValue ? (ushort)value.Length : ushort.MaxValue;
+        return new(DataKind.JsonValue, flags: FlagHasReference, p0: p0, p1: p1, p2: hashLo, p3: hashHi, charCount: cc);
+    }
+
+    /// <summary>
+    /// Computes XxHash64 over the UTF-8 encoding of a char span and splits into two int32 halves.
+    /// Always hashes UTF-8 bytes for consistency with <see cref="HashUtf8"/>.
+    /// </summary>
+    /// <summary>
+    /// Computes GetHashCode for a ReferenceStore-backed string that has no cached hash.
+    /// Resolves the string via ReferenceStore, computes XxHash64, and returns a combined hash code.
+    /// </summary>
+    private int ComputeStringHashCode()
+    {
+        ReferenceStore? store = ReferenceStore.TryGetCurrent();
+        if (store is null) return HashCode.Combine(_kind, _p0, _p1);
+        string text = store.Get<string>(_referenceIndex);
+        var (lo, hi) = HashString(text.AsSpan());
+        return HashCode.Combine(_kind, lo, hi);
+    }
+
+    private static (int Lo, int Hi) HashString(ReadOnlySpan<char> chars)
+    {
+        int maxBytes = System.Text.Encoding.UTF8.GetMaxByteCount(chars.Length);
+        byte[]? rented = null;
+        Span<byte> utf8 = maxBytes <= 256
+            ? stackalloc byte[maxBytes]
+            : (rented = System.Buffers.ArrayPool<byte>.Shared.Rent(maxBytes));
+        int written = System.Text.Encoding.UTF8.GetBytes(chars, utf8);
+        var result = HashUtf8(utf8[..written]);
+        if (rented is not null) System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+        return result;
+    }
+
+    /// <summary>Computes XxHash64 over raw UTF-8 bytes and splits into two int32 halves.</summary>
+    private static (int Lo, int Hi) HashUtf8(ReadOnlySpan<byte> utf8)
+    {
+        ulong hash = XxHash64.HashToUInt64(utf8);
+        return ((int)hash, (int)(hash >> 32));
     }
 
     /// <summary>Creates a value from a 128-bit universally unique identifier.</summary>
@@ -1063,6 +1108,14 @@ public readonly struct DataValue : IEquatable<DataValue>
     public string AsString(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
+        // Values with a cached hash (_p2/_p3 non-zero) were created by the updated factories
+        // and can be resolved via the provided store. Legacy values without hashes fall back
+        // to ReferenceStore.
+        if ((_p2 | _p3) == 0 && !IsArenaBacked)
+        {
+            ReferenceStore? refStore = ReferenceStore.TryGetCurrent();
+            if (refStore is not null) return refStore.Get<string>(_referenceIndex);
+        }
         return store.RetrieveString(_p0, _p1);
     }
 
@@ -1077,7 +1130,11 @@ public readonly struct DataValue : IEquatable<DataValue>
     public int StringCharCount(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.String);
-        return _p2 != 0 ? _p2 : System.Text.Encoding.UTF8.GetCharCount(store.RetrieveUtf8Span(_p0, _p1));
+        // _charCount holds the char count (ushort). 65535 = overflow sentinel → fall back to decode.
+        // 0 = unknown (e.g. FromStringSlice) → also fall back.
+        return _charCount is not 0 and not ushort.MaxValue
+            ? _charCount
+            : System.Text.Encoding.UTF8.GetCharCount(store.RetrieveUtf8Span(_p0, _p1));
     }
 
     /// <summary>
@@ -1111,7 +1168,12 @@ public readonly struct DataValue : IEquatable<DataValue>
     public ReadOnlySpan<byte> AsUtf8Span(IValueStore store)
     {
         if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
-            ThrowIfNullOrWrongKind(DataKind.String); // throws with a clear message
+            ThrowIfNullOrWrongKind(DataKind.String);
+        if ((_p2 | _p3) == 0 && !IsArenaBacked)
+        {
+            ReferenceStore? refStore = ReferenceStore.TryGetCurrent();
+            if (refStore is not null) return System.Text.Encoding.UTF8.GetBytes(refStore.Get<string>(_referenceIndex));
+        }
         return store.RetrieveUtf8Span(_p0, _p1);
     }
 
@@ -1131,7 +1193,7 @@ public readonly struct DataValue : IEquatable<DataValue>
     {
         if (IsNull || (_kind is not DataKind.String and not DataKind.JsonValue))
             ThrowIfNullOrWrongKind(DataKind.String);
-        ReadOnlySpan<byte> utf8 = store.RetrieveUtf8Span(_p0, _p1);
+        ReadOnlySpan<byte> utf8 = AsUtf8Span(store);
         int maxChars = System.Text.Encoding.UTF8.GetMaxCharCount(utf8.Length);
         rentedBuffer = System.Buffers.ArrayPool<char>.Shared.Rent(maxChars);
         int charCount = System.Text.Encoding.UTF8.GetChars(utf8, rentedBuffer);
@@ -1583,9 +1645,9 @@ public readonly struct DataValue : IEquatable<DataValue>
 
             // Reference types:
             DataKind.String or DataKind.JsonValue
-                => HasReference
-                    ? HashCode.Combine(_kind, ReferenceStore.Current().Get<string>(_referenceIndex))
-                    : HashCode.Combine(_kind, _p0, _p1),
+                => (_p2 | _p3) != 0
+                    ? HashCode.Combine(_kind, _p2, _p3)
+                    : ComputeStringHashCode(),
             DataKind.DateTime
                 => HashCode.Combine(_kind, _p0, _p1, _p2),
             DataKind.Uuid
@@ -1624,26 +1686,40 @@ public readonly struct DataValue : IEquatable<DataValue>
     /// </summary>
     private static bool CompareStrings(in DataValue left, in DataValue right)
     {
-        bool leftHasRef = (left._flags & FlagHasReference) != 0;
-        bool rightHasRef = (right._flags & FlagHasReference) != 0;
+        // Fast path: same offset + same byte length → identical bytes in the same store.
+        if (left._p0 == right._p0 && left._p1 == right._p1)
+            return true;
 
-        if (leftHasRef && rightHasRef)
+        bool leftHasHash = (left._p2 | left._p3) != 0;
+        bool rightHasHash = (right._p2 | right._p3) != 0;
+
+        // Both have hashes: compare directly.
+        if (leftHasHash && rightHasHash)
+            return left._p2 == right._p2 && left._p3 == right._p3;
+
+        // Mixed: compute hash for the no-hash side on the fly and compare.
+        if (leftHasHash != rightHasHash)
         {
-            // Both reference-backed: resolve via store and compare strings.
-            ReferenceStore store = ReferenceStore.Current();
-            string leftStr = store.Get<string>(left._referenceIndex);
-            string rightStr = store.Get<string>(right._referenceIndex);
-            return leftStr == rightStr;
+            ReferenceStore? store = ReferenceStore.TryGetCurrent();
+            if (store is null) return false;
+
+            // The no-hash side is ReferenceStore-backed — compute its hash.
+            if (!leftHasHash)
+            {
+                var (lo, hi) = HashString(store.Get<string>(left._referenceIndex).AsSpan());
+                return lo == right._p2 && hi == right._p3;
+            }
+            else
+            {
+                var (lo, hi) = HashString(store.Get<string>(right._referenceIndex).AsSpan());
+                return left._p2 == lo && left._p3 == hi;
+            }
         }
 
-        if (!leftHasRef && !rightHasRef)
-        {
-            // Both arena-backed: same offset+length → same content.
-            return left._p0 == right._p0 && left._p1 == right._p1;
-        }
-
-        // Mixed arena/non-arena: cannot compare without arena context.
-        return false;
+        // Neither has hash: both ReferenceStore-backed, compare strings.
+        ReferenceStore? refStore = ReferenceStore.TryGetCurrent();
+        if (refStore is null) return false;
+        return refStore.Get<string>(left._referenceIndex) == refStore.Get<string>(right._referenceIndex);
     }
 
     /// <summary>

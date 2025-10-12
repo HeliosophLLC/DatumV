@@ -93,8 +93,8 @@ public sealed class ExpressionEvaluator
         _letBindingExpressions = letBindingExpressions;
     }
 
-    /// <summary>Resolves a string DataValue, delegating to the current resolution path.</summary>
-    private string Str(DataValue v) => v.AsString();
+    /// <summary>Resolves a string DataValue via the store if available.</summary>
+    private string Str(DataValue v) => _store is not null ? v.AsString(_store) : v.AsString();
 
     /// <summary>
     /// Evaluates an expression tree against the given row and returns the result.
