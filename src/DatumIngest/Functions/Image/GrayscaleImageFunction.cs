@@ -82,6 +82,42 @@ public sealed class GrayscaleImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+
+        string? formatOverride = arguments.Length == 2 ? arguments[1].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("grayscale");
+
+        SKBitmap grayscaled = new(original.Width, original.Height);
+        using SKCanvas canvas = new(grayscaled);
+
+        float[] matrix =
+        [
+            RedWeight, GreenWeight, BlueWeight, 0, 0,
+            RedWeight, GreenWeight, BlueWeight, 0, 0,
+            RedWeight, GreenWeight, BlueWeight, 0, 0,
+            0, 0, 0, 1, 0
+        ];
+
+        using SKColorFilter filter = SKColorFilter.CreateColorMatrix(matrix);
+        using SKPaint paint = new() { ColorFilter = filter };
+
+        canvas.DrawBitmap(original, 0, 0, paint);
+
+        return DataValue.FromImageHandle(new ImageHandle(grayscaled, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

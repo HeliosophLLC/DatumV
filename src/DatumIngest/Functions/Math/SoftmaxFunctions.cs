@@ -63,6 +63,39 @@ public sealed class SoftmaxFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Vector);
+        }
+
+        float[] source = input.AsVector(store);
+        float[] result = new float[source.Length];
+
+        float max = float.NegativeInfinity;
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (source[i] > max) max = source[i];
+        }
+
+        float sum = 0f;
+        for (int i = 0; i < source.Length; i++)
+        {
+            result[i] = MathF.Exp(source[i] - max);
+            sum += result[i];
+        }
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            result[i] /= sum;
+        }
+
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -126,6 +159,39 @@ public sealed class LogSoftmaxFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Vector);
+        }
+
+        float[] source = input.AsVector(store);
+        float[] result = new float[source.Length];
+
+        float max = float.NegativeInfinity;
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (source[i] > max) max = source[i];
+        }
+
+        float logSumExp = 0f;
+        for (int i = 0; i < source.Length; i++)
+        {
+            logSumExp += MathF.Exp(source[i] - max);
+        }
+        logSumExp = max + MathF.Log(logSumExp);
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            result[i] = source[i] - logSumExp;
+        }
+
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -186,5 +252,37 @@ public sealed class L2NormalizeFunction : IScalarFunction
         }
 
         return DataValue.FromVector(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Vector);
+        }
+
+        float[] source = input.AsVector(store);
+        float[] result = new float[source.Length];
+
+        float sumSquares = 0f;
+        for (int i = 0; i < source.Length; i++)
+        {
+            sumSquares += source[i] * source[i];
+        }
+
+        float norm = MathF.Sqrt(sumSquares);
+        if (norm == 0f)
+        {
+            return DataValue.FromVector(result, store);
+        }
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            result[i] = source[i] / norm;
+        }
+
+        return DataValue.FromVector(result, store);
     }
 }

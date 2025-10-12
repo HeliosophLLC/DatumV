@@ -90,6 +90,62 @@ public abstract class UnaryMathFunction : IScalarFunction
         }
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(
+                input.Kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor
+                    ? input.Kind
+                    : DataKind.Float32);
+        }
+
+        switch (input.Kind)
+        {
+            case var k when DataValueComparer.IsNumericScalar(k):
+                return DataValue.FromFloat32(Apply(ExtractFloat(input)));
+
+            case DataKind.Vector:
+            {
+                float[] source = input.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    result[i] = Apply(source[i]);
+                }
+                return DataValue.FromVector(result, store);
+            }
+
+            case DataKind.Matrix:
+            {
+                float[] source = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    result[i] = Apply(source[i]);
+                }
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+
+            case DataKind.Tensor:
+            {
+                float[] source = input.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    result[i] = Apply(source[i]);
+                }
+                return DataValue.FromTensor(result, shape, store);
+            }
+
+            default:
+                throw new InvalidOperationException($"{Name}() does not support {input.Kind}.");
+        }
+    }
+
     /// <summary>
     /// Applies the math function to a single float element.
     /// </summary>

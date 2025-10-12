@@ -189,7 +189,7 @@ public sealed class ExpressionEvaluator
         };
     }
 
-    private static DataValue EvaluateLiteral(LiteralExpression literal)
+    private DataValue EvaluateLiteral(LiteralExpression literal)
     {
         if (literal.Value is null)
         {
@@ -205,7 +205,7 @@ public sealed class ExpressionEvaluator
             long longValue => DataValue.FromInt64(longValue),
             float floatValue => DataValue.FromFloat32(floatValue),
             double doubleValue => DataValue.FromFloat64(doubleValue),
-            string stringValue => DataValue.FromString(stringValue),
+            string stringValue => _store is not null ? DataValue.FromString(stringValue, _store) : DataValue.FromString(stringValue),
             bool boolValue => DataValue.FromBoolean(boolValue),
             _ => throw new InvalidOperationException(
                 $"Unsupported literal type: {literal.Value.GetType().Name}."),
@@ -401,7 +401,9 @@ public sealed class ExpressionEvaluator
                 arguments[index] = Evaluate(function.Arguments[index], row);
             }
 
-            DataValue result = scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
+            DataValue result = _store is not null
+                ? scalarFunction.Execute(arguments.AsSpan(0, argumentCount), _store)
+                : scalarFunction.Execute(arguments.AsSpan(0, argumentCount));
 
             _meter?.Add(scalarFunction.QueryUnitCost);
         if (_meter is not null && scalarFunction is ICostAwareFunction costAware)
@@ -779,7 +781,9 @@ public sealed class ExpressionEvaluator
 
         if (!_castTargetCache.TryGetValue(cast.TargetType, out DataValue targetTypeValue))
         {
-            targetTypeValue = DataValue.FromString(cast.TargetType);
+            targetTypeValue = _store is not null
+                ? DataValue.FromString(cast.TargetType, _store)
+                : DataValue.FromString(cast.TargetType);
             _castTargetCache[cast.TargetType] = targetTypeValue;
         }
 
@@ -788,7 +792,9 @@ public sealed class ExpressionEvaluator
         {
             arguments[0] = value;
             arguments[1] = targetTypeValue;
-            DataValue result = castFunction.Execute(arguments.AsSpan(0, 2));
+            DataValue result = _store is not null
+                ? castFunction.Execute(arguments.AsSpan(0, 2), _store)
+                : castFunction.Execute(arguments.AsSpan(0, 2));
             _meter?.Add(castFunction.QueryUnitCost);
             return result;
         }

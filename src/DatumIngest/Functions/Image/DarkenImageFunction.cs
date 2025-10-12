@@ -82,6 +82,46 @@ public sealed class DarkenImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        float intensity = arguments[1].AsFloat32();
+
+        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("darken");
+
+        // Use color matrix to subtract intensity from RGB channels
+        SKBitmap darkened = new(original.Width, original.Height);
+        using SKCanvas canvas = new(darkened);
+
+        float normalizedIntensity = -(intensity / 255f);
+
+        float[] matrix =
+        [
+            1, 0, 0, 0, normalizedIntensity,
+            0, 1, 0, 0, normalizedIntensity,
+            0, 0, 1, 0, normalizedIntensity,
+            0, 0, 0, 1, 0
+        ];
+
+        using SKColorFilter filter = SKColorFilter.CreateColorMatrix(matrix);
+        using SKPaint paint = new() { ColorFilter = filter };
+
+        canvas.DrawBitmap(original, 0, 0, paint);
+
+        return DataValue.FromImageHandle(new ImageHandle(darkened, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

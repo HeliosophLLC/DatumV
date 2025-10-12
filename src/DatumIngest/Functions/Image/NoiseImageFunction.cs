@@ -186,6 +186,67 @@ public sealed class NoiseImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+
+        // Two-argument form: noise(image, value) — defaults to gaussian.
+        string noiseType;
+        float value;
+        string? formatOverride;
+
+        if (arguments.Length == 2)
+        {
+            noiseType = "GAUSSIAN";
+            value = arguments[1].AsFloat32();
+            formatOverride = null;
+        }
+        else
+        {
+            noiseType = arguments[1].AsString(store).ToUpperInvariant();
+            value = arguments[2].AsFloat32();
+            formatOverride = arguments.Length == 4 ? arguments[3].AsString(store) : null;
+        }
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("noise");
+
+        // Work in RGBA8888 for consistent pixel access — always copy
+        // because noise modifies pixels in place and we must not mutate the input handle's bitmap.
+        SKBitmap rgba = original.ColorType == SKColorType.Rgba8888
+            ? original.Copy()
+            : original.Copy(SKColorType.Rgba8888);
+
+        nint pixelPtr = rgba.GetPixels();
+        int totalPixels = rgba.Width * rgba.Height;
+
+        switch (noiseType)
+        {
+            case "GAUSSIAN":
+                ApplyGaussianNoise(pixelPtr, totalPixels, value);
+                break;
+
+            case "SALT_PEPPER":
+                ApplySaltAndPepperNoise(pixelPtr, totalPixels, value);
+                break;
+
+            default:
+                rgba.Dispose();
+                throw new ArgumentException(
+                    $"noise() unknown noise type '{noiseType}'. Supported: gaussian, salt_pepper.");
+        }
+
+        return DataValue.FromImageHandle(new ImageHandle(rgba, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -50,6 +50,25 @@ public sealed class HashSplitFunction : IScalarFunction
         double value = (hash >>> 11) * (1.0 / (1UL << 53));
         return DataValue.FromFloat32((float)value);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue key = arguments[0];
+        if (key.IsNull)
+            return DataValue.Null(DataKind.Float32);
+
+        long seed = (long)arguments[1].ToFloat();
+
+        // Use UTF-8 span for hashing when the key is a string.
+        ReadOnlySpan<byte> keyBytes = key.Kind is DataKind.String or DataKind.JsonValue
+            ? key.AsUtf8Span(store)
+            : Encoding.UTF8.GetBytes(key.ToString()!);
+        ulong hash = XxHash64.HashToUInt64(keyBytes, seed);
+
+        double value = (hash >>> 11) * (1.0 / (1UL << 53));
+        return DataValue.FromFloat32((float)value);
+    }
 }
 
 /// <summary>

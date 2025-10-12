@@ -40,4 +40,16 @@ public sealed class ToOctFunction : IScalarFunction
         long value = arguments[0].ToInt64();
         return DataValue.FromString(Convert.ToString(value, 8));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        long value = arguments[0].ToInt64();
+        return DataValue.FromString(Convert.ToString(value, 8), store);
+    }
 }

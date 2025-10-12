@@ -32,4 +32,10 @@ public sealed class TimeofdayFunction : IScalarFunction
     {
         return DataValue.FromString(DateTimeOffset.UtcNow.ToString("O"));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        return DataValue.FromString(DateTimeOffset.UtcNow.ToString("O"), store);
+    }
 }

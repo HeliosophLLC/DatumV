@@ -61,6 +61,30 @@ public sealed class ArrayGetFunction : IElementKindAwareFunction
         return elements[index];
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue arrayValue = arguments[0];
+        DataValue indexValue = arguments[1];
+
+        if (arrayValue.IsNull || indexValue.IsNull)
+        {
+            return DataValue.Null(arrayValue.IsNull
+                ? DataKind.Float32
+                : arrayValue.ArrayElementKind);
+        }
+
+        DataValue[] elements = arrayValue.AsArray(store);
+        int index = indexValue.ToInt32() - 1; // 1-based → 0-based
+
+        if (index < 0 || index >= elements.Length)
+        {
+            return DataValue.Null(arrayValue.ArrayElementKind);
+        }
+
+        return elements[index];
+    }
+
     private static void ValidateArgumentCount(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 2)

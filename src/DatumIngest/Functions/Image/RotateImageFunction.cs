@@ -80,6 +80,44 @@ public sealed class RotateImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        float degrees = arguments[1].AsFloat32();
+
+        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("rotate");
+
+        // Compute expanded canvas size to avoid clipping
+        double radians = degrees * System.Math.PI / 180.0;
+        double sinAngle = System.Math.Abs(System.Math.Sin(radians));
+        double cosAngle = System.Math.Abs(System.Math.Cos(radians));
+
+        int newWidth = (int)System.Math.Round(original.Width * cosAngle + original.Height * sinAngle);
+        int newHeight = (int)System.Math.Round(original.Width * sinAngle + original.Height * cosAngle);
+
+        SKBitmap rotated = new(newWidth, newHeight);
+        using SKCanvas canvas = new(rotated);
+
+        canvas.Clear(SKColors.Transparent);
+        canvas.Translate(newWidth / 2f, newHeight / 2f);
+        canvas.RotateDegrees(degrees);
+        canvas.Translate(-original.Width / 2f, -original.Height / 2f);
+        canvas.DrawBitmap(original, 0, 0);
+
+        return DataValue.FromImageHandle(new ImageHandle(rotated, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -35,4 +35,17 @@ public sealed class ChrFunction : IScalarFunction
 
         return DataValue.FromString(((char)codePoint).ToString());
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        int codePoint = input.ToInt32();
+        return DataValue.FromString(((char)codePoint).ToString(), store);
+    }
 }

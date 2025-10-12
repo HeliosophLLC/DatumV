@@ -62,6 +62,31 @@ public sealed class ArrayMaxFunction : IElementKindAwareFunction
         return maximum ?? DataValue.Null(elementKind);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        DataKind elementKind = input.ArrayElementKind;
+        DataValue? maximum = null;
+
+        foreach (DataValue element in input.AsArray(store))
+        {
+            if (element.IsNull) continue;
+
+            if (maximum is null || OrderByOperator.CompareDataValues(element, maximum.Value) > 0)
+            {
+                maximum = element;
+            }
+        }
+
+        return maximum ?? DataValue.Null(elementKind);
+    }
+
     private static void ValidateArgumentCount(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

@@ -111,6 +111,50 @@ public sealed class ResizeAndCropImageFunction : IScalarFunction, ICostAwareFunc
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        int targetWidth = (int)arguments[1].AsFloat32();
+        int targetHeight = (int)arguments[2].AsFloat32();
+        string gravity = arguments[3].AsString(store).ToUpperInvariant();
+
+        string? formatOverride = arguments.Length == 5 ? arguments[4].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("resize_and_crop");
+
+        // Step 1: Resize to fill — scale so both dimensions meet or exceed target
+        float scaleX = (float)targetWidth / original.Width;
+        float scaleY = (float)targetHeight / original.Height;
+        float scale = System.Math.Max(scaleX, scaleY);
+
+        int resizedWidth = (int)System.Math.Ceiling(original.Width * scale);
+        int resizedHeight = (int)System.Math.Ceiling(original.Height * scale);
+
+        using SKBitmap resized = original.Resize(
+            new SKImageInfo(resizedWidth, resizedHeight), SKSamplingOptions.Default)
+            ?? throw new InvalidOperationException(
+                $"resize_and_crop() failed to resize to {resizedWidth}×{resizedHeight}.");
+
+        // Step 2: Crop to exact target dimensions using gravity
+        (int cropX, int cropY) = ComputeCropOffset(resizedWidth, resizedHeight, targetWidth, targetHeight, gravity);
+
+        SKBitmap cropped = new(targetWidth, targetHeight);
+        using SKCanvas canvas = new(cropped);
+        canvas.DrawBitmap(resized, new SKRect(cropX, cropY, cropX + targetWidth, cropY + targetHeight),
+            new SKRect(0, 0, targetWidth, targetHeight));
+
+        return DataValue.FromImageHandle(new ImageHandle(cropped, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

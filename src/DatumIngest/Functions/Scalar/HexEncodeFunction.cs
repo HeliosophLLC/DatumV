@@ -40,4 +40,18 @@ public sealed class HexEncodeFunction : IScalarFunction
         byte[] inputBytes = input.AsUInt8Array().ToArray();
         return DataValue.FromString(Convert.ToHexStringLower(inputBytes));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        byte[] inputBytes = input.AsUInt8Array().ToArray();
+        return DataValue.FromString(Convert.ToHexStringLower(inputBytes), store);
+    }
 }

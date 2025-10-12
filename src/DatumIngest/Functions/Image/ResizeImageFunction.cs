@@ -70,6 +70,33 @@ public sealed class ResizeImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        int targetWidth = (int)arguments[1].AsFloat32();
+        int targetHeight = (int)arguments[2].AsFloat32();
+
+        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("resize");
+
+        SKBitmap resized = original.Resize(
+            new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default)
+            ?? throw new InvalidOperationException(
+                $"resize() failed to resize the image to {targetWidth}×{targetHeight}.");
+
+        return DataValue.FromImageHandle(new ImageHandle(resized, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

@@ -75,4 +75,32 @@ internal sealed class TryCastFunction : IScalarFunction
             return DataValue.Null(targetKind);
         }
     }
+
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataKind targetKind = arguments[1].AsType();
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(targetKind);
+        }
+
+        if (input.Kind == targetKind)
+        {
+            return input;
+        }
+
+        try
+        {
+            string targetName = targetKind.ToString();
+            DataValue targetNameValue = DataValue.FromString(targetName);
+            ReadOnlySpan<DataValue> castArgs = [input, targetNameValue];
+            return CastImpl.Execute(castArgs, store);
+        }
+        catch
+        {
+            return DataValue.Null(targetKind);
+        }
+    }
 }

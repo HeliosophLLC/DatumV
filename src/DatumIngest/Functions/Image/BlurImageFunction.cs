@@ -70,6 +70,34 @@ public sealed class BlurImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        float radius = arguments[1].AsFloat32();
+
+        string? formatOverride = arguments.Length == 3 ? arguments[2].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("blur");
+
+        SKBitmap blurred = new(original.Width, original.Height);
+        using SKCanvas canvas = new(blurred);
+        using SKImageFilter blurFilter = SKImageFilter.CreateBlur(radius, radius);
+        using SKPaint paint = new() { ImageFilter = blurFilter };
+
+        canvas.DrawBitmap(original, 0, 0, paint);
+
+        return DataValue.FromImageHandle(new ImageHandle(blurred, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

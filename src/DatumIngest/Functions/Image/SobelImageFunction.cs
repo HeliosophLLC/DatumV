@@ -153,6 +153,104 @@ public sealed class SobelImageFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+
+        string? formatOverride = arguments.Length == 2 ? arguments[1].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("sobel");
+
+        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(original)
+            : null;
+        SKBitmap rgba = converted ?? original;
+
+        int width = rgba.Width;
+        int height = rgba.Height;
+        nint pixelPointer = rgba.GetPixels();
+
+        // Convert to grayscale luminance buffer
+        float[] grayscale = new float[width * height];
+
+        unsafe
+        {
+            byte* pixels = (byte*)pixelPointer;
+
+            for (int i = 0; i < width * height; i++)
+            {
+                int offset = i * 4;
+                grayscale[i] = pixels[offset] * RedWeight
+                             + pixels[offset + 1] * GreenWeight
+                             + pixels[offset + 2] * BlueWeight;
+            }
+        }
+
+        // Apply Sobel kernels and produce output bitmap
+        // Gx = [-1, 0, 1; -2, 0, 2; -1, 0, 1]
+        // Gy = [-1, -2, -1; 0, 0, 0; 1, 2, 1]
+        SKBitmap result = new(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
+        nint resultPointer = result.GetPixels();
+
+        unsafe
+        {
+            byte* output = (byte*)resultPointer;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int index = (y * width + x) * 4;
+
+                    if (y == 0 || y == height - 1 || x == 0 || x == width - 1)
+                    {
+                        // Border pixels: set to black
+                        output[index] = 0;
+                        output[index + 1] = 0;
+                        output[index + 2] = 0;
+                        output[index + 3] = 255;
+                        continue;
+                    }
+
+                    // Sobel horizontal gradient
+                    float gradientX = -grayscale[(y - 1) * width + (x - 1)]
+                                    + grayscale[(y - 1) * width + (x + 1)]
+                                    - 2f * grayscale[y * width + (x - 1)]
+                                    + 2f * grayscale[y * width + (x + 1)]
+                                    - grayscale[(y + 1) * width + (x - 1)]
+                                    + grayscale[(y + 1) * width + (x + 1)];
+
+                    // Sobel vertical gradient
+                    float gradientY = -grayscale[(y - 1) * width + (x - 1)]
+                                    - 2f * grayscale[(y - 1) * width + x]
+                                    - grayscale[(y - 1) * width + (x + 1)]
+                                    + grayscale[(y + 1) * width + (x - 1)]
+                                    + 2f * grayscale[(y + 1) * width + x]
+                                    + grayscale[(y + 1) * width + (x + 1)];
+
+                    float magnitude = (float)System.Math.Sqrt(gradientX * gradientX + gradientY * gradientY);
+                    byte clamped = magnitude >= 255f ? (byte)255 : (byte)magnitude;
+
+                    output[index] = clamped;
+                    output[index + 1] = clamped;
+                    output[index + 2] = clamped;
+                    output[index + 3] = 255;
+                }
+            }
+        }
+
+        return DataValue.FromImageHandle(new ImageHandle(result, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

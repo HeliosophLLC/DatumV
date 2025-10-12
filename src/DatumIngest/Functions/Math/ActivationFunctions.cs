@@ -196,6 +196,55 @@ public sealed class LeakyReluFunction : IScalarFunction
                 throw new InvalidOperationException($"leaky_relu() does not support {input.Kind}.");
         }
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.IsNumericScalar ? DataKind.Float32 : input.Kind);
+        }
+
+        float alpha = 0.01f;
+        if (arguments.Length == 2 && !arguments[1].IsNull)
+        {
+            alpha = arguments[1].ToFloat();
+        }
+
+        float LeakyRelu(float v) => v > 0f ? v : alpha * v;
+
+        switch (input.Kind)
+        {
+            case DataKind.UInt8:
+                return DataValue.FromFloat32(LeakyRelu(input.AsUInt8()));
+            case DataKind.Float32:
+                return DataValue.FromFloat32(LeakyRelu(input.AsFloat32()));
+            case DataKind.Vector:
+            {
+                float[] source = input.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = LeakyRelu(source[i]);
+                return DataValue.FromVector(result, store);
+            }
+            case DataKind.Matrix:
+            {
+                float[] source = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = LeakyRelu(source[i]);
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+            case DataKind.Tensor:
+            {
+                float[] source = input.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = LeakyRelu(source[i]);
+                return DataValue.FromTensor(result, shape, store);
+            }
+            default:
+                throw new InvalidOperationException($"leaky_relu() does not support {input.Kind}.");
+        }
+    }
 }
 
 /// <summary>
@@ -272,6 +321,55 @@ public sealed class EluFunction : IScalarFunction
                 float[] result = new float[source.Length];
                 for (int i = 0; i < source.Length; i++) result[i] = Elu(source[i]);
                 return DataValue.FromTensor(result, shape);
+            }
+            default:
+                throw new InvalidOperationException($"elu() does not support {input.Kind}.");
+        }
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.IsNumericScalar ? DataKind.Float32 : input.Kind);
+        }
+
+        float alpha = 1.0f;
+        if (arguments.Length == 2 && !arguments[1].IsNull)
+        {
+            alpha = arguments[1].ToFloat();
+        }
+
+        float Elu(float v) => v > 0f ? v : alpha * (MathF.Exp(v) - 1f);
+
+        switch (input.Kind)
+        {
+            case DataKind.UInt8:
+                return DataValue.FromFloat32(Elu(input.AsUInt8()));
+            case DataKind.Float32:
+                return DataValue.FromFloat32(Elu(input.AsFloat32()));
+            case DataKind.Vector:
+            {
+                float[] source = input.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = Elu(source[i]);
+                return DataValue.FromVector(result, store);
+            }
+            case DataKind.Matrix:
+            {
+                float[] source = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = Elu(source[i]);
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+            case DataKind.Tensor:
+            {
+                float[] source = input.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = Elu(source[i]);
+                return DataValue.FromTensor(result, shape, store);
             }
             default:
                 throw new InvalidOperationException($"elu() does not support {input.Kind}.");

@@ -62,6 +62,31 @@ public sealed class ArrayMinFunction : IElementKindAwareFunction
         return minimum ?? DataValue.Null(elementKind);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        DataKind elementKind = input.ArrayElementKind;
+        DataValue? minimum = null;
+
+        foreach (DataValue element in input.AsArray(store))
+        {
+            if (element.IsNull) continue;
+
+            if (minimum is null || OrderByOperator.CompareDataValues(element, minimum.Value) < 0)
+            {
+                minimum = element;
+            }
+        }
+
+        return minimum ?? DataValue.Null(elementKind);
+    }
+
     private static void ValidateArgumentCount(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

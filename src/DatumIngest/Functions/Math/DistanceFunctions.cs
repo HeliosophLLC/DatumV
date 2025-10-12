@@ -43,6 +43,26 @@ public sealed class CosineSimilarityFunction : IScalarFunction
         float denominator = MathF.Sqrt(normA) * MathF.Sqrt(normB);
         return DataValue.FromFloat32(denominator == 0f ? 0f : dot / denominator);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] a = arguments[0].AsVector(store);
+        float[] b = arguments[1].AsVector(store);
+        int length = System.Math.Min(a.Length, b.Length);
+
+        float dot = 0f, normA = 0f, normB = 0f;
+        for (int i = 0; i < length; i++)
+        {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+
+        float denominator = MathF.Sqrt(normA) * MathF.Sqrt(normB);
+        return DataValue.FromFloat32(denominator == 0f ? 0f : dot / denominator);
+    }
 }
 
 /// <summary>
@@ -72,6 +92,24 @@ public sealed class EuclideanDistanceFunction : IScalarFunction
         if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         float[] a = arguments[0].AsVector();
         float[] b = arguments[1].AsVector();
+        int length = System.Math.Min(a.Length, b.Length);
+
+        float sumSqDiff = 0f;
+        for (int i = 0; i < length; i++)
+        {
+            float diff = a[i] - b[i];
+            sumSqDiff += diff * diff;
+        }
+
+        return DataValue.FromFloat32(MathF.Sqrt(sumSqDiff));
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] a = arguments[0].AsVector(store);
+        float[] b = arguments[1].AsVector(store);
         int length = System.Math.Min(a.Length, b.Length);
 
         float sumSqDiff = 0f;
@@ -122,6 +160,23 @@ public sealed class ManhattanDistanceFunction : IScalarFunction
 
         return DataValue.FromFloat32(sum);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] a = arguments[0].AsVector(store);
+        float[] b = arguments[1].AsVector(store);
+        int length = System.Math.Min(a.Length, b.Length);
+
+        float sum = 0f;
+        for (int i = 0; i < length; i++)
+        {
+            sum += MathF.Abs(a[i] - b[i]);
+        }
+
+        return DataValue.FromFloat32(sum);
+    }
 }
 
 /// <summary>
@@ -151,6 +206,23 @@ public sealed class DotFunction : IScalarFunction
         if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         float[] a = arguments[0].AsVector();
         float[] b = arguments[1].AsVector();
+        int length = System.Math.Min(a.Length, b.Length);
+
+        float dot = 0f;
+        for (int i = 0; i < length; i++)
+        {
+            dot += a[i] * b[i];
+        }
+
+        return DataValue.FromFloat32(dot);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] a = arguments[0].AsVector(store);
+        float[] b = arguments[1].AsVector(store);
         int length = System.Math.Min(a.Length, b.Length);
 
         float dot = 0f;
@@ -191,6 +263,24 @@ public sealed class HammingDistanceFunction : IScalarFunction
         if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
         string a = arguments[0].AsString();
         string b = arguments[1].AsString();
+
+        int length = System.Math.Min(a.Length, b.Length);
+        int distance = System.Math.Abs(a.Length - b.Length);
+
+        for (int i = 0; i < length; i++)
+        {
+            if (a[i] != b[i]) distance++;
+        }
+
+        return DataValue.FromFloat32(distance);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull || arguments[1].IsNull) return DataValue.Null(DataKind.Float32);
+        string a = arguments[0].AsString(store);
+        string b = arguments[1].AsString(store);
 
         int length = System.Math.Min(a.Length, b.Length);
         int distance = System.Math.Abs(a.Length - b.Length);

@@ -48,4 +48,21 @@ public sealed class ArraySortFunction : IScalarFunction
 
         return DataValue.FromArray(input.ArrayElementKind, sorted);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.NullArray(input.ArrayElementKind);
+        }
+
+        DataValue[] elements = input.AsArray(store);
+        DataValue[] sorted = new DataValue[elements.Length];
+        Array.Copy(elements, sorted, elements.Length);
+        Array.Sort(sorted, OrderByOperator.CompareDataValues);
+
+        return DataValue.FromArray(input.ArrayElementKind, sorted, store);
+    }
 }

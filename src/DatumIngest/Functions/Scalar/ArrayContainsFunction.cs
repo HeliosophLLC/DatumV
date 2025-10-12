@@ -54,4 +54,28 @@ public sealed class ArrayContainsFunction : IScalarFunction
 
         return DataValue.FromBoolean(false);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue arrayValue = arguments[0];
+        DataValue searchValue = arguments[1];
+
+        if (arrayValue.IsNull)
+        {
+            return DataValue.Null(DataKind.Boolean);
+        }
+
+        DataValue[] elements = arrayValue.AsArray(store);
+
+        foreach (DataValue element in elements)
+        {
+            if (element.Equals(searchValue))
+            {
+                return DataValue.FromBoolean(true);
+            }
+        }
+
+        return DataValue.FromBoolean(false);
+    }
 }

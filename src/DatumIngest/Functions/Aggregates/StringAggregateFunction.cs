@@ -77,6 +77,20 @@ public sealed class StringAggregateFunction : IAggregateFunction
             _values.Add(arguments[0].AsString());
         }
 
+        /// <inheritdoc />
+        public void Accumulate(ReadOnlySpan<DataValue> arguments, IValueStore store)
+        {
+            if (!_separatorCaptured && !arguments[1].IsNull)
+            {
+                _separator = arguments[1].AsString(store);
+                _separatorCaptured = true;
+            }
+
+            if (arguments[0].IsNull) return;
+
+            _values.Add(arguments[0].AsString(store));
+        }
+
         /// <inheritdoc/>
         public void Merge(IAggregateAccumulator other)
         {

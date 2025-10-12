@@ -46,6 +46,10 @@ public sealed class ArrayTransformFunction : IHigherOrderFunction, IElementKindA
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) =>
+        Execute(arguments);
+
+    /// <inheritdoc />
     public DataValue ExecuteHigherOrder(
         ReadOnlySpan<DataValue> arguments,
         IReadOnlyDictionary<int, LambdaExpression> lambdaArguments,

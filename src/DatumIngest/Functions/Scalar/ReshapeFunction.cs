@@ -92,4 +92,56 @@ public sealed class ReshapeFunction : IScalarFunction
         }
         return DataValue.FromTensor(data, newShape);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.Kind);
+        }
+
+        float[] data;
+        switch (input.Kind)
+        {
+            case DataKind.Vector:
+                data = input.AsVector(store);
+                break;
+            case DataKind.Matrix:
+                data = input.AsMatrix(store, out _, out _);
+                break;
+            case DataKind.Tensor:
+                data = input.AsTensor(store, out _);
+                break;
+            default:
+                throw new InvalidOperationException($"reshape() does not support {input.Kind}.");
+        }
+
+        int dimensionCount = arguments.Length - 1;
+        int[] newShape = new int[dimensionCount];
+        int expectedLength = 1;
+        for (int index = 0; index < dimensionCount; index++)
+        {
+            int dimension = (int)arguments[index + 1].AsFloat32();
+            newShape[index] = dimension;
+            expectedLength *= dimension;
+        }
+
+        if (expectedLength != data.Length)
+        {
+            throw new ArgumentException(
+                $"reshape() cannot reshape {data.Length} elements into shape [{string.Join(", ", newShape)}] ({expectedLength} elements).");
+        }
+
+        if (dimensionCount == 1)
+        {
+            return DataValue.FromVector(data, store);
+        }
+        if (dimensionCount == 2)
+        {
+            return DataValue.FromMatrix(data, newShape[0], newShape[1], store);
+        }
+        return DataValue.FromTensor(data, newShape, store);
+    }
 }

@@ -337,6 +337,13 @@ public readonly struct DataValue : IEquatable<DataValue>
         return new(DataKind.Image, flags: FlagHasReference, p0: index);
     }
 
+    /// <summary>Creates a value from an <see cref="ImageHandle"/> using an explicit store.</summary>
+    internal static DataValue FromImageHandle(ImageHandle handle, IValueStore store)
+    {
+        var (p0, p1) = store.StoreObject(handle);
+        return new(DataKind.Image, flags: FlagHasReference, p0: p0, p1: p1);
+    }
+
     /// <summary>Creates a value from a calendar date.</summary>
     public static DataValue FromDate(DateOnly value) =>
         new(DataKind.Date, flags: 0, p0: value.DayNumber);
@@ -1337,6 +1344,17 @@ public readonly struct DataValue : IEquatable<DataValue>
     internal ImageHandle GetImageHandle(IValueStore store)
     {
         ThrowIfNullOrWrongKind(DataKind.Image);
+
+        // Try the object side-list first (ImageHandle from a previous function in the chain).
+        try
+        {
+            object obj = store.RetrieveObject(_p0, _p1);
+            if (obj is ImageHandle handle) return handle;
+        }
+        catch (InvalidOperationException) { /* not in object list — fall through to bytes */ }
+        catch (NotSupportedException) { /* store doesn't support objects — fall through */ }
+
+        // Fall back to byte[] storage (from deserialization or FromImage).
         byte[] bytes = store.RetrieveBytes(_p0, _p1);
         return new ImageHandle(bytes, ImageEncoder.ResolveFormat(bytes, formatOverride: null));
     }

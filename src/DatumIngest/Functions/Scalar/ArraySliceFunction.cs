@@ -74,4 +74,36 @@ public sealed class ArraySliceFunction : IScalarFunction
 
         return DataValue.FromArray(elementKind, slice);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue arrayValue = arguments[0];
+        DataValue startValue = arguments[1];
+        DataValue lengthValue = arguments[2];
+
+        if (arrayValue.IsNull || startValue.IsNull || lengthValue.IsNull)
+        {
+            return DataValue.NullArray(arrayValue.IsNull
+                ? DataKind.Float32
+                : arrayValue.ArrayElementKind);
+        }
+
+        DataValue[] elements = arrayValue.AsArray(store);
+        DataKind elementKind = arrayValue.ArrayElementKind;
+
+        int start = System.Math.Max(0, startValue.ToInt32() - 1);
+        int length = System.Math.Max(0, lengthValue.ToInt32());
+
+        if (start >= elements.Length)
+        {
+            return DataValue.FromArray(elementKind, (DataValue[])[], store);
+        }
+
+        int actualLength = System.Math.Min(length, elements.Length - start);
+        DataValue[] slice = new DataValue[actualLength];
+        Array.Copy(elements, start, slice, 0, actualLength);
+
+        return DataValue.FromArray(elementKind, slice, store);
+    }
 }

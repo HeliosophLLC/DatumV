@@ -101,6 +101,64 @@ public sealed class AffineTransformFunction : IScalarFunction, ICostAwareFunctio
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        float angleDegrees = arguments[1].AsFloat32();
+        float scaleX = arguments[2].AsFloat32();
+        float scaleY = arguments[3].AsFloat32();
+        float shearX = arguments[4].AsFloat32();
+        float shearY = arguments[5].AsFloat32();
+
+        string? formatOverride = arguments.Length == 7 ? arguments[6].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("affine_transform");
+
+        float centerX = original.Width / 2f;
+        float centerY = original.Height / 2f;
+
+        // Build the affine matrix: translate to origin → shear → scale → rotate → translate back
+        float angleRadians = angleDegrees * (float)System.Math.PI / 180f;
+        float cosAngle = (float)System.Math.Cos(angleRadians);
+        float sinAngle = (float)System.Math.Sin(angleRadians);
+
+        // Combined affine matrix: Rotation × Scale × Shear
+        // Shear matrix: [1, shear_x; shear_y, 1]
+        // Scale matrix: [scale_x, 0; 0, scale_y]
+        // Rotation matrix: [cos, -sin; sin, cos]
+        // Combined = R × S × Sh
+
+        float m00 = cosAngle * scaleX + (-sinAngle) * scaleY * shearY;
+        float m01 = cosAngle * scaleX * shearX + (-sinAngle) * scaleY;
+        float m10 = sinAngle * scaleX + cosAngle * scaleY * shearY;
+        float m11 = sinAngle * scaleX * shearX + cosAngle * scaleY;
+
+        // Translation: keep image centered
+        float translateX = centerX - (m00 * centerX + m01 * centerY);
+        float translateY = centerY - (m10 * centerX + m11 * centerY);
+
+        SKMatrix matrix = new(
+            m00, m01, translateX,
+            m10, m11, translateY,
+            0, 0, 1);
+
+        SKBitmap transformed = new(original.Width, original.Height);
+        using SKCanvas canvas = new(transformed);
+        canvas.SetMatrix(matrix);
+        canvas.DrawBitmap(original, 0, 0);
+
+        return DataValue.FromImageHandle(new ImageHandle(transformed, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

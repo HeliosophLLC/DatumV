@@ -54,4 +54,28 @@ public sealed class ArrayPositionFunction : IScalarFunction
 
         return DataValue.Null(DataKind.Float32);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue arrayValue = arguments[0];
+        DataValue searchValue = arguments[1];
+
+        if (arrayValue.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        DataValue[] elements = arrayValue.AsArray(store);
+
+        for (int i = 0; i < elements.Length; i++)
+        {
+            if (elements[i].Equals(searchValue))
+            {
+                return DataValue.FromFloat32(i + 1);
+            }
+        }
+
+        return DataValue.Null(DataKind.Float32);
+    }
 }

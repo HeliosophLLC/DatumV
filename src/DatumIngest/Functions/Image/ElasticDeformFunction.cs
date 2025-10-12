@@ -230,6 +230,85 @@ public sealed class ElasticDeformFunction : IScalarFunction, ICostAwareFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Image);
+        }
+
+        ImageHandle inputHandle = input.GetImageHandle(store);
+        float alpha = arguments[1].AsFloat32();
+        float sigma = arguments[2].AsFloat32();
+
+        string? formatOverride = arguments.Length == 4 ? arguments[3].AsString(store) : null;
+        SKEncodedImageFormat outputFormat = ImageEncoder.ResolveFormat(inputHandle, formatOverride);
+
+        SKBitmap original = inputHandle.GetBitmap("elastic_deform");
+
+        using SKBitmap? converted = original.ColorType != SKColorType.Rgba8888
+            ? ConvertToRgba8888(original)
+            : null;
+        SKBitmap rgba = converted ?? original;
+
+        int width = rgba.Width;
+        int height = rgba.Height;
+
+        // Generate random displacement fields
+        Random random = new();
+        float[] displacementX = new float[width * height];
+        float[] displacementY = new float[width * height];
+
+        for (int i = 0; i < width * height; i++)
+        {
+            displacementX[i] = (float)(random.NextDouble() * 2.0 - 1.0);
+            displacementY[i] = (float)(random.NextDouble() * 2.0 - 1.0);
+        }
+
+        // Smooth displacement fields with Gaussian kernel
+        int kernelRadius = System.Math.Max(1, (int)System.Math.Ceiling(sigma * 3));
+        float[] kernel = BuildGaussianKernel(kernelRadius, sigma);
+
+        float[] smoothedX = ApplyGaussianSmoothing(displacementX, width, height, kernel, kernelRadius);
+        float[] smoothedY = ApplyGaussianSmoothing(displacementY, width, height, kernel, kernelRadius);
+
+        // Scale by alpha
+        for (int i = 0; i < width * height; i++)
+        {
+            smoothedX[i] *= alpha;
+            smoothedY[i] *= alpha;
+        }
+
+        // Apply displacement with bilinear interpolation
+        SKBitmap result = new(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        nint sourcePointer = rgba.GetPixels();
+        nint resultPointer = result.GetPixels();
+
+        unsafe
+        {
+            byte* source = (byte*)sourcePointer;
+            byte* destination = (byte*)resultPointer;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int index = y * width + x;
+                    float sourceX = x + smoothedX[index];
+                    float sourceY = y + smoothedY[index];
+
+                    BilinearSample(source, width, height, sourceX, sourceY,
+                        destination, (y * width + x) * 4);
+                }
+            }
+        }
+
+        return DataValue.FromImageHandle(new ImageHandle(result, outputFormat), store);
+    }
+
+    /// <inheritdoc />
     public long ComputeSupplementalCost(ReadOnlySpan<DataValue> arguments, DataValue result) =>
         ImageCostHelper.ComputeSupplementalCost(arguments);
 }

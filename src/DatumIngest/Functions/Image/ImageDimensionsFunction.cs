@@ -69,4 +69,37 @@ public sealed class ImageDimensionsFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Vector);
+        }
+
+        byte[] imageBytes = input.Kind == DataKind.Image ? input.AsImage() : input.AsUInt8Array();
+        ImageDimensions? dimensions = ImageHeaderParser.TryParseHeader(imageBytes);
+
+        if (dimensions is null)
+        {
+            return DataValue.Null(DataKind.Vector);
+        }
+
+        string format = arguments[1].AsString(store).ToUpperInvariant();
+
+        float[] result = format switch
+        {
+            "HWC" => [dimensions.Height, dimensions.Width, dimensions.Channels],
+            "CHW" => [dimensions.Channels, dimensions.Height, dimensions.Width],
+            "WH" => [dimensions.Width, dimensions.Height],
+            "WHC" => [dimensions.Width, dimensions.Height, dimensions.Channels],
+            _ => throw new ArgumentException(
+                $"dimensions() unknown format '{format}'. Supported: HWC, CHW, WH, WHC.")
+        };
+
+        return DataValue.FromVector(result);
+    }
 }

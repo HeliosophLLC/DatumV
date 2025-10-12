@@ -39,6 +39,21 @@ public sealed class RandomVectorFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        int length = (int)arguments[0].ToFloat();
+
+        if (length <= 0)
+            throw new ArgumentException($"random_vector() length must be positive, got {length}.");
+
+        float[] result = new float[length];
+        for (int i = 0; i < length; i++)
+            result[i] = (float)Random.Shared.NextDouble();
+
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -88,6 +103,27 @@ public sealed class RandomNormalVectorFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        int length = (int)arguments[0].ToFloat();
+
+        float mean = arguments[1].ToFloat();
+
+        float stddev = arguments[2].ToFloat();
+
+        if (length <= 0)
+            throw new ArgumentException($"random_normal_vector() length must be positive, got {length}.");
+        if (stddev < 0)
+            throw new ArgumentException($"random_normal_vector() stddev must be non-negative, got {stddev}.");
+
+        float[] result = new float[length];
+        for (int i = 0; i < length; i++)
+            result[i] = mean + stddev * RandomNormalFunction.SampleStandardNormal();
+
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -135,6 +171,27 @@ public sealed class RandomPermutationFunction : IScalarFunction
         }
 
         return DataValue.FromVector(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        int length = (int)arguments[0].ToFloat();
+
+        if (length <= 0)
+            throw new ArgumentException($"random_permutation() length must be positive, got {length}.");
+
+        float[] result = new float[length];
+        for (int i = 0; i < length; i++)
+            result[i] = i;
+
+        for (int i = length - 1; i > 0; i--)
+        {
+            int j = Random.Shared.Next(i + 1);
+            (result[i], result[j]) = (result[j], result[i]);
+        }
+
+        return DataValue.FromVector(result, store);
     }
 }
 
@@ -197,4 +254,7 @@ public sealed class RandomChoiceFunction : IScalarFunction
 
         return DataValue.FromArray(elementKind, result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }

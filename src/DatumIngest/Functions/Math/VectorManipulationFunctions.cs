@@ -43,6 +43,22 @@ public sealed class VecSliceFunction : IScalarFunction
         Array.Copy(source, start, result, 0, length);
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] source = arguments[0].AsVector(store);
+        int start = (int)arguments[1].ToFloat();
+        int length = (int)arguments[2].ToFloat();
+
+        start = System.Math.Clamp(start, 0, source.Length);
+        length = System.Math.Clamp(length, 0, source.Length - start);
+
+        float[] result = new float[length];
+        Array.Copy(source, start, result, 0, length);
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -98,6 +114,35 @@ public sealed class VecFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        int totalLength = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) return DataValue.Null(DataKind.Vector);
+            totalLength += arguments[i].Kind is DataKind.Vector ? arguments[i].AsVector(store).Length : 1;
+        }
+
+        float[] result = new float[totalLength];
+        int offset = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].Kind is DataKind.Vector)
+            {
+                float[] source = arguments[i].AsVector(store);
+                Array.Copy(source, 0, result, offset, source.Length);
+                offset += source.Length;
+            }
+            else
+            {
+                result[offset++] = arguments[i].ToFloat();
+            }
+        }
+
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -149,6 +194,31 @@ public sealed class TensorFunction : IScalarFunction
 
         return DataValue.FromMatrix(result, rows, columns);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) return DataValue.Null(DataKind.Matrix);
+        }
+
+        int columns = arguments[0].AsVector(store).Length;
+        for (int i = 1; i < arguments.Length; i++)
+        {
+            if (arguments[i].AsVector(store).Length != columns)
+                throw new ArgumentException($"tensor() all vectors must have the same length. Vector 1 has {columns} elements but vector {i + 1} has {arguments[i].AsVector(store).Length}.");
+        }
+
+        int rows = arguments.Length;
+        float[] result = new float[rows * columns];
+        for (int i = 0; i < rows; i++)
+        {
+            Array.Copy(arguments[i].AsVector(store), 0, result, i * columns, columns);
+        }
+
+        return DataValue.FromMatrix(result, rows, columns, store);
+    }
 }
 
 /// <summary>
@@ -196,6 +266,28 @@ public sealed class VecConcatFunction : IScalarFunction
 
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        int totalLength = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) return DataValue.Null(DataKind.Vector);
+            totalLength += arguments[i].AsVector(store).Length;
+        }
+
+        float[] result = new float[totalLength];
+        int offset = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            float[] source = arguments[i].AsVector(store);
+            Array.Copy(source, 0, result, offset, source.Length);
+            offset += source.Length;
+        }
+
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>Reverses the elements of a vector: vec_reverse(vector).</summary>
@@ -229,6 +321,19 @@ public sealed class VecReverseFunction : IScalarFunction
         }
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] source = arguments[0].AsVector(store);
+        float[] result = new float[source.Length];
+        for (int i = 0; i < source.Length; i++)
+        {
+            result[i] = source[source.Length - 1 - i];
+        }
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>Returns a sorted copy of a vector in ascending order: vec_sort(vector).</summary>
@@ -259,6 +364,17 @@ public sealed class VecSortFunction : IScalarFunction
         Array.Copy(source, result, source.Length);
         Array.Sort(result);
         return DataValue.FromVector(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] source = arguments[0].AsVector(store);
+        float[] result = new float[source.Length];
+        Array.Copy(source, result, source.Length);
+        Array.Sort(result);
+        return DataValue.FromVector(result, store);
     }
 }
 
@@ -297,6 +413,23 @@ public sealed class VecUniqueFunction : IScalarFunction
         }
         return DataValue.FromVector(unique.ToArray());
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] source = arguments[0].AsVector(store);
+        HashSet<float> seen = new();
+        List<float> unique = new();
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (seen.Add(source[i]))
+            {
+                unique.Add(source[i]);
+            }
+        }
+        return DataValue.FromVector(unique.ToArray(), store);
+    }
 }
 
 /// <summary>Flattens a Matrix or Tensor to a Vector: vec_flatten(input).</summary>
@@ -332,6 +465,22 @@ public sealed class VecFlattenFunction : IScalarFunction
         float[] result = new float[data.Length];
         Array.Copy(data, result, data.Length);
         return DataValue.FromVector(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] data = arguments[0].Kind switch
+        {
+            DataKind.Vector => arguments[0].AsVector(store),
+            DataKind.Matrix => arguments[0].AsMatrix(store, out _, out _),
+            DataKind.Tensor => arguments[0].AsTensor(store, out _),
+            _ => []
+        };
+        float[] result = new float[data.Length];
+        Array.Copy(data, result, data.Length);
+        return DataValue.FromVector(result, store);
     }
 }
 
@@ -384,6 +533,30 @@ public sealed class VecPadFunction : IScalarFunction
         }
         return DataValue.FromVector(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] source = arguments[0].AsVector(store);
+        int targetLength = (int)arguments[1].ToFloat();
+        float fillValue = arguments[2].ToFloat();
+
+        if (source.Length >= targetLength)
+        {
+            float[] copy = new float[source.Length];
+            Array.Copy(source, copy, source.Length);
+            return DataValue.FromVector(copy, store);
+        }
+
+        float[] result = new float[targetLength];
+        Array.Copy(source, result, source.Length);
+        for (int i = source.Length; i < targetLength; i++)
+        {
+            result[i] = fillValue;
+        }
+        return DataValue.FromVector(result, store);
+    }
 }
 
 /// <summary>
@@ -423,6 +596,22 @@ public sealed class VecRepeatFunction : IScalarFunction
             Array.Copy(source, 0, result, c * source.Length, source.Length);
         }
         return DataValue.FromVector(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Vector);
+        float[] source = arguments[0].AsVector(store);
+        int count = (int)arguments[1].ToFloat();
+        if (count <= 0) return DataValue.FromVector([], store);
+
+        float[] result = new float[source.Length * count];
+        for (int c = 0; c < count; c++)
+        {
+            Array.Copy(source, 0, result, c * source.Length, source.Length);
+        }
+        return DataValue.FromVector(result, store);
     }
 }
 
@@ -468,6 +657,26 @@ public sealed class LinspaceFunction : IScalarFunction
         }
         result[count - 1] = stop; // Ensure exact endpoint
         return DataValue.FromVector(result);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        float start = arguments[0].ToFloat();
+        float stop = arguments[1].ToFloat();
+        int count = (int)arguments[2].ToFloat();
+
+        if (count <= 0) return DataValue.FromVector([], store);
+        if (count == 1) return DataValue.FromVector([start], store);
+
+        float[] result = new float[count];
+        float step = (stop - start) / (count - 1);
+        for (int i = 0; i < count; i++)
+        {
+            result[i] = start + step * i;
+        }
+        result[count - 1] = stop;
+        return DataValue.FromVector(result, store);
     }
 }
 
@@ -522,5 +731,33 @@ public sealed class ArangeFunction : IScalarFunction
         }
 
         return DataValue.FromVector(values.ToArray());
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        float start = arguments[0].ToFloat();
+        float stop = arguments[1].ToFloat();
+        float step = arguments[2].ToFloat();
+
+        if (step == 0f) throw new ArgumentException("arange() step cannot be zero.");
+
+        List<float> values = new();
+        if (step > 0)
+        {
+            for (float v = start; v < stop; v += step)
+            {
+                values.Add(v);
+            }
+        }
+        else
+        {
+            for (float v = start; v > stop; v += step)
+            {
+                values.Add(v);
+            }
+        }
+
+        return DataValue.FromVector(values.ToArray(), store);
     }
 }

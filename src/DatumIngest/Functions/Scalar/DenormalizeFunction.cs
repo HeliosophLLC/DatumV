@@ -81,4 +81,58 @@ public sealed class DenormalizeFunction : IScalarFunction
                 throw new InvalidOperationException($"denormalize() does not support {input.Kind}.");
         }
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.Kind);
+        }
+
+        float factor = arguments[1].AsFloat32();
+
+        switch (input.Kind)
+        {
+            case DataKind.Float32:
+                return DataValue.FromFloat32(input.AsFloat32() * factor);
+
+            case DataKind.Vector:
+            {
+                float[] source = input.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    result[index] = source[index] * factor;
+                }
+                return DataValue.FromVector(result, store);
+            }
+
+            case DataKind.Matrix:
+            {
+                float[] source = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    result[index] = source[index] * factor;
+                }
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+
+            case DataKind.Tensor:
+            {
+                float[] source = input.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    result[index] = source[index] * factor;
+                }
+                return DataValue.FromTensor(result, shape, store);
+            }
+
+            default:
+                throw new InvalidOperationException($"denormalize() does not support {input.Kind}.");
+        }
+    }
 }

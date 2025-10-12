@@ -45,4 +45,21 @@ public sealed class ArrayReverseFunction : IScalarFunction
 
         return DataValue.FromArray(input.ArrayElementKind, reversed);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.NullArray(input.ArrayElementKind);
+        }
+
+        DataValue[] elements = input.AsArray(store);
+        DataValue[] reversed = new DataValue[elements.Length];
+        Array.Copy(elements, reversed, elements.Length);
+        Array.Reverse(reversed);
+
+        return DataValue.FromArray(input.ArrayElementKind, reversed, store);
+    }
 }

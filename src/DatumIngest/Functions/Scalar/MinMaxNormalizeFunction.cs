@@ -127,4 +127,88 @@ public sealed class MinMaxNormalizeFunction : IScalarFunction
                 throw new InvalidOperationException($"min_max_normalize() does not support {input.Kind}.");
         }
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.Kind);
+        }
+
+        switch (input.Kind)
+        {
+            case DataKind.UInt8:
+                return DataValue.FromFloat32(input.AsUInt8() / 255.0f);
+
+            case DataKind.UInt8Array:
+            {
+                byte[] bytes = input.AsUInt8Array(store).ToArray();
+                float[] result = new float[bytes.Length];
+                for (int index = 0; index < bytes.Length; index++)
+                {
+                    result[index] = bytes[index] / 255.0f;
+                }
+                return DataValue.FromVector(result, store);
+            }
+
+            case DataKind.Float32:
+            {
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
+                float range = max - min;
+                if (range == 0)
+                {
+                    return DataValue.FromFloat32(0);
+                }
+                return DataValue.FromFloat32((input.AsFloat32() - min) / range);
+            }
+
+            case DataKind.Vector:
+            {
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
+                float range = max - min;
+                float[] sourceVector = input.AsVector(store);
+                float[] result = new float[sourceVector.Length];
+                for (int index = 0; index < sourceVector.Length; index++)
+                {
+                    result[index] = range == 0 ? 0 : (sourceVector[index] - min) / range;
+                }
+                return DataValue.FromVector(result, store);
+            }
+
+            case DataKind.Matrix:
+            {
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
+                float range = max - min;
+                float[] sourceData = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[sourceData.Length];
+                for (int index = 0; index < sourceData.Length; index++)
+                {
+                    result[index] = range == 0 ? 0 : (sourceData[index] - min) / range;
+                }
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+
+            case DataKind.Tensor:
+            {
+                float min = arguments[1].AsFloat32();
+                float max = arguments[2].AsFloat32();
+                float range = max - min;
+                float[] sourceData = input.AsTensor(store, out int[] shape);
+                float[] result = new float[sourceData.Length];
+                for (int index = 0; index < sourceData.Length; index++)
+                {
+                    result[index] = range == 0 ? 0 : (sourceData[index] - min) / range;
+                }
+                return DataValue.FromTensor(result, shape, store);
+            }
+
+            default:
+                throw new InvalidOperationException($"min_max_normalize() does not support {input.Kind}.");
+        }
+    }
 }

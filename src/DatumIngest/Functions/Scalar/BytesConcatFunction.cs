@@ -57,4 +57,31 @@ public sealed class BytesConcatFunction : IScalarFunction
 
         return DataValue.FromUInt8Array(result);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        int totalLength = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (!arguments[i].IsNull)
+            {
+                totalLength += arguments[i].AsUInt8Array(store).Length;
+            }
+        }
+
+        byte[] result = new byte[totalLength];
+        int offset = 0;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (!arguments[i].IsNull)
+            {
+                ReadOnlyMemory<byte> segment = arguments[i].AsUInt8Array(store);
+                segment.Span.CopyTo(result.AsSpan(offset));
+                offset += segment.Length;
+            }
+        }
+
+        return DataValue.FromUInt8Array(result, store);
+    }
 }

@@ -31,6 +31,16 @@ public sealed class VecSumFunction : IScalarFunction
         for (int i = 0; i < data.Length; i++) sum += data[i];
         return DataValue.FromFloat32(sum);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+        float sum = 0f;
+        for (int i = 0; i < data.Length; i++) sum += data[i];
+        return DataValue.FromFloat32(sum);
+    }
 }
 
 /// <summary>Reduces a Vector/Matrix/Tensor to a Scalar mean of all elements.</summary>
@@ -57,6 +67,17 @@ public sealed class VecMeanFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        float sum = 0f;
+        for (int i = 0; i < data.Length; i++) sum += data[i];
+        return DataValue.FromFloat32(sum / data.Length);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
         if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float sum = 0f;
         for (int i = 0; i < data.Length; i++) sum += data[i];
@@ -93,6 +114,17 @@ public sealed class VecMinFunction : IScalarFunction
         for (int i = 1; i < data.Length; i++) if (data[i] < min) min = data[i];
         return DataValue.FromFloat32(min);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        float min = data[0];
+        for (int i = 1; i < data.Length; i++) if (data[i] < min) min = data[i];
+        return DataValue.FromFloat32(min);
+    }
 }
 
 /// <summary>Reduces a Vector/Matrix/Tensor to a Scalar maximum of all elements.</summary>
@@ -119,6 +151,17 @@ public sealed class VecMaxFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        float max = data[0];
+        for (int i = 1; i < data.Length; i++) if (data[i] > max) max = data[i];
+        return DataValue.FromFloat32(max);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
         if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float max = data[0];
         for (int i = 1; i < data.Length; i++) if (data[i] > max) max = data[i];
@@ -153,6 +196,15 @@ public sealed class VecStdFunction : IScalarFunction
         if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         return DataValue.FromFloat32(MathF.Sqrt(ComputeVariance(data)));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        return DataValue.FromFloat32(MathF.Sqrt(ComputeVariance(data)));
+    }
 }
 
 /// <summary>Reduces a Vector/Matrix/Tensor to a Scalar population variance.</summary>
@@ -182,6 +234,15 @@ public sealed class VecVarFunction : IScalarFunction
         if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         return DataValue.FromFloat32(ComputeVariance(data));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        return DataValue.FromFloat32(ComputeVariance(data));
+    }
 }
 
 /// <summary>Reduces a Vector/Matrix/Tensor to a Scalar median of all elements.</summary>
@@ -208,6 +269,22 @@ public sealed class VecMedianFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        float[] sorted = new float[data.Length];
+        Array.Copy(data, sorted, data.Length);
+        Array.Sort(sorted);
+        int mid = sorted.Length / 2;
+        float median = sorted.Length % 2 == 0
+            ? (sorted[mid - 1] + sorted[mid]) / 2f
+            : sorted[mid];
+        return DataValue.FromFloat32(median);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
         if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         float[] sorted = new float[data.Length];
         Array.Copy(data, sorted, data.Length);
@@ -252,6 +329,20 @@ public sealed class VecArgminFunction : IScalarFunction
         }
         return DataValue.FromFloat32(minIndex);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        int minIndex = 0;
+        for (int i = 1; i < data.Length; i++)
+        {
+            if (data[i] < data[minIndex]) minIndex = i;
+        }
+        return DataValue.FromFloat32(minIndex);
+    }
 }
 
 /// <summary>Returns the index of the maximum element in a Vector/Matrix/Tensor.</summary>
@@ -278,6 +369,20 @@ public sealed class VecArgmaxFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
+        if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
+        int maxIndex = 0;
+        for (int i = 1; i < data.Length; i++)
+        {
+            if (data[i] > data[maxIndex]) maxIndex = i;
+        }
+        return DataValue.FromFloat32(maxIndex);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
         if (data.Length == 0) return DataValue.FromFloat32(float.NaN);
         int maxIndex = 0;
         for (int i = 1; i < data.Length; i++)
@@ -342,6 +447,37 @@ public sealed class VecNormFunction : IScalarFunction
         }
         return DataValue.FromFloat32(MathF.Pow(sum, 1f / p));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+
+        float p = 2f;
+        if (arguments.Length == 2 && !arguments[1].IsNull)
+        {
+            p = arguments[1].ToFloat();
+        }
+
+        if (float.IsPositiveInfinity(p))
+        {
+            float max = 0f;
+            for (int i = 0; i < data.Length; i++)
+            {
+                float abs = MathF.Abs(data[i]);
+                if (abs > max) max = abs;
+            }
+            return DataValue.FromFloat32(max);
+        }
+
+        float sum = 0f;
+        for (int i = 0; i < data.Length; i++)
+        {
+            sum += MathF.Pow(MathF.Abs(data[i]), p);
+        }
+        return DataValue.FromFloat32(MathF.Pow(sum, 1f / p));
+    }
 }
 
 /// <summary>Counts the number of non-zero elements in a Vector/Matrix/Tensor.</summary>
@@ -368,6 +504,19 @@ public sealed class VecCountNonzeroFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
         float[] data = ExtractFloats(arguments[0]);
+        int count = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] != 0f) count++;
+        }
+        return DataValue.FromFloat32(count);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
         int count = 0;
         for (int i = 0; i < data.Length; i++)
         {
@@ -407,6 +556,18 @@ public sealed class VecAnyFunction : IScalarFunction
         }
         return DataValue.FromBoolean(false);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Boolean);
+        float[] data = ExtractFloats(arguments[0], store);
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] != 0f) return DataValue.FromBoolean(true);
+        }
+        return DataValue.FromBoolean(false);
+    }
 }
 
 /// <summary>Returns true if all elements are non-zero, false otherwise.</summary>
@@ -433,6 +594,18 @@ public sealed class VecAllFunction : IScalarFunction
     {
         if (arguments[0].IsNull) return DataValue.Null(DataKind.Boolean);
         float[] data = ExtractFloats(arguments[0]);
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] == 0f) return DataValue.FromBoolean(false);
+        }
+        return DataValue.FromBoolean(true);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Boolean);
+        float[] data = ExtractFloats(arguments[0], store);
         for (int i = 0; i < data.Length; i++)
         {
             if (data[i] == 0f) return DataValue.FromBoolean(false);
@@ -470,6 +643,17 @@ public sealed class VecProductFunction : IScalarFunction
         for (int i = 0; i < data.Length; i++) product *= data[i];
         return DataValue.FromFloat32(product);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull) return DataValue.Null(DataKind.Float32);
+        float[] data = ExtractFloats(arguments[0], store);
+        if (data.Length == 0) return DataValue.FromFloat32(1f);
+        float product = 1f;
+        for (int i = 0; i < data.Length; i++) product *= data[i];
+        return DataValue.FromFloat32(product);
+    }
 }
 
 /// <summary>
@@ -487,6 +671,20 @@ internal static class ReductionFunctionHelpers
             DataKind.Vector => value.AsVector(),
             DataKind.Matrix => value.AsMatrix(out _, out _),
             DataKind.Tensor => value.AsTensor(out _),
+            _ => []
+        };
+    }
+
+    /// <summary>
+    /// Extracts a flat float array from a Vector, Matrix, or Tensor DataValue using the provided store.
+    /// </summary>
+    internal static float[] ExtractFloats(DataValue value, IValueStore store)
+    {
+        return value.Kind switch
+        {
+            DataKind.Vector => value.AsVector(store),
+            DataKind.Matrix => value.AsMatrix(store, out _, out _),
+            DataKind.Tensor => value.AsTensor(store, out _),
             _ => []
         };
     }

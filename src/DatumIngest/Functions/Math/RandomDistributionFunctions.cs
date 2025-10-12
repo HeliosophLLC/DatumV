@@ -55,6 +55,9 @@ public sealed class RandomTruncatedNormalFunction : IScalarFunction
         return DataValue.FromFloat32(System.Math.Clamp(fallback, min, max));
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
+
     private static float ExtractFloat(DataValue value) => value.ToFloat();
 }
 
@@ -95,6 +98,9 @@ public sealed class RandomLogNormalFunction : IScalarFunction
         float normalSample = mean + stddev * RandomNormalFunction.SampleStandardNormal();
         return DataValue.FromFloat32(MathF.Exp(normalSample));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -131,6 +137,9 @@ public sealed class RandomExponentialFunction : IScalarFunction
         double sample = -System.Math.Log(1.0 - Random.Shared.NextDouble()) / rate;
         return DataValue.FromFloat32((float)sample);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -174,6 +183,9 @@ public sealed class RandomBetaFunction : IScalarFunction
         double y = SampleGamma(beta);
         return DataValue.FromFloat32((float)(x / (x + y)));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 
     /// <summary>
     /// Samples from Gamma(shape, 1) using Marsaglia and Tsang's method.
@@ -317,6 +329,39 @@ public sealed class RandomCategoricalFunction : IScalarFunction
         }
 
         // Floating-point edge case — return the last category.
+        return DataValue.FromFloat32(weights.Length - 1);
+    }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].IsNull)
+            return DataValue.Null(DataKind.Float32);
+
+        float[] weights = arguments[0].AsVector(store);
+        if (weights.Length == 0)
+            throw new ArgumentException("random_categorical() weights vector must not be empty.");
+
+        double total = 0;
+        for (int i = 0; i < weights.Length; i++)
+        {
+            if (weights[i] < 0)
+                throw new ArgumentException($"random_categorical() weights must be non-negative, got {weights[i]} at index {i}.");
+            total += weights[i];
+        }
+
+        if (total <= 0)
+            throw new ArgumentException("random_categorical() weights must sum to a positive value.");
+
+        double threshold = Random.Shared.NextDouble() * total;
+        double cumulative = 0;
+        for (int i = 0; i < weights.Length; i++)
+        {
+            cumulative += weights[i];
+            if (threshold < cumulative)
+                return DataValue.FromFloat32(i);
+        }
+
         return DataValue.FromFloat32(weights.Length - 1);
     }
 }

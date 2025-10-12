@@ -110,6 +110,53 @@ public sealed class RoundFunction : IScalarFunction
                 throw new InvalidOperationException($"round() does not support {input.Kind}.");
         }
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.IsNumericScalar ? DataKind.Float32 : input.Kind);
+        }
+
+        int decimals = 0;
+        if (arguments.Length == 2 && !arguments[1].IsNull)
+        {
+            decimals = (int)arguments[1].ToFloat();
+        }
+
+        float Round(float v) => MathF.Round(v, decimals, MidpointRounding.AwayFromZero);
+
+        switch (input.Kind)
+        {
+            case var k when DataValue.IsNumericScalarKind(k):
+                return DataValue.FromFloat32(Round(input.ToFloat()));
+            case DataKind.Vector:
+            {
+                float[] source = input.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = Round(source[i]);
+                return DataValue.FromVector(result, store);
+            }
+            case DataKind.Matrix:
+            {
+                float[] source = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = Round(source[i]);
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+            case DataKind.Tensor:
+            {
+                float[] source = input.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++) result[i] = Round(source[i]);
+                return DataValue.FromTensor(result, shape, store);
+            }
+            default:
+                throw new InvalidOperationException($"round() does not support {input.Kind}.");
+        }
+    }
 }
 
 /// <summary>
@@ -185,6 +232,36 @@ public sealed class BucketizeFunction : IScalarFunction
 
         return DataValue.FromFloat32(bucket);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        DataValue boundaries = arguments[1];
+
+        if (input.IsNull || boundaries.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        float value = input.ToFloat();
+        float[] bounds = boundaries.AsVector(store);
+
+        int bucket = 0;
+        for (int i = 0; i < bounds.Length; i++)
+        {
+            if (value >= bounds[i])
+            {
+                bucket = i + 1;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return DataValue.FromFloat32(bucket);
+    }
 }
 
 /// <summary>
@@ -202,4 +279,7 @@ public sealed class ClipFunction : IScalarFunction
 
     /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments) => _clamp.Execute(arguments);
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => _clamp.Execute(arguments, store);
 }

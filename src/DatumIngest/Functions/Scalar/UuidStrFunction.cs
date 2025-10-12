@@ -39,4 +39,17 @@ public sealed class UuidStrFunction : IScalarFunction
 
         return DataValue.FromString(input.AsUuid().ToString("D"));
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.String);
+        }
+
+        return DataValue.FromString(input.AsUuid().ToString("D"), store);
+    }
 }

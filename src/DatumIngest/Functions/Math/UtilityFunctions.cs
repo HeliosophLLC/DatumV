@@ -33,6 +33,9 @@ public sealed class NullifFunction : IScalarFunction
 
         return first.Equals(second) ? DataValue.Null(first.Kind) : first;
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -61,6 +64,9 @@ public sealed class CoalesceFunction : IScalarFunction
         }
         return arguments[0]; // all null — return first null
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -116,6 +122,26 @@ public sealed class GreatestFunction : IScalarFunction
         return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(max);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].Kind is DataKind.String || (arguments[0].IsNull && arguments.Length > 1 && !arguments[1].IsNull && arguments[1].Kind is DataKind.String))
+        {
+            return ExecuteString(arguments, store);
+        }
+
+        float max = float.NegativeInfinity;
+        bool allNull = true;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) continue;
+            allNull = false;
+            float value = arguments[i].ToFloat();
+            if (value > max) max = value;
+        }
+        return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(max);
+    }
+
     private static DataValue ExecuteString(ReadOnlySpan<DataValue> arguments)
     {
         string? max = null;
@@ -131,6 +157,23 @@ public sealed class GreatestFunction : IScalarFunction
             }
         }
         return allNull ? DataValue.Null(DataKind.String) : DataValue.FromString(max!);
+    }
+
+    private static DataValue ExecuteString(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        string? max = null;
+        bool allNull = true;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) continue;
+            allNull = false;
+            string value = arguments[i].AsString(store);
+            if (max is null || string.Compare(value, max, StringComparison.Ordinal) > 0)
+            {
+                max = value;
+            }
+        }
+        return allNull ? DataValue.Null(DataKind.String) : DataValue.FromString(max!, store);
     }
 }
 
@@ -187,6 +230,26 @@ public sealed class LeastFunction : IScalarFunction
         return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(min);
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        if (arguments[0].Kind is DataKind.String || (arguments[0].IsNull && arguments.Length > 1 && !arguments[1].IsNull && arguments[1].Kind is DataKind.String))
+        {
+            return ExecuteString(arguments, store);
+        }
+
+        float min = float.PositiveInfinity;
+        bool allNull = true;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) continue;
+            allNull = false;
+            float value = arguments[i].ToFloat();
+            if (value < min) min = value;
+        }
+        return allNull ? DataValue.Null(DataKind.Float32) : DataValue.FromFloat32(min);
+    }
+
     private static DataValue ExecuteString(ReadOnlySpan<DataValue> arguments)
     {
         string? min = null;
@@ -202,6 +265,23 @@ public sealed class LeastFunction : IScalarFunction
             }
         }
         return allNull ? DataValue.Null(DataKind.String) : DataValue.FromString(min!);
+    }
+
+    private static DataValue ExecuteString(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        string? min = null;
+        bool allNull = true;
+        for (int i = 0; i < arguments.Length; i++)
+        {
+            if (arguments[i].IsNull) continue;
+            allNull = false;
+            string value = arguments[i].AsString(store);
+            if (min is null || string.Compare(value, min, StringComparison.Ordinal) < 0)
+            {
+                min = value;
+            }
+        }
+        return allNull ? DataValue.Null(DataKind.String) : DataValue.FromString(min!, store);
     }
 }
 
@@ -230,6 +310,9 @@ public sealed class IsNanFunction : IScalarFunction
         float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(float.IsNaN(value) ? 1f : 0f);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -257,6 +340,9 @@ public sealed class IsFiniteFunction : IScalarFunction
         float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(float.IsFinite(value) ? 1f : 0f);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -285,6 +371,9 @@ public sealed class IsEvenFunction : IScalarFunction
         float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(value == MathF.Truncate(value) && value % 2 == 0 ? 1f : 0f);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -313,6 +402,9 @@ public sealed class IsOddFunction : IScalarFunction
         float value = arguments[0].ToFloat();
         return DataValue.FromFloat32(value == MathF.Truncate(value) && value % 2 != 0 ? 1f : 0f);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -336,6 +428,9 @@ public sealed class IfNullFunction : IScalarFunction
     {
         return arguments[0].IsNull ? arguments[1] : arguments[0];
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -368,6 +463,9 @@ public sealed class IifFunction : IScalarFunction
             (condition.Kind == DataKind.Boolean ? condition.AsBoolean() : condition.AsFloat32() != 0f);
         return truthy ? arguments[1] : arguments[2];
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }
 
 /// <summary>
@@ -392,4 +490,7 @@ public sealed class RandomFunction : IScalarFunction
     {
         return DataValue.FromFloat32((float)Random.Shared.NextDouble());
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store) => Execute(arguments);
 }

@@ -56,4 +56,26 @@ public sealed class ArrayConcatFunction : IScalarFunction
 
         return DataValue.FromArray(left.ArrayElementKind, combined);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue left = arguments[0];
+        DataValue right = arguments[1];
+
+        if (left.IsNull || right.IsNull)
+        {
+            DataKind elementKind = left.IsNull ? right.ArrayElementKind : left.ArrayElementKind;
+            return DataValue.NullArray(elementKind);
+        }
+
+        DataValue[] leftElements = left.AsArray(store);
+        DataValue[] rightElements = right.AsArray(store);
+
+        DataValue[] combined = new DataValue[leftElements.Length + rightElements.Length];
+        Array.Copy(leftElements, 0, combined, 0, leftElements.Length);
+        Array.Copy(rightElements, 0, combined, leftElements.Length, rightElements.Length);
+
+        return DataValue.FromArray(left.ArrayElementKind, combined, store);
+    }
 }

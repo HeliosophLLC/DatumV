@@ -68,6 +68,31 @@ public sealed class ArrayAvgFunction : IElementKindAwareFunction
             : DataValue.FromFloat32((float)(sum / count));
     }
 
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        double sum = 0;
+        int count = 0;
+
+        foreach (DataValue element in input.AsArray(store))
+        {
+            if (element.IsNull) continue;
+
+            sum += element.ToFloat();
+            count++;
+        }
+
+        return count == 0
+            ? DataValue.Null(DataKind.Float32)
+            : DataValue.FromFloat32((float)(sum / count));
+    }
+
     private static void ValidateArgumentCount(ReadOnlySpan<DataKind> argumentKinds)
     {
         if (argumentKinds.Length != 1)

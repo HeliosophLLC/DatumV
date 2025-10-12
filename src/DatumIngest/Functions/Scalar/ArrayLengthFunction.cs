@@ -40,4 +40,16 @@ public sealed class ArrayLengthFunction : IScalarFunction
 
         return DataValue.FromFloat32(input.AsArray().Length);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(DataKind.Float32);
+        }
+
+        return DataValue.FromFloat32(input.AsArray(store).Length);
+    }
 }

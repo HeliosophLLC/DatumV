@@ -56,6 +56,36 @@ public abstract class BinaryMathFunction : IScalarFunction
     }
 
     /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue inputA = arguments[0];
+        DataValue inputB = arguments[1];
+
+        if (inputA.IsNull || inputB.IsNull)
+        {
+            DataKind resultKind = ValidateArguments([inputA.Kind, inputB.Kind]);
+            return DataValue.Null(resultKind);
+        }
+
+        bool aIsScalar = IsNumericScalar(inputA.Kind);
+        bool bIsScalar = IsNumericScalar(inputB.Kind);
+
+        if (aIsScalar && bIsScalar)
+        {
+            float a = ExtractFloat(inputA);
+            float b = ExtractFloat(inputB);
+            return DataValue.FromFloat32(Apply(a, b));
+        }
+
+        return (aIsScalar, bIsScalar) switch
+        {
+            (true, false) => ApplyScalarLeft(inputA, inputB, store),
+            (false, true) => ApplyScalarRight(inputA, inputB, store),
+            _ => ApplyBoth(inputA, inputB, store)
+        };
+    }
+
+    /// <inheritdoc />
     public DataValue Execute(ReadOnlySpan<DataValue> arguments)
     {
         DataValue inputA = arguments[0];
@@ -91,6 +121,113 @@ public abstract class BinaryMathFunction : IScalarFunction
     /// Applies the binary operation to two float values.
     /// </summary>
     protected abstract float Apply(float a, float b);
+
+    private DataValue ApplyScalarLeft(DataValue scalarVal, DataValue arrayVal, IValueStore store)
+    {
+        float scalar = ExtractFloat(scalarVal);
+        return MapArray(arrayVal, element => Apply(scalar, element), store);
+    }
+
+    private DataValue ApplyScalarRight(DataValue arrayVal, DataValue scalarVal, IValueStore store)
+    {
+        float scalar = ExtractFloat(scalarVal);
+        return MapArray(arrayVal, element => Apply(element, scalar), store);
+    }
+
+    private DataValue ApplyBoth(DataValue a, DataValue b, IValueStore store)
+    {
+        float[] sourceA = ExtractFloats(a, out int[] shapeA, store);
+        float[] sourceB = ExtractFloats(b, out _, store);
+
+        int length = System.Math.Min(sourceA.Length, sourceB.Length);
+        float[] result = new float[length];
+        for (int i = 0; i < length; i++)
+        {
+            result[i] = Apply(sourceA[i], sourceB[i]);
+        }
+
+        return ReconstructFromShape(result, a.Kind, shapeA, store);
+    }
+
+    private DataValue MapArray(DataValue arrayVal, Func<float, float> transform, IValueStore store)
+    {
+        switch (arrayVal.Kind)
+        {
+            case DataKind.Vector:
+            {
+                float[] source = arrayVal.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    result[i] = transform(source[i]);
+                }
+                return DataValue.FromVector(result, store);
+            }
+
+            case DataKind.Matrix:
+            {
+                float[] source = arrayVal.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    result[i] = transform(source[i]);
+                }
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+
+            case DataKind.Tensor:
+            {
+                float[] source = arrayVal.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int i = 0; i < source.Length; i++)
+                {
+                    result[i] = transform(source[i]);
+                }
+                return DataValue.FromTensor(result, shape, store);
+            }
+
+            default:
+                throw new InvalidOperationException($"{Name}() does not support {arrayVal.Kind}.");
+        }
+    }
+
+    private static float[] ExtractFloats(DataValue value, out int[] shape, IValueStore store)
+    {
+        switch (value.Kind)
+        {
+            case DataKind.Vector:
+            {
+                float[] data = value.AsVector(store);
+                shape = [data.Length];
+                return data;
+            }
+            case DataKind.Matrix:
+            {
+                float[] data = value.AsMatrix(store, out int rows, out int cols);
+                shape = [rows, cols];
+                return data;
+            }
+            case DataKind.Tensor:
+            {
+                float[] data = value.AsTensor(store, out shape);
+                return data;
+            }
+            default:
+                shape = [];
+                return [];
+        }
+    }
+
+    private static DataValue ReconstructFromShape(float[] data, DataKind kind, int[] shape, IValueStore store)
+    {
+        return kind switch
+        {
+            DataKind.Vector => DataValue.FromVector(data, store),
+            DataKind.Matrix => DataValue.FromMatrix(data, shape[0], shape[1], store),
+            DataKind.Tensor => DataValue.FromTensor(data, shape, store),
+            _ => DataValue.FromVector(data, store)
+        };
+    }
 
     private DataValue ApplyScalarLeft(DataValue scalarVal, DataValue arrayVal)
     {

@@ -82,4 +82,59 @@ public sealed class ClampFunction : IScalarFunction
                 throw new InvalidOperationException($"clamp() does not support {input.Kind}.");
         }
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.Null(input.Kind);
+        }
+
+        float min = arguments[1].AsFloat32();
+        float max = arguments[2].AsFloat32();
+
+        switch (input.Kind)
+        {
+            case DataKind.Float32:
+                return DataValue.FromFloat32(System.Math.Clamp(input.AsFloat32(), min, max));
+
+            case DataKind.Vector:
+            {
+                float[] source = input.AsVector(store);
+                float[] result = new float[source.Length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    result[index] = System.Math.Clamp(source[index], min, max);
+                }
+                return DataValue.FromVector(result, store);
+            }
+
+            case DataKind.Matrix:
+            {
+                float[] source = input.AsMatrix(store, out int rows, out int columns);
+                float[] result = new float[source.Length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    result[index] = System.Math.Clamp(source[index], min, max);
+                }
+                return DataValue.FromMatrix(result, rows, columns, store);
+            }
+
+            case DataKind.Tensor:
+            {
+                float[] source = input.AsTensor(store, out int[] shape);
+                float[] result = new float[source.Length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    result[index] = System.Math.Clamp(source[index], min, max);
+                }
+                return DataValue.FromTensor(result, shape, store);
+            }
+
+            default:
+                throw new InvalidOperationException($"clamp() does not support {input.Kind}.");
+        }
+    }
 }

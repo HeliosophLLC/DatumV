@@ -53,4 +53,28 @@ public sealed class ArrayDistinctFunction : IScalarFunction
 
         return DataValue.FromArray(input.ArrayElementKind, [.. distinct]);
     }
+
+    /// <inheritdoc />
+    public DataValue Execute(ReadOnlySpan<DataValue> arguments, IValueStore store)
+    {
+        DataValue input = arguments[0];
+        if (input.IsNull)
+        {
+            return DataValue.NullArray(input.ArrayElementKind);
+        }
+
+        DataValue[] elements = input.AsArray(store);
+        HashSet<DataValue> seen = new(elements.Length);
+        List<DataValue> distinct = new(elements.Length);
+
+        foreach (DataValue element in elements)
+        {
+            if (seen.Add(element))
+            {
+                distinct.Add(element);
+            }
+        }
+
+        return DataValue.FromArray(input.ArrayElementKind, distinct, store);
+    }
 }
