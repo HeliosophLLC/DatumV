@@ -1,3 +1,5 @@
+using DatumIngest.Model;
+
 namespace DatumIngest.DatumFile.Encoding;
 
 /// <summary>
@@ -18,4 +20,10 @@ public sealed class DatumEncoderContext
 
     /// <summary>Zero-based index of the row group currently being encoded.</summary>
     public int RowGroupIndex { get; init; }
+
+    /// <summary>
+    /// Optional value store for resolving string and binary payloads. When set, encoders
+    /// use this store instead of <see cref="ReferenceStore.Current()"/>.
+    /// </summary>
+    public IValueStore? Store { get; init; }
 }

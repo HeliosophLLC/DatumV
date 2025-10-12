@@ -50,6 +50,13 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
                     encoded[rowIndex] = [];
                     nullCount++;
                 }
+                else if (context.Store is not null)
+                {
+                    // Zero-copy: read UTF-8 bytes directly from the store.
+                    ReadOnlySpan<byte> utf8 = value.AsUtf8Span(context.Store);
+                    encoded[rowIndex] = utf8.ToArray();
+                    totalPoolBytes += encoded[rowIndex].Length;
+                }
                 else
                 {
                     string text = isJson ? value.AsJsonValue() : value.AsString();
@@ -59,7 +66,7 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
             }
 
             // Zone map for strings: min and max by ordinal comparison.
-            DatumZoneMap zoneMap = BuildZoneMap(nullCount, values, isJson);
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, values, isJson, context.Store);
 
             byte[] bitmapBytes = nullBitmap.ToBytes();
             int offsetsSize = (rowCount + 1) * 4;
@@ -106,7 +113,7 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         }
     }
 
-    private static DatumZoneMap BuildZoneMap(uint nullCount, IReadOnlyList<DataValue> values, bool isJson)
+    private static DatumZoneMap BuildZoneMap(uint nullCount, IReadOnlyList<DataValue> values, bool isJson, IValueStore? store)
     {
         int rowCount = values.Count;
         if (nullCount == (uint)rowCount)
@@ -127,7 +134,7 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         {
             if (value.IsNull) continue;
 
-            string text = value.AsString();
+            string text = store is not null ? value.AsString(store) : value.AsString();
 
             if (minimum is null || string.CompareOrdinal(text, minimum) < 0) minimum = text;
             if (maximum is null || string.CompareOrdinal(text, maximum) > 0) maximum = text;
@@ -138,6 +145,8 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
             return new DatumZoneMap(nullCount, null, null);
         }
 
+        // Zone map min/max values are serialized by IndexWriter via parameterless AsString(),
+        // so they always use ReferenceStore (a scope must be active).
         return new DatumZoneMap(
             nullCount,
             DataValue.FromString(minimum),

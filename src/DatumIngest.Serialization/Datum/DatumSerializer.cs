@@ -30,10 +30,10 @@ public sealed class DatumSerializer : IFormatSerializer
         CancellationToken cancellationToken = default)
     {
         DatumFileWriter? writer = null;
-        IValueStore store = context.Arena;
 
-        // DatumFileWriter's encoders resolve strings via ReferenceStore.Current(),
-        // so we need a scope and must materialize arena-backed strings into it.
+        // A ReferenceStore scope is still needed for zone map min/max DataValues,
+        // which are serialized by the footer writer via parameterless AsString().
+        // This scope will be removed once the footer writer is store-aware.
         ReferenceStore.BeginQueryScope();
         try
         {
@@ -46,17 +46,12 @@ public sealed class DatumSerializer : IFormatSerializer
                     Schema schema = InferSchema(batch);
                     DatumFileSchema datumSchema = DatumFileSchema.FromSchema(schema);
                     writer = new DatumFileWriter(_descriptor.FilePath);
+                    writer.Store = context.Arena;
                     writer.Initialize(datumSchema);
                 }
 
                 for (int i = 0; i < batch.Count; i++)
-                {
-                    Row row = batch[i];
-                    // Materialize arena-backed strings into ReferenceStore for the encoder.
-                    if (HasStringColumns(row))
-                        row = MaterializeStrings(row, store);
-                    writer.WriteRow(row);
-                }
+                    writer.WriteRow(batch[i]);
             }
 
             writer?.Finalize();
@@ -66,50 +61,6 @@ public sealed class DatumSerializer : IFormatSerializer
             writer?.Dispose();
             ReferenceStore.EndQueryScope();
         }
-    }
-
-    private static bool HasStringColumns(Row row)
-    {
-        for (int i = 0; i < row.FieldCount; i++)
-        {
-            DataKind kind = row[i].Kind;
-            if (kind is DataKind.String or DataKind.JsonValue)
-                return true;
-        }
-        return false;
-    }
-
-    private static Row MaterializeStrings(Row row, IValueStore store)
-    {
-        DataValue[] values = new DataValue[row.FieldCount];
-        bool changed = false;
-
-        for (int i = 0; i < row.FieldCount; i++)
-        {
-            DataValue v = row[i];
-            if (!v.IsNull && v.Kind == DataKind.String)
-            {
-                values[i] = DataValue.FromString(v.AsString(store));
-                changed = true;
-            }
-            else if (!v.IsNull && v.Kind == DataKind.JsonValue)
-            {
-                values[i] = DataValue.FromJsonValue(v.AsJsonValue(store));
-                changed = true;
-            }
-            else
-            {
-                values[i] = v;
-            }
-        }
-
-        if (!changed) return row;
-
-        Dictionary<string, int> nameIndex = new(row.FieldCount, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < row.ColumnNames.Count; i++)
-            nameIndex[row.ColumnNames[i]] = i;
-
-        return new Row(row.ColumnNames, values, nameIndex);
     }
 
     private static Schema InferSchema(RowBatch batch)

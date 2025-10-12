@@ -76,6 +76,13 @@ public sealed class DatumFileWriter : IDisposable
     internal void SetRowGroupSize(int rowGroupSize) => _rowGroupSize = rowGroupSize;
 
     /// <summary>
+    /// Optional value store for resolving string payloads during encoding.
+    /// When set, <see cref="StringColumnEncoder"/> reads strings via this store
+    /// instead of <see cref="ReferenceStore.Current()"/>.
+    /// </summary>
+    public Model.IValueStore? Store { get; set; }
+
+    /// <summary>
     /// Initializes the writer with a schema and writes the file header.
     /// Must be called exactly once before any calls to <see cref="WriteRow"/>.
     /// </summary>
@@ -200,6 +207,7 @@ public sealed class DatumFileWriter : IDisposable
         {
             DatumFilePath = _filePath ?? string.Empty,
             RowGroupIndex = _rowGroupDescriptors.Count,
+            Store = Store,
         };
 
         // Encode all columns in parallel — encoders are stateless singletons and
