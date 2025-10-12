@@ -146,6 +146,8 @@ public sealed class ColumnBatchScanOperator : IColumnBatchOperator
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
+        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
+            datumProvider.Store = context.Store;
 
         if (provider is not IColumnBatchProvider columnBatchProvider)
         {

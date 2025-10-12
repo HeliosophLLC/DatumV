@@ -128,6 +128,8 @@ public sealed class LateMaterializationOperator : IQueryOperator
 
         // 2. Fetch deferred columns via keyed provider.
         ITableProvider rawProvider = context.Catalog.CreateProvider(_descriptor);
+        if (rawProvider is Catalog.Providers.DatumFileTableProvider datumProvider)
+            datumProvider.Store = context.Store;
 
         if (rawProvider is not IKeyedTableProvider keyedProvider)
         {

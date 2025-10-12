@@ -335,6 +335,8 @@ public sealed class JoinOperator : IQueryOperator
 
         // Verify the provider supports seeking.
         ITableProvider provider = context.Catalog.CreateProvider(buildScan.Descriptor);
+        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
+            datumProvider.Store = context.Store;
 
         if (provider is not ISeekableTableProvider)
         {

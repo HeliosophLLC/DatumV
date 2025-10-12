@@ -103,6 +103,8 @@ internal sealed class IndexNestedLoopJoinExecutor
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_buildDescriptor);
+        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
+            datumProvider.Store = context.Store;
 
         if (provider is not ISeekableTableProvider seekable)
         {

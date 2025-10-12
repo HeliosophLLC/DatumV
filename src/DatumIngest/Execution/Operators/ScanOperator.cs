@@ -250,6 +250,8 @@ public sealed class ScanOperator : IQueryOperator
     {
         CancellationToken cancellationToken = context.CancellationToken;
         ITableProvider provider = context.Catalog.CreateProvider(_descriptor);
+        if (provider is Catalog.Providers.DatumFileTableProvider datumProvider)
+            datumProvider.Store = context.Store;
 
         ExecutionTracer.Write($"SCAN start  table={_descriptor.Name}  provider={provider.GetType().Name}  hasIndex={_sourceIndex is not null}  filterHint={_filterHint is not null}  estimated={EstimatedRowCount}");
 
