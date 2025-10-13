@@ -350,9 +350,8 @@ public sealed class ComputeService : DatumCompute.DatumComputeBase
 
                                 for (int columnIndex = 0; columnIndex < row.FieldCount; columnIndex++)
                                 {
+                                    // TODO: Store should come from the RowBatch, not CommandResult
                                     queryRow.Values.Add(ProtoConverter.ToProto(row[columnIndex], result.Store!));
-
-                                    throw new Exception("Store logic above is incorrect! = should be on the RowBatch");
                                 }
 
                                 QueryResult rowMessage = new()

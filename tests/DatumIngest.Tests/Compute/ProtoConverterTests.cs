@@ -71,7 +71,7 @@ public sealed class ProtoConverterTests
     {
         DataValue value = DataValue.Null(DataKind.Float32);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.True(message.IsNull);
     }
@@ -84,7 +84,7 @@ public sealed class ProtoConverterTests
     {
         DataValue value = DataValue.FromFloat32(3.14f);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.False(message.IsNull);
         Assert.Equal(3.14f, message.Float32Value, precision: 5);
@@ -98,7 +98,7 @@ public sealed class ProtoConverterTests
     {
         DataValue value = DataValue.FromUInt8(42);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal(42u, message.Uint8Value);
     }
@@ -111,7 +111,7 @@ public sealed class ProtoConverterTests
     {
         DataValue value = DataValue.FromString("hello world");
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal("hello world", message.StringValue);
     }
@@ -124,7 +124,7 @@ public sealed class ProtoConverterTests
     {
         DataValue value = DataValue.FromDate(new DateOnly(2024, 6, 15));
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal("2024-06-15", message.DateValue);
     }
@@ -138,7 +138,7 @@ public sealed class ProtoConverterTests
         DateTime dateTime = new(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc);
         DataValue value = DataValue.FromDateTime(dateTime);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Contains("2024-06-15", message.DateTimeValue);
     }
@@ -151,7 +151,7 @@ public sealed class ProtoConverterTests
     {
         DataValue value = DataValue.FromJsonValue("{\"key\": 1}");
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal("{\"key\": 1}", message.JsonValue);
     }
@@ -165,7 +165,7 @@ public sealed class ProtoConverterTests
         byte[] data = [0x01, 0x02, 0x03];
         DataValue value = DataValue.FromUInt8Array(data);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal(data, message.Uint8ArrayValue.ToByteArray());
     }
@@ -179,7 +179,7 @@ public sealed class ProtoConverterTests
         byte[] data = [0xFF, 0xD8, 0xFF, 0xE0];
         DataValue value = DataValue.FromImage(data);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal(data, message.ImageValue.ToByteArray());
     }
@@ -193,7 +193,7 @@ public sealed class ProtoConverterTests
         float[] data = [1.0f, 2.0f, 3.0f];
         DataValue value = DataValue.FromVector(data);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal(3, message.VectorValue.Values.Count);
         Assert.Equal(1.0f, message.VectorValue.Values[0]);
@@ -210,7 +210,7 @@ public sealed class ProtoConverterTests
         float[] data = [1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f];
         DataValue value = DataValue.FromMatrix(data, 2, 3);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal(2, message.MatrixValue.Rows);
         Assert.Equal(3, message.MatrixValue.Columns);
@@ -230,7 +230,7 @@ public sealed class ProtoConverterTests
         int[] shape = [2, 3, 4];
         DataValue value = DataValue.FromTensor(data, shape);
 
-        DataValueMessage message = ProtoConverter.ToProto(value);
+        DataValueMessage message = ProtoConverter.ToProto(value, new Arena());
 
         Assert.Equal(3, message.TensorValue.Shape.Count);
         Assert.Equal(2, message.TensorValue.Shape[0]);
@@ -372,7 +372,7 @@ public sealed class ProtoConverterTests
             if (clientOnlyKinds.Contains(kind)) continue;
 
             DataValue sample = Indexing.IndexWriterRoundTripTests.CreateSampleValue(kind);
-            DataValueMessage message = ProtoConverter.ToProto(sample);
+            DataValueMessage message = ProtoConverter.ToProto(sample, new Arena());
             DataValue roundTripped = ProtoConverter.FromProto(message);
 
             if (roundTripped.Kind != kind)
@@ -402,14 +402,15 @@ public sealed class ProtoConverterTests
         DataValue uint64Value = DataValue.FromUInt64(18000000000000000000UL);
         DataValue float64Value = DataValue.FromFloat64(3.141592653589793);
 
-        Assert.Equal(42, ProtoConverter.FromProto(ProtoConverter.ToProto(int8Value)).AsInt8());
-        Assert.Equal(1000, ProtoConverter.FromProto(ProtoConverter.ToProto(int16Value)).AsInt16());
-        Assert.Equal(50000, ProtoConverter.FromProto(ProtoConverter.ToProto(uint16Value)).AsUInt16());
-        Assert.Equal(123456, ProtoConverter.FromProto(ProtoConverter.ToProto(int32Value)).AsInt32());
-        Assert.Equal(3000000000U, ProtoConverter.FromProto(ProtoConverter.ToProto(uint32Value)).AsUInt32());
-        Assert.Equal(9876543210L, ProtoConverter.FromProto(ProtoConverter.ToProto(int64Value)).AsInt64());
-        Assert.Equal(18000000000000000000UL, ProtoConverter.FromProto(ProtoConverter.ToProto(uint64Value)).AsUInt64());
-        Assert.Equal(3.141592653589793, ProtoConverter.FromProto(ProtoConverter.ToProto(float64Value)).AsFloat64());
+        Arena a = new();
+        Assert.Equal(42, ProtoConverter.FromProto(ProtoConverter.ToProto(int8Value, a)).AsInt8());
+        Assert.Equal(1000, ProtoConverter.FromProto(ProtoConverter.ToProto(int16Value, a)).AsInt16());
+        Assert.Equal(50000, ProtoConverter.FromProto(ProtoConverter.ToProto(uint16Value, a)).AsUInt16());
+        Assert.Equal(123456, ProtoConverter.FromProto(ProtoConverter.ToProto(int32Value, a)).AsInt32());
+        Assert.Equal(3000000000U, ProtoConverter.FromProto(ProtoConverter.ToProto(uint32Value, a)).AsUInt32());
+        Assert.Equal(9876543210L, ProtoConverter.FromProto(ProtoConverter.ToProto(int64Value, a)).AsInt64());
+        Assert.Equal(18000000000000000000UL, ProtoConverter.FromProto(ProtoConverter.ToProto(uint64Value, a)).AsUInt64());
+        Assert.Equal(3.141592653589793, ProtoConverter.FromProto(ProtoConverter.ToProto(float64Value, a)).AsFloat64());
     }
 
     /// <summary>
@@ -433,8 +434,8 @@ public sealed class ProtoConverterTests
 
         // Serialize both values through ProtoConverter — the image column
         // must still be encodable after the function read from the same bitmap.
-        DataValueMessage imageMessage = ProtoConverter.ToProto(imageValue);
-        DataValueMessage tensorMessage = ProtoConverter.ToProto(tensorValue);
+        DataValueMessage imageMessage = ProtoConverter.ToProto(imageValue, new Arena());
+        DataValueMessage tensorMessage = ProtoConverter.ToProto(tensorValue, new Arena());
 
         Assert.False(imageMessage.ImageValue.IsEmpty);
         Assert.Equal(3, tensorMessage.TensorValue.Shape.Count);
@@ -462,8 +463,8 @@ public sealed class ProtoConverterTests
         ]);
 
         // Serialize both — original and resized.
-        DataValueMessage originalMessage = ProtoConverter.ToProto(imageValue);
-        DataValueMessage resizedMessage = ProtoConverter.ToProto(resizedValue);
+        DataValueMessage originalMessage = ProtoConverter.ToProto(imageValue, new Arena());
+        DataValueMessage resizedMessage = ProtoConverter.ToProto(resizedValue, new Arena());
 
         Assert.False(originalMessage.ImageValue.IsEmpty);
         Assert.False(resizedMessage.ImageValue.IsEmpty);

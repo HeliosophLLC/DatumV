@@ -1,3 +1,10 @@
+using DatumIngest.Serialization.Csv;
+using DatumIngest.Serialization.Hdf5;
+using DatumIngest.Serialization.Idx;
+using DatumIngest.Serialization.Jsonl;
+using DatumIngest.Serialization.Parquet;
+using DatumIngest.Serialization.Zip;
+
 namespace DatumIngest.Serialization;
 
 /// <summary>
@@ -47,12 +54,12 @@ public sealed class FormatRegistry
     public static FormatRegistry CreateDefault()
     {
         FormatRegistry registry = new();
-        registry.Register(new Csv.CsvFileFormat());
-        registry.Register(new Jsonl.JsonlFileFormat());
-        registry.Register(new Parquet.ParquetFileFormat());
-        registry.Register(new Hdf5.Hdf5FileFormat());
-        registry.Register(new Idx.IdxFileFormat());
-        registry.Register(new Zip.ZipFileFormat());
+        registry.Register(new CsvFileFormat());
+        registry.Register(new JsonlFileFormat());
+        registry.Register(new ParquetFileFormat());
+        registry.Register(new Hdf5FileFormat());
+        registry.Register(new IdxFileFormat());
+        registry.Register(new ZipFileFormat());
         return registry;
     }
 }

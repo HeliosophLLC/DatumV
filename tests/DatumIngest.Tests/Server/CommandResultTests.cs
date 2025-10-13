@@ -40,7 +40,7 @@ public sealed class CommandResultTests
     public void StreamingRows_SetsRowsAndSchema()
     {
         Schema schema = new(new[] { new ColumnInfo("id", DataKind.Float32, false) });
-        CommandResult result = CommandResult.StreamingRows(EmptyRows(), schema);
+        CommandResult result = CommandResult.StreamingRows(EmptyRows(), schema, new Arena());
         Assert.Equal(CommandResultKind.StreamingRows, result.Kind);
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Rows);
