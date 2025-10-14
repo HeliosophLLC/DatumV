@@ -45,8 +45,7 @@ public sealed class DatumSerializer : IFormatSerializer
                     writer.Initialize(datumSchema);
                 }
 
-                for (int i = 0; i < batch.Count; i++)
-                    writer.WriteRow(batch[i]);
+                writer.WriteRowBatch(batch);
             }
 
             writer?.Finalize();

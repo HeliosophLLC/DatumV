@@ -149,10 +149,6 @@ public sealed class DatumFileWriter : IDisposable
         for (int columnIndex = 0; columnIndex < _descriptors!.Length; columnIndex++)
         {
             DataValue value = row[columnIndex];
-            if (value.IsArenaBacked)
-            {
-                
-            }
 
             _columnBuffers![columnIndex].Add(value);
         }
