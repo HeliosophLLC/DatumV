@@ -6,8 +6,11 @@ using DatumIngest.Model;
 /// <summary>
 /// Tests for <see cref="ColumnRoleClassifier"/>.
 /// </summary>
-public sealed class ColumnRoleClassifierTests
+public sealed class ColumnRoleClassifierTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
     // ─────────────── Identifier ───────────────
 
     [Fact]
@@ -444,9 +447,9 @@ public sealed class ColumnRoleClassifierTests
                 DataValue.FromInt64(index),
                 DataValue.FromInt8((sbyte)(index % 3)),
                 DataValue.FromFloat64(index * 1.5 + 0.1),
-                DataValue.FromString($"item_{index}")
+                DataValue.FromString($"item_{index}", _arena)
             ];
-            collector.AddRow(new DatumIngest.Model.Row(names, values));
+            collector.AddRow(new DatumIngest.Model.Row(names, values), _arena);
         }
 
         IReadOnlyDictionary<string, DatumIngest.Statistics.ColumnStatistics> stats = collector.GetStatistics();
@@ -480,7 +483,7 @@ public sealed class ColumnRoleClassifierTests
         for (int index = 0; index < 100; index++)
         {
             DataValue[] values = [DataValue.FromBoolean(index % 3 != 0)];
-            collector.AddRow(new DatumIngest.Model.Row(names, values));
+            collector.AddRow(new DatumIngest.Model.Row(names, values), _arena);
         }
 
         IReadOnlyDictionary<string, DatumIngest.Statistics.ColumnStatistics> stats = collector.GetStatistics();

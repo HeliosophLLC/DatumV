@@ -10,12 +10,9 @@ public interface IStatisticAccumulator
     /// <summary>
     /// Adds a data value to the accumulator.
     /// </summary>
-    void Add(DataValue value);
-
-    /// <summary>
-    /// Merges another accumulator's state into this one. Used for parallel accumulation.
-    /// </summary>
-    void Merge(IStatisticAccumulator other);
+    /// <param name="value">The value to accumulate.</param>
+    /// <param name="store">Value store for resolving reference-type payloads (strings, vectors, etc.).</param>
+    void Add(DataValue value, IValueStore store);
 
     /// <summary>
     /// Returns the accumulated statistic result.

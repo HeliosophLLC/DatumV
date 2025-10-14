@@ -32,29 +32,42 @@ namespace DatumIngest.Model;
 /// </remarks>
 public sealed class Arena : IValueStore, IDisposable
 {
-    private const int DefaultCapacity = 4096;
+    private const int DefaultCapacity = 1024 * 1024; // 1 MB — OS demand-pages, so unused capacity costs nothing
 
     private readonly Lock _writeLock = new();
-    private MemoryMappedFile _mmf;
-    private MemoryMappedViewAccessor _accessor;
+    private MemoryMappedFile? _mmf;
+    private MemoryMappedViewAccessor? _accessor;
     private unsafe byte* _pointer;
+    private int _initialCapacity;
     private int _capacity;
     private int _position;
     private bool _disposed;
+    private bool _pooled;
 
     // Side-list for managed objects that cannot be byte-serialized (e.g. ImageHandle).
     // Accessed under _writeLock for thread safety.
     private List<object>? _objects;
 
-    /// <summary>Creates an arena with the specified initial byte capacity.</summary>
+    /// <summary>Creates an arena with the specified initial byte capacity and optional owner.</summary>
     /// <param name="initialCapacity">
     /// Initial size of the anonymous memory-mapped region in bytes.
+    /// The mapping is not allocated until the first write.
     /// </param>
-    public unsafe Arena(int initialCapacity = DefaultCapacity)
+    /// <param name="owner">The object that owns this arena (e.g. a RowBatch). Null if unowned.</param>
+    public Arena(int initialCapacity = DefaultCapacity, object? owner = null)
     {
-        _capacity = Math.Max(initialCapacity, DefaultCapacity);
-        CreateMapping(_capacity, out _mmf, out _accessor, out _pointer);
+        _initialCapacity = Math.Max(initialCapacity, DefaultCapacity);
+        Owner = owner;
     }
+
+    /// <summary>Whether the backing memory-mapped region has been allocated.</summary>
+    public bool IsAllocated => _mmf is not null;
+
+    /// <summary>Whether this arena is currently held in a pool and must not be accessed.</summary>
+    public bool Pooled { get => _pooled; private set => _pooled = value; }
+
+    /// <summary>The object that owns this arena (e.g. a RowBatch), or null if unowned/pooled.</summary>
+    public object? Owner { get; private set; }
 
     // ───────────────────────── IValueStore ─────────────────────────
 
@@ -120,6 +133,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <inheritdoc />
     public (int P0, int P1) StoreObject(object value)
     {
+        ThrowIfPooled();
         lock (_writeLock)
         {
             _objects ??= [];
@@ -131,6 +145,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <inheritdoc />
     public object RetrieveObject(int p0, int p1)
     {
+        ThrowIfPooled();
         if (_objects is null || (uint)p0 >= (uint)_objects.Count)
             throw new InvalidOperationException($"No object stored at index {p0}.");
         return _objects[p0];
@@ -141,6 +156,9 @@ public sealed class Arena : IValueStore, IDisposable
     /// <summary>Total bytes written so far.</summary>
     public int BytesWritten => _position;
 
+    /// <summary>Current capacity of the backing memory-mapped region in bytes, or zero if not yet allocated.</summary>
+    public int Capacity => _capacity;
+
     // ───────────────────────── Core write path ─────────────────────────
 
     /// <summary>
@@ -150,6 +168,7 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>The byte offset and length of the written region.</returns>
     private (int Offset, int Length) WriteBytes(ReadOnlySpan<byte> data)
     {
+        ThrowIfPooled();
         lock (_writeLock)
         {
             EnsureCapacity(data.Length);
@@ -232,7 +251,12 @@ public sealed class Arena : IValueStore, IDisposable
     /// <param name="length">Byte length returned by <see cref="AppendUtf8"/>.</param>
     /// <returns>The decoded string.</returns>
     public unsafe string GetString(int offset, int length)
-        => Encoding.UTF8.GetString(_pointer + offset, length);
+    {
+        ThrowIfPooled();
+        if (_pointer == null)
+            throw new InvalidOperationException("Arena has not been allocated. No data has been written.");
+        return Encoding.UTF8.GetString(_pointer + offset, length);
+    }
 
     // ───────────────────────── Float operations ─────────────────────────
 
@@ -398,12 +422,54 @@ public sealed class Arena : IValueStore, IDisposable
     /// <returns>The base offset in this arena where the copy begins.</returns>
     public int CopyFrom(Arena source)
     {
+        if (source._position == 0) return 0;
         ReadOnlySpan<byte> data = source.GetSpanForRead(0, source._position);
         var (offset, _) = WriteBytes(data);
         return offset;
     }
 
-    // ───────────────────────── Disposal ─────────────────────────
+    // ───────────────────────── Pooling ─────────────────────────
+
+    /// <summary>
+    /// Marks this arena as pooled, clears the owner, and resets position to zero.
+    /// Any subsequent read or write will throw until <see cref="Unpool"/> is called.
+    /// Called by the pool when the arena is returned.
+    /// </summary>
+    internal void Pool()
+    {
+        if (_pooled)
+            throw new InvalidOperationException("Arena is already pooled — double-return detected.");
+
+        lock (_writeLock)
+        {
+            _position = 0;
+            _objects?.Clear();
+        }
+
+        Owner = null;
+        _pooled = true;
+    }
+
+    /// <summary>
+    /// Marks this arena as active, resets it for reuse, and assigns the new owner.
+    /// Called by the pool when the arena is rented out.
+    /// </summary>
+    /// <param name="owner">The object that will own this arena.</param>
+    internal void Unpool(object owner)
+    {
+        if (!_pooled)
+            throw new InvalidOperationException("Arena is not pooled — double-rent detected.");
+        _pooled = false;
+        Owner = owner;
+    }
+
+    private void ThrowIfPooled()
+    {
+        if (_pooled)
+            throw new InvalidOperationException(
+                "Arena is pooled and must not be accessed. " +
+                "This indicates a use-after-return bug — a DataValue or operator is reading from an arena that was returned to the pool.");
+    }
 
     /// <inheritdoc/>
     public void Dispose()
@@ -429,20 +495,33 @@ public sealed class Arena : IValueStore, IDisposable
     {
         if (_pointer != null)
         {
-            _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
+            _accessor!.SafeMemoryMappedViewHandle.ReleasePointer();
             _pointer = null;
         }
 
-        _accessor.Dispose();
-        _mmf.Dispose();
+        _accessor?.Dispose();
+        _mmf?.Dispose();
+        _accessor = null;
+        _mmf = null;
     }
 
     /// <summary>
-    /// Grows the backing mapping. Must be called under <see cref="_writeLock"/>.
+    /// Allocates or grows the backing mapping. Must be called under <see cref="_writeLock"/>.
+    /// On the first call, creates the initial mapping lazily.
     /// </summary>
     private unsafe void EnsureCapacity(int additionalBytes)
     {
         int required = _position + additionalBytes;
+
+        // First allocation — deferred from constructor.
+        if (_mmf is null)
+        {
+            int capacity = Math.Max(_initialCapacity, required);
+            CreateMapping(capacity, out _mmf, out _accessor, out _pointer);
+            _capacity = capacity;
+            return;
+        }
+
         if (required <= _capacity) return;
 
         int newCapacity = Math.Max(_capacity * 2, required);
@@ -463,5 +542,10 @@ public sealed class Arena : IValueStore, IDisposable
         => new(_pointer + offset, length);
 
     private unsafe ReadOnlySpan<byte> GetSpanForRead(int offset, int length)
-        => new(_pointer + offset, length);
+    {
+        ThrowIfPooled();
+        if (_pointer == null)
+            throw new InvalidOperationException("Arena has not been allocated. No data has been written.");
+        return new(_pointer + offset, length);
+    }
 }

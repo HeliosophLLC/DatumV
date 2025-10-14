@@ -131,7 +131,7 @@ public sealed class FusedDatumPipelineWriter : IOutputWriter
 
         _fileWriter.WriteRow(row);
         _indexBuilder?.AddRow(row);
-        _statisticsCollector?.AddRow(row);
+        _statisticsCollector?.AddRow(row, new Arena()); // TODO: remove with old ingestion
         _rowsWritten++;
     }
 

@@ -1170,7 +1170,7 @@ public readonly struct DataValue : IEquatable<DataValue>
         ThrowIfNullOrWrongKind(DataKind.Matrix);
         rows = _p1;
         columns = _p2;
-        return store.RetrieveFloats(_p0, _p1);
+        return store.RetrieveFloats(_p0, _p1 * _p2);
     }
 
     /// <summary>Returns the tensor flat float array and its shape.</summary>

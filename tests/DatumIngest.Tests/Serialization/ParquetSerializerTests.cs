@@ -1,4 +1,4 @@
-using DatumIngest.Execution.Pooling;
+using DatumIngest.Pooling;
 using DatumIngest.Model;
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
@@ -24,7 +24,7 @@ public sealed class ParquetSerializerTests
         for (int i = 0; i < names.Count; i++)
             nameIndex[names[i]] = i;
 
-        RowBatch batch = context.Pool.RentBatch(1024);
+        RowBatch batch = context.Pool.RentRowBatch(1024);
         foreach (DataValue[] values in rowValues)
             batch.Add(new Row(names, values, nameIndex));
 
@@ -219,7 +219,7 @@ public sealed class ParquetSerializerTests
         {
             for (int batchNum = 0; batchNum < 3; batchNum++)
             {
-                RowBatch batch = context.Pool.RentBatch(1024);
+                RowBatch batch = context.Pool.RentRowBatch(1024);
                 batch.Add(new Row(names, [DataValue.FromInt32(batchNum)], nameIndex));
                 yield return batch;
             }

@@ -16,9 +16,9 @@ public sealed class MissingRunsAccumulator : IStatisticAccumulator
     private bool _hasValues;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
-        bool isMissing = value.IsNull || (value.Kind == DataKind.String && value.AsString().Length == 0);
+        bool isMissing = value.IsNull || (value.Kind == DataKind.String && value.AsString(store).Length == 0);
 
         if (!_hasValues)
         {
@@ -40,43 +40,6 @@ public sealed class MissingRunsAccumulator : IStatisticAccumulator
         }
 
         _endsWithMissing = isMissing;
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not MissingRunsAccumulator otherRuns)
-        {
-            return;
-        }
-
-        if (!otherRuns._hasValues)
-        {
-            return;
-        }
-
-        if (!_hasValues)
-        {
-            _runCount = otherRuns._runCount;
-            _inRun = otherRuns._inRun;
-            _startsWithMissing = otherRuns._startsWithMissing;
-            _endsWithMissing = otherRuns._endsWithMissing;
-            _hasValues = true;
-            return;
-        }
-
-        long combined = _runCount + otherRuns._runCount;
-
-        // If this chunk ends with missing and the next starts with missing,
-        // they form one continuous run — subtract the double-count.
-        if (_endsWithMissing && otherRuns._startsWithMissing)
-        {
-            combined--;
-        }
-
-        _runCount = combined;
-        _endsWithMissing = otherRuns._endsWithMissing;
-        _inRun = otherRuns._inRun;
     }
 
     /// <inheritdoc />

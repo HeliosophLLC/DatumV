@@ -4,9 +4,7 @@ using DatumIngest.Model;
 namespace DatumIngest.Serialization.Csv;
 
 /// <summary>
-/// Deserializes CSV files into <see cref="RowBatch"/> streams. Uses
-/// <see cref="SerializationContext.Arena"/> as the <see cref="IValueStore"/>
-/// for string values — no ambient state needed.
+/// Deserializes CSV files into <see cref="RowBatch"/> streams.
 /// </summary>
 public sealed class CsvDeserializer : IFormatDeserializer
 {
@@ -53,7 +51,6 @@ public sealed class CsvDeserializer : IFormatDeserializer
         if (hasHeader)
             lineReader.ReadLineAsString();
 
-        IValueStore store = context.Arena;
         RowBatch? batch = null;
         int lineNumber = hasHeader ? 1 : 0; // Header line already consumed.
 
@@ -64,6 +61,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
             lineNumber++;
 
             DataValue[] values = context.Pool.RentDataValues(names.Length);
+            batch ??= context.Pool.RentRowBatch(DefaultBatchSize);
 
             if (!lineSpan.Contains('"'))
             {
@@ -87,7 +85,7 @@ public sealed class CsvDeserializer : IFormatDeserializer
                             {
                                 // String fields: store in Arena via IValueStore.
                                 string fieldStr = fieldSpan.ToString();
-                                values[columnIndex] = DataValue.FromString(fieldStr, store);
+                                values[columnIndex] = DataValue.FromString(fieldStr, batch.Arena);
                             }
                             else
                             {
@@ -117,11 +115,10 @@ public sealed class CsvDeserializer : IFormatDeserializer
                 for (int columnIndex = 0; columnIndex < names.Length; columnIndex++)
                 {
                     string field = columnIndex < fields.Count ? fields[columnIndex].Trim() : string.Empty;
-                    values[columnIndex] = CsvParser.ParseFieldString(field, kinds[columnIndex], store);
+                    values[columnIndex] = CsvParser.ParseFieldString(field, kinds[columnIndex], batch.Arena);
                 }
             }
 
-            batch ??= context.Pool.RentBatch(DefaultBatchSize);
             batch.Add(new Row(names, values, nameIndex));
 
             if (batch.IsFull)

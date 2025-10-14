@@ -1,10 +1,3 @@
-using DatumIngest.Serialization.Csv;
-using DatumIngest.Serialization.Hdf5;
-using DatumIngest.Serialization.Idx;
-using DatumIngest.Serialization.Jsonl;
-using DatumIngest.Serialization.Parquet;
-using DatumIngest.Serialization.Zip;
-
 namespace DatumIngest.Serialization;
 
 /// <summary>
@@ -13,17 +6,20 @@ namespace DatumIngest.Serialization;
 /// </summary>
 /// <remarks>
 /// Not a singleton — create a new instance per context to keep tests isolated.
-/// Use <see cref="CreateDefault"/> for production with all built-in formats.
+/// Register <see cref="IFileFormat"/> implementations via DI and inject
+/// <c>IEnumerable&lt;IFileFormat&gt;</c> into the constructor.
 /// </remarks>
 public sealed class FormatRegistry
 {
     private readonly List<IFileFormat> _formats = [];
 
-    /// <summary>Registers a format handler.</summary>
-    /// <param name="format">The format to register.</param>
-    public void Register(IFileFormat format)
+    /// <summary>
+    /// Initializes a new <see cref="FormatRegistry"/> with the given formats.
+    /// </summary>
+    /// <param name="formats">The file formats to register.</param>
+    public FormatRegistry(IEnumerable<IFileFormat> formats)
     {
-        _formats.Add(format);
+        _formats.AddRange(formats);
     }
 
     /// <summary>
@@ -46,20 +42,5 @@ public sealed class FormatRegistry
         throw new NotSupportedException(
             $"No format handler registered for '{descriptor.FilePath}' (extension: '{extension}'). " +
             $"Registered formats: {string.Join(", ", _formats.Select(f => f.Name))}.");
-    }
-
-    /// <summary>
-    /// Creates a registry pre-populated with all built-in format handlers.
-    /// </summary>
-    public static FormatRegistry CreateDefault()
-    {
-        FormatRegistry registry = new();
-        registry.Register(new CsvFileFormat());
-        registry.Register(new JsonlFileFormat());
-        registry.Register(new ParquetFileFormat());
-        registry.Register(new Hdf5FileFormat());
-        registry.Register(new IdxFileFormat());
-        registry.Register(new ZipFileFormat());
-        return registry;
     }
 }

@@ -23,7 +23,7 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
     public int SampleCount => _samples.Count;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -54,30 +54,6 @@ public sealed class QuantileAccumulator : IStatisticAccumulator
             {
                 _samples[(int)j] = numericValue;
             }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not QuantileAccumulator otherQuantile || otherQuantile._totalCount == 0)
-        {
-            return;
-        }
-
-        _totalCount += otherQuantile._totalCount;
-        _samples.AddRange(otherQuantile._samples);
-
-        if (_samples.Count > MaxSamples)
-        {
-            // Shuffle and truncate for approximate fairness
-            for (int i = _samples.Count - 1; i > 0; i--)
-            {
-                int j = _random.Next(i + 1);
-                (_samples[i], _samples[j]) = (_samples[j], _samples[i]);
-            }
-
-            _samples.RemoveRange(MaxSamples, _samples.Count - MaxSamples);
         }
     }
 

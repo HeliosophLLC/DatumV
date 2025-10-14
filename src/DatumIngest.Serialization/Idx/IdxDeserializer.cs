@@ -36,7 +36,6 @@ public sealed class IdxDeserializer : IFormatDeserializer
             [header.DataColumnName] = 1,
         };
 
-        IValueStore store = context.Arena;
         int itemByteSize = header.ItemByteSize;
         byte[] itemBuffer = new byte[itemByteSize];
 
@@ -48,11 +47,11 @@ public sealed class IdxDeserializer : IFormatDeserializer
 
             IdxHeader.ReadExactly(stream, itemBuffer);
 
+            batch ??= context.Pool.RentRowBatch(DefaultBatchSize);
             DataValue[] values = context.Pool.RentDataValues(2);
             values[0] = DataValue.FromFloat32(rowIndex);
-            values[1] = IdxValueReader.CreateDataValue(header, itemBuffer, store);
+            values[1] = IdxValueReader.CreateDataValue(header, itemBuffer, batch.Arena);
 
-            batch ??= context.Pool.RentBatch(DefaultBatchSize);
             batch.Add(new Row(names, values, nameIndex));
 
             if (batch.IsFull)

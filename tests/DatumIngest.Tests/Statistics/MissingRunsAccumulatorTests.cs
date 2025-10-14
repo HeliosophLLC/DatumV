@@ -4,8 +4,12 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class MissingRunsAccumulatorTests
+public sealed class MissingRunsAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_NoValues_ReturnsZeroRuns()
     {
@@ -20,9 +24,9 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(2.0f));
-        accumulator.Add(DataValue.FromFloat32(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.RunCount);
@@ -33,9 +37,9 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.FromFloat32(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.RunCount);
@@ -46,11 +50,11 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.RunCount);
@@ -61,10 +65,10 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.RunCount);
@@ -75,9 +79,9 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.RunCount);
@@ -88,11 +92,11 @@ public sealed class MissingRunsAccumulatorTests
     {
         MissingRunsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromString("hello"));
-        accumulator.Add(DataValue.FromString(""));
-        accumulator.Add(DataValue.FromString(""));
-        accumulator.Add(DataValue.FromString("world"));
-        accumulator.Add(DataValue.FromString(""));
+        accumulator.Add(DataValue.FromString("hello", _arena), _arena);
+        accumulator.Add(DataValue.FromString("", _arena), _arena);
+        accumulator.Add(DataValue.FromString("", _arena), _arena);
+        accumulator.Add(DataValue.FromString("world", _arena), _arena);
+        accumulator.Add(DataValue.FromString("", _arena), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.RunCount);
@@ -104,106 +108,16 @@ public sealed class MissingRunsAccumulatorTests
         MissingRunsAccumulator accumulator = new();
 
         // Run 1: leading null
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
         // Run 2: middle null
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
         // Run 3: trailing null
-        accumulator.Add(DataValue.Null(DataKind.Float32));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
 
         MissingRunsResult result = (MissingRunsResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.RunCount);
-    }
-
-    [Fact]
-    public void Merge_BoundaryCoalesces_WhenChunksShareNullBorder()
-    {
-        // Chunk 1: [1, null, null]  → 1 run, ends with null
-        MissingRunsAccumulator first = new();
-        first.Add(DataValue.FromFloat32(1.0f));
-        first.Add(DataValue.Null(DataKind.Float32));
-        first.Add(DataValue.Null(DataKind.Float32));
-
-        // Chunk 2: [null, 2]  → 1 run, starts with null
-        MissingRunsAccumulator second = new();
-        second.Add(DataValue.Null(DataKind.Float32));
-        second.Add(DataValue.FromFloat32(2.0f));
-
-        first.Merge(second);
-
-        // The two runs merge into one continuous run
-        MissingRunsResult result = (MissingRunsResult)first.GetResult().Value!;
-        Assert.Equal(1, result.RunCount);
-    }
-
-    [Fact]
-    public void Merge_NoBoundaryCoalesce_WhenChunksDontBorderOnNulls()
-    {
-        // Chunk 1: [null, 1]  → 1 run, ends with non-null
-        MissingRunsAccumulator first = new();
-        first.Add(DataValue.Null(DataKind.Float32));
-        first.Add(DataValue.FromFloat32(1.0f));
-
-        // Chunk 2: [2, null]  → 1 run, starts with non-null
-        MissingRunsAccumulator second = new();
-        second.Add(DataValue.FromFloat32(2.0f));
-        second.Add(DataValue.Null(DataKind.Float32));
-
-        first.Merge(second);
-
-        // No coalescing: 1 + 1 = 2 runs
-        MissingRunsResult result = (MissingRunsResult)first.GetResult().Value!;
-        Assert.Equal(2, result.RunCount);
-    }
-
-    [Fact]
-    public void Merge_EmptySecond_PreservesFirst()
-    {
-        MissingRunsAccumulator first = new();
-        first.Add(DataValue.Null(DataKind.Float32));
-        first.Add(DataValue.FromFloat32(1.0f));
-        first.Add(DataValue.Null(DataKind.Float32));
-
-        MissingRunsAccumulator second = new();
-
-        first.Merge(second);
-
-        MissingRunsResult result = (MissingRunsResult)first.GetResult().Value!;
-        Assert.Equal(2, result.RunCount);
-    }
-
-    [Fact]
-    public void Merge_EmptyFirst_TakesSecond()
-    {
-        MissingRunsAccumulator first = new();
-
-        MissingRunsAccumulator second = new();
-        second.Add(DataValue.Null(DataKind.Float32));
-        second.Add(DataValue.FromFloat32(1.0f));
-        second.Add(DataValue.Null(DataKind.Float32));
-
-        first.Merge(second);
-
-        MissingRunsResult result = (MissingRunsResult)first.GetResult().Value!;
-        Assert.Equal(2, result.RunCount);
-    }
-
-    [Fact]
-    public void Merge_AllNullBothChunks_CoalescesToOneRun()
-    {
-        MissingRunsAccumulator first = new();
-        first.Add(DataValue.Null(DataKind.Float32));
-        first.Add(DataValue.Null(DataKind.Float32));
-
-        MissingRunsAccumulator second = new();
-        second.Add(DataValue.Null(DataKind.Float32));
-        second.Add(DataValue.Null(DataKind.Float32));
-
-        first.Merge(second);
-
-        MissingRunsResult result = (MissingRunsResult)first.GetResult().Value!;
-        Assert.Equal(1, result.RunCount);
     }
 
     [Fact]

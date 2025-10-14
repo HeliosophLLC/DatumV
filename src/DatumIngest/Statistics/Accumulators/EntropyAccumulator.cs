@@ -71,7 +71,7 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -142,7 +142,7 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
         }
         else
         {
-            string? key = ToKey(value);
+            string? key = ToKey(value, store);
 
             if (key is null)
             {
@@ -167,91 +167,6 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
             else
             {
                 _untrackedCount++;
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not EntropyAccumulator otherEntropy || otherEntropy._totalCount == 0)
-        {
-            return;
-        }
-
-        _totalCount += otherEntropy._totalCount;
-        _untrackedCount += otherEntropy._untrackedCount;
-
-        if (_wideNumericFrequencies is not null && otherEntropy._wideNumericFrequencies is not null)
-        {
-            foreach (KeyValuePair<long, long> entry in otherEntropy._wideNumericFrequencies)
-            {
-                if (_wideNumericFrequencies.TryGetValue(entry.Key, out long existing))
-                {
-                    _wideNumericFrequencies[entry.Key] = existing + entry.Value;
-                }
-                else if (_wideNumericFrequencies.Count < MaxDistinctValues)
-                {
-                    _wideNumericFrequencies[entry.Key] = entry.Value;
-                }
-                else
-                {
-                    _untrackedCount += entry.Value;
-                    _capped = true;
-                }
-            }
-
-            if (_wideNumericFrequencies.Count >= MaxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-        else if (_numericFrequencies is not null && otherEntropy._numericFrequencies is not null)
-        {
-            foreach (KeyValuePair<int, long> entry in otherEntropy._numericFrequencies)
-            {
-                if (_numericFrequencies.TryGetValue(entry.Key, out long existing))
-                {
-                    _numericFrequencies[entry.Key] = existing + entry.Value;
-                }
-                else if (_numericFrequencies.Count < MaxDistinctValues)
-                {
-                    _numericFrequencies[entry.Key] = entry.Value;
-                }
-                else
-                {
-                    _untrackedCount += entry.Value;
-                    _capped = true;
-                }
-            }
-
-            if (_numericFrequencies.Count >= MaxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-        else if (_stringFrequencies is not null && otherEntropy._stringFrequencies is not null)
-        {
-            foreach (KeyValuePair<string, long> entry in otherEntropy._stringFrequencies)
-            {
-                if (_stringFrequencies.TryGetValue(entry.Key, out long existing))
-                {
-                    _stringFrequencies[entry.Key] = existing + entry.Value;
-                }
-                else if (_stringFrequencies.Count < MaxDistinctValues)
-                {
-                    _stringFrequencies[entry.Key] = entry.Value;
-                }
-                else
-                {
-                    _untrackedCount += entry.Value;
-                    _capped = true;
-                }
-            }
-
-            if (_stringFrequencies.Count >= MaxDistinctValues)
-            {
-                _capped = true;
             }
         }
     }
@@ -311,16 +226,16 @@ public sealed class EntropyAccumulator : IStatisticAccumulator
         return new StatisticResult("entropy", new EntropyResult(entropy, _capped));
     }
 
-    private static string? ToKey(DataValue value)
+    private static string? ToKey(DataValue value, IValueStore store)
     {
         return value.Kind switch
         {
             DataKind.Float32 => value.AsFloat32().ToString("R"),
             DataKind.UInt8 => value.AsUInt8().ToString(),
-            DataKind.String => value.AsString(),
+            DataKind.String => value.AsString(store),
             DataKind.Date => value.AsDate().ToString("O"),
             DataKind.DateTime => value.AsDateTime().ToString("O"),
-            DataKind.JsonValue => value.AsJsonValue(),
+            DataKind.JsonValue => value.AsJsonValue(store),
             _ => null
         };
     }

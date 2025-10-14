@@ -5,8 +5,12 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class ImageStatsAccumulatorTests
+public sealed class ImageStatsAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     // Minimal valid JPEG: SOI + SOF0 marker with 3 channels, 480×640
     private static byte[] MakeJpegHeader(int width, int height, int channels)
     {
@@ -165,9 +169,9 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.ImageCount);
@@ -182,9 +186,9 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 100, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 100, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 100, 1)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 100, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 100, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 100, 1), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.ChannelCounts[3]);
@@ -200,8 +204,8 @@ public sealed class ImageStatsAccumulatorTests
         byte[] large = new byte[1000];
         Array.Copy(MakeJpegHeader(200, 200, 3), large, 20);
 
-        accumulator.Add(DataValue.FromImage(small));
-        accumulator.Add(DataValue.FromImage(large));
+        accumulator.Add(DataValue.FromImage(small, _arena), _arena);
+        accumulator.Add(DataValue.FromImage(large, _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(20.0, result.FileSizeStats.Min);
@@ -214,7 +218,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09], _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.ImageCount);
@@ -226,29 +230,10 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Image));
+        accumulator.Add(DataValue.Null(DataKind.Image), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.ImageCount);
-    }
-
-    [Fact]
-    public void Merge_TwoAccumulators_CombinesCorrectly()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
-        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
-        Assert.Equal(2, result.ImageCount);
-        Assert.Equal(640, result.MinWidth);
-        Assert.Equal(1920, result.MaxWidth);
-        Assert.Equal(480, result.MinHeight);
-        Assert.Equal(1080, result.MaxHeight);
     }
 
     [Fact]
@@ -264,9 +249,9 @@ public sealed class ImageStatsAccumulatorTests
         ImageStatsAccumulator accumulator = new();
 
         // Landscape (800/600 ≈ 1.333), Portrait (600/800 = 0.75), Square (500/500 = 1.0)
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -280,7 +265,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -290,28 +275,11 @@ public sealed class ImageStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_TwoAccumulators_CombinesAspectRatioSamples()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // landscape
-        second.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3))); // portrait
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
-
-        Assert.NotNull(result.AspectRatioHistogram);
-        Assert.Equal(2, result.AspectRatioHistogram.Counts.Sum());
-    }
-
-    [Fact]
     public void Add_UndecodableImages_NoAspectRatioContribution()
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09], _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -336,9 +304,9 @@ public sealed class ImageStatsAccumulatorTests
         ImageStatsAccumulator accumulator = new();
 
         // Landscape 800/600 ≈ 1.333, Portrait 600/800 = 0.75, Square 500/500 = 1.0
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -354,7 +322,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -363,25 +331,6 @@ public sealed class ImageStatsAccumulatorTests
         Assert.Equal(640.0 / 480.0, result.AspectRatioStats.Max, 3);
         Assert.Equal(640.0 / 480.0, result.AspectRatioStats.Mean, 3);
         Assert.Equal(0.0, result.AspectRatioStats.Variance);
-    }
-
-    [Fact]
-    public void Merge_TwoAccumulators_CombinesAspectRatioStats()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // ~1.333
-        second.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3))); // 0.75
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
-
-        Assert.Equal(2, result.AspectRatioStats.Count);
-        Assert.Equal(0.75, result.AspectRatioStats.Min, 2);
-        Assert.Equal(800.0 / 600.0, result.AspectRatioStats.Max, 2);
-        Assert.True(result.AspectRatioStats.StandardDeviation > 0);
     }
 
     [Fact]
@@ -428,9 +377,9 @@ public sealed class ImageStatsAccumulatorTests
         ImageStatsAccumulator accumulator = new();
 
         // 800×600 = 0.48 MP, 1920×1080 = 2.0736 MP, 320×240 = 0.0768 MP
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -442,30 +391,11 @@ public sealed class ImageStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_TwoAccumulators_CombinesMegapixelStats()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));   // 0.3072 MP
-        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // 2.0736 MP
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
-
-        Assert.Equal(2, result.MegapixelStats.Count);
-        Assert.Equal(640.0 * 480 / 1_000_000.0, result.MegapixelStats.Min, 4);
-        Assert.Equal(1920.0 * 1080 / 1_000_000.0, result.MegapixelStats.Max, 4);
-        Assert.True(result.MegapixelStats.StandardDeviation > 0);
-    }
-
-    [Fact]
     public void Add_UndecodableImages_NoMegapixelContribution()
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09], _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -477,32 +407,12 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // landscape
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3)));  // portrait
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));  // square
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // landscape
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3), _arena), _arena);  // landscape
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3), _arena), _arena);  // portrait
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3), _arena), _arena);  // square
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3), _arena), _arena); // landscape
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
-
-        Assert.Equal(2, result.OrientationCounts["landscape"]);
-        Assert.Equal(1, result.OrientationCounts["portrait"]);
-        Assert.Equal(1, result.OrientationCounts["square"]);
-    }
-
-    [Fact]
-    public void Merge_TwoAccumulators_CombinesOrientationCounts()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));  // landscape
-        first.Add(DataValue.FromImage(MakeJpegHeader(500, 500, 3)));  // square
-        second.Add(DataValue.FromImage(MakeJpegHeader(600, 800, 3))); // portrait
-        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // landscape
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
 
         Assert.Equal(2, result.OrientationCounts["landscape"]);
         Assert.Equal(1, result.OrientationCounts["portrait"]);
@@ -514,7 +424,7 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]));
+        accumulator.Add(DataValue.FromImage([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09], _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -526,10 +436,10 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(16, 16, 3)));   // both dims < 32
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(31, 100, 3)));  // width < 32
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 20, 3)));  // height < 32
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3))); // normal
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(16, 16, 3), _arena), _arena);   // both dims < 32
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(31, 100, 3), _arena), _arena);  // width < 32
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(100, 20, 3), _arena), _arena);  // height < 32
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena); // normal
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -542,9 +452,9 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(5000, 3000, 3))); // width > 4096
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(3000, 5000, 3))); // height > 4096
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));   // normal
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(5000, 3000, 3), _arena), _arena); // width > 4096
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(3000, 5000, 3), _arena), _arena); // height > 4096
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena);   // normal
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -557,9 +467,9 @@ public sealed class ImageStatsAccumulatorTests
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(256, 256, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(256, 256, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -568,33 +478,14 @@ public sealed class ImageStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_TwoAccumulators_CombinesExtremeCounts()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(16, 16, 3)));    // tiny
-        first.Add(DataValue.FromImage(MakeJpegHeader(5000, 3000, 3))); // huge
-        second.Add(DataValue.FromImage(MakeJpegHeader(10, 10, 3)));   // tiny
-        second.Add(DataValue.FromImage(MakeJpegHeader(8000, 6000, 3))); // huge
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
-
-        Assert.Equal(2, result.TinyImageCount);
-        Assert.Equal(2, result.HugeImageCount);
-    }
-
-    [Fact]
     public void Add_MultipleImages_TracksPixelCountStats()
     {
         ImageStatsAccumulator accumulator = new();
 
         // 800×600 = 480,000 px, 1920×1080 = 2,073,600 px, 320×240 = 76,800 px
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3)));
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(800, 600, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3), _arena), _arena);
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(320, 240, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 
@@ -606,30 +497,11 @@ public sealed class ImageStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_TwoAccumulators_CombinesPixelCountStats()
-    {
-        ImageStatsAccumulator first = new();
-        ImageStatsAccumulator second = new();
-
-        first.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));   // 307,200 px
-        second.Add(DataValue.FromImage(MakeJpegHeader(1920, 1080, 3))); // 2,073,600 px
-
-        first.Merge(second);
-
-        ImageStatsResult result = (ImageStatsResult)first.GetResult().Value!;
-
-        Assert.Equal(2, result.PixelCountStats.Count);
-        Assert.Equal(307_200.0, result.PixelCountStats.Min, 0);
-        Assert.Equal(2_073_600.0, result.PixelCountStats.Max, 0);
-        Assert.True(result.PixelCountStats.StandardDeviation > 0);
-    }
-
-    [Fact]
     public void Add_SingleImage_PixelCountStatsHasZeroVariance()
     {
         ImageStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3)));
+        accumulator.Add(DataValue.FromImage(MakeJpegHeader(640, 480, 3), _arena), _arena);
 
         ImageStatsResult result = (ImageStatsResult)accumulator.GetResult().Value!;
 

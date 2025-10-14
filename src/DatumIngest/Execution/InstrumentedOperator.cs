@@ -142,12 +142,12 @@ public sealed class InstrumentedOperator : IQueryOperator
 
         // Add pruning statistics for scan operators backed by filterable providers.
         if (instrumentedOp.Inner is Operators.ScanOperator scan
-            && scan.LastFilterableProvider is Catalog.Providers.ParquetTableProvider parquetProvider
-            && parquetProvider.TotalRowGroups > 0
-            && parquetProvider.PrunedRowGroups > 0)
+            && scan.LastFilterableProvider is Catalog.Providers.DatumFileTableProvider datumProvider
+            && datumProvider.TotalRowGroups > 0
+            && datumProvider.PrunedRowGroups > 0)
         {
-            int total = parquetProvider.TotalRowGroups;
-            int pruned = parquetProvider.PrunedRowGroups;
+            int total = datumProvider.TotalRowGroups;
+            int pruned = datumProvider.PrunedRowGroups;
             double percentage = (double)pruned / total * 100.0;
             planNode.RuntimeAnnotations.Add(
                 $"row groups: {total} total, {pruned} pruned ({percentage:F0}%)");

@@ -4,16 +4,20 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class StatisticsCollectorTests
+public sealed class StatisticsCollectorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void AddRow_NumericColumn_CollectsAllStatistics()
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))));
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(2.0f))));
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(3.0f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))), _arena);
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(2.0f))), _arena);
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(3.0f))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -32,8 +36,8 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice"))));
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Bob"))));
+        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice", _arena))), _arena);
+        collector.AddRow(CreateRow(("name", DataValue.FromString("Bob", _arena))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -51,7 +55,7 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         ColumnStatistics columnStats = stats["value"];
@@ -64,7 +68,7 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice"))));
+        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice", _arena))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         ColumnStatistics columnStats = stats["name"];
@@ -78,11 +82,11 @@ public sealed class StatisticsCollectorTests
         StatisticsCollector collector = new();
 
         collector.AddRow(CreateRow(
-            ("name", DataValue.FromString("Alice")),
-            ("age", DataValue.FromFloat32(30.0f))));
+            ("name", DataValue.FromString("Alice", _arena)),
+            ("age", DataValue.FromFloat32(30.0f))), _arena);
         collector.AddRow(CreateRow(
-            ("name", DataValue.FromString("Bob")),
-            ("age", DataValue.FromFloat32(25.0f))));
+            ("name", DataValue.FromString("Bob", _arena)),
+            ("age", DataValue.FromFloat32(25.0f))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -103,38 +107,15 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice"))));
-        collector.AddRow(CreateRow(("name", DataValue.Null(DataKind.String))));
-        collector.AddRow(CreateRow(("name", DataValue.FromString("Charlie"))));
+        collector.AddRow(CreateRow(("name", DataValue.FromString("Alice", _arena))), _arena);
+        collector.AddRow(CreateRow(("name", DataValue.Null(DataKind.String))), _arena);
+        collector.AddRow(CreateRow(("name", DataValue.FromString("Charlie", _arena))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         CountResult count = (CountResult)stats["name"].Results["count"].Value!;
 
         Assert.Equal(2, count.NonNull);
         Assert.Equal(1, count.NullOrEmpty);
-    }
-
-    [Fact]
-    public void Merge_CombinesCollectors()
-    {
-        StatisticsCollector first = new();
-        first.AddRow(CreateRow(("value", DataValue.FromFloat32(1.0f))));
-        first.AddRow(CreateRow(("value", DataValue.FromFloat32(2.0f))));
-
-        StatisticsCollector second = new();
-        second.AddRow(CreateRow(("value", DataValue.FromFloat32(3.0f))));
-        second.AddRow(CreateRow(("value", DataValue.FromFloat32(4.0f))));
-
-        first.Merge(second);
-
-        IReadOnlyDictionary<string, ColumnStatistics> stats = first.GetStatistics();
-        CountResult count = (CountResult)stats["value"].Results["count"].Value!;
-        Assert.Equal(4, count.NonNull);
-
-        NumericResult numeric = (NumericResult)stats["value"].Results["numeric"].Value!;
-        Assert.Equal(1.0, numeric.Min);
-        Assert.Equal(4.0, numeric.Max);
-        Assert.Equal(2.5, numeric.Mean, 1e-10);
     }
 
     [Fact]
@@ -155,7 +136,7 @@ public sealed class StatisticsCollectorTests
         // Add many distinct values
         for (int i = 0; i < 100; i++)
         {
-            collector.AddRow(CreateRow(("category", DataValue.FromString($"cat_{i % 5}"))));
+            collector.AddRow(CreateRow(("category", DataValue.FromString($"cat_{i % 5}", _arena))), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -169,8 +150,8 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("byte_val", DataValue.FromUInt8(10))));
-        collector.AddRow(CreateRow(("byte_val", DataValue.FromUInt8(200))));
+        collector.AddRow(CreateRow(("byte_val", DataValue.FromUInt8(10))), _arena);
+        collector.AddRow(CreateRow(("byte_val", DataValue.FromUInt8(200))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -185,7 +166,7 @@ public sealed class StatisticsCollectorTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("my_column", DataValue.FromFloat32(1.0f))));
+        collector.AddRow(CreateRow(("my_column", DataValue.FromFloat32(1.0f))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Assert.Equal("my_column", stats["my_column"].ColumnName);
@@ -209,7 +190,7 @@ public sealed class StatisticsCollectorTests
         jpeg[9] = 0x02; jpeg[10] = 0x80; // width 640
         jpeg[11] = 0x03; // 3 channels
 
-        collector.AddRow(CreateRow(("img", DataValue.FromImage(jpeg))));
+        collector.AddRow(CreateRow(("img", DataValue.FromImage(jpeg, _arena))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Assert.Contains("image_stats", stats["img"].Results.Keys);
@@ -231,15 +212,15 @@ public sealed class StatisticsCollectorTests
 
         DataValue value = kind switch
         {
-            DataKind.Image => DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF, 0xC0 }),
-            DataKind.UInt8Array => DataValue.FromUInt8Array(new byte[] { 1, 2, 3 }),
-            DataKind.Vector => DataValue.FromVector(new float[] { 1.0f, 2.0f }),
-            DataKind.Matrix => DataValue.FromMatrix(new float[] { 1.0f, 2.0f }, 1, 2),
-            DataKind.Tensor => DataValue.FromTensor(new float[] { 1.0f }, new int[] { 1 }),
+            DataKind.Image => DataValue.FromImage(new byte[] { 0xFF, 0xD8, 0xFF, 0xC0 }, _arena),
+            DataKind.UInt8Array => DataValue.FromUInt8Array(new byte[] { 1, 2, 3 }, _arena),
+            DataKind.Vector => DataValue.FromVector(new float[] { 1.0f, 2.0f }, _arena),
+            DataKind.Matrix => DataValue.FromMatrix(new float[] { 1.0f, 2.0f }, 1, 2, _arena),
+            DataKind.Tensor => DataValue.FromTensor(new float[] { 1.0f }, new int[] { 1 }, _arena),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
 
-        collector.AddRow(CreateRow(("data", value)));
+        collector.AddRow(CreateRow(("data", value)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Assert.DoesNotContain("top_k", stats["data"].Results.Keys);

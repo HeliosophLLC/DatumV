@@ -49,7 +49,7 @@ public sealed class NumericAccumulator : IStatisticAccumulator
     public double Kurtosis => _count > 3 && _m2 > 0 ? (double)_count * _m4 / (_m2 * _m2) : 0.0;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -114,84 +114,6 @@ public sealed class NumericAccumulator : IStatisticAccumulator
                 {
                     _outlierCount++;
                 }
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not NumericAccumulator otherNumeric || otherNumeric._count == 0)
-        {
-            return;
-        }
-
-        if (_count == 0)
-        {
-            _count = otherNumeric._count;
-            _zeroCount = otherNumeric._zeroCount;
-            _outlierCount = otherNumeric._outlierCount;
-            _min = otherNumeric._min;
-            _max = otherNumeric._max;
-            _mean = otherNumeric._mean;
-            _m2 = otherNumeric._m2;
-            _m3 = otherNumeric._m3;
-            _m4 = otherNumeric._m4;
-            _nonzeroCount = otherNumeric._nonzeroCount;
-            _nonzeroMean = otherNumeric._nonzeroMean;
-            _nonzeroM2 = otherNumeric._nonzeroM2;
-            return;
-        }
-
-        // Parallel merge of central moments (Pébay 2008)
-        long combinedCount = _count + otherNumeric._count;
-        double delta = otherNumeric._mean - _mean;
-        double delta2 = delta * delta;
-        double delta3 = delta2 * delta;
-        double delta4 = delta2 * delta2;
-        double nA = _count;
-        double nB = otherNumeric._count;
-        double nCombined = combinedCount;
-
-        double combinedM4 = _m4 + otherNumeric._m4
-            + delta4 * nA * nB * (nA * nA - nA * nB + nB * nB) / (nCombined * nCombined * nCombined)
-            + 6.0 * delta2 * (nA * nA * otherNumeric._m2 + nB * nB * _m2) / (nCombined * nCombined)
-            + 4.0 * delta * (nA * otherNumeric._m3 - nB * _m3) / nCombined;
-
-        double combinedM3 = _m3 + otherNumeric._m3
-            + delta3 * nA * nB * (nA - nB) / (nCombined * nCombined)
-            + 3.0 * delta * (nA * otherNumeric._m2 - nB * _m2) / nCombined;
-
-        double combinedMean = _mean + delta * nB / nCombined;
-        double combinedM2 = _m2 + otherNumeric._m2 + delta2 * nA * nB / nCombined;
-
-        _count = combinedCount;
-        _mean = combinedMean;
-        _m2 = combinedM2;
-        _m3 = combinedM3;
-        _m4 = combinedM4;
-        _zeroCount += otherNumeric._zeroCount;
-        _outlierCount += otherNumeric._outlierCount;
-        _min = Math.Min(_min, otherNumeric._min);
-        _max = Math.Max(_max, otherNumeric._max);
-
-        // Parallel merge for nonzero subset (Pébay 2008, mean + M2 only)
-        if (otherNumeric._nonzeroCount > 0)
-        {
-            if (_nonzeroCount == 0)
-            {
-                _nonzeroCount = otherNumeric._nonzeroCount;
-                _nonzeroMean = otherNumeric._nonzeroMean;
-                _nonzeroM2 = otherNumeric._nonzeroM2;
-            }
-            else
-            {
-                long combinedNonzero = _nonzeroCount + otherNumeric._nonzeroCount;
-                double nzDelta = otherNumeric._nonzeroMean - _nonzeroMean;
-                _nonzeroM2 += otherNumeric._nonzeroM2
-                    + nzDelta * nzDelta * _nonzeroCount * otherNumeric._nonzeroCount / combinedNonzero;
-                _nonzeroMean += nzDelta * otherNumeric._nonzeroCount / combinedNonzero;
-                _nonzeroCount = combinedNonzero;
             }
         }
     }

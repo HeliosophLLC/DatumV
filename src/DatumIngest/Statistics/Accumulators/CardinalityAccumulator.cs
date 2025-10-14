@@ -15,7 +15,7 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
     public long EstimatedCardinality => (long)_estimator.Count();
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -66,26 +66,17 @@ public sealed class CardinalityAccumulator : IStatisticAccumulator
                 _estimator.Add(value.AsDateTime().ToUnixTimeMilliseconds());
                 break;
             case DataKind.String:
-                _estimator.Add(value.AsString());
+                _estimator.Add(value.AsString(store));
                 break;
             case DataKind.Uuid:
                 _estimator.Add(value.AsUuid().ToString());
                 break;
             case DataKind.JsonValue:
-                _estimator.Add(value.AsJsonValue());
+                _estimator.Add(value.AsJsonValue(store));
                 break;
             default:
                 _estimator.Add(value.GetHashCode());
                 break;
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is CardinalityAccumulator otherCardinality)
-        {
-            _estimator.Merge(otherCardinality._estimator);
         }
     }
 

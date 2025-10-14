@@ -76,13 +76,6 @@ public sealed class DatumFileWriter : IDisposable
     internal void SetRowGroupSize(int rowGroupSize) => _rowGroupSize = rowGroupSize;
 
     /// <summary>
-    /// Optional value store for resolving string payloads during encoding.
-    /// When set, <see cref="StringColumnEncoder"/> reads strings via this store
-    /// instead of a global store.
-    /// </summary>
-    public Model.IValueStore Store { get; set; } = new Model.Arena();
-
-    /// <summary>
     /// Initializes the writer with a schema and writes the file header.
     /// Must be called exactly once before any calls to <see cref="WriteRow"/>.
     /// </summary>
@@ -127,6 +120,19 @@ public sealed class DatumFileWriter : IDisposable
     }
 
     /// <summary>
+    /// Writes a batch of rows to the file, flushing a row group when the buffer is full.
+    /// <see cref="WriteRow"/> for per-row details.
+    /// </summary>
+    /// <param name="batch">The batch of rows to write.</param>
+    public void WriteRowBatch(RowBatch batch)
+    {
+        for (int i = 0; i < batch.Count; i++)
+        {
+            WriteRow(batch[i], batch.Arena);
+        }
+    }
+
+    /// <summary>
     /// Appends a row of values to the current row group buffer.
     /// Triggers a row group flush when the buffer reaches the current row group size.
     /// </summary>
@@ -134,14 +140,21 @@ public sealed class DatumFileWriter : IDisposable
     /// One value per column in schema column order.
     /// <see cref="Row.FieldCount"/> must equal <see cref="DatumFileSchema.ColumnCount"/>.
     /// </param>
+    /// <param name="arena">The memory arena where references are stored.</param>
     /// <exception cref="InvalidOperationException">Thrown when not initialized or already finalized.</exception>
-    public void WriteRow(Row row)
+    private void WriteRow(Row row, Arena arena)
     {
         ThrowIfNotReady();
 
         for (int columnIndex = 0; columnIndex < _descriptors!.Length; columnIndex++)
         {
-            _columnBuffers![columnIndex].Add(row[columnIndex]);
+            DataValue value = row[columnIndex];
+            if (value.IsArenaBacked)
+            {
+                
+            }
+
+            _columnBuffers![columnIndex].Add(value);
         }
 
         if (_columnBuffers![0].Count >= _rowGroupSize)
@@ -207,7 +220,6 @@ public sealed class DatumFileWriter : IDisposable
         {
             DatumFilePath = _filePath ?? string.Empty,
             RowGroupIndex = _rowGroupDescriptors.Count,
-            Store = Store,
         };
 
         // Encode all columns in parallel — encoders are stateless singletons and

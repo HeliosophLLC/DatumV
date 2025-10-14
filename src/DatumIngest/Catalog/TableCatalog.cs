@@ -60,18 +60,11 @@ public sealed class TableCatalog : IDisposable
     private readonly HashSet<string> _analysisPending = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Initializes a new <see cref="TableCatalog"/> with all built-in provider factories
-    /// pre-registered (csv, json, jsonl, parquet, hdf5, zip, idx).
+    /// Initializes a new <see cref="TableCatalog"/> with the datum provider factory
+    /// pre-registered. All source formats are handled via ingestion, not direct querying.
     /// </summary>
     public TableCatalog()
     {
-        _providerFactories["csv"] = () => new CsvTableProvider();
-        _providerFactories["json"] = () => new JsonTableProvider();
-        _providerFactories["jsonl"] = () => new JsonlTableProvider();
-        _providerFactories["parquet"] = () => new ParquetTableProvider();
-        _providerFactories["hdf5"] = () => new Hdf5TableProvider();
-        _providerFactories["zip"] = () => new ZipTableProvider();
-        _providerFactories["idx"] = () => new IdxTableProvider();
         _providerFactories["datum"] = () => new DatumFileTableProvider();
     }
 

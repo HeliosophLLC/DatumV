@@ -4,8 +4,12 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class EntropyAccumulatorTests
+public sealed class EntropyAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void GetResult_NoValues_ReturnsZero()
     {
@@ -24,7 +28,7 @@ public sealed class EntropyAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString("same"));
+            accumulator.Add(DataValue.FromString("same", _arena), _arena);
         }
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
@@ -40,8 +44,8 @@ public sealed class EntropyAccumulatorTests
 
         for (int i = 0; i < 500; i++)
         {
-            accumulator.Add(DataValue.FromString("a"));
-            accumulator.Add(DataValue.FromString("b"));
+            accumulator.Add(DataValue.FromString("a", _arena), _arena);
+            accumulator.Add(DataValue.FromString("b", _arena), _arena);
         }
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
@@ -58,7 +62,7 @@ public sealed class EntropyAccumulatorTests
         // 8 values, each appearing exactly once → H = log₂(8) = 3
         for (int i = 0; i < 8; i++)
         {
-            accumulator.Add(DataValue.FromFloat32(i));
+            accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
@@ -74,12 +78,12 @@ public sealed class EntropyAccumulatorTests
         // "a" appears 90 times, "b" appears 10 times
         for (int i = 0; i < 90; i++)
         {
-            accumulator.Add(DataValue.FromString("a"));
+            accumulator.Add(DataValue.FromString("a", _arena), _arena);
         }
 
         for (int i = 0; i < 10; i++)
         {
-            accumulator.Add(DataValue.FromString("b"));
+            accumulator.Add(DataValue.FromString("b", _arena), _arena);
         }
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
@@ -94,10 +98,10 @@ public sealed class EntropyAccumulatorTests
     {
         EntropyAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromString("a"));
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromString("b"));
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromString("a", _arena), _arena);
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromString("b", _arena), _arena);
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
 
@@ -112,7 +116,7 @@ public sealed class EntropyAccumulatorTests
         // UInt8 values: 4 distinct → H = log₂(4) = 2
         for (int i = 0; i < 4; i++)
         {
-            accumulator.Add(DataValue.FromUInt8((byte)i));
+            accumulator.Add(DataValue.FromUInt8((byte)i), _arena);
         }
 
         EntropyResult result = (EntropyResult)accumulator.GetResult().Value!;
@@ -121,33 +125,10 @@ public sealed class EntropyAccumulatorTests
     }
 
     [Fact]
-    public void Merge_CombinesFrequencies()
-    {
-        EntropyAccumulator a = new();
-        EntropyAccumulator b = new();
-
-        for (int i = 0; i < 50; i++)
-        {
-            a.Add(DataValue.FromString("x"));
-        }
-
-        for (int i = 0; i < 50; i++)
-        {
-            b.Add(DataValue.FromString("y"));
-        }
-
-        a.Merge(b);
-
-        EntropyResult result = (EntropyResult)a.GetResult().Value!;
-
-        Assert.Equal(1.0, result.Value, precision: 10);
-    }
-
-    [Fact]
     public void GetResult_ResultNameIsEntropy()
     {
         EntropyAccumulator accumulator = new();
-        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
 
         StatisticResult result = accumulator.GetResult();
 

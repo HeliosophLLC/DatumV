@@ -42,7 +42,6 @@ public sealed class DatumSerializer : IFormatSerializer
                     Schema schema = InferSchema(batch);
                     DatumFileSchema datumSchema = DatumFileSchema.FromSchema(schema);
                     writer = new DatumFileWriter(_descriptor.FilePath);
-                    writer.Store = context.Arena;
                     writer.Initialize(datumSchema);
                 }
 

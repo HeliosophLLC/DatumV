@@ -4,18 +4,22 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class TopKAccumulatorTests
+public sealed class TopKAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_Values_TracksFrequencies()
     {
         TopKAccumulator accumulator = new(10);
 
-        accumulator.Add(DataValue.FromString("a"));
-        accumulator.Add(DataValue.FromString("b"));
-        accumulator.Add(DataValue.FromString("a"));
-        accumulator.Add(DataValue.FromString("c"));
-        accumulator.Add(DataValue.FromString("a"));
+        accumulator.Add(DataValue.FromString("a", _arena), _arena);
+        accumulator.Add(DataValue.FromString("b", _arena), _arena);
+        accumulator.Add(DataValue.FromString("a", _arena), _arena);
+        accumulator.Add(DataValue.FromString("c", _arena), _arena);
+        accumulator.Add(DataValue.FromString("a", _arena), _arena);
 
         TopKResult result = (TopKResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.Entries.Count);
@@ -31,19 +35,19 @@ public sealed class TopKAccumulatorTests
         // Add values with different frequencies
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString("high"));
+            accumulator.Add(DataValue.FromString("high", _arena), _arena);
         }
         for (int i = 0; i < 50; i++)
         {
-            accumulator.Add(DataValue.FromString("medium"));
+            accumulator.Add(DataValue.FromString("medium", _arena), _arena);
         }
         for (int i = 0; i < 25; i++)
         {
-            accumulator.Add(DataValue.FromString("low"));
+            accumulator.Add(DataValue.FromString("low", _arena), _arena);
         }
         for (int i = 0; i < 1; i++)
         {
-            accumulator.Add(DataValue.FromString("very_low_" + i));
+            accumulator.Add(DataValue.FromString("very_low_" + i, _arena), _arena);
         }
 
         TopKResult result = (TopKResult)accumulator.GetResult().Value!;
@@ -56,9 +60,9 @@ public sealed class TopKAccumulatorTests
     {
         TopKAccumulator accumulator = new(10);
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(2.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
 
         TopKResult result = (TopKResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.Entries.Count);
@@ -70,32 +74,11 @@ public sealed class TopKAccumulatorTests
     {
         TopKAccumulator accumulator = new(10);
 
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromString("a"));
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromString("a", _arena), _arena);
 
         TopKResult result = (TopKResult)accumulator.GetResult().Value!;
         Assert.Single(result.Entries);
-    }
-
-    [Fact]
-    public void Merge_CombinesFrequencies()
-    {
-        TopKAccumulator first = new(10);
-        first.Add(DataValue.FromString("a"));
-        first.Add(DataValue.FromString("a"));
-        first.Add(DataValue.FromString("b"));
-
-        TopKAccumulator second = new(10);
-        second.Add(DataValue.FromString("a"));
-        second.Add(DataValue.FromString("c"));
-        second.Add(DataValue.FromString("c"));
-
-        first.Merge(second);
-
-        TopKResult result = (TopKResult)first.GetResult().Value!;
-        Assert.Equal(3, result.Entries.Count);
-        Assert.Equal("a", result.Entries[0].Key);
-        Assert.Equal(3, result.Entries[0].Value);
     }
 
     [Fact]
@@ -103,9 +86,9 @@ public sealed class TopKAccumulatorTests
     {
         TopKAccumulator accumulator = new(10);
 
-        for (int i = 0; i < 1; i++) accumulator.Add(DataValue.FromString("rare"));
-        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromString("common"));
-        for (int i = 0; i < 3; i++) accumulator.Add(DataValue.FromString("medium"));
+        for (int i = 0; i < 1; i++) accumulator.Add(DataValue.FromString("rare", _arena), _arena);
+        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromString("common", _arena), _arena);
+        for (int i = 0; i < 3; i++) accumulator.Add(DataValue.FromString("medium", _arena), _arena);
 
         TopKResult result = (TopKResult)accumulator.GetResult().Value!;
         Assert.Equal("common", result.Entries[0].Key);

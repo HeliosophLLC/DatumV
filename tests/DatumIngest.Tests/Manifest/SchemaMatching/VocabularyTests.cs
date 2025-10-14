@@ -11,8 +11,11 @@ using DatumIngest.Statistics.Accumulators;
 /// <see cref="VocabularyAccumulator"/> accumulation and capping, <see cref="ManifestBuilder"/>
 /// vocabulary attachment, and <see cref="JoinEvidenceScorer"/> exact containment scoring.
 /// </summary>
-public sealed class VocabularyTests
+public sealed class VocabularyTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
     // ── ColumnVocabulary: Set Operations ──
 
     [Fact]
@@ -186,10 +189,10 @@ public sealed class VocabularyTests
     {
         VocabularyAccumulator accumulator = new(DataKind.Int32);
 
-        accumulator.Add(DataValue.FromInt32(3));
-        accumulator.Add(DataValue.FromInt32(1));
-        accumulator.Add(DataValue.FromInt32(2));
-        accumulator.Add(DataValue.FromInt32(1)); // duplicate
+        accumulator.Add(DataValue.FromInt32(3), _arena);
+        accumulator.Add(DataValue.FromInt32(1), _arena);
+        accumulator.Add(DataValue.FromInt32(2), _arena);
+        accumulator.Add(DataValue.FromInt32(1), _arena); // duplicate
 
         StatisticResult result = accumulator.GetResult();
         VocabularyResult vocabulary = (VocabularyResult)result.Value!;
@@ -208,10 +211,10 @@ public sealed class VocabularyTests
     {
         VocabularyAccumulator accumulator = new(DataKind.String);
 
-        accumulator.Add(DataValue.FromString("charlie"));
-        accumulator.Add(DataValue.FromString("alice"));
-        accumulator.Add(DataValue.FromString("bob"));
-        accumulator.Add(DataValue.FromString("alice")); // duplicate
+        accumulator.Add(DataValue.FromString("charlie", _arena), _arena);
+        accumulator.Add(DataValue.FromString("alice", _arena), _arena);
+        accumulator.Add(DataValue.FromString("bob", _arena), _arena);
+        accumulator.Add(DataValue.FromString("alice", _arena), _arena); // duplicate
 
         StatisticResult result = accumulator.GetResult();
         VocabularyResult vocabulary = (VocabularyResult)result.Value!;
@@ -229,9 +232,9 @@ public sealed class VocabularyTests
     {
         VocabularyAccumulator accumulator = new(DataKind.Int64);
 
-        accumulator.Add(DataValue.FromInt64(100));
-        accumulator.Add(DataValue.FromInt64(200));
-        accumulator.Add(DataValue.FromInt64(100)); // duplicate
+        accumulator.Add(DataValue.FromInt64(100), _arena);
+        accumulator.Add(DataValue.FromInt64(200), _arena);
+        accumulator.Add(DataValue.FromInt64(100), _arena); // duplicate
 
         StatisticResult result = accumulator.GetResult();
         VocabularyResult vocabulary = (VocabularyResult)result.Value!;
@@ -247,7 +250,7 @@ public sealed class VocabularyTests
 
         for (int i = 0; i < 10; i++)
         {
-            accumulator.Add(DataValue.FromInt32(i));
+            accumulator.Add(DataValue.FromInt32(i), _arena);
         }
 
         StatisticResult result = accumulator.GetResult();
@@ -263,56 +266,15 @@ public sealed class VocabularyTests
     {
         VocabularyAccumulator accumulator = new(DataKind.Int32);
 
-        accumulator.Add(DataValue.FromInt32(1));
-        accumulator.Add(DataValue.Null(DataKind.Int32));
-        accumulator.Add(DataValue.FromInt32(2));
-        accumulator.Add(DataValue.Null(DataKind.Int32));
+        accumulator.Add(DataValue.FromInt32(1), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Int32), _arena);
+        accumulator.Add(DataValue.FromInt32(2), _arena);
+        accumulator.Add(DataValue.Null(DataKind.Int32), _arena);
 
         StatisticResult result = accumulator.GetResult();
         VocabularyResult vocabulary = (VocabularyResult)result.Value!;
 
         Assert.Equal(2, vocabulary.SortedValues.Count);
-    }
-
-    [Fact]
-    public void VocabularyAccumulator_Merge_CombinesDistinctValues()
-    {
-        VocabularyAccumulator left = new(DataKind.Int32);
-        left.Add(DataValue.FromInt32(1));
-        left.Add(DataValue.FromInt32(2));
-
-        VocabularyAccumulator right = new(DataKind.Int32);
-        right.Add(DataValue.FromInt32(2));
-        right.Add(DataValue.FromInt32(3));
-
-        left.Merge(right);
-
-        StatisticResult result = left.GetResult();
-        VocabularyResult vocabulary = (VocabularyResult)result.Value!;
-
-        Assert.False(vocabulary.Capped);
-        Assert.Equal(3, vocabulary.SortedValues.Count);
-    }
-
-    [Fact]
-    public void VocabularyAccumulator_Merge_PropagatesCapped()
-    {
-        VocabularyAccumulator left = new(DataKind.Int32, maxDistinctValues: 100);
-        left.Add(DataValue.FromInt32(1));
-
-        VocabularyAccumulator right = new(DataKind.Int32, maxDistinctValues: 3);
-        for (int i = 0; i < 5; i++)
-        {
-            right.Add(DataValue.FromInt32(i + 10));
-        }
-
-        left.Merge(right);
-
-        StatisticResult result = left.GetResult();
-        VocabularyResult vocabulary = (VocabularyResult)result.Value!;
-
-        // Capped because right was capped
-        Assert.True(vocabulary.Capped);
     }
 
     // ── StatisticsCollector: Vocabulary Registration ──
@@ -322,9 +284,9 @@ public sealed class VocabularyTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("id", DataValue.FromInt32(1))));
-        collector.AddRow(CreateRow(("id", DataValue.FromInt32(2))));
-        collector.AddRow(CreateRow(("id", DataValue.FromInt32(3))));
+        collector.AddRow(CreateRow(("id", DataValue.FromInt32(1))), _arena);
+        collector.AddRow(CreateRow(("id", DataValue.FromInt32(2))), _arena);
+        collector.AddRow(CreateRow(("id", DataValue.FromInt32(3))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -339,8 +301,8 @@ public sealed class VocabularyTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("name", DataValue.FromString("alice"))));
-        collector.AddRow(CreateRow(("name", DataValue.FromString("bob"))));
+        collector.AddRow(CreateRow(("name", DataValue.FromString("alice", _arena))), _arena);
+        collector.AddRow(CreateRow(("name", DataValue.FromString("bob", _arena))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -352,7 +314,7 @@ public sealed class VocabularyTests
     {
         StatisticsCollector collector = new();
 
-        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.5f))));
+        collector.AddRow(CreateRow(("value", DataValue.FromFloat32(1.5f))), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
 
@@ -370,7 +332,7 @@ public sealed class VocabularyTests
 
         for (int i = 0; i < rowCount; i++)
         {
-            collector.AddRow(CreateRow(("id", DataValue.FromInt32(i))));
+            collector.AddRow(CreateRow(("id", DataValue.FromInt32(i))), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -394,7 +356,7 @@ public sealed class VocabularyTests
         for (int i = 0; i < rowCount; i++)
         {
             // 1000 distinct values, each repeated ~5 times
-            collector.AddRow(CreateRow(("user_id", DataValue.FromInt32(i % 1000))));
+            collector.AddRow(CreateRow(("user_id", DataValue.FromInt32(i % 1000))), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -417,7 +379,7 @@ public sealed class VocabularyTests
 
         for (int i = 0; i < rowCount; i++)
         {
-            collector.AddRow(CreateRow(("status", DataValue.FromString(i % 3 == 0 ? "active" : i % 3 == 1 ? "inactive" : "pending"))));
+            collector.AddRow(CreateRow(("status", DataValue.FromString(i % 3 == 0 ? "active" : i % 3 == 1 ? "inactive" : "pending", _arena))), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -440,7 +402,7 @@ public sealed class VocabularyTests
 
         for (int i = 0; i < rowCount; i++)
         {
-            collector.AddRow(CreateRow(("id", DataValue.FromInt32(i))));
+            collector.AddRow(CreateRow(("id", DataValue.FromInt32(i))), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();

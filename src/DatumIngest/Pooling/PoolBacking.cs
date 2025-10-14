@@ -1,10 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using DatumIngest.Execution;
 using DatumIngest.Functions;
 using DatumIngest.Model;
 
-namespace DatumIngest.Execution.Pooling;
+namespace DatumIngest.Pooling;
 
 /// <summary>
 /// 
@@ -68,7 +69,9 @@ public sealed class PoolBacking
     private readonly ConcurrentDictionary<int, CountedPool<RowBatch>> rowBatchPools = new();
     private readonly ConcurrentDictionary<int, CountedPool<GroupState>> groupStatePools = new();
     private readonly ConcurrentDictionary<int, CountedPool<IAggregateAccumulator[]>> accumulatorArrayPools = new();
-  
+    private readonly CountedPool<Arena> arenaPools = new();
+
+
     /// <summary>
     /// Initializes a new <see cref="PoolBacking"/>.
     /// </summary>
@@ -140,12 +143,34 @@ public sealed class PoolBacking
     // }
 
     /// <summary>
-    /// Rents a <see cref="RowBatch"/> with a backing <see cref="Row"/> array of exactly
-    /// <paramref name="capacity"/> elements.
+    /// Rents a <see cref="RowBatch"/> with a backing <see cref="Row"/> array of exactly.
     /// </summary>
+    /// <param name="capacity">The capacity of the column batch.</param>
     public RowBatch RentRowBatch(int capacity)
     {
-        return RowBatch.Rent(capacity);
+        RowBatch rowBatch = RowBatch.Rent(capacity);
+        Arena arena = RentArena(owner: rowBatch);
+
+        rowBatch.Rent(arena);
+
+        return rowBatch;
+    }
+
+
+    /// <summary>
+    /// Rents an <see cref="Arena"/> with at least the specified capacity. The returned arena may have a larger capacity than requested;
+    /// </summary>
+    /// <param name="owner">The object that owns this arena (e.g. a RowBatch).</param>
+    /// <returns></returns>
+    public Arena RentArena(object owner)
+    {
+        if (arenaPools.TryDequeue(out Arena? arena))
+        {
+            arena.Unpool(owner);
+            return arena;
+        }
+
+        return new Arena(owner: owner);
     }
 
     /// <summary>
@@ -218,17 +243,38 @@ public sealed class PoolBacking
     /// <summary>
     /// Returns a <see cref="RowBatch"/> to the pool.
     /// </summary>
-    public void Return(RowBatch batch, bool returnDataValues)
+    public void Return(RowBatch batch)
     {
-        if (returnDataValues)
+        for (int i = 0; i < batch.Count; i++)
         {
-            for (int i = 0; i < batch.Count; i++)
-            {
-                Return(batch[i]);
-            }
+            Return(batch[i]);
+        }
+
+        if (batch.Arena?.Owner == batch)
+        {
+            Return(batch.Arena);
         }
 
         batch.ReturnShell();
+    }
+
+    /// <summary>
+    /// Returns the <paramref name="arena"/> to the pool and resets it for reuse.
+    /// Arenas above a certain capacity are not pooled to prevent unbounded memory usage from errant returns.
+    /// </summary>
+    /// <param name="arena">The arena to return.</param>
+    public void Return(Arena arena)
+    {
+        const int maxArenaCapacity = 4 * 1024 * 1024; // 4 MiB — arbitrary cap to prevent unbounded memory usage from errant returns; arenas above this size are not pooled
+
+        if (arena.Capacity >= maxArenaCapacity)
+        {
+            arena.Dispose();
+            return;
+        }
+
+        arena.Pool();
+        arenaPools.Enqueue(arena);
     }
 
     /// <summary>

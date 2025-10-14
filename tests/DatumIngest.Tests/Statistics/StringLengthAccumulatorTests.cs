@@ -4,16 +4,20 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class StringLengthAccumulatorTests
+public sealed class StringLengthAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_StringValues_TracksMinMaxLength()
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromString("hi"));
-        accumulator.Add(DataValue.FromString("hello"));
-        accumulator.Add(DataValue.FromString("greetings"));
+        accumulator.Add(DataValue.FromString("hi", _arena), _arena);
+        accumulator.Add(DataValue.FromString("hello", _arena), _arena);
+        accumulator.Add(DataValue.FromString("greetings", _arena), _arena);
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.Count);
@@ -26,7 +30,7 @@ public sealed class StringLengthAccumulatorTests
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromString("test"));
+        accumulator.Add(DataValue.FromString("test", _arena), _arena);
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.Count);
@@ -39,8 +43,8 @@ public sealed class StringLengthAccumulatorTests
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromString(""));
-        accumulator.Add(DataValue.FromString("abc"));
+        accumulator.Add(DataValue.FromString("", _arena), _arena);
+        accumulator.Add(DataValue.FromString("abc", _arena), _arena);
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.Count);
@@ -53,8 +57,8 @@ public sealed class StringLengthAccumulatorTests
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromString("hello"));
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromString("hello", _arena), _arena);
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.Count);
@@ -66,8 +70,8 @@ public sealed class StringLengthAccumulatorTests
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromUInt8(42));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromUInt8(42), _arena);
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.Count);
@@ -80,32 +84,13 @@ public sealed class StringLengthAccumulatorTests
     {
         StringLengthAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromJsonValue("{\"a\":1}"));
-        accumulator.Add(DataValue.FromJsonValue("[1,2,3,4,5]"));
+        accumulator.Add(DataValue.FromJsonValue("{\"a\":1}", _arena), _arena);
+        accumulator.Add(DataValue.FromJsonValue("[1,2,3,4,5]", _arena), _arena);
 
         StringLengthResult result = (StringLengthResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.Count);
         Assert.Equal(7, result.MinLength);
         Assert.Equal(11, result.MaxLength);
-    }
-
-    [Fact]
-    public void Merge_CombinesResults()
-    {
-        StringLengthAccumulator first = new();
-        first.Add(DataValue.FromString("ab"));
-        first.Add(DataValue.FromString("abcd"));
-
-        StringLengthAccumulator second = new();
-        second.Add(DataValue.FromString("a"));
-        second.Add(DataValue.FromString("abcdef"));
-
-        first.Merge(second);
-
-        StringLengthResult result = (StringLengthResult)first.GetResult().Value!;
-        Assert.Equal(4, result.Count);
-        Assert.Equal(1, result.MinLength);
-        Assert.Equal(6, result.MaxLength);
     }
 
     [Fact]

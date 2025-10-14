@@ -15,7 +15,7 @@ public sealed class BinarySizeAccumulator : IStatisticAccumulator
     private double _m2;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -27,7 +27,7 @@ public sealed class BinarySizeAccumulator : IStatisticAccumulator
             return;
         }
 
-        byte[] bytes = value.AsUInt8Array();
+        byte[] bytes = value.AsUInt8Array(store);
         double size = bytes.Length;
 
         _count++;
@@ -46,33 +46,6 @@ public sealed class BinarySizeAccumulator : IStatisticAccumulator
         _mean += delta / _count;
         double delta2 = size - _mean;
         _m2 += delta * delta2;
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not BinarySizeAccumulator otherBinary || otherBinary._count == 0)
-        {
-            return;
-        }
-
-        if (_count == 0)
-        {
-            _count = otherBinary._count;
-            _min = otherBinary._min;
-            _max = otherBinary._max;
-            _mean = otherBinary._mean;
-            _m2 = otherBinary._m2;
-            return;
-        }
-
-        long combinedCount = _count + otherBinary._count;
-        double delta = otherBinary._mean - _mean;
-        _mean += delta * otherBinary._count / combinedCount;
-        _m2 += otherBinary._m2 + delta * delta * _count * otherBinary._count / combinedCount;
-        _min = Math.Min(_min, otherBinary._min);
-        _max = Math.Max(_max, otherBinary._max);
-        _count = combinedCount;
     }
 
     /// <inheritdoc />

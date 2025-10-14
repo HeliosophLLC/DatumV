@@ -4,14 +4,18 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class HistogramAccumulatorTests
+public sealed class HistogramAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_SingleValue_SingleBin()
     {
         HistogramAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
         Assert.Single(result.Counts);
@@ -25,7 +29,7 @@ public sealed class HistogramAccumulatorTests
 
         for (int i = 0; i <= 100; i++)
         {
-            accumulator.Add(DataValue.FromFloat32(i));
+            accumulator.Add(DataValue.FromFloat32(i), _arena);
         }
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
@@ -49,11 +53,11 @@ public sealed class HistogramAccumulatorTests
     {
         HistogramAccumulator accumulator = new(binCount: 5);
 
-        accumulator.Add(DataValue.FromUInt8(0));
-        accumulator.Add(DataValue.FromUInt8(50));
-        accumulator.Add(DataValue.FromUInt8(100));
-        accumulator.Add(DataValue.FromUInt8(200));
-        accumulator.Add(DataValue.FromUInt8(255));
+        accumulator.Add(DataValue.FromUInt8(0), _arena);
+        accumulator.Add(DataValue.FromUInt8(50), _arena);
+        accumulator.Add(DataValue.FromUInt8(100), _arena);
+        accumulator.Add(DataValue.FromUInt8(200), _arena);
+        accumulator.Add(DataValue.FromUInt8(255), _arena);
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
         Assert.Equal(5, result.Counts.Count);
@@ -74,7 +78,7 @@ public sealed class HistogramAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromFloat32(42.0f));
+            accumulator.Add(DataValue.FromFloat32(42.0f), _arena);
         }
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
@@ -87,8 +91,8 @@ public sealed class HistogramAccumulatorTests
     {
         HistogramAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
         Assert.Equal(1, accumulator.TotalCount);
@@ -112,30 +116,6 @@ public sealed class HistogramAccumulatorTests
     }
 
     [Fact]
-    public void Merge_TwoAccumulators_CombinesSamples()
-    {
-        HistogramAccumulator first = new(binCount: 5);
-        HistogramAccumulator second = new(binCount: 5);
-
-        for (int i = 0; i < 50; i++)
-        {
-            first.Add(DataValue.FromFloat32(i));
-        }
-
-        for (int i = 50; i < 100; i++)
-        {
-            second.Add(DataValue.FromFloat32(i));
-        }
-
-        first.Merge(second);
-        HistogramResult result = (HistogramResult)first.GetResult().Value!;
-
-        Assert.Equal(100, first.TotalCount);
-        long totalInBins = result.Counts.Sum();
-        Assert.Equal(100, totalInBins);
-    }
-
-    [Fact]
     public void GetResult_IntegerData_ProducesIntegerAlignedEdges()
     {
         HistogramAccumulator accumulator = new(binCount: 50);
@@ -145,7 +125,7 @@ public sealed class HistogramAccumulatorTests
         {
             for (int i = 0; i < 10; i++)
             {
-                accumulator.Add(DataValue.FromFloat32(age));
+                accumulator.Add(DataValue.FromFloat32(age), _arena);
             }
         }
 
@@ -175,7 +155,7 @@ public sealed class HistogramAccumulatorTests
         {
             for (int i = 0; i < 100; i++)
             {
-                accumulator.Add(DataValue.FromFloat32(value));
+                accumulator.Add(DataValue.FromFloat32(value), _arena);
             }
         }
 
@@ -201,11 +181,11 @@ public sealed class HistogramAccumulatorTests
         HistogramAccumulator accumulator = new(binCount: 10);
 
         // Non-integer values — should use equal-width continuous binning.
-        accumulator.Add(DataValue.FromFloat32(0.1f));
-        accumulator.Add(DataValue.FromFloat32(0.5f));
-        accumulator.Add(DataValue.FromFloat32(1.7f));
-        accumulator.Add(DataValue.FromFloat32(3.14f));
-        accumulator.Add(DataValue.FromFloat32(9.99f));
+        accumulator.Add(DataValue.FromFloat32(0.1f), _arena);
+        accumulator.Add(DataValue.FromFloat32(0.5f), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.7f), _arena);
+        accumulator.Add(DataValue.FromFloat32(3.14f), _arena);
+        accumulator.Add(DataValue.FromFloat32(9.99f), _arena);
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
 
@@ -223,11 +203,11 @@ public sealed class HistogramAccumulatorTests
         HistogramAccumulator accumulator = new(binCount: 10);
 
         // Mix of integer and fractional — should detect as continuous.
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(2.0f));
-        accumulator.Add(DataValue.FromFloat32(3.5f));
-        accumulator.Add(DataValue.FromFloat32(4.0f));
-        accumulator.Add(DataValue.FromFloat32(5.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(3.5f), _arena);
+        accumulator.Add(DataValue.FromFloat32(4.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(5.0f), _arena);
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
 
@@ -256,7 +236,7 @@ public sealed class HistogramAccumulatorTests
         for (int i = 0; i < 1_000; i++)
         {
             double value = random.Next(0, 5_000_001);
-            accumulator.Add(DataValue.FromFloat64(value));
+            accumulator.Add(DataValue.FromFloat64(value), _arena);
         }
 
         // Must not throw IndexOutOfRangeException.
@@ -287,7 +267,7 @@ public sealed class HistogramAccumulatorTests
         for (int i = 0; i < 500; i++)
         {
             double value = baseEpoch + random.Next(0, 1_200_000_000);
-            accumulator.Add(DataValue.FromFloat64(value));
+            accumulator.Add(DataValue.FromFloat64(value), _arena);
         }
 
         // Must not throw IndexOutOfRangeException.
@@ -309,10 +289,10 @@ public sealed class HistogramAccumulatorTests
         HistogramAccumulator accumulator = new(binCount: 10);
 
         // Range: 0 to 10 billion. binWidth ≈ 1 billion, well above int.MaxValue.
-        accumulator.Add(DataValue.FromFloat64(0.0));
-        accumulator.Add(DataValue.FromFloat64(1_000_000_000.0));
-        accumulator.Add(DataValue.FromFloat64(5_000_000_000.0));
-        accumulator.Add(DataValue.FromFloat64(10_000_000_000.0));
+        accumulator.Add(DataValue.FromFloat64(0.0), _arena);
+        accumulator.Add(DataValue.FromFloat64(1_000_000_000.0), _arena);
+        accumulator.Add(DataValue.FromFloat64(5_000_000_000.0), _arena);
+        accumulator.Add(DataValue.FromFloat64(10_000_000_000.0), _arena);
 
         HistogramResult result = (HistogramResult)accumulator.GetResult().Value!;
 

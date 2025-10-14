@@ -31,7 +31,6 @@ public sealed class CsvSerializer : IFormatSerializer
 
         char delimiter = GetDelimiter(_descriptor.Options);
         bool writeHeader = GetHeaderOption(_descriptor.Options);
-        IValueStore store = context.Arena;
 
         bool headerWritten = false;
 
@@ -47,7 +46,7 @@ public sealed class CsvSerializer : IFormatSerializer
                     headerWritten = true;
                 }
 
-                WriteDataRow(writer, row, delimiter, store);
+                WriteDataRow(writer, row, delimiter, batch.Arena);
             }
         }
     }

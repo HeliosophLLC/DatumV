@@ -12,11 +12,7 @@ public interface IFormatSerializer
     /// <summary>
     /// Serializes the given row batches to the output stream.
     /// </summary>
-    /// <param name="context">
-    /// Shared serialization resources: <see cref="SerializationContext.Pool"/> for
-    /// renting arrays and batches, <see cref="SerializationContext.Arena"/> for
-    /// temporary string storage.
-    /// </param>
+    /// <param name="context">The serialization context.</param>
     /// <param name="rows">An async stream of <see cref="RowBatch"/> instances to serialize.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task SerializeAsync(

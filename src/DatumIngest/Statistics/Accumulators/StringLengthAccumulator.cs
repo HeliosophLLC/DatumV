@@ -21,7 +21,7 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
     public int MaxLength => _count > 0 ? _maxLength : 0;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -33,7 +33,7 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
             return;
         }
 
-        string stringValue = value.Kind == DataKind.JsonValue ? value.AsJsonValue() : value.AsString();
+        string stringValue = value.Kind == DataKind.JsonValue ? value.AsJsonValue(store) : value.AsString(store);
         int length = stringValue.Length;
 
         _count++;
@@ -47,27 +47,6 @@ public sealed class StringLengthAccumulator : IStatisticAccumulator
         {
             _maxLength = length;
         }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not StringLengthAccumulator otherString || otherString._count == 0)
-        {
-            return;
-        }
-
-        if (_count == 0)
-        {
-            _count = otherString._count;
-            _minLength = otherString._minLength;
-            _maxLength = otherString._maxLength;
-            return;
-        }
-
-        _count += otherString._count;
-        _minLength = Math.Min(_minLength, otherString._minLength);
-        _maxLength = Math.Max(_maxLength, otherString._maxLength);
     }
 
     /// <inheritdoc />

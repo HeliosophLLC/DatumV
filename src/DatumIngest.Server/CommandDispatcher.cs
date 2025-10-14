@@ -1,7 +1,7 @@
 using DatumIngest.Catalog;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
-using DatumIngest.Execution.Pooling;
+using DatumIngest.Pooling;
 using DatumIngest.Functions;
 using DatumIngest.Manifest;
 using DatumIngest.Model;

@@ -57,7 +57,7 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
     private long _aspectTotalCount;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -66,8 +66,8 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
 
         byte[]? imageBytes = value.Kind switch
         {
-            DataKind.Image => value.AsImage(),
-            DataKind.UInt8Array => value.AsUInt8Array(),
+            DataKind.Image => value.AsImage(store),
+            DataKind.UInt8Array => value.AsUInt8Array(store),
             _ => null
         };
 
@@ -217,145 +217,6 @@ public sealed class ImageStatsAccumulator : IStatisticAccumulator
                     _aspectSamples[(int)j] = aspectRatio;
                 }
             }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not ImageStatsAccumulator otherImage || otherImage._count == 0)
-        {
-            return;
-        }
-
-        if (_count == 0)
-        {
-            _count = otherImage._count;
-            _minWidth = otherImage._minWidth;
-            _maxWidth = otherImage._maxWidth;
-            _minHeight = otherImage._minHeight;
-            _maxHeight = otherImage._maxHeight;
-            _undecodableCount = otherImage._undecodableCount;
-            _tinyImageCount = otherImage._tinyImageCount;
-            _hugeImageCount = otherImage._hugeImageCount;
-            _sizeCount = otherImage._sizeCount;
-            _sizeMin = otherImage._sizeMin;
-            _sizeMax = otherImage._sizeMax;
-            _sizeMean = otherImage._sizeMean;
-            _sizeM2 = otherImage._sizeM2;
-            _megapixelCount = otherImage._megapixelCount;
-            _megapixelMin = otherImage._megapixelMin;
-            _megapixelMax = otherImage._megapixelMax;
-            _megapixelMean = otherImage._megapixelMean;
-            _megapixelM2 = otherImage._megapixelM2;
-            _aspectCount = otherImage._aspectCount;
-            _aspectMin = otherImage._aspectMin;
-            _aspectMax = otherImage._aspectMax;
-            _aspectMean = otherImage._aspectMean;
-            _aspectM2 = otherImage._aspectM2;
-            _aspectTotalCount = otherImage._aspectTotalCount;
-            _aspectSamples.AddRange(otherImage._aspectSamples);
-
-            foreach (KeyValuePair<int, long> entry in otherImage._channelCounts)
-            {
-                _channelCounts[entry.Key] = entry.Value;
-            }
-
-            foreach (KeyValuePair<string, long> entry in otherImage._orientationCounts)
-            {
-                _orientationCounts[entry.Key] = entry.Value;
-            }
-
-            return;
-        }
-
-        _count += otherImage._count;
-        _minWidth = Math.Min(_minWidth, otherImage._minWidth);
-        _maxWidth = Math.Max(_maxWidth, otherImage._maxWidth);
-        _minHeight = Math.Min(_minHeight, otherImage._minHeight);
-        _maxHeight = Math.Max(_maxHeight, otherImage._maxHeight);
-        _undecodableCount += otherImage._undecodableCount;
-        _tinyImageCount += otherImage._tinyImageCount;
-        _hugeImageCount += otherImage._hugeImageCount;
-
-        // Merge channel counts
-        foreach (KeyValuePair<int, long> entry in otherImage._channelCounts)
-        {
-            if (_channelCounts.TryGetValue(entry.Key, out long existing))
-            {
-                _channelCounts[entry.Key] = existing + entry.Value;
-            }
-            else
-            {
-                _channelCounts[entry.Key] = entry.Value;
-            }
-        }
-
-        // Merge orientation counts
-        foreach (KeyValuePair<string, long> entry in otherImage._orientationCounts)
-        {
-            if (_orientationCounts.TryGetValue(entry.Key, out long existingOrientation))
-            {
-                _orientationCounts[entry.Key] = existingOrientation + entry.Value;
-            }
-            else
-            {
-                _orientationCounts[entry.Key] = entry.Value;
-            }
-        }
-
-        // Parallel Welford merge for file size
-        if (otherImage._sizeCount > 0)
-        {
-            long combinedCount = _sizeCount + otherImage._sizeCount;
-            double sizeDelta = otherImage._sizeMean - _sizeMean;
-            _sizeMean += sizeDelta * otherImage._sizeCount / combinedCount;
-            _sizeM2 += otherImage._sizeM2 +
-                        sizeDelta * sizeDelta * _sizeCount * otherImage._sizeCount / combinedCount;
-            _sizeMin = Math.Min(_sizeMin, otherImage._sizeMin);
-            _sizeMax = Math.Max(_sizeMax, otherImage._sizeMax);
-            _sizeCount = combinedCount;
-        }
-
-        // Parallel Welford merge for megapixels
-        if (otherImage._megapixelCount > 0)
-        {
-            long combinedMegapixelCount = _megapixelCount + otherImage._megapixelCount;
-            double megapixelDelta = otherImage._megapixelMean - _megapixelMean;
-            _megapixelMean += megapixelDelta * otherImage._megapixelCount / combinedMegapixelCount;
-            _megapixelM2 += otherImage._megapixelM2 +
-                            megapixelDelta * megapixelDelta * _megapixelCount * otherImage._megapixelCount / combinedMegapixelCount;
-            _megapixelMin = Math.Min(_megapixelMin, otherImage._megapixelMin);
-            _megapixelMax = Math.Max(_megapixelMax, otherImage._megapixelMax);
-            _megapixelCount = combinedMegapixelCount;
-        }
-
-        // Parallel Welford merge for aspect ratio
-        if (otherImage._aspectCount > 0)
-        {
-            long combinedAspectCount = _aspectCount + otherImage._aspectCount;
-            double aspectDelta = otherImage._aspectMean - _aspectMean;
-            _aspectMean += aspectDelta * otherImage._aspectCount / combinedAspectCount;
-            _aspectM2 += otherImage._aspectM2 +
-                         aspectDelta * aspectDelta * _aspectCount * otherImage._aspectCount / combinedAspectCount;
-            _aspectMin = Math.Min(_aspectMin, otherImage._aspectMin);
-            _aspectMax = Math.Max(_aspectMax, otherImage._aspectMax);
-            _aspectCount = combinedAspectCount;
-        }
-
-        // Merge aspect ratio samples
-        _aspectTotalCount += otherImage._aspectTotalCount;
-        _aspectSamples.AddRange(otherImage._aspectSamples);
-
-        if (_aspectSamples.Count > MaxAspectSamples)
-        {
-            for (int i = _aspectSamples.Count - 1; i > 0; i--)
-            {
-                int j = _aspectRandom.Next(i + 1);
-                (_aspectSamples[i], _aspectSamples[j]) = (_aspectSamples[j], _aspectSamples[i]);
-            }
-
-            _aspectSamples.RemoveRange(MaxAspectSamples, _aspectSamples.Count - MaxAspectSamples);
         }
     }
 

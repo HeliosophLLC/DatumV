@@ -1,22 +1,19 @@
 namespace DatumIngest.Statistics;
 
-using System.Collections.Concurrent;
 using DatumIngest.Model;
 using DatumIngest.Statistics.Accumulators;
 
 /// <summary>
 /// Manages per-column statistic accumulators and collects statistics from rows.
-/// Thread-safe: uses concurrent dictionaries for parallel accumulation.
 /// </summary>
 public sealed class StatisticsCollector
 {
-    private readonly ConcurrentDictionary<string, List<IStatisticAccumulator>> _columnAccumulators = new();
+    private readonly Dictionary<string, List<IStatisticAccumulator>> _columnAccumulators = new();
     private readonly int _topK;
 
     /// <summary>
     /// Cached accumulator lists indexed by column ordinal. Populated on the first row
-    /// and reused for all subsequent rows, bypassing the <see cref="ConcurrentDictionary{TKey,TValue}"/>
-    /// lookup overhead on the hot path.
+    /// and reused for all subsequent rows, bypassing the dictionary lookup on the hot path.
     /// </summary>
     private List<IStatisticAccumulator>[]? _ordinalAccumulators;
 
@@ -30,9 +27,23 @@ public sealed class StatisticsCollector
     }
 
     /// <summary>
+    /// Adds a batch of rows to the statistics collector. Each row is processed sequentially.
+    /// </summary>
+    /// <param name="rowBatch">The row batch to process.</param>
+    public void Collect(RowBatch rowBatch)
+    {
+        for (int i = 0; i < rowBatch.Count; i++)
+        {
+            AddRow(rowBatch[i], rowBatch.Arena);
+        }
+    }
+
+    /// <summary>
     /// Adds a row to all column accumulators. Creates accumulators for new columns on first encounter.
     /// </summary>
-    public void AddRow(Row row)
+    /// <param name="row">The row to accumulate.</param>
+    /// <param name="store">Value store for resolving reference-type payloads.</param>
+    public void AddRow(Row row, IValueStore store)
     {
         List<IStatisticAccumulator>[]? cached = _ordinalAccumulators;
 
@@ -45,7 +56,7 @@ public sealed class StatisticsCollector
 
                 foreach (IStatisticAccumulator accumulator in accumulators)
                 {
-                    accumulator.Add(value);
+                    accumulator.Add(value, store);
                 }
             }
 
@@ -59,13 +70,15 @@ public sealed class StatisticsCollector
         foreach (string columnName in row.ColumnNames)
         {
             DataValue value = row[columnName];
-            List<IStatisticAccumulator> accumulators = _columnAccumulators.GetOrAdd(
-                columnName,
-                _ => CreateAccumulators(value.Kind));
+            if (!_columnAccumulators.TryGetValue(columnName, out List<IStatisticAccumulator>? accumulators))
+            {
+                accumulators = CreateAccumulators(value.Kind);
+                _columnAccumulators[columnName] = accumulators;
+            }
 
             foreach (IStatisticAccumulator accumulator in accumulators)
             {
-                accumulator.Add(value);
+                accumulator.Add(value, store);
             }
 
             ordinalCache[index] = accumulators;
@@ -73,29 +86,6 @@ public sealed class StatisticsCollector
         }
 
         _ordinalAccumulators = ordinalCache;
-    }
-
-    /// <summary>
-    /// Merges another collector's state into this one. Used for combining results from parallel processing.
-    /// </summary>
-    public void Merge(StatisticsCollector other)
-    {
-        foreach (KeyValuePair<string, List<IStatisticAccumulator>> entry in other._columnAccumulators)
-        {
-            List<IStatisticAccumulator> thisAccumulators = _columnAccumulators.GetOrAdd(
-                entry.Key,
-                _ => CreateAccumulators(DataKind.String));
-
-            if (thisAccumulators.Count != entry.Value.Count)
-            {
-                continue;
-            }
-
-            for (int i = 0; i < thisAccumulators.Count; i++)
-            {
-                thisAccumulators[i].Merge(entry.Value[i]);
-            }
-        }
     }
 
     /// <summary>

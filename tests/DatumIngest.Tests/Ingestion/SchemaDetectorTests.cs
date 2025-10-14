@@ -1,4 +1,4 @@
-using DatumIngest.Execution.Pooling;
+using DatumIngest.Pooling;
 using DatumIngest.Ingestion;
 using DatumIngest.Model;
 
@@ -14,7 +14,7 @@ public sealed class SchemaDetectorTests
         for (int i = 0; i < names.Count; i++)
             nameIndex[names[i]] = i;
 
-        RowBatch batch = pool.RentBatch(1024);
+        RowBatch batch = pool.RentRowBatch(1024);
         foreach (DataValue[] values in rows)
             batch.Add(new Row(names, values, nameIndex));
         return batch;

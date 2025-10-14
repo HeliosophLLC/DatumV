@@ -20,9 +20,4 @@ public sealed class DatumEncoderContext
 
     /// <summary>Zero-based index of the row group currently being encoded.</summary>
     public int RowGroupIndex { get; init; }
-
-    /// <summary>
-    /// Value store for resolving string and binary payloads during encoding.
-    /// </summary>
-    public IValueStore Store { get; init; } = new Arena();
 }

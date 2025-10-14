@@ -17,29 +17,19 @@ public sealed class CountAccumulator : IStatisticAccumulator
     public long NullOrEmptyCount => _nullOrEmptyCount;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
             _nullOrEmptyCount++;
         }
-        else if (value.Kind == DataKind.String && value.AsString().Length == 0)
+        else if (value.Kind == DataKind.String && value.AsString(store).Length == 0)
         {
             _nullOrEmptyCount++;
         }
         else
         {
             _nonNullCount++;
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is CountAccumulator otherCount)
-        {
-            _nonNullCount += otherCount._nonNullCount;
-            _nullOrEmptyCount += otherCount._nullOrEmptyCount;
         }
     }
 

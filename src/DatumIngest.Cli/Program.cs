@@ -438,6 +438,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
             ITableProvider provider = catalog.CreateProvider(descriptor);
             IncrementalIndexBuilder indexBuilder = builder.CreateIncrementalBuilder(fingerprint);
             StatisticsCollector statisticsCollector = new();
+            using Arena statisticsArena = new(); // TODO: remove when CLI ingestion is refactored
             ColumnInteractionCollector? interactionCollector = options.WithInteractions ? new() : null;
             ProgressReporter progress = new();
             Dictionary<string, DataKind> columnKinds = new();
@@ -458,7 +459,7 @@ static async Task BuildGroupedIndexAndManifestAsync(
                     }
 
                     indexBuilder.AddRow(row);
-                    statisticsCollector.AddRow(row);
+                    statisticsCollector.AddRow(row, statisticsArena);
                     interactionCollector?.AddRow(row);
                     rowCount++;
                     progress.ReportRow();
@@ -740,6 +741,7 @@ static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions optio
     {
         ITableProvider provider = catalog.CreateProvider(descriptor);
         StatisticsCollector statisticsCollector = new();
+        using Arena statisticsArena2 = new(); // TODO: remove when star-schema is refactored
         Dictionary<string, DataKind> columnKinds = new();
         long rowCount = 0;
 
@@ -757,7 +759,7 @@ static async Task<int> RunStarSchemaAsync(TableCatalog catalog, CliOptions optio
                     }
                 }
 
-                statisticsCollector.AddRow(row);
+                statisticsCollector.AddRow(row, statisticsArena2);
                 rowCount++;
             }
             batch.Return();
@@ -1137,6 +1139,7 @@ static async Task<int> RunStatsViaGrpcAsync(
     GrpcQueryResult grpcResult = await GrpcResultAdapter.ReadQueryAsync(call);
 
     StatisticsCollector collector = new();
+    using Arena statsArena = new(); // TODO: remove when CLI is refactored
     ProgressReporter progress = new();
 
     await foreach (RowBatch batch in grpcResult.Rows)
@@ -1144,7 +1147,7 @@ static async Task<int> RunStatsViaGrpcAsync(
         for (int i = 0; i < batch.Count; i++)
         {
             Row row = batch[i];
-            collector.AddRow(row);
+            collector.AddRow(row, statsArena);
             progress.ReportRow();
         }
         batch.Return();
@@ -1211,6 +1214,7 @@ static async Task<int> RunManifestViaGrpcAsync(
     GrpcQueryResult grpcResult = await GrpcResultAdapter.ReadQueryAsync(call);
 
     StatisticsCollector collector = new();
+    using Arena statsArena2 = new(); // TODO: remove when CLI is refactored
     ColumnInteractionCollector interactionCollector = new();
     ProgressReporter progress = new();
     Dictionary<string, DataKind> columnKinds = new();
@@ -1229,7 +1233,7 @@ static async Task<int> RunManifestViaGrpcAsync(
                 }
             }
 
-            collector.AddRow(row);
+            collector.AddRow(row, statsArena2);
             interactionCollector.AddRow(row);
             rowCount++;
             progress.ReportRow();

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
+using DatumIngest.Execution;
 
-namespace DatumIngest.Execution.Pooling;
+namespace DatumIngest.Pooling;
 
 
 /// <summary>
@@ -8,40 +9,11 @@ namespace DatumIngest.Execution.Pooling;
 /// </summary>
 public static class GlobalPool
 {
-    private static readonly ConcurrentQueue<Pool> pools = new();
     private static readonly ConcurrentQueue<LocalBufferPool> localBufferPools = new();
-
     /// <summary>
-    /// Gets the process-wide shared <see cref="PoolBacking"/> instance.
+    /// Gets the global <see cref="PoolBacking"/> instance shared by all pools. Contains the shared resources (e.g. buffers) that survive across queries.
     /// </summary>
-    internal static PoolBacking Backing { get; } = new PoolBacking();
-
-
-    /// <summary>
-    /// Rents a <see cref="Pool"/>.
-    /// </summary>
-    public static Pool RentPool()
-    {
-        if (pools.TryDequeue(out Pool? pool))
-        {
-            return pool;
-        }
-
-        return new Pool(Backing);
-    }
-
-    /// <summary>
-    /// Returns a <see cref="Pool"/> for future reuse.
-    /// </summary>
-    public static void ReturnPool(Pool pool)
-    {
-        if (pool.Backing != Backing)
-        {
-            throw new InvalidOperationException("Attempted to return a Pool instance that was not created by this GlobalPool.");
-        }
-
-        pools.Enqueue(pool);
-    }
+    public static PoolBacking Backing => new();
 
     /// <summary>
     /// Rents a <see cref="LocalBufferPool"/> for a single query. Returns a previously

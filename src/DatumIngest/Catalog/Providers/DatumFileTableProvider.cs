@@ -199,7 +199,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                     continue;
                 }
 
-                DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
+                DataValue[] values = DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
@@ -398,7 +398,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
                     continue;
                 }
 
-                DataValue[] values = DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
+                DataValue[] values = DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(projectedIndices.Length);
                 for (int colPos = 0; colPos < projectedIndices.Length; colPos++)
                 {
                     values[colPos] = columns[colPos][rowIndex];
@@ -463,7 +463,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         for (int ci = 0; ci < projectedIndices.Length; ci++)
         {
             columnBuffers[ci] = maxRowGroupSize > 0
-                ? DatumIngest.Execution.Pooling.GlobalPool.Backing.RentDataValues(maxRowGroupSize)
+                ? DatumIngest.Pooling.GlobalPool.Backing.RentDataValues(maxRowGroupSize)
                 : [];
         }
 
@@ -487,7 +487,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         {
             foreach (DataValue[] buffer in _seekColumnBuffers)
             {
-                if (buffer.Length > 0) DatumIngest.Execution.Pooling.GlobalPool.Backing.Return(buffer);
+                if (buffer.Length > 0) DatumIngest.Pooling.GlobalPool.Backing.Return(buffer);
             }
         }
 

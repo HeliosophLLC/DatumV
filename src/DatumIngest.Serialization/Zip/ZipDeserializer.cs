@@ -36,8 +36,6 @@ public sealed class ZipDeserializer : IFormatDeserializer
             ["file_bytes"] = 1,
         };
 
-        IValueStore store = context.Arena;
-
         int batchSize = ComputeBatchSize(archive);
 
         RowBatch? batch = null;
@@ -49,11 +47,11 @@ public sealed class ZipDeserializer : IFormatDeserializer
             if (string.IsNullOrEmpty(entry.Name) && entry.FullName.EndsWith('/'))
                 continue;
 
+            batch ??= context.Pool.RentRowBatch(batchSize);
             DataValue[] values = context.Pool.RentDataValues(2);
-            values[0] = DataValue.FromString(entry.FullName, store);
-            values[1] = DataValue.FromUInt8Array(ReadEntryBytes(entry), store);
+            values[0] = DataValue.FromString(entry.FullName, batch.Arena);
+            values[1] = DataValue.FromUInt8Array(ReadEntryBytes(entry), batch.Arena);
 
-            batch ??= context.Pool.RentBatch(batchSize);
             batch.Add(new Row(names, values, nameIndex));
 
             if (batch.IsFull)

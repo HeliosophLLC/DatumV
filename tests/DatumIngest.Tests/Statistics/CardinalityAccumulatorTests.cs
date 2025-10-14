@@ -4,8 +4,12 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class CardinalityAccumulatorTests
+public sealed class CardinalityAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_DistinctValues_EstimatesCardinality()
     {
@@ -13,7 +17,7 @@ public sealed class CardinalityAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString($"value_{i}"));
+            accumulator.Add(DataValue.FromString($"value_{i}", _arena), _arena);
         }
 
         CardinalityResult result = (CardinalityResult)accumulator.GetResult().Value!;
@@ -28,7 +32,7 @@ public sealed class CardinalityAccumulatorTests
 
         for (int i = 0; i < 1000; i++)
         {
-            accumulator.Add(DataValue.FromString($"value_{i % 10}"));
+            accumulator.Add(DataValue.FromString($"value_{i % 10}", _arena), _arena);
         }
 
         CardinalityResult result = (CardinalityResult)accumulator.GetResult().Value!;
@@ -40,10 +44,10 @@ public sealed class CardinalityAccumulatorTests
     {
         CardinalityAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(2.0f));
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(3.0f));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(3.0f), _arena);
 
         CardinalityResult result = (CardinalityResult)accumulator.GetResult().Value!;
         Assert.InRange(result.EstimatedDistinctCount, 2, 4);
@@ -54,9 +58,9 @@ public sealed class CardinalityAccumulatorTests
     {
         CardinalityAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromString("a"));
-        accumulator.Add(DataValue.Null(DataKind.String));
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromString("a", _arena), _arena);
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
 
         CardinalityResult result = (CardinalityResult)accumulator.GetResult().Value!;
         Assert.InRange(result.EstimatedDistinctCount, 1, 2);
@@ -70,56 +74,13 @@ public sealed class CardinalityAccumulatorTests
         int distinctCount = 5000;
         for (int i = 0; i < distinctCount; i++)
         {
-            accumulator.Add(DataValue.FromString($"item_{i}"));
+            accumulator.Add(DataValue.FromString($"item_{i}", _arena), _arena);
         }
 
         CardinalityResult result = (CardinalityResult)accumulator.GetResult().Value!;
         // HyperLogLog should be within ~2% for larger datasets
         double errorPercent = Math.Abs(result.EstimatedDistinctCount - distinctCount) * 100.0 / distinctCount;
         Assert.True(errorPercent < 5.0, $"Error was {errorPercent:F2}% for {distinctCount} distinct values");
-    }
-
-    [Fact]
-    public void Merge_CombinesEstimates()
-    {
-        CardinalityAccumulator first = new();
-        for (int i = 0; i < 50; i++)
-        {
-            first.Add(DataValue.FromString($"value_{i}"));
-        }
-
-        CardinalityAccumulator second = new();
-        for (int i = 50; i < 100; i++)
-        {
-            second.Add(DataValue.FromString($"value_{i}"));
-        }
-
-        first.Merge(second);
-
-        CardinalityResult result = (CardinalityResult)first.GetResult().Value!;
-        Assert.InRange(result.EstimatedDistinctCount, 85, 115);
-    }
-
-    [Fact]
-    public void Merge_WithOverlappingValues_DoesNotDoubleCount()
-    {
-        CardinalityAccumulator first = new();
-        for (int i = 0; i < 50; i++)
-        {
-            first.Add(DataValue.FromString($"value_{i}"));
-        }
-
-        CardinalityAccumulator second = new();
-        for (int i = 25; i < 75; i++) // 25 values overlap
-        {
-            second.Add(DataValue.FromString($"value_{i}"));
-        }
-
-        first.Merge(second);
-
-        CardinalityResult result = (CardinalityResult)first.GetResult().Value!;
-        // Should be ~75 distinct, not ~100
-        Assert.InRange(result.EstimatedDistinctCount, 60, 90);
     }
 
     [Fact]

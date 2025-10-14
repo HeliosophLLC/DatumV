@@ -86,7 +86,7 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -155,7 +155,7 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
         }
         else
         {
-            string key = ValueToString(value);
+            string key = ValueToString(value, store);
 
             if (_stringFrequencies!.TryGetValue(key, out long currentCount))
             {
@@ -173,91 +173,6 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
             else
             {
                 _untrackedCount++;
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not CategoricalDiagnosticsAccumulator otherDiagnostics)
-        {
-            return;
-        }
-
-        _totalCount += otherDiagnostics._totalCount;
-        _untrackedCount += otherDiagnostics._untrackedCount;
-
-        if (_wideNumericFrequencies is not null && otherDiagnostics._wideNumericFrequencies is not null)
-        {
-            foreach (KeyValuePair<long, long> entry in otherDiagnostics._wideNumericFrequencies)
-            {
-                if (_wideNumericFrequencies.TryGetValue(entry.Key, out long currentCount))
-                {
-                    _wideNumericFrequencies[entry.Key] = currentCount + entry.Value;
-                }
-                else if (_wideNumericFrequencies.Count < MaxDistinctValues)
-                {
-                    _wideNumericFrequencies[entry.Key] = entry.Value;
-                }
-                else
-                {
-                    _untrackedCount += entry.Value;
-                    _capped = true;
-                }
-            }
-
-            if (_wideNumericFrequencies.Count >= MaxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-        else if (_numericFrequencies is not null && otherDiagnostics._numericFrequencies is not null)
-        {
-            foreach (KeyValuePair<int, long> entry in otherDiagnostics._numericFrequencies)
-            {
-                if (_numericFrequencies.TryGetValue(entry.Key, out long currentCount))
-                {
-                    _numericFrequencies[entry.Key] = currentCount + entry.Value;
-                }
-                else if (_numericFrequencies.Count < MaxDistinctValues)
-                {
-                    _numericFrequencies[entry.Key] = entry.Value;
-                }
-                else
-                {
-                    _untrackedCount += entry.Value;
-                    _capped = true;
-                }
-            }
-
-            if (_numericFrequencies.Count >= MaxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-        else if (_stringFrequencies is not null && otherDiagnostics._stringFrequencies is not null)
-        {
-            foreach (KeyValuePair<string, long> entry in otherDiagnostics._stringFrequencies)
-            {
-                if (_stringFrequencies.TryGetValue(entry.Key, out long currentCount))
-                {
-                    _stringFrequencies[entry.Key] = currentCount + entry.Value;
-                }
-                else if (_stringFrequencies.Count < MaxDistinctValues)
-                {
-                    _stringFrequencies[entry.Key] = entry.Value;
-                }
-                else
-                {
-                    _untrackedCount += entry.Value;
-                    _capped = true;
-                }
-            }
-
-            if (_stringFrequencies.Count >= MaxDistinctValues)
-            {
-                _capped = true;
             }
         }
     }
@@ -315,7 +230,12 @@ public sealed class CategoricalDiagnosticsAccumulator : IStatisticAccumulator
             new CategoricalDiagnosticsResult(coverageTopK, rareRatio, rareCategoryCount, totalCategoryCount, _capped));
     }
 
-    private static string ValueToString(DataValue value) => value.ToDisplayString();
+    private static string ValueToString(DataValue value, IValueStore store) => value.Kind switch
+    {
+        DataKind.String => value.AsString(store),
+        DataKind.JsonValue => value.AsJsonValue(store),
+        _ => value.ToDisplayString()
+    };
 }
 
 /// <summary>

@@ -99,7 +99,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -144,7 +144,7 @@ public sealed class TopKAccumulator : IStatisticAccumulator
         }
         else
         {
-            string key = ValueToString(value);
+            string key = ValueToString(value, store);
 
             if (_stringFrequencies!.TryGetValue(key, out long currentCount))
             {
@@ -158,78 +158,6 @@ public sealed class TopKAccumulator : IStatisticAccumulator
                 {
                     TrimString();
                 }
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not TopKAccumulator otherTopK)
-        {
-            return;
-        }
-
-        if (_wideNumericFrequencies is not null && otherTopK._wideNumericFrequencies is not null)
-        {
-            foreach (KeyValuePair<long, long> entry in otherTopK._wideNumericFrequencies)
-            {
-                _wideNumericFrequencies.TryGetValue(entry.Key, out long currentCount);
-                _wideNumericFrequencies[entry.Key] = currentCount + entry.Value;
-            }
-
-            if (_wideNumericFrequencies.Count > _k * 2)
-            {
-                TrimWideNumeric();
-            }
-        }
-        else if (_numericFrequencies is not null && otherTopK._numericFrequencies is not null)
-        {
-            foreach (KeyValuePair<int, long> entry in otherTopK._numericFrequencies)
-            {
-                _numericFrequencies.TryGetValue(entry.Key, out long currentCount);
-                _numericFrequencies[entry.Key] = currentCount + entry.Value;
-            }
-
-            if (_numericFrequencies.Count > _k * 2)
-            {
-                TrimNumeric();
-            }
-        }
-        else if (_stringFrequencies is not null)
-        {
-            if (otherTopK._stringFrequencies is not null)
-            {
-                foreach (KeyValuePair<string, long> entry in otherTopK._stringFrequencies)
-                {
-                    _stringFrequencies.TryGetValue(entry.Key, out long currentCount);
-                    _stringFrequencies[entry.Key] = currentCount + entry.Value;
-                }
-            }
-            else if (otherTopK._numericFrequencies is not null)
-            {
-                // Cross-mode merge: convert other's numeric keys to strings.
-                foreach (KeyValuePair<int, long> entry in otherTopK._numericFrequencies)
-                {
-                    string key = otherTopK.NumericKeyToString(entry.Key);
-                    _stringFrequencies.TryGetValue(key, out long currentCount);
-                    _stringFrequencies[key] = currentCount + entry.Value;
-                }
-            }
-            else if (otherTopK._wideNumericFrequencies is not null)
-            {
-                // Cross-mode merge: convert other's wide numeric keys to strings.
-                foreach (KeyValuePair<long, long> entry in otherTopK._wideNumericFrequencies)
-                {
-                    string key = otherTopK.WideNumericKeyToString(entry.Key);
-                    _stringFrequencies.TryGetValue(key, out long currentCount);
-                    _stringFrequencies[key] = currentCount + entry.Value;
-                }
-            }
-
-            if (_stringFrequencies.Count > _k * 2)
-            {
-                TrimString();
             }
         }
     }
@@ -371,7 +299,12 @@ public sealed class TopKAccumulator : IStatisticAccumulator
         }
     }
 
-    private static string ValueToString(DataValue value) => value.ToDisplayString();
+    private static string ValueToString(DataValue value, IValueStore store) => value.Kind switch
+    {
+        DataKind.String => value.AsString(store),
+        DataKind.JsonValue => value.AsJsonValue(store),
+        _ => value.ToDisplayString()
+    };
 }
 
 /// <summary>

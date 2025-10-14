@@ -19,6 +19,7 @@ public sealed class RowBatch
 {
     private Row[] _rows;
     private bool _returned;
+    private Arena? _arena;
 
     private RowBatch(Row[] rows, int capacity)
     {
@@ -34,6 +35,15 @@ public sealed class RowBatch
 
     /// <summary>Whether the batch has reached its capacity.</summary>
     public bool IsFull => Count >= Capacity;
+
+    /// <summary>
+    /// Gets the <see cref="Arena"/> associated with this batch.
+    /// </summary>
+    public Arena Arena
+    {
+        get => _arena
+            ?? throw new InvalidOperationException("RowBatch does not have an associated Arena.");
+    }
 
     /// <summary>
     /// Returns the row at the given index.
@@ -121,10 +131,22 @@ public sealed class RowBatch
         }
 
         _returned = true;
+        _arena = null;
         Array.Clear(_rows, 0, Count);
         ArrayPool<Row>.Shared.Return(_rows);
         _rows = Array.Empty<Row>();
         Count = 0;
+    }
+
+    internal void Rent(Arena arena)
+    {
+        if (_arena != null)
+        {
+            throw new InvalidOperationException("RowBatch is already rented with an Arena. This indicates a bug in the operator code where a batch is being rented multiple times without being returned.");
+        }
+
+        _arena = arena;
+        _returned = false;
     }
 
     /// <summary>

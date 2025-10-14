@@ -4,14 +4,18 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class VectorStatsAccumulatorTests
+public sealed class VectorStatsAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_SingleVector_TracksElementStats()
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f]));
+        accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.ValueCount);
@@ -30,8 +34,8 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([1.0f, 2.0f]));
-        accumulator.Add(DataValue.FromVector([10.0f, 20.0f, 30.0f]));
+        accumulator.Add(DataValue.FromVector([1.0f, 2.0f], _arena), _arena);
+        accumulator.Add(DataValue.FromVector([10.0f, 20.0f, 30.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.ValueCount);
@@ -47,7 +51,7 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2));
+        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.ValueCount);
@@ -66,7 +70,7 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromTensor([1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f], [2, 2, 2]));
+        accumulator.Add(DataValue.FromTensor([1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f], [2, 2, 2], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.MinRank);
@@ -79,8 +83,8 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([1.0f, 2.0f]));
-        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2));
+        accumulator.Add(DataValue.FromVector([1.0f, 2.0f], _arena), _arena);
+        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.MinRank);
@@ -92,8 +96,8 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Vector));
-        accumulator.Add(DataValue.FromVector([5.0f]));
+        accumulator.Add(DataValue.Null(DataKind.Vector), _arena);
+        accumulator.Add(DataValue.FromVector([5.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.ValueCount);
@@ -111,26 +115,6 @@ public sealed class VectorStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_TwoAccumulators_CombinesCorrectly()
-    {
-        VectorStatsAccumulator first = new();
-        VectorStatsAccumulator second = new();
-
-        first.Add(DataValue.FromVector([1.0f, 2.0f]));
-        second.Add(DataValue.FromVector([10.0f, 20.0f, 30.0f]));
-
-        first.Merge(second);
-
-        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
-        Assert.Equal(2, result.ValueCount);
-        Assert.Equal(2, result.MinElementCount);
-        Assert.Equal(3, result.MaxElementCount);
-        Assert.Equal(5, result.ElementStats.Count);
-        Assert.Equal(1.0, result.ElementStats.Min);
-        Assert.Equal(30.0, result.ElementStats.Max);
-    }
-
-    [Fact]
     public void GetResult_HasCorrectName()
     {
         VectorStatsAccumulator accumulator = new();
@@ -142,7 +126,7 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([0.0f, 1.0f, 0.0f, 2.0f]));
+        accumulator.Add(DataValue.FromVector([0.0f, 1.0f, 0.0f, 2.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(2, result.ZeroElementCount);
@@ -155,7 +139,7 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.ZeroElementCount);
@@ -168,9 +152,9 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
-        accumulator.Add(DataValue.FromVector([0.0f, 0.2f, 0.0f]));
-        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
+        accumulator.Add(DataValue.FromVector([0.0f, 0.2f, 0.0f], _arena), _arena);
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(8, result.ZeroElementCount);
@@ -183,7 +167,7 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f]));
+        accumulator.Add(DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.ZeroElementCount);
@@ -203,30 +187,11 @@ public sealed class VectorStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_CombinesZeroCounts()
-    {
-        VectorStatsAccumulator first = new();
-        first.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
-
-        VectorStatsAccumulator second = new();
-        second.Add(DataValue.FromVector([0.0f, 1.0f]));
-        second.Add(DataValue.FromVector([0.0f, 0.0f]));
-
-        first.Merge(second);
-
-        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
-        Assert.Equal(3, result.ValueCount);
-        Assert.Equal(6, result.ZeroElementCount);
-        Assert.Equal(6.0 / 7.0, result.ZeroElementRatio, 1e-10);
-        Assert.Equal(2, result.ZeroVectorCount);
-    }
-
-    [Fact]
     public void Add_Matrix_TracksZeroElements()
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromMatrix([0.0f, 0.0f, 0.0f, 0.0f], 2, 2));
+        accumulator.Add(DataValue.FromMatrix([0.0f, 0.0f, 0.0f, 0.0f], 2, 2, _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(4, result.ZeroElementCount);
@@ -242,7 +207,7 @@ public sealed class VectorStatsAccumulatorTests
         VectorStatsAccumulator accumulator = new();
 
         // ||[3, 4]||₂ = 5.0
-        accumulator.Add(DataValue.FromVector([3.0f, 4.0f]));
+        accumulator.Add(DataValue.FromVector([3.0f, 4.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(5.0, result.NormMin, 1e-10);
@@ -256,9 +221,9 @@ public sealed class VectorStatsAccumulatorTests
         VectorStatsAccumulator accumulator = new();
 
         // ||[1, 0]||₂ = 1.0
-        accumulator.Add(DataValue.FromVector([1.0f, 0.0f]));
+        accumulator.Add(DataValue.FromVector([1.0f, 0.0f], _arena), _arena);
         // ||[3, 4]||₂ = 5.0
-        accumulator.Add(DataValue.FromVector([3.0f, 4.0f]));
+        accumulator.Add(DataValue.FromVector([3.0f, 4.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(1.0, result.NormMin, 1e-10);
@@ -271,7 +236,7 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f]));
+        accumulator.Add(DataValue.FromVector([0.0f, 0.0f, 0.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(0.0, result.NormMin, 1e-10);
@@ -295,9 +260,9 @@ public sealed class VectorStatsAccumulatorTests
     {
         VectorStatsAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Vector));
+        accumulator.Add(DataValue.Null(DataKind.Vector), _arena);
         // ||[3, 4]||₂ = 5.0
-        accumulator.Add(DataValue.FromVector([3.0f, 4.0f]));
+        accumulator.Add(DataValue.FromVector([3.0f, 4.0f], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(5.0, result.NormMin, 1e-10);
@@ -306,34 +271,12 @@ public sealed class VectorStatsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_CombinesNormStats()
-    {
-        VectorStatsAccumulator first = new();
-        // ||[1, 0]||₂ = 1.0
-        first.Add(DataValue.FromVector([1.0f, 0.0f]));
-
-        VectorStatsAccumulator second = new();
-        // ||[3, 4]||₂ = 5.0
-        second.Add(DataValue.FromVector([3.0f, 4.0f]));
-        // ||[0, 2]||₂ = 2.0
-        second.Add(DataValue.FromVector([0.0f, 2.0f]));
-
-        first.Merge(second);
-
-        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
-        Assert.Equal(1.0, result.NormMin, 1e-10);
-        Assert.Equal(5.0, result.NormMax, 1e-10);
-        // Mean: (1.0 + 5.0 + 2.0) / 3 ≈ 2.6667
-        Assert.Equal(8.0 / 3.0, result.NormMean, 1e-10);
-    }
-
-    [Fact]
     public void Add_Matrix_ComputesNorm()
     {
         VectorStatsAccumulator accumulator = new();
 
         // ||[1, 2, 3, 4]||₂ = sqrt(1+4+9+16) = sqrt(30)
-        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2));
+        accumulator.Add(DataValue.FromMatrix([1.0f, 2.0f, 3.0f, 4.0f], 2, 2, _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(Math.Sqrt(30.0), result.NormMin, 1e-10);
@@ -347,7 +290,7 @@ public sealed class VectorStatsAccumulatorTests
         VectorStatsAccumulator accumulator = new();
 
         // ||[1, 1, 1, 1, 1, 1, 1, 1]||₂ = sqrt(8)
-        accumulator.Add(DataValue.FromTensor([1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f], [2, 2, 2]));
+        accumulator.Add(DataValue.FromTensor([1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f], [2, 2, 2], _arena), _arena);
 
         VectorStatsResult result = (VectorStatsResult)accumulator.GetResult().Value!;
         Assert.Equal(Math.Sqrt(8.0), result.NormMin, 1e-10);
@@ -355,20 +298,4 @@ public sealed class VectorStatsAccumulatorTests
         Assert.Equal(Math.Sqrt(8.0), result.NormMean, 1e-10);
     }
 
-    [Fact]
-    public void Merge_IntoEmpty_CopiesNormStats()
-    {
-        VectorStatsAccumulator first = new();
-        VectorStatsAccumulator second = new();
-
-        // ||[3, 4]||₂ = 5.0
-        second.Add(DataValue.FromVector([3.0f, 4.0f]));
-
-        first.Merge(second);
-
-        VectorStatsResult result = (VectorStatsResult)first.GetResult().Value!;
-        Assert.Equal(5.0, result.NormMin, 1e-10);
-        Assert.Equal(5.0, result.NormMax, 1e-10);
-        Assert.Equal(5.0, result.NormMean, 1e-10);
-    }
 }

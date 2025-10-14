@@ -3,6 +3,7 @@ using DatumIngest.Compute.Services;
 using DatumIngest.Diagnostics;
 using DatumIngest.Execution;
 using DatumIngest.Functions;
+using DatumIngest.Serialization;
 using DatumIngest.Server;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
@@ -89,13 +90,14 @@ public static class DatumComputeServiceExtensions
             services.TryAddSingleton(new ParallelismBudget(maxParallelWorkers));
         }
 
+        // Register core engine services (FormatRegistry, FunctionRegistry, PoolBacking).
+        services.AddDatumIngest();
+        services.AddFileFormats();
+
         // Register the default catalog factory. Embedded hosts override this
         // with a factory that returns a pre-built catalog.
         services.TryAddSingleton<Func<string, Task<TableCatalog>>>(
             _ => DatasetCatalogFactory.CreateAsync);
-
-        // Register engine services only if the host has not already provided them.
-        services.TryAddSingleton<FunctionRegistry>(_ => FunctionRegistry.CreateDefault());
 
         services.TryAddSingleton<SessionManager>(provider =>
         {

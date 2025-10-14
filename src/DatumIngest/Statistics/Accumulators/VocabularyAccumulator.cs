@@ -70,7 +70,7 @@ public sealed class VocabularyAccumulator : IStatisticAccumulator
     }
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull || _capped)
         {
@@ -117,82 +117,17 @@ public sealed class VocabularyAccumulator : IStatisticAccumulator
         {
             string key = value.Kind switch
             {
-                DataKind.String => value.AsString(),
+                DataKind.String => value.AsString(store),
                 DataKind.Uuid => value.AsUuid().ToString(),
                 DataKind.Date => value.AsDate().ToString("O"),
                 DataKind.DateTime => value.AsDateTime().ToString("O"),
-                DataKind.JsonValue => value.AsJsonValue(),
+                DataKind.JsonValue => value.AsJsonValue(store),
                 _ => value.ToString() ?? ""
             };
 
             _stringValues!.Add(key);
 
             if (_stringValues.Count >= _maxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not VocabularyAccumulator otherVocabulary || _capped)
-        {
-            return;
-        }
-
-        if (_wideNumericValues is not null && otherVocabulary._wideNumericValues is not null)
-        {
-            foreach (long key in otherVocabulary._wideNumericValues)
-            {
-                _wideNumericValues.Add(key);
-            }
-
-            if (otherVocabulary._capped || _wideNumericValues.Count >= _maxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-        else if (_numericValues is not null && otherVocabulary._numericValues is not null)
-        {
-            foreach (int key in otherVocabulary._numericValues)
-            {
-                _numericValues.Add(key);
-            }
-
-            if (otherVocabulary._capped || _numericValues.Count >= _maxDistinctValues)
-            {
-                _capped = true;
-            }
-        }
-        else if (_stringValues is not null)
-        {
-            IEnumerable<string> otherKeys;
-
-            if (otherVocabulary._stringValues is not null)
-            {
-                otherKeys = otherVocabulary._stringValues;
-            }
-            else if (otherVocabulary._numericValues is not null)
-            {
-                otherKeys = ConvertNumericKeysToStrings(otherVocabulary._numericValues, otherVocabulary._kind);
-            }
-            else if (otherVocabulary._wideNumericValues is not null)
-            {
-                otherKeys = ConvertWideNumericKeysToStrings(otherVocabulary._wideNumericValues, otherVocabulary._kind);
-            }
-            else
-            {
-                return;
-            }
-
-            foreach (string key in otherKeys)
-            {
-                _stringValues.Add(key);
-            }
-
-            if (otherVocabulary._capped || _stringValues.Count >= _maxDistinctValues)
             {
                 _capped = true;
             }
@@ -261,37 +196,6 @@ public sealed class VocabularyAccumulator : IStatisticAccumulator
         };
     }
 
-    private static IEnumerable<string> ConvertNumericKeysToStrings(HashSet<int> keys, DataKind kind)
-    {
-        foreach (int key in keys)
-        {
-            yield return kind switch
-            {
-                DataKind.Float32 => BitConverter.Int32BitsToSingle(key).ToString("G"),
-                DataKind.UInt8 => ((byte)key).ToString(),
-                DataKind.Int8 => ((sbyte)key).ToString(),
-                DataKind.Int16 => ((short)key).ToString(),
-                DataKind.UInt16 => ((ushort)key).ToString(),
-                DataKind.Int32 => key.ToString(),
-                DataKind.UInt32 => ((uint)key).ToString(),
-                _ => key.ToString()
-            };
-        }
-    }
-
-    private static IEnumerable<string> ConvertWideNumericKeysToStrings(HashSet<long> keys, DataKind kind)
-    {
-        foreach (long key in keys)
-        {
-            yield return kind switch
-            {
-                DataKind.Int64 => key.ToString(),
-                DataKind.UInt64 => ((ulong)key).ToString(),
-                DataKind.Float64 => BitConverter.Int64BitsToDouble(key).ToString("G"),
-                _ => key.ToString()
-            };
-        }
-    }
 }
 
 /// <summary>

@@ -12,17 +12,20 @@ using DatumIngest.Statistics.Accumulators;
 /// Tests for <see cref="ColumnIndexHint"/> generation in <see cref="ManifestBuilder"/>
 /// and consumption in <see cref="SourceIndexBuilder"/>.
 /// </summary>
-public sealed class IndexHintTests
+public sealed class IndexHintTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
     // ───────────────── ManifestBuilder hint generation ─────────────────
 
     [Fact]
     public void Build_BooleanColumn_GeneratesBitmapHint()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)));
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(false)));
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)));
+        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)), _arena);
+        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(false)), _arena);
+        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
@@ -39,9 +42,9 @@ public sealed class IndexHintTests
     public void Build_LowCardinalityString_GeneratesBitmapHint()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("color", DataValue.FromString("red")));
-        collector.AddRow(MakeRow("color", DataValue.FromString("blue")));
-        collector.AddRow(MakeRow("color", DataValue.FromString("red")));
+        collector.AddRow(MakeRow("color", DataValue.FromString("red", _arena)), _arena);
+        collector.AddRow(MakeRow("color", DataValue.FromString("blue", _arena)), _arena);
+        collector.AddRow(MakeRow("color", DataValue.FromString("red", _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["color"] = DataKind.String };
@@ -63,7 +66,7 @@ public sealed class IndexHintTests
 
         for (int i = 0; i < distinctCount; i++)
         {
-            collector.AddRow(MakeRow("id", DataValue.FromFloat32(i)));
+            collector.AddRow(MakeRow("id", DataValue.FromFloat32(i)), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
@@ -81,8 +84,8 @@ public sealed class IndexHintTests
     public void Build_VectorColumn_GeneratesNoHint()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("embedding", DataValue.FromVector([1.0f, 2.0f])));
-        collector.AddRow(MakeRow("embedding", DataValue.FromVector([3.0f, 4.0f])));
+        collector.AddRow(MakeRow("embedding", DataValue.FromVector([1.0f, 2.0f], _arena)), _arena);
+        collector.AddRow(MakeRow("embedding", DataValue.FromVector([3.0f, 4.0f], _arena)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["embedding"] = DataKind.Vector };
@@ -98,12 +101,12 @@ public sealed class IndexHintTests
         StatisticsCollector collector = new();
 
         // Low-cardinality string → Bitmap.
-        collector.AddRow(MakeRow("status", DataValue.FromString("active"),
-                                 "count", DataValue.FromFloat32(1.0f)));
-        collector.AddRow(MakeRow("status", DataValue.FromString("inactive"),
-                                 "count", DataValue.FromFloat32(2.0f)));
-        collector.AddRow(MakeRow("status", DataValue.FromString("active"),
-                                 "count", DataValue.FromFloat32(3.0f)));
+        collector.AddRow(MakeRow("status", DataValue.FromString("active", _arena),
+                                 "count", DataValue.FromFloat32(1.0f)), _arena);
+        collector.AddRow(MakeRow("status", DataValue.FromString("inactive", _arena),
+                                 "count", DataValue.FromFloat32(2.0f)), _arena);
+        collector.AddRow(MakeRow("status", DataValue.FromString("active", _arena),
+                                 "count", DataValue.FromFloat32(3.0f)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
@@ -128,8 +131,8 @@ public sealed class IndexHintTests
     public void Build_WithInsights_PreservesIndexHints()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)));
-        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(false)));
+        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(true)), _arena);
+        collector.AddRow(MakeRow("flag", DataValue.FromBoolean(false)), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> statistics = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };

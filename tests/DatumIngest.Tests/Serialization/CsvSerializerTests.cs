@@ -1,4 +1,4 @@
-using DatumIngest.Execution.Pooling;
+using DatumIngest.Pooling;
 using DatumIngest.Model;
 using DatumIngest.Serialization;
 using DatumIngest.Serialization.Csv;
@@ -36,7 +36,7 @@ public sealed class CsvSerializerTests
         for (int i = 0; i < names.Count; i++)
             nameIndex[names[i]] = i;
 
-        RowBatch batch = context.Pool.RentBatch(1024);
+        RowBatch batch = context.Pool.RentRowBatch(1024);
         foreach (DataValue[] values in rowValues)
         {
             batch.Add(new Row(names, values, nameIndex));

@@ -2,7 +2,7 @@ using DatumIngest.Catalog;
 using DatumIngest.DatumFile;
 using DatumIngest.DatumFile.Encoding;
 using DatumIngest.Execution;
-using DatumIngest.Execution.Pooling;
+using DatumIngest.Pooling;
 using DatumIngest.Indexing;
 using DatumIngest.Manifest;
 using DatumIngest.Model;
@@ -276,6 +276,7 @@ internal sealed class StatementExecutor
         SourceFingerprint fingerprint = new(0, Array.Empty<byte>());
         IncrementalIndexBuilder indexBuilder = sourceIndexBuilder.CreateIncrementalBuilder(fingerprint);
         StatisticsCollector statisticsCollector = new();
+        using Arena statisticsArena = new(); // TODO: remove when sidecar rebuild is refactored
 
         Schema schema;
         using (DatumFileReader reader = DatumFileReader.Open(filePath))
@@ -321,7 +322,7 @@ internal sealed class StatementExecutor
 
                     Row row = new(columnNames, values, nameIndex);
                     indexBuilder.AddRow(row);
-                    statisticsCollector.AddRow(row);
+                    statisticsCollector.AddRow(row, statisticsArena);
                 }
             }
         }

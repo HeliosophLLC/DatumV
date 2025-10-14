@@ -1,4 +1,4 @@
-using DatumIngest.Execution.Pooling;
+using DatumIngest.Pooling;
 using DatumIngest.Model;
 
 namespace DatumIngest.Execution;

@@ -31,7 +31,7 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
     private double _normMean;
 
     /// <inheritdoc />
-    public void Add(DataValue value)
+    public void Add(DataValue value, IValueStore store)
     {
         if (value.IsNull)
         {
@@ -45,19 +45,19 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
         switch (value.Kind)
         {
             case DataKind.Vector:
-                elements = value.AsVector();
+                elements = value.AsVector(store);
                 rank = 1;
                 elementCount = elements.Length;
                 break;
 
             case DataKind.Matrix:
-                elements = value.AsMatrix(out int rows, out int cols);
+                elements = value.AsMatrix(store, out int rows, out int cols);
                 rank = 2;
                 elementCount = rows * cols;
                 break;
 
             case DataKind.Tensor:
-                elements = value.AsTensor(out int[] shape);
+                elements = value.AsTensor(store, out int[] shape);
                 rank = shape.Length;
                 elementCount = elements.Length;
                 break;
@@ -142,67 +142,6 @@ public sealed class VectorStatsAccumulator : IStatisticAccumulator
         if (allZero)
         {
             _zeroVectorCount++;
-        }
-    }
-
-    /// <inheritdoc />
-    public void Merge(IStatisticAccumulator other)
-    {
-        if (other is not VectorStatsAccumulator otherVector || otherVector._count == 0)
-        {
-            return;
-        }
-
-        if (_count == 0)
-        {
-            _count = otherVector._count;
-            _minElementCount = otherVector._minElementCount;
-            _maxElementCount = otherVector._maxElementCount;
-            _minRank = otherVector._minRank;
-            _maxRank = otherVector._maxRank;
-            _elementCount = otherVector._elementCount;
-            _zeroElementCount = otherVector._zeroElementCount;
-            _zeroVectorCount = otherVector._zeroVectorCount;
-            _elementMin = otherVector._elementMin;
-            _elementMax = otherVector._elementMax;
-            _elementMean = otherVector._elementMean;
-            _elementM2 = otherVector._elementM2;
-            _normMin = otherVector._normMin;
-            _normMax = otherVector._normMax;
-            _normMean = otherVector._normMean;
-            return;
-        }
-
-        _count += otherVector._count;
-        _zeroElementCount += otherVector._zeroElementCount;
-        _zeroVectorCount += otherVector._zeroVectorCount;
-        _minElementCount = Math.Min(_minElementCount, otherVector._minElementCount);
-        _maxElementCount = Math.Max(_maxElementCount, otherVector._maxElementCount);
-        _minRank = Math.Min(_minRank, otherVector._minRank);
-        _maxRank = Math.Max(_maxRank, otherVector._maxRank);
-        _elementMin = Math.Min(_elementMin, otherVector._elementMin);
-        _elementMax = Math.Max(_elementMax, otherVector._elementMax);
-
-        // Merge L2 norm stats
-        _normMin = Math.Min(_normMin, otherVector._normMin);
-        _normMax = Math.Max(_normMax, otherVector._normMax);
-
-        long prevCount = _count - otherVector._count;
-        _normMean = (prevCount * _normMean + otherVector._count * otherVector._normMean) / _count;
-
-        // Parallel Welford merge (Chan et al.)
-        long combinedCount = _elementCount + otherVector._elementCount;
-
-        if (combinedCount > 0)
-        {
-            double delta = otherVector._elementMean - _elementMean;
-            double combinedMean = _elementMean + delta * otherVector._elementCount / combinedCount;
-            double combinedM2 = _elementM2 + otherVector._elementM2 +
-                                delta * delta * _elementCount * otherVector._elementCount / combinedCount;
-
-            _elementCount = combinedCount;
-            _elementMean = combinedMean;
-            _elementM2 = combinedM2;
         }
     }
 

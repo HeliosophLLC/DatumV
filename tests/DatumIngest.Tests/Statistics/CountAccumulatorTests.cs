@@ -4,16 +4,20 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class CountAccumulatorTests
+public sealed class CountAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void Add_NonNullValues_CountsCorrectly()
     {
         CountAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromFloat32(1.0f));
-        accumulator.Add(DataValue.FromFloat32(2.0f));
-        accumulator.Add(DataValue.FromString("hello"));
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
+        accumulator.Add(DataValue.FromString("hello", _arena), _arena);
 
         CountResult result = (CountResult)accumulator.GetResult().Value!;
         Assert.Equal(3, result.NonNull);
@@ -25,9 +29,9 @@ public sealed class CountAccumulatorTests
     {
         CountAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.Null(DataKind.Float32));
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromFloat32(1.0f));
+        accumulator.Add(DataValue.Null(DataKind.Float32), _arena);
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
 
         CountResult result = (CountResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.NonNull);
@@ -39,9 +43,9 @@ public sealed class CountAccumulatorTests
     {
         CountAccumulator accumulator = new();
 
-        accumulator.Add(DataValue.FromString(""));
-        accumulator.Add(DataValue.FromString("hello"));
-        accumulator.Add(DataValue.FromString(""));
+        accumulator.Add(DataValue.FromString("", _arena), _arena);
+        accumulator.Add(DataValue.FromString("hello", _arena), _arena);
+        accumulator.Add(DataValue.FromString("", _arena), _arena);
 
         CountResult result = (CountResult)accumulator.GetResult().Value!;
         Assert.Equal(1, result.NonNull);
@@ -56,25 +60,6 @@ public sealed class CountAccumulatorTests
         CountResult result = (CountResult)accumulator.GetResult().Value!;
         Assert.Equal(0, result.NonNull);
         Assert.Equal(0, result.NullOrEmpty);
-    }
-
-    [Fact]
-    public void Merge_CombinesCounts()
-    {
-        CountAccumulator first = new();
-        first.Add(DataValue.FromFloat32(1.0f));
-        first.Add(DataValue.Null(DataKind.Float32));
-
-        CountAccumulator second = new();
-        second.Add(DataValue.FromFloat32(2.0f));
-        second.Add(DataValue.FromFloat32(3.0f));
-        second.Add(DataValue.Null(DataKind.Float32));
-
-        first.Merge(second);
-
-        CountResult result = (CountResult)first.GetResult().Value!;
-        Assert.Equal(3, result.NonNull);
-        Assert.Equal(2, result.NullOrEmpty);
     }
 
     [Fact]

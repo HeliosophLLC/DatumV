@@ -6,8 +6,11 @@ using DatumIngest.Model;
 using DatumIngest.Statistics;
 using DatumIngest.Statistics.Accumulators;
 
-public sealed class ManifestSerializerTests
+public sealed class ManifestSerializerTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
     [Fact]
     public void Serialize_NumericManifest_ProducesValidJson()
     {
@@ -111,8 +114,8 @@ public sealed class ManifestSerializerTests
         StatisticsCollector collector = new();
         Row row = new(
             ["id", "name"],
-            [DataValue.FromFloat32(1.0f), DataValue.FromString("test")]);
-        collector.AddRow(row);
+            [DataValue.FromFloat32(1.0f), DataValue.FromString("test", _arena)]);
+        collector.AddRow(row, _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new()
@@ -144,7 +147,7 @@ public sealed class ManifestSerializerTests
 
         for (int i = 0; i < 10; i++)
         {
-            collector.AddRow(new Row(["cat"], [DataValue.FromString("A")]));
+            collector.AddRow(new Row(["cat"], [DataValue.FromString("A", _arena)]), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -156,12 +159,12 @@ public sealed class ManifestSerializerTests
         Assert.Contains("\"frequency\": 10", json);
     }
 
-    private static QueryResultsManifest BuildNumericManifest()
+    private QueryResultsManifest BuildNumericManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(1.0f)]));
-        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(2.0f)]));
-        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(3.0f)]));
+        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(1.0f)]), _arena);
+        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(2.0f)]), _arena);
+        collector.AddRow(new Row(["value"], [DataValue.FromFloat32(3.0f)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["value"] = DataKind.Float32 };
@@ -169,10 +172,10 @@ public sealed class ManifestSerializerTests
         return ManifestBuilder.Build(stats, kinds, 3);
     }
 
-    private static QueryResultsManifest BuildStringManifest()
+    private QueryResultsManifest BuildStringManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["name"], [DataValue.FromString("Alice")]));
+        collector.AddRow(new Row(["name"], [DataValue.FromString("Alice", _arena)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["name"] = DataKind.String };
@@ -180,7 +183,7 @@ public sealed class ManifestSerializerTests
         return ManifestBuilder.Build(stats, kinds, 1);
     }
 
-    private static QueryResultsManifest BuildImageManifest()
+    private QueryResultsManifest BuildImageManifest()
     {
         StatisticsCollector collector = new();
         byte[] jpeg = new byte[20];
@@ -195,7 +198,7 @@ public sealed class ManifestSerializerTests
         jpeg[9] = 0x02; jpeg[10] = 0x80; // width = 640
         jpeg[11] = 0x03; // 3 channels
 
-        collector.AddRow(new Row(["photo"], [DataValue.FromImage(jpeg)]));
+        collector.AddRow(new Row(["photo"], [DataValue.FromImage(jpeg, _arena)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["photo"] = DataKind.Image };
@@ -203,10 +206,10 @@ public sealed class ManifestSerializerTests
         return ManifestBuilder.Build(stats, kinds, 1);
     }
 
-    private static QueryResultsManifest BuildVectorManifest()
+    private QueryResultsManifest BuildVectorManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["embedding"], [DataValue.FromVector([1.0f, 2.0f, 3.0f])]));
+        collector.AddRow(new Row(["embedding"], [DataValue.FromVector([1.0f, 2.0f, 3.0f], _arena)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["embedding"] = DataKind.Vector };
@@ -214,10 +217,10 @@ public sealed class ManifestSerializerTests
         return ManifestBuilder.Build(stats, kinds, 1);
     }
 
-    private static QueryResultsManifest BuildTemporalManifest()
+    private QueryResultsManifest BuildTemporalManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["date"], [DataValue.FromDate(new DateOnly(2024, 6, 15))]));
+        collector.AddRow(new Row(["date"], [DataValue.FromDate(new DateOnly(2024, 6, 15))]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["date"] = DataKind.Date };
@@ -229,8 +232,8 @@ public sealed class ManifestSerializerTests
     public void Serialize_NullRatio_PresentInJson()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["x"], [DataValue.FromFloat32(1.0f)]));
-        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]));
+        collector.AddRow(new Row(["x"], [DataValue.FromFloat32(1.0f)]), _arena);
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Float32 };
@@ -245,9 +248,9 @@ public sealed class ManifestSerializerTests
     public void Serialize_MissingRuns_PresentInJson()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]));
-        collector.AddRow(new Row(["x"], [DataValue.FromFloat32(1.0f)]));
-        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]));
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]), _arena);
+        collector.AddRow(new Row(["x"], [DataValue.FromFloat32(1.0f)]), _arena);
+        collector.AddRow(new Row(["x"], [DataValue.Null(DataKind.Float32)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.Float32 };
@@ -265,10 +268,10 @@ public sealed class ManifestSerializerTests
 
         for (int i = 0; i < 9; i++)
         {
-            collector.AddRow(new Row(["x"], [DataValue.FromString("same")]));
+            collector.AddRow(new Row(["x"], [DataValue.FromString("same", _arena)]), _arena);
         }
 
-        collector.AddRow(new Row(["x"], [DataValue.FromString("other")]));
+        collector.AddRow(new Row(["x"], [DataValue.FromString("other", _arena)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["x"] = DataKind.String };
@@ -296,9 +299,9 @@ public sealed class ManifestSerializerTests
     public void Serialize_BooleanManifest_ContainsTrueRatio()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]));
-        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(false)]));
-        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]));
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]), _arena);
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(false)]), _arena);
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
@@ -314,8 +317,8 @@ public sealed class ManifestSerializerTests
     public void Deserialize_BooleanManifest_RoundTrips()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]));
-        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(false)]));
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(true)]), _arena);
+        collector.AddRow(new Row(["flag"], [DataValue.FromBoolean(false)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["flag"] = DataKind.Boolean };
@@ -485,13 +488,13 @@ public sealed class ManifestSerializerTests
     /// <summary>
     /// Builds a manifest with a single string column containing the given distinct values.
     /// </summary>
-    private static QueryResultsManifest BuildIdentifierManifest(string columnName, params string[] values)
+    private QueryResultsManifest BuildIdentifierManifest(string columnName, params string[] values)
     {
         StatisticsCollector collector = new();
 
         foreach (string value in values)
         {
-            collector.AddRow(new Row([columnName], [DataValue.FromString(value)]));
+            collector.AddRow(new Row([columnName], [DataValue.FromString(value, _arena)]), _arena);
         }
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
@@ -503,12 +506,12 @@ public sealed class ManifestSerializerTests
     /// <summary>
     /// Builds a manifest with two columns: "name" (string) and "value" (numeric).
     /// </summary>
-    private static QueryResultsManifest BuildTwoColumnManifest()
+    private QueryResultsManifest BuildTwoColumnManifest()
     {
         StatisticsCollector collector = new();
-        collector.AddRow(new Row(["name", "value"], [DataValue.FromString("Alice"), DataValue.FromFloat32(1.0f)]));
-        collector.AddRow(new Row(["name", "value"], [DataValue.FromString("Bob"), DataValue.FromFloat32(2.0f)]));
-        collector.AddRow(new Row(["name", "value"], [DataValue.FromString("Charlie"), DataValue.FromFloat32(3.0f)]));
+        collector.AddRow(new Row(["name", "value"], [DataValue.FromString("Alice", _arena), DataValue.FromFloat32(1.0f)]), _arena);
+        collector.AddRow(new Row(["name", "value"], [DataValue.FromString("Bob", _arena), DataValue.FromFloat32(2.0f)]), _arena);
+        collector.AddRow(new Row(["name", "value"], [DataValue.FromString("Charlie", _arena), DataValue.FromFloat32(3.0f)]), _arena);
 
         IReadOnlyDictionary<string, ColumnStatistics> stats = collector.GetStatistics();
         Dictionary<string, DataKind> kinds = new() { ["name"] = DataKind.String, ["value"] = DataKind.Float32 };

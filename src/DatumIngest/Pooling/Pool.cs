@@ -1,6 +1,7 @@
+using DatumIngest.Execution;
 using DatumIngest.Model;
 
-namespace DatumIngest.Execution.Pooling;
+namespace DatumIngest.Pooling;
 
 /// <summary>
 /// 
@@ -31,7 +32,7 @@ public sealed class Pool
     /// <summary>
     /// Rents a <see cref="RowBatch"/> with the specified capacity.
     /// </summary>
-    public RowBatch RentBatch(int capacity) => Backing.RentRowBatch(capacity);
+    public RowBatch RentRowBatch(int capacity) => Backing.RentRowBatch(capacity);
 
     /// <summary>
     /// Rents a <see cref="GroupState"/> with the specified number of accumulators.
@@ -52,12 +53,12 @@ public sealed class Pool
     /// Returns the <paramref name="rowBatch"/> and all its contained buffers to the pool for reuse.
     /// </summary>
     /// <param name="rowBatch">The batch to return.</param>
-    /// <param name="returnDataValues">Whether to return the contained <see cref="DataValue"/> arrays to the pool. Set to <c>false</c> when the caller intends to hold references to the contained values beyond the batch lifecycle.</param>
-    public void ReturnRowBatch(RowBatch rowBatch, bool returnDataValues) => Backing.Return(rowBatch, returnDataValues);
+    public void ReturnRowBatch(RowBatch rowBatch) => Backing.Return(rowBatch);
 
     /// <summary>
     /// Returns the <paramref name="groupState"/> and all its contained buffers to the pool for reuse.
     /// </summary>
+    /// <param name="groupState">The group state to return.</param>
     public void ReturnGroupState(GroupState groupState) => Backing.Return(groupState);
 
     /// <summary>

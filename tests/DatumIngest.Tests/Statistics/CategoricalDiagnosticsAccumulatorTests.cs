@@ -7,8 +7,12 @@ using DatumIngest.Statistics.Accumulators;
 /// <summary>
 /// Tests for <see cref="CategoricalDiagnosticsAccumulator"/>.
 /// </summary>
-public sealed class CategoricalDiagnosticsAccumulatorTests
+public sealed class CategoricalDiagnosticsAccumulatorTests : IDisposable
 {
+    private readonly Arena _arena = new();
+
+    public void Dispose() => _arena.Dispose();
+
     [Fact]
     public void GetResult_Empty_ReturnsZeros()
     {
@@ -40,7 +44,7 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         {
             for (int i = 0; i < 10; i++)
             {
-                accumulator.Add(DataValue.FromString($"category_{category}"));
+                accumulator.Add(DataValue.FromString($"category_{category}", _arena), _arena);
             }
         }
 
@@ -58,10 +62,10 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         CategoricalDiagnosticsAccumulator accumulator = new(2);
 
         // Two dominant categories
-        for (int i = 0; i < 500; i++) accumulator.Add(DataValue.FromString("dominant_a"));
-        for (int i = 0; i < 480; i++) accumulator.Add(DataValue.FromString("dominant_b"));
+        for (int i = 0; i < 500; i++) accumulator.Add(DataValue.FromString("dominant_a", _arena), _arena);
+        for (int i = 0; i < 480; i++) accumulator.Add(DataValue.FromString("dominant_b", _arena), _arena);
         // Many rare categories
-        for (int i = 0; i < 20; i++) accumulator.Add(DataValue.FromString($"rare_{i}"));
+        for (int i = 0; i < 20; i++) accumulator.Add(DataValue.FromString($"rare_{i}", _arena), _arena);
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
 
@@ -77,7 +81,7 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         // Each category appears only once (count = 1, which is < 5)
         for (int i = 0; i < 20; i++)
         {
-            accumulator.Add(DataValue.FromString($"singleton_{i}"));
+            accumulator.Add(DataValue.FromString($"singleton_{i}", _arena), _arena);
         }
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
@@ -97,7 +101,7 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         {
             for (int i = 0; i < 5; i++)
             {
-                accumulator.Add(DataValue.FromString($"category_{category}"));
+                accumulator.Add(DataValue.FromString($"category_{category}", _arena), _arena);
             }
         }
 
@@ -113,10 +117,10 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         CategoricalDiagnosticsAccumulator accumulator = new(10);
 
         // Exactly 5 occurrences — NOT rare
-        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromString("five"));
+        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromString("five", _arena), _arena);
 
         // Exactly 4 occurrences — IS rare
-        for (int i = 0; i < 4; i++) accumulator.Add(DataValue.FromString("four"));
+        for (int i = 0; i < 4; i++) accumulator.Add(DataValue.FromString("four", _arena), _arena);
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
 
@@ -130,9 +134,9 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
     {
         CategoricalDiagnosticsAccumulator accumulator = new(10);
 
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.Null(DataKind.String));
-        accumulator.Add(DataValue.FromString("only_value"));
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.Null(DataKind.String), _arena);
+        accumulator.Add(DataValue.FromString("only_value", _arena), _arena);
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
 
@@ -148,7 +152,7 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString("only"));
+            accumulator.Add(DataValue.FromString("only", _arena), _arena);
         }
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
@@ -159,35 +163,12 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
     }
 
     [Fact]
-    public void Merge_CombinesFrequenciesAndTotals()
-    {
-        CategoricalDiagnosticsAccumulator first = new(10);
-        for (int i = 0; i < 10; i++) first.Add(DataValue.FromString("a"));
-        for (int i = 0; i < 3; i++) first.Add(DataValue.FromString("b"));
-
-        CategoricalDiagnosticsAccumulator second = new(10);
-        for (int i = 0; i < 5; i++) second.Add(DataValue.FromString("a"));
-        for (int i = 0; i < 2; i++) second.Add(DataValue.FromString("c"));
-
-        first.Merge(second);
-
-        CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)first.GetResult().Value!;
-
-        // a=15, b=3, c=2 → total=20, 3 categories
-        Assert.Equal(3, result.TotalCategoryCount);
-        // b(3) and c(2) are rare (< 5)
-        Assert.Equal(2, result.RareCategoryCount);
-        // coverage top-10 covers all 3 categories → (15+3+2)/20 = 1.0
-        Assert.Equal(1.0, result.CoverageTopK);
-    }
-
-    [Fact]
     public void Add_NumericValues_ConvertsToString()
     {
         CategoricalDiagnosticsAccumulator accumulator = new(10);
 
-        for (int i = 0; i < 10; i++) accumulator.Add(DataValue.FromFloat32(1.0f));
-        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromFloat32(2.0f));
+        for (int i = 0; i < 10; i++) accumulator.Add(DataValue.FromFloat32(1.0f), _arena);
+        for (int i = 0; i < 5; i++) accumulator.Add(DataValue.FromFloat32(2.0f), _arena);
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
 
@@ -205,7 +186,7 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
 
         for (int i = 0; i < totalDistinct; i++)
         {
-            accumulator.Add(DataValue.FromString($"cat_{i}"));
+            accumulator.Add(DataValue.FromString($"cat_{i}", _arena), _arena);
         }
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
@@ -223,16 +204,16 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         // Fill to cap with distinct values, but add a known key many times first.
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString("tracked"));
+            accumulator.Add(DataValue.FromString("tracked", _arena), _arena);
         }
 
         for (int i = 0; i < CategoricalDiagnosticsAccumulator.MaxDistinctValues; i++)
         {
-            accumulator.Add(DataValue.FromString($"fill_{i}"));
+            accumulator.Add(DataValue.FromString($"fill_{i}", _arena), _arena);
         }
 
         // After capping, existing key should still be tracked.
-        accumulator.Add(DataValue.FromString("tracked"));
+        accumulator.Add(DataValue.FromString("tracked", _arena), _arena);
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
 
@@ -248,7 +229,7 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
 
         for (int i = 0; i < 100; i++)
         {
-            accumulator.Add(DataValue.FromString($"cat_{i}"));
+            accumulator.Add(DataValue.FromString($"cat_{i}", _arena), _arena);
         }
 
         CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)accumulator.GetResult().Value!;
@@ -257,29 +238,4 @@ public sealed class CategoricalDiagnosticsAccumulatorTests
         Assert.Equal(100, result.TotalCategoryCount);
     }
 
-    [Fact]
-    public void Merge_BothCapped_PreservesApproximateFlag()
-    {
-        CategoricalDiagnosticsAccumulator first = new(10);
-        CategoricalDiagnosticsAccumulator second = new(10);
-
-        // Fill both to near cap.
-        for (int i = 0; i < CategoricalDiagnosticsAccumulator.MaxDistinctValues; i++)
-        {
-            first.Add(DataValue.FromString($"a_{i}"));
-        }
-
-        for (int i = 0; i < CategoricalDiagnosticsAccumulator.MaxDistinctValues; i++)
-        {
-            second.Add(DataValue.FromString($"b_{i}"));
-        }
-
-        first.Merge(second);
-
-        CategoricalDiagnosticsResult result = (CategoricalDiagnosticsResult)first.GetResult().Value!;
-
-        Assert.True(result.Approximate);
-        // The merged result should still be capped at MaxDistinctValues.
-        Assert.Equal(CategoricalDiagnosticsAccumulator.MaxDistinctValues, result.TotalCategoryCount);
-    }
 }

@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DatumIngest.Server\DatumIngest.Server.csproj" />
+    <ProjectReference Include="..\DatumIngest.Serialization\DatumIngest.Serialization.csproj" />
   </ItemGroup>
 
 </Project>
