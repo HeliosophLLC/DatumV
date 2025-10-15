@@ -294,42 +294,57 @@ public sealed class DatumFileWriter : IDisposable
             bool isFloatKind = descriptor.Kind is DataKind.Vector or DataKind.Matrix or DataKind.Tensor;
             if (!isFloatKind) continue;
 
-            foreach (DataValue value in _columnBuffers![columnIndex])
-            {
-                if (value.IsNull) continue;
+            List<DataValue> buffer = _columnBuffers![columnIndex];
 
-                int[]? shape = ExtractShape(value);
+            // Walk pages in order and use each page's store to resolve the first non-null shape.
+            foreach (PageSpan page in _pages)
+            {
+                IValueStore pageStore = page.ArenaLength > 0
+                    ? _writerArena.Slice(page.ArenaBase, page.ArenaLength)
+                    : _writerArena;
+
+                int endRow = page.RowStart + page.RowCount;
+                int[]? shape = null;
+
+                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
+                {
+                    DataValue value = buffer[rowIndex];
+                    if (value.IsNull) continue;
+
+                    shape = ExtractShape(value, pageStore);
+                    break;
+                }
+
                 if (shape is not null)
                 {
                     DatumColumnFlags updatedFlags = descriptor.Flags | DatumColumnFlags.FixedShape;
                     _descriptors[columnIndex] = descriptor with { Flags = updatedFlags, FixedShape = shape };
+                    break;
                 }
-
-                break;
             }
         }
     }
 
-    private static int[]? ExtractShape(DataValue value)
+    private static int[]? ExtractShape(DataValue value, IValueStore store)
     {
         return value.Kind switch
         {
-            DataKind.Vector => [value.AsVector().Length],
-            DataKind.Matrix => ExtractMatrixShape(value),
-            DataKind.Tensor => ExtractTensorShape(value),
+            DataKind.Vector => [value.AsVector(store).Length],
+            DataKind.Matrix => ExtractMatrixShape(value, store),
+            DataKind.Tensor => ExtractTensorShape(value, store),
             _ => null
         };
     }
 
-    private static int[] ExtractMatrixShape(DataValue value)
+    private static int[] ExtractMatrixShape(DataValue value, IValueStore store)
     {
-        value.AsMatrix(out int rows, out int columns);
+        value.AsMatrix(store, out int rows, out int columns);
         return [rows, columns];
     }
 
-    private static int[] ExtractTensorShape(DataValue value)
+    private static int[] ExtractTensorShape(DataValue value, IValueStore store)
     {
-        value.AsTensor(out int[] shape);
+        value.AsTensor(store, out int[] shape);
         return shape;
     }
 

@@ -13,6 +13,7 @@ namespace DatumIngest.Ingestion;
 public class Ingester(
     FormatRegistry formatRegistry,
     Pool pool,
+    //SchemaDetector schemaDetector,
     StatisticsCollector statisticsCollector)
 {
     /// <summary>
@@ -40,6 +41,7 @@ public class Ingester(
             .CreateDeserializer(source)
             .DeserializeAsync(new SerializationContext(pool), cancellationToken: cancellationToken))
         {
+            //schemaDetector.DetectAndPassthrough()
             statisticsCollector.Collect(rowBatch);
         }
 

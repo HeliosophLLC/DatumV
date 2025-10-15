@@ -34,7 +34,7 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
         uint nullCount = 0;
 
         // Determine elements-per-row from the descriptor or from the first non-null value.
-        int elementsPerRow = ResolveElementsPerRow(values, descriptor);
+        int elementsPerRow = ResolveElementsPerRow(values, descriptor, context);
         int totalFloats = rowCount * elementsPerRow;
         int bitmapLength = DatumNullBitmap.ByteCount(rowCount);
         int shuffledLength = totalFloats * sizeof(float);
@@ -51,27 +51,35 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
             float minimum = float.MaxValue;
             float maximum = float.MinValue;
 
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            foreach (PageSpan page in context.Pages)
             {
-                DataValue value = values[rowIndex];
+                IValueStore pageStore = page.ArenaLength > 0
+                    ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                    : context.Store;
 
-                if (value.IsNull)
+                int endRow = page.RowStart + page.RowCount;
+                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
                 {
-                    nullBitmap.SetNull(rowIndex);
-                    nullCount++;
-                    continue;
-                }
+                    DataValue value = values[rowIndex];
 
-                ReadOnlySpan<float> elements = ExtractElements(value);
-                Span<float> destination = floatData.AsSpan(rowIndex * elementsPerRow, elementsPerRow);
-                elements.CopyTo(destination);
-
-                foreach (float element in elements)
-                {
-                    if (!float.IsNaN(element))
+                    if (value.IsNull)
                     {
-                        if (element < minimum) minimum = element;
-                        if (element > maximum) maximum = element;
+                        nullBitmap.SetNull(rowIndex);
+                        nullCount++;
+                        continue;
+                    }
+
+                    ReadOnlySpan<float> elements = ExtractElements(value, pageStore);
+                    Span<float> destination = floatData.AsSpan(rowIndex * elementsPerRow, elementsPerRow);
+                    elements.CopyTo(destination);
+
+                    foreach (float element in elements)
+                    {
+                        if (!float.IsNaN(element))
+                        {
+                            if (element < minimum) minimum = element;
+                            if (element > maximum) maximum = element;
+                        }
                     }
                 }
             }
@@ -94,7 +102,8 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
         }
     }
 
-    private static int ResolveElementsPerRow(IReadOnlyList<DataValue> values, DatumColumnDescriptor descriptor)
+    private static int ResolveElementsPerRow(
+        IReadOnlyList<DataValue> values, DatumColumnDescriptor descriptor, DatumEncoderContext context)
     {
         if (descriptor.HasFixedShape)
         {
@@ -103,12 +112,21 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
 
         // Fall back to reading the shape from the first non-null value when the descriptor
         // has not yet been frozen (e.g. first row group of a streaming write).
-        foreach (DataValue value in values)
+        foreach (PageSpan page in context.Pages)
         {
-            if (!value.IsNull)
+            IValueStore pageStore = page.ArenaLength > 0
+                ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                : context.Store;
+
+            int endRow = page.RowStart + page.RowCount;
+            for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
             {
-                ReadOnlySpan<float> elements = ExtractElements(value);
-                return elements.Length;
+                DataValue value = values[rowIndex];
+                if (!value.IsNull)
+                {
+                    ReadOnlySpan<float> elements = ExtractElements(value, pageStore);
+                    return elements.Length;
+                }
             }
         }
 
@@ -116,14 +134,14 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
         return 0;
     }
 
-    private static ReadOnlySpan<float> ExtractElements(DataValue value)
+    private static ReadOnlySpan<float> ExtractElements(DataValue value, IValueStore store)
     {
         return value.Kind switch
         {
             DataKind.Float32 => new float[] { value.AsFloat32() },
-            DataKind.Vector => value.AsVector(),
-            DataKind.Matrix => value.AsMatrix(out _, out _),
-            DataKind.Tensor => value.AsTensor(out _),
+            DataKind.Vector => value.AsVector(store),
+            DataKind.Matrix => value.AsMatrix(store, out _, out _),
+            DataKind.Tensor => value.AsTensor(store, out _),
             _ => throw new NotSupportedException($"FixedShapeFloatColumnEncoder does not support {value.Kind}.")
         };
     }

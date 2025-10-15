@@ -41,30 +41,38 @@ internal sealed class StructColumnEncoder : DatumColumnEncoder
 
         try
         {
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            foreach (PageSpan page in context.Pages)
             {
-                DataValue value = values[rowIndex];
+                IValueStore pageStore = page.ArenaLength > 0
+                    ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                    : context.Store;
 
-                if (value.IsNull)
+                int endRow = page.RowStart + page.RowCount;
+                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
                 {
-                    nullBitmap.SetNull(rowIndex);
-                    rowPools[rowIndex] = [];
-                    nullCount++;
-                    continue;
+                    DataValue value = values[rowIndex];
+
+                    if (value.IsNull)
+                    {
+                        nullBitmap.SetNull(rowIndex);
+                        rowPools[rowIndex] = [];
+                        nullCount++;
+                        continue;
+                    }
+
+                    DataValue[] fields = value.AsStruct(pageStore);
+                    using MemoryStream rowStream = new();
+                    using BinaryWriter rowWriter = new(rowStream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+                    foreach (DataValue field in fields)
+                    {
+                        IndexWriter.WriteDataValue(rowWriter, field, pageStore);
+                    }
+
+                    rowWriter.Flush();
+                    rowPools[rowIndex] = rowStream.ToArray();
+                    totalPoolBytes += rowPools[rowIndex].Length;
                 }
-
-                DataValue[] fields = value.AsStruct(context.Store);
-                using MemoryStream rowStream = new();
-                using BinaryWriter rowWriter = new(rowStream, System.Text.Encoding.UTF8, leaveOpen: true);
-
-                foreach (DataValue field in fields)
-                {
-                    IndexWriter.WriteDataValue(rowWriter, field);
-                }
-
-                rowWriter.Flush();
-                rowPools[rowIndex] = rowStream.ToArray();
-                totalPoolBytes += rowPools[rowIndex].Length;
             }
 
             DatumZoneMap zoneMap = new(nullCount);

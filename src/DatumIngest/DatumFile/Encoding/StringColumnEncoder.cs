@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Text;
 using DatumIngest.DatumFile.Compression;
 using DatumIngest.Model;
 
@@ -36,37 +35,38 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         uint nullCount = 0;
         int totalPoolBytes = 0;
 
-        bool isJson = descriptor.Kind == DataKind.JsonValue;
-
         try
         {
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            // Iterate pages so each row resolves against the slice of the writer's arena
+            // that contains its original batch-relative bytes.
+            foreach (PageSpan page in context.Pages)
             {
-                DataValue value = values[rowIndex];
+                IValueStore pageStore = page.ArenaLength > 0
+                    ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                    : context.Store;
 
-                if (value.IsNull)
+                int endRow = page.RowStart + page.RowCount;
+                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
                 {
-                    nullBitmap.SetNull(rowIndex);
-                    encoded[rowIndex] = [];
-                    nullCount++;
-                }
-                else if (context.Store is not null)
-                {
-                    // Zero-copy: read UTF-8 bytes directly from the store.
-                    ReadOnlySpan<byte> utf8 = value.AsUtf8Span(context.Store);
+                    DataValue value = values[rowIndex];
+
+                    if (value.IsNull)
+                    {
+                        nullBitmap.SetNull(rowIndex);
+                        encoded[rowIndex] = [];
+                        nullCount++;
+                        continue;
+                    }
+
+                    // Zero-copy: read UTF-8 bytes directly from the page store.
+                    ReadOnlySpan<byte> utf8 = value.AsUtf8Span(pageStore);
                     encoded[rowIndex] = utf8.ToArray();
-                    totalPoolBytes += encoded[rowIndex].Length;
-                }
-                else
-                {
-                    string text = isJson ? value.AsJsonValue() : value.AsString();
-                    encoded[rowIndex] = System.Text.Encoding.UTF8.GetBytes(text);
                     totalPoolBytes += encoded[rowIndex].Length;
                 }
             }
 
-            // Zone map for strings: min and max by ordinal comparison.
-            DatumZoneMap zoneMap = BuildZoneMap(nullCount, values, isJson, context.Store);
+            bool isJson = descriptor.Kind == DataKind.JsonValue;
+            DatumZoneMap zoneMap = BuildZoneMap(nullCount, values, isJson, context);
 
             byte[] bitmapBytes = nullBitmap.ToBytes();
             int offsetsSize = (rowCount + 1) * 4;
@@ -113,7 +113,11 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         }
     }
 
-    private static DatumZoneMap BuildZoneMap(uint nullCount, IReadOnlyList<DataValue> values, bool isJson, IValueStore? store)
+    private static DatumZoneMap BuildZoneMap(
+        uint nullCount,
+        IReadOnlyList<DataValue> values,
+        bool isJson,
+        DatumEncoderContext context)
     {
         int rowCount = values.Count;
         if (nullCount == (uint)rowCount)
@@ -130,14 +134,23 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         string? minimum = null;
         string? maximum = null;
 
-        foreach (DataValue value in values)
+        foreach (PageSpan page in context.Pages)
         {
-            if (value.IsNull) continue;
+            IValueStore pageStore = page.ArenaLength > 0
+                ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                : context.Store;
 
-            string text = store is not null ? value.AsString(store) : value.AsString();
+            int endRow = page.RowStart + page.RowCount;
+            for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
+            {
+                DataValue value = values[rowIndex];
+                if (value.IsNull) continue;
 
-            if (minimum is null || string.CompareOrdinal(text, minimum) < 0) minimum = text;
-            if (maximum is null || string.CompareOrdinal(text, maximum) > 0) maximum = text;
+                string text = value.AsString(pageStore);
+
+                if (minimum is null || string.CompareOrdinal(text, minimum) < 0) minimum = text;
+                if (maximum is null || string.CompareOrdinal(text, maximum) > 0) maximum = text;
+            }
         }
 
         if (minimum is null)

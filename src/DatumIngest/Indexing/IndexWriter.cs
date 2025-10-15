@@ -19,6 +19,87 @@ internal static class IndexWriter
         WriteDataValue(writer, value.Value);
     }
 
+    /// <summary>
+    /// Writes a <see cref="DataValue"/> using an <see cref="IValueStore"/> to resolve
+    /// arena-backed payloads (strings, vectors, arrays, structs, images, byte arrays).
+    /// Call this from encoders that operate on values holding page-relative offsets.
+    /// </summary>
+    internal static void WriteDataValue(BinaryWriter writer, DataValue value, IValueStore store)
+    {
+        writer.Write((byte)value.Kind);
+
+        switch (value.Kind)
+        {
+            case DataKind.Float32:  writer.Write(value.AsFloat32()); break;
+            case DataKind.Float64:  writer.Write(value.AsFloat64()); break;
+            case DataKind.UInt8:    writer.Write(value.AsUInt8()); break;
+            case DataKind.Int8:     writer.Write(value.AsInt8()); break;
+            case DataKind.Int16:    writer.Write(value.AsInt16()); break;
+            case DataKind.UInt16:   writer.Write(value.AsUInt16()); break;
+            case DataKind.Int32:    writer.Write(value.AsInt32()); break;
+            case DataKind.UInt32:   writer.Write(value.AsUInt32()); break;
+            case DataKind.Int64:    writer.Write(value.AsInt64()); break;
+            case DataKind.UInt64:   writer.Write(value.AsUInt64()); break;
+            case DataKind.Boolean:  writer.Write(value.AsBoolean()); break;
+            case DataKind.Date:     writer.Write(value.AsDate().DayNumber); break;
+            case DataKind.Time:     writer.Write(value.AsTime().Ticks); break;
+            case DataKind.Duration: writer.Write(value.AsDuration().Ticks); break;
+            case DataKind.Uuid:     writer.Write(value.AsUuid().ToByteArray()); break;
+            case DataKind.Type:     writer.Write((byte)value.AsType()); break;
+
+            case DataKind.DateTime:
+                DateTimeOffset dto = value.AsDateTime();
+                writer.Write(dto.Ticks);
+                writer.Write((short)dto.Offset.TotalMinutes);
+                break;
+
+            case DataKind.String:
+                writer.Write(value.AsString(store));
+                break;
+
+            case DataKind.JsonValue:
+                writer.Write(value.AsJsonValue(store));
+                break;
+
+            case DataKind.UInt8Array:
+                byte[] u8 = value.AsUInt8Array(store);
+                writer.Write(u8.Length);
+                writer.Write(u8);
+                break;
+
+            case DataKind.Image:
+                byte[] img = value.AsImage(store);
+                writer.Write(img.Length);
+                writer.Write(img);
+                break;
+
+            case DataKind.Vector:
+                float[] vec = value.AsVector(store);
+                writer.Write(vec.Length);
+                foreach (float element in vec) writer.Write(element);
+                break;
+
+            case DataKind.Matrix:
+                float[] mat = value.AsMatrix(store, out int rows, out int columns);
+                writer.Write(rows);
+                writer.Write(columns);
+                writer.Write(mat.Length);
+                foreach (float element in mat) writer.Write(element);
+                break;
+
+            case DataKind.Tensor:
+                float[] tensor = value.AsTensor(store, out int[] shape);
+                writer.Write(shape.Length);
+                foreach (int dimension in shape) writer.Write(dimension);
+                writer.Write(tensor.Length);
+                foreach (float element in tensor) writer.Write(element);
+                break;
+
+            default:
+                throw new NotSupportedException($"Cannot serialize DataValue of kind {value.Kind}.");
+        }
+    }
+
     internal static void WriteDataValue(BinaryWriter writer, DataValue value)
     {
         writer.Write((byte)value.Kind);

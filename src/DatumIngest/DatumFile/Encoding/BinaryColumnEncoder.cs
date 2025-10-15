@@ -49,21 +49,29 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
 
         try
         {
-            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+            foreach (PageSpan page in context.Pages)
             {
-                DataValue value = values[rowIndex];
+                IValueStore pageStore = page.ArenaLength > 0
+                    ? context.Store.Slice(page.ArenaBase, page.ArenaLength)
+                    : context.Store;
 
-                if (value.IsNull)
+                int endRow = page.RowStart + page.RowCount;
+                for (int rowIndex = page.RowStart; rowIndex < endRow; rowIndex++)
                 {
-                    nullBitmap.SetNull(rowIndex);
-                    blobs[rowIndex] = [];
-                    nullCount++;
-                }
-                else
-                {
-                    byte[] blob = isImage ? value.AsImage() : value.AsUInt8Array();
-                    blobs[rowIndex] = blob;
-                    if (blob.Length > maxBlobSize) maxBlobSize = blob.Length;
+                    DataValue value = values[rowIndex];
+
+                    if (value.IsNull)
+                    {
+                        nullBitmap.SetNull(rowIndex);
+                        blobs[rowIndex] = [];
+                        nullCount++;
+                    }
+                    else
+                    {
+                        byte[] blob = isImage ? value.AsImage(pageStore) : value.AsUInt8Array(pageStore);
+                        blobs[rowIndex] = blob;
+                        if (blob.Length > maxBlobSize) maxBlobSize = blob.Length;
+                    }
                 }
             }
 

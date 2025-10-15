@@ -1,6 +1,8 @@
 using DatumIngest.Pooling;
 using DatumIngest.Functions;
 using DatumIngest.Serialization;
+using DatumIngest.Statistics;
+using DatumIngest.Ingestion;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -18,6 +20,8 @@ public static class DatumIngestServiceExtensions
     {
         services.AddSingleton<PoolBacking>();
         services.AddTransient<FormatRegistry>();
+        services.AddTransient<StatisticsCollector>();
+        services.AddTransient<SchemaDetector>();
         services.AddSingleton<FunctionRegistry>(_ => FunctionRegistry.CreateDefault());
         services.AddTransient(provider =>
         {
