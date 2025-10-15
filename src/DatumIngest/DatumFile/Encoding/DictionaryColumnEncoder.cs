@@ -77,7 +77,7 @@ internal sealed class DictionaryColumnEncoder : DatumColumnEncoder
                 codes[rowIndex] = code;
             }
 
-            DatumZoneMap zoneMap = new(nullCount, null, null);
+            DatumZoneMap zoneMap = new(nullCount);
 
             // Serialize using BinaryWriter for the DataValue entries.
             using MemoryStream dictStream = new();

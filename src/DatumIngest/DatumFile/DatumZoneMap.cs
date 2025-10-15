@@ -1,4 +1,3 @@
-using DatumIngest.Indexing;
 using DatumIngest.Model;
 
 namespace DatumIngest.DatumFile;
@@ -9,21 +8,40 @@ namespace DatumIngest.DatumFile;
 /// so that column pages can be skipped without decompressing them.
 /// </summary>
 /// <remarks>
-/// Zone maps are only populated for comparable types — Scalar, UInt8, Boolean,
-/// String, Date, DateTime, Time, Duration, Uuid. Non-comparable types
-/// (Vector, Matrix, Tensor, Image, UInt8Array, JsonValue, Array) carry only
-/// <see cref="NullCount"/>; <see cref="Minimum"/> and <see cref="Maximum"/>
-/// are <c>null</c> in that case.
+/// <para>
+/// Zone maps are only populated for comparable types — scalar numerics,
+/// <see cref="DataKind.Boolean"/>, <see cref="DataKind.String"/>, temporal types,
+/// and <see cref="DataKind.Uuid"/>. Non-comparable types (Vector, Matrix, Tensor,
+/// Image, UInt8Array, JsonValue, Array, Struct) carry only <see cref="NullCount"/>;
+/// <see cref="Minimum"/> and <see cref="Maximum"/> are <c>null</c> in that case.
+/// </para>
+/// <para>
+/// <see cref="Minimum"/> and <see cref="Maximum"/> are managed-boxed primitives
+/// (e.g. <see cref="long"/>, <see cref="double"/>, <see cref="string"/>) rather
+/// than <see cref="DataValue"/> so the zone map has no arena dependency and
+/// survives the writer's page-arena resets between row groups.
+/// </para>
 /// </remarks>
 public sealed record DatumZoneMap
 {
-    /// <summary>Creates a zone map with the given statistics.</summary>
-    /// <param name="nullCount">Number of null values in this row group for this column.</param>
-    /// <param name="minimum">Smallest observed value, or <c>null</c> if not applicable or not yet computed.</param>
-    /// <param name="maximum">Largest observed value, or <c>null</c> if not applicable or not yet computed.</param>
-    public DatumZoneMap(uint nullCount, DataValue? minimum, DataValue? maximum)
+    /// <summary>Creates a zone map with no min/max (non-comparable type or all nulls).</summary>
+    public DatumZoneMap(uint nullCount)
     {
         NullCount = nullCount;
+        Kind = DataKind.Unknown;
+        Minimum = null;
+        Maximum = null;
+    }
+
+    /// <summary>Creates a zone map with the given managed min/max values.</summary>
+    /// <param name="nullCount">Number of null values in this row group for this column.</param>
+    /// <param name="kind">The <see cref="DataKind"/> of <paramref name="minimum"/> and <paramref name="maximum"/>.</param>
+    /// <param name="minimum">Smallest observed value (managed-boxed primitive), or <c>null</c>.</param>
+    /// <param name="maximum">Largest observed value (managed-boxed primitive), or <c>null</c>.</param>
+    public DatumZoneMap(uint nullCount, DataKind kind, object? minimum, object? maximum)
+    {
+        NullCount = nullCount;
+        Kind = kind;
         Minimum = minimum;
         Maximum = maximum;
     }
@@ -31,50 +49,46 @@ public sealed record DatumZoneMap
     /// <summary>Number of null values in this row group for this column.</summary>
     public uint NullCount { get; init; }
 
-    /// <summary>Smallest observed value, or <c>null</c> if the type is non-comparable.</summary>
-    public DataValue? Minimum { get; init; }
+    /// <summary>The <see cref="DataKind"/> of <see cref="Minimum"/> and <see cref="Maximum"/>, or <see cref="DataKind.Unknown"/> if not populated.</summary>
+    public DataKind Kind { get; init; }
 
-    /// <summary>Largest observed value, or <c>null</c> if the type is non-comparable.</summary>
-    public DataValue? Maximum { get; init; }
+    /// <summary>Smallest observed value (managed-boxed), or <c>null</c> if the type is non-comparable or no values were seen.</summary>
+    public object? Minimum { get; init; }
 
-    /// <summary>
-    /// Returns <c>true</c> if both <see cref="Minimum"/> and <see cref="Maximum"/> are available,
-    /// enabling range-based partition pruning.
-    /// </summary>
+    /// <summary>Largest observed value (managed-boxed), or <c>null</c> if the type is non-comparable or no values were seen.</summary>
+    public object? Maximum { get; init; }
+
+    /// <summary>Whether both <see cref="Minimum"/> and <see cref="Maximum"/> are available for range-based pruning.</summary>
     public bool HasMinMax => Minimum is not null && Maximum is not null;
 
     // ──────────────────── Binary serialization ────────────────────
 
-    /// <summary>Serializes this zone map using the same nullable DataValue wire format as <c>IndexWriter</c>.</summary>
+    /// <summary>Serializes this zone map to the footer.</summary>
     internal void Serialize(BinaryWriter writer)
     {
         writer.Write(NullCount);
         writer.Write(HasMinMax);
 
-        if (Minimum.HasValue && Maximum.HasValue)
+        if (HasMinMax)
         {
-            IndexWriter.WriteDataValue(writer, Minimum.Value);
-            IndexWriter.WriteDataValue(writer, Maximum.Value);
+            ZoneMapValueSerializer.Write(writer, Kind, Minimum!);
+            ZoneMapValueSerializer.Write(writer, Kind, Maximum!);
         }
     }
 
-    /// <summary>Deserializes a zone map from the given binary reader.</summary>
-    internal static DatumZoneMap Deserialize(BinaryReader reader, IValueStore? store = null)
+    /// <summary>Deserializes a zone map from the footer.</summary>
+    internal static DatumZoneMap Deserialize(BinaryReader reader)
     {
         uint nullCount = reader.ReadUInt32();
         bool hasMinMax = reader.ReadBoolean();
 
         if (!hasMinMax)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        DataValue minimum = store is not null
-            ? IndexReader.ReadDataValue(reader, store)
-            : IndexReader.ReadDataValue(reader);
-        DataValue maximum = store is not null
-            ? IndexReader.ReadDataValue(reader, store)
-            : IndexReader.ReadDataValue(reader);
-        return new DatumZoneMap(nullCount, minimum, maximum);
+        object minimum = ZoneMapValueSerializer.Read(reader, out DataKind kind);
+        object maximum = ZoneMapValueSerializer.Read(reader, out _);
+        return new DatumZoneMap(nullCount, kind, minimum, maximum);
     }
 }

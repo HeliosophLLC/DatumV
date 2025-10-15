@@ -159,6 +159,17 @@ public sealed class Arena : IValueStore, IDisposable
     /// <summary>Current capacity of the backing memory-mapped region in bytes, or zero if not yet allocated.</summary>
     public int Capacity => _capacity;
 
+    /// <summary>
+    /// Returns a read-only view over a sub-region ("page") of this arena.
+    /// All <c>Retrieve*</c> calls on the slice add <paramref name="pageBase"/> to <c>p0</c>
+    /// before dereferencing. Used to resolve page-relative offsets copied verbatim from
+    /// another arena via <see cref="CopyFrom"/> without rewriting the bytes.
+    /// </summary>
+    /// <param name="pageBase">Byte offset at which the page begins within this arena.</param>
+    /// <param name="pageLength">Length of the page in bytes.</param>
+    public ArenaSlice Slice(int pageBase, int pageLength)
+        => new(this, pageBase, pageLength);
+
     // ───────────────────────── Core write path ─────────────────────────
 
     /// <summary>

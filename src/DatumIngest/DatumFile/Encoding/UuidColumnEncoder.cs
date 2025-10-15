@@ -56,7 +56,7 @@ internal sealed class UuidColumnEncoder : DatumColumnEncoder
             }
 
             // UUIDs are effectively random — zone map min/max would have no predicate pushdown value.
-            DatumZoneMap zoneMap = new(nullCount, null, null);
+            DatumZoneMap zoneMap = new(nullCount);
 
             Buffer.BlockCopy(nullBitmap.ToBytes(), 0, raw, 0, bitmapLength);
 

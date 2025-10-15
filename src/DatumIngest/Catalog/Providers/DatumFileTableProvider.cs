@@ -559,7 +559,7 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
         return nameIndex;
     }
 
-    private static Dictionary<string, ColumnStatisticsRange> BuildStatistics(
+    private Dictionary<string, ColumnStatisticsRange> BuildStatistics(
         Schema schema,
         DatumRowGroupDescriptor rowGroup,
         HashSet<string> filterColumnNames)
@@ -574,8 +574,8 @@ public sealed class DatumFileTableProvider : ITableProvider, IFilterableTablePro
 
             DatumZoneMap zoneMap = rowGroup.ColumnChunks[columnIndex].ZoneMap;
             statistics[columnName] = new ColumnStatisticsRange(
-                zoneMap.Minimum,
-                zoneMap.Maximum,
+                DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Minimum, Store),
+                DataValueComparer.MakeFromBoxed(zoneMap.Kind, zoneMap.Maximum, Store),
                 zoneMap.NullCount,
                 rowGroup.RowCount);
         }

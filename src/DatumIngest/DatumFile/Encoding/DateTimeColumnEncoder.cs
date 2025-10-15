@@ -107,7 +107,7 @@ internal sealed class DateTimeColumnEncoder : DatumColumnEncoder
     {
         if (!baselineSet || nullCount == (uint)rowCount)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
         // Reconstruct absolute ticks for the zone map min/max. Use offset 0 for the zone map
@@ -115,9 +115,6 @@ internal sealed class DateTimeColumnEncoder : DatumColumnEncoder
         DateTimeOffset minDto = new(baseline + minimumTick, TimeSpan.Zero);
         DateTimeOffset maxDto = new(baseline + maximumTick, TimeSpan.Zero);
 
-        return new DatumZoneMap(
-            nullCount,
-            DataValue.FromDateTime(minDto),
-            DataValue.FromDateTime(maxDto));
+        return new DatumZoneMap(nullCount, DataKind.DateTime, minDto, maxDto);
     }
 }

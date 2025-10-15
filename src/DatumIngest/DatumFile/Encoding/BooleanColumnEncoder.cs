@@ -71,13 +71,13 @@ internal sealed class BooleanColumnEncoder : DatumColumnEncoder
     {
         if (nullCount == (uint)rowCount)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        // Represent boolean min/max as UInt8 0/1 for zone map predicate pushdown.
-        DataValue minimum = DataValue.FromUInt8(hasFalse ? (byte)0 : (byte)1);
-        DataValue maximum = DataValue.FromUInt8(hasTrue ? (byte)1 : (byte)0);
+        // min = false if any false seen, else true; max = true if any true seen, else false.
+        bool minimum = !hasFalse;
+        bool maximum = hasTrue;
 
-        return new DatumZoneMap(nullCount, minimum, maximum);
+        return new DatumZoneMap(nullCount, DataKind.Boolean, minimum, maximum);
     }
 }

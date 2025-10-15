@@ -97,15 +97,12 @@ internal sealed class DateColumnEncoder : DatumColumnEncoder
     {
         if (!baselineSet || nullCount == (uint)rowCount)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
         DateOnly minDate = DateOnly.FromDayNumber(baseline + minimum);
         DateOnly maxDate = DateOnly.FromDayNumber(baseline + maximum);
 
-        return new DatumZoneMap(
-            nullCount,
-            DataValue.FromDate(minDate),
-            DataValue.FromDate(maxDate));
+        return new DatumZoneMap(nullCount, DataKind.Date, minDate, maxDate);
     }
 }

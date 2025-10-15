@@ -60,14 +60,14 @@ public sealed class DatumFileReader : IDisposable
 
         try
         {
-            // The footer contains zone map min/max DataValues that need a store.
-            // If the caller doesn't provide one, create a reader-owned Arena.
-            store ??= new Model.Arena();
             (DatumFileSchema schema, DatumRowGroupDescriptor[] rowGroups, long totalRowCount, DatumFileFlags flags) =
-                ReadFooterAndHeader(stream, store);
+                ReadFooterAndHeader(stream);
 
             var reader = new DatumFileReader(stream, filePath, schema, rowGroups, totalRowCount, flags);
-            reader.Store = store;
+            if (store is not null)
+            {
+                reader.Store = store;
+            }
             return reader;
         }
         catch
@@ -256,7 +256,7 @@ public sealed class DatumFileReader : IDisposable
     // ──────────────────── Footer reading ────────────────────
 
     internal static (DatumFileSchema Schema, DatumRowGroupDescriptor[] RowGroups, long TotalRowCount, DatumFileFlags Flags)
-        ReadFooterAndHeader(Stream stream, Model.IValueStore? store = null)
+        ReadFooterAndHeader(Stream stream)
     {
         // Validate header magic and read totalRowCount from position 12.
         byte[] headerBytes = new byte[DatumFileConstants.HeaderSize];
@@ -305,7 +305,7 @@ public sealed class DatumFileReader : IDisposable
 
         for (int groupIndex = 0; groupIndex < (int)rowGroupCount; groupIndex++)
         {
-            rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount, hasTombstones, store);
+            rowGroups[groupIndex] = DatumRowGroupDescriptor.Deserialize(reader, schema.ColumnCount, hasTombstones);
         }
 
         return (schema, rowGroups, totalRowCount, flags);

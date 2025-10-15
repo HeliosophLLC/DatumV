@@ -133,19 +133,19 @@ internal sealed class FloatColumnEncoder : DatumColumnEncoder
     {
         if (nullCount == (uint)rowCount || minimum > maximum)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        return new DatumZoneMap(nullCount, DataValue.FromFloat32(minimum), DataValue.FromFloat32(maximum));
+        return new DatumZoneMap(nullCount, DataKind.Float32, minimum, maximum);
     }
 
     private static DatumZoneMap BuildFloat64ZoneMap(uint nullCount, int rowCount, double minimum, double maximum)
     {
         if (nullCount == (uint)rowCount || minimum > maximum)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        return new DatumZoneMap(nullCount, DataValue.FromFloat64(minimum), DataValue.FromFloat64(maximum));
+        return new DatumZoneMap(nullCount, DataKind.Float64, minimum, maximum);
     }
 }

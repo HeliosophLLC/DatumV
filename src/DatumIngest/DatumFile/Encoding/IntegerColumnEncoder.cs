@@ -144,12 +144,28 @@ internal sealed class IntegerColumnEncoder : DatumColumnEncoder
     {
         if (nullCount == (uint)rowCount || minimum > maximum)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        DataValue minValue = CreateFromDouble(kind, minimum);
-        DataValue maxValue = CreateFromDouble(kind, maximum);
-        return new DatumZoneMap(nullCount, minValue, maxValue);
+        object minBoxed = BoxForKind(kind, minimum);
+        object maxBoxed = BoxForKind(kind, maximum);
+        return new DatumZoneMap(nullCount, kind, minBoxed, maxBoxed);
+    }
+
+    private static object BoxForKind(DataKind kind, double value)
+    {
+        return kind switch
+        {
+            DataKind.UInt8 => (byte)value,
+            DataKind.Int8 => (sbyte)value,
+            DataKind.Int16 => (short)value,
+            DataKind.UInt16 => (ushort)value,
+            DataKind.Int32 => (int)value,
+            DataKind.UInt32 => (uint)value,
+            DataKind.Int64 => (long)value,
+            DataKind.UInt64 => (ulong)value,
+            _ => throw new NotSupportedException($"IntegerColumnEncoder does not support DataKind.{kind}.")
+        };
     }
 
     private static DataValue CreateFromDouble(DataKind kind, double value)

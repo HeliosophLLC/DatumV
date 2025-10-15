@@ -67,7 +67,7 @@ internal sealed class BinaryColumnEncoder : DatumColumnEncoder
                 }
             }
 
-            DatumZoneMap zoneMap = new(nullCount, null, null);
+            DatumZoneMap zoneMap = new(nullCount);
 
             bool externalize = descriptor.ExternalizesBlobs && maxBlobSize > descriptor.ExternalizationThresholdBytes;
 

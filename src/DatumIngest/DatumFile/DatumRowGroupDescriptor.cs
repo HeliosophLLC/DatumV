@@ -124,8 +124,7 @@ public sealed class DatumRowGroupDescriptor
     /// <param name="hasTombstones">
     /// Whether the file has the <see cref="DatumFileFlags.HasTombstones"/> flag set.
     /// </param>
-    /// <param name="store">Optional value store for zone map DataValues.</param>
-    internal static DatumRowGroupDescriptor Deserialize(BinaryReader reader, int columnCount, bool hasTombstones = false, Model.IValueStore? store = null)
+    internal static DatumRowGroupDescriptor Deserialize(BinaryReader reader, int columnCount, bool hasTombstones = false)
     {
         uint rowCount = reader.ReadUInt32();
 
@@ -146,7 +145,7 @@ public sealed class DatumRowGroupDescriptor
 
         for (int index = 0; index < columnCount; index++)
         {
-            chunks[index] = DatumColumnChunkDescriptor.Deserialize(reader, store);
+            chunks[index] = DatumColumnChunkDescriptor.Deserialize(reader);
         }
 
         return new DatumRowGroupDescriptor(rowCount, activeRowCount, tombstoneBitmap, chunks);

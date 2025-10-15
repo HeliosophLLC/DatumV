@@ -118,13 +118,13 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
         int rowCount = values.Count;
         if (nullCount == (uint)rowCount)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
         // JSON values do not have a meaningful lexicographic range for zone map pruning.
         if (isJson)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
         string? minimum = null;
@@ -142,14 +142,9 @@ internal sealed class StringColumnEncoder : DatumColumnEncoder
 
         if (minimum is null)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        // Zone map min/max values are serialized by IndexWriter via parameterless AsString(),
-        // so they always use ReferenceStore (a scope must be active).
-        return new DatumZoneMap(
-            nullCount,
-            DataValue.FromString(minimum),
-            DataValue.FromString(maximum!));
+        return new DatumZoneMap(nullCount, DataKind.String, minimum, maximum!);
     }
 }

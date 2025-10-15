@@ -67,7 +67,7 @@ internal sealed class ArrayColumnEncoder : DatumColumnEncoder
                 totalPoolBytes += rowPools[rowIndex].Length;
             }
 
-            DatumZoneMap zoneMap = new(nullCount, null, null);
+            DatumZoneMap zoneMap = new(nullCount);
             byte[] bitmapBytes = nullBitmap.ToBytes();
             int offsetsSize = (rowCount + 1) * 4;
             int rawLength = bitmapBytes.Length + offsetsSize + totalPoolBytes;

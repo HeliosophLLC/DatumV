@@ -132,9 +132,9 @@ internal sealed class FixedShapeFloatColumnEncoder : DatumColumnEncoder
     {
         if (nullCount == (uint)rowCount || minimum > maximum)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
-        return new DatumZoneMap(nullCount, DataValue.FromFloat32(minimum), DataValue.FromFloat32(maximum));
+        return new DatumZoneMap(nullCount, DataKind.Float32, minimum, maximum);
     }
 }

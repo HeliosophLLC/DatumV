@@ -92,12 +92,12 @@ internal sealed class DurationColumnEncoder : DatumColumnEncoder
     {
         if (!baselineSet || nullCount == (uint)rowCount)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
         TimeSpan minDuration = TimeSpan.FromTicks(baseline + minimum);
         TimeSpan maxDuration = TimeSpan.FromTicks(baseline + maximum);
 
-        return new DatumZoneMap(nullCount, DataValue.FromDuration(minDuration), DataValue.FromDuration(maxDuration));
+        return new DatumZoneMap(nullCount, DataKind.Duration, minDuration, maxDuration);
     }
 }

@@ -92,12 +92,12 @@ internal sealed class TimeColumnEncoder : DatumColumnEncoder
     {
         if (!baselineSet || nullCount == (uint)rowCount)
         {
-            return new DatumZoneMap(nullCount, null, null);
+            return new DatumZoneMap(nullCount);
         }
 
         TimeOnly minTime = new(baseline + minimum);
         TimeOnly maxTime = new(baseline + maximum);
 
-        return new DatumZoneMap(nullCount, DataValue.FromTime(minTime), DataValue.FromTime(maxTime));
+        return new DatumZoneMap(nullCount, DataKind.Time, minTime, maxTime);
     }
 }

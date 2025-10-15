@@ -158,6 +158,44 @@ internal static class DataValueComparer
     }
 
     /// <summary>
+    /// Converts a managed-boxed primitive back into a <see cref="DataValue"/> of the given kind.
+    /// Used for zone-map values which are stored as boxed managed primitives rather than
+    /// <see cref="DataValue"/> to avoid arena dependencies on long-lived metadata.
+    /// </summary>
+    /// <param name="kind">The target <see cref="DataKind"/>.</param>
+    /// <param name="boxed">The managed-boxed primitive value (e.g. <see cref="long"/>, <see cref="string"/>, <see cref="DateOnly"/>), or <c>null</c>.</param>
+    /// <param name="store">Value store for arena-backed kinds (String). May be <c>null</c> for inline kinds only.</param>
+    /// <returns>The materialized <see cref="DataValue"/>, or <c>null</c> if <paramref name="boxed"/> is null or the kind is unsupported.</returns>
+    internal static DataValue? MakeFromBoxed(DataKind kind, object? boxed, IValueStore? store = null)
+    {
+        if (boxed is null) return null;
+
+        return kind switch
+        {
+            DataKind.Boolean  => DataValue.FromUInt8((bool)boxed ? (byte)1 : (byte)0),
+            DataKind.UInt8    => DataValue.FromUInt8((byte)boxed),
+            DataKind.Int8     => DataValue.FromInt8((sbyte)boxed),
+            DataKind.Int16    => DataValue.FromInt16((short)boxed),
+            DataKind.UInt16   => DataValue.FromUInt16((ushort)boxed),
+            DataKind.Int32    => DataValue.FromInt32((int)boxed),
+            DataKind.UInt32   => DataValue.FromUInt32((uint)boxed),
+            DataKind.Int64    => DataValue.FromInt64((long)boxed),
+            DataKind.UInt64   => DataValue.FromUInt64((ulong)boxed),
+            DataKind.Float32  => DataValue.FromFloat32((float)boxed),
+            DataKind.Float64  => DataValue.FromFloat64((double)boxed),
+            DataKind.Date     => DataValue.FromDate((DateOnly)boxed),
+            DataKind.DateTime => DataValue.FromDateTime((DateTimeOffset)boxed),
+            DataKind.Time     => DataValue.FromTime((TimeOnly)boxed),
+            DataKind.Duration => DataValue.FromDuration((TimeSpan)boxed),
+            DataKind.Uuid     => DataValue.FromUuid((Guid)boxed),
+            DataKind.String   => store is not null
+                ? DataValue.FromString((string)boxed, store)
+                : throw new ArgumentNullException(nameof(store), "String kind requires a value store."),
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Returns whether a string can be parsed as the target type without failure.
     /// Uses culture-invariant TryParse for each supported target kind.
     /// </summary>

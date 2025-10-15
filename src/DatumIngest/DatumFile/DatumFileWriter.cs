@@ -140,9 +140,9 @@ public sealed class DatumFileWriter : IDisposable
     /// One value per column in schema column order.
     /// <see cref="Row.FieldCount"/> must equal <see cref="DatumFileSchema.ColumnCount"/>.
     /// </param>
-    /// <param name="arena">The memory arena where references are stored.</param>
+    /// <param name="store">The value store where references are stored.</param>
     /// <exception cref="InvalidOperationException">Thrown when not initialized or already finalized.</exception>
-    private void WriteRow(Row row, Arena arena)
+    private void WriteRow(Row row, IValueStore store)
     {
         ThrowIfNotReady();
 
