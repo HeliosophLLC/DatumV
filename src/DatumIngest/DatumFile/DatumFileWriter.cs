@@ -34,6 +34,20 @@ public sealed class DatumFileWriter : IDisposable
     private bool _disposed;
 
     /// <summary>
+    /// Writer-owned arena holding verbatim byte copies of every incoming batch's arena.
+    /// Each <see cref="WriteRowBatch"/> appends a page; <see cref="_pages"/> tracks the
+    /// per-page layout so encoders can resolve page-relative DataValue offsets via
+    /// <see cref="Arena.Slice(int, int)"/>.
+    /// </summary>
+    private readonly Arena _writerArena = new();
+
+    /// <summary>
+    /// Per-page layout of the current row group's column buffers. Cleared on
+    /// row group flush. One entry per appended <see cref="RowBatch"/>.
+    /// </summary>
+    private readonly List<PageSpan> _pages = new();
+
+    /// <summary>
     /// Initializes a <see cref="DatumFileWriter"/> that writes to an existing seekable stream.
     /// The caller retains ownership of the stream and is responsible for disposing it.
     /// </summary>
@@ -77,7 +91,7 @@ public sealed class DatumFileWriter : IDisposable
 
     /// <summary>
     /// Initializes the writer with a schema and writes the file header.
-    /// Must be called exactly once before any calls to <see cref="WriteRow"/>.
+    /// Must be called exactly once before any calls to <see cref="WriteRowBatch"/>.
     /// </summary>
     /// <param name="schema">The schema describing the columns to be written.</param>
     /// <exception cref="InvalidOperationException">Thrown when already initialized.</exception>
@@ -120,40 +134,39 @@ public sealed class DatumFileWriter : IDisposable
     }
 
     /// <summary>
-    /// Writes a batch of rows to the file, flushing a row group when the buffer is full.
-    /// <see cref="WriteRow"/> for per-row details.
+    /// Appends a batch of rows to the current row group. The batch's arena bytes are
+    /// copied verbatim into the writer's arena as a new page, and the batch's
+    /// <see cref="DataValue"/>s are appended to the column buffers with their original
+    /// page-relative offsets preserved. The caller may dispose or return
+    /// <paramref name="batch"/> immediately after this call — the writer retains no
+    /// reference to its arena.
     /// </summary>
-    /// <param name="batch">The batch of rows to write.</param>
+    /// <param name="batch">The batch of rows to append.</param>
     public void WriteRowBatch(RowBatch batch)
-    {
-        for (int i = 0; i < batch.Count; i++)
-        {
-            WriteRow(batch[i], batch.Arena);
-        }
-    }
-
-    /// <summary>
-    /// Appends a row of values to the current row group buffer.
-    /// Triggers a row group flush when the buffer reaches the current row group size.
-    /// </summary>
-    /// <param name="row">
-    /// One value per column in schema column order.
-    /// <see cref="Row.FieldCount"/> must equal <see cref="DatumFileSchema.ColumnCount"/>.
-    /// </param>
-    /// <param name="store">The value store where references are stored.</param>
-    /// <exception cref="InvalidOperationException">Thrown when not initialized or already finalized.</exception>
-    private void WriteRow(Row row, IValueStore store)
     {
         ThrowIfNotReady();
 
-        for (int columnIndex = 0; columnIndex < _descriptors!.Length; columnIndex++)
-        {
-            DataValue value = row[columnIndex];
+        if (batch.Count == 0) return;
 
-            _columnBuffers![columnIndex].Add(value);
+        // Copy the batch's arena bytes into the writer's arena as a page. If the
+        // batch never wrote any reference data, pageLength is zero and the encoders'
+        // per-page slices resolve no offsets — still correct.
+        int pageLength = batch.Arena.BytesWritten;
+        int pageBase = pageLength > 0 ? _writerArena.CopyFrom(batch.Arena) : 0;
+
+        int rowStart = _columnBuffers![0].Count;
+        _pages.Add(new PageSpan(rowStart, batch.Count, pageBase, pageLength));
+
+        for (int rowIndex = 0; rowIndex < batch.Count; rowIndex++)
+        {
+            Row row = batch[rowIndex];
+            for (int columnIndex = 0; columnIndex < _descriptors!.Length; columnIndex++)
+            {
+                _columnBuffers[columnIndex].Add(row[columnIndex]);
+            }
         }
 
-        if (_columnBuffers![0].Count >= _rowGroupSize)
+        if (_columnBuffers[0].Count >= _rowGroupSize)
         {
             FlushRowGroup();
         }
@@ -201,6 +214,8 @@ public sealed class DatumFileWriter : IDisposable
             _stream.Dispose();
             _ownsStream = false;
         }
+
+        _writerArena.Dispose();
     }
 
     // ──────────────────── Row group flush ────────────────────
@@ -216,6 +231,8 @@ public sealed class DatumFileWriter : IDisposable
         {
             DatumFilePath = _filePath ?? string.Empty,
             RowGroupIndex = _rowGroupDescriptors.Count,
+            Store = _writerArena,
+            Pages = _pages,
         };
 
         // Encode all columns in parallel — encoders are stateless singletons and
@@ -253,6 +270,8 @@ public sealed class DatumFileWriter : IDisposable
         {
             buffer.Clear();
         }
+
+        _pages.Clear();
 
         CheckAutoTune(chunks);
     }
