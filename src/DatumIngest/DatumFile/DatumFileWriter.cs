@@ -37,9 +37,9 @@ public sealed class DatumFileWriter : IDisposable
     /// Writer-owned arena holding verbatim byte copies of every incoming batch's arena.
     /// Each <see cref="WriteRowBatch"/> appends a page; <see cref="_pages"/> tracks the
     /// per-page layout so encoders can resolve page-relative DataValue offsets via
-    /// <see cref="Arena.Slice(int, int)"/>.
+    /// <see cref="Arena.Slice(int, int)"/>. Reset between row groups; disposed with the writer.
     /// </summary>
-    private readonly Arena _writerArena = new();
+    private readonly Arena _writerArena;
 
     /// <summary>
     /// Per-page layout of the current row group's column buffers. Cleared on
@@ -67,6 +67,7 @@ public sealed class DatumFileWriter : IDisposable
 
         _stream = stream;
         _ownsStream = false;
+        _writerArena = new Arena(owner: this);
     }
 
     /// <summary>
@@ -80,6 +81,7 @@ public sealed class DatumFileWriter : IDisposable
         // _stream will be opened in Initialize once we know the file path is valid.
         _stream = Stream.Null;
         _ownsStream = false;
+        _writerArena = new Arena(owner: this);
     }
 
     /// <summary>
@@ -200,6 +202,9 @@ public sealed class DatumFileWriter : IDisposable
             _ownsStream = false;
         }
 
+        // Footer is already written — the writer arena is no longer needed.
+        _writerArena.Dispose();
+
         return bytesWritten;
     }
 
@@ -272,6 +277,11 @@ public sealed class DatumFileWriter : IDisposable
         }
 
         _pages.Clear();
+
+        // Release the row group's page data. Zone maps are already materialized as
+        // managed primitives on each row group descriptor, so nothing in the arena
+        // needs to survive the flush.
+        _writerArena.Reset();
 
         CheckAutoTune(chunks);
     }

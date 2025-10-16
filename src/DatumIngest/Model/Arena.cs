@@ -439,6 +439,29 @@ public sealed class Arena : IValueStore, IDisposable
         return offset;
     }
 
+    // ───────────────────────── Reset ─────────────────────────
+
+    /// <summary>
+    /// Clears the arena for reuse without releasing the backing mapping.
+    /// Position returns to zero and the object side-list is emptied; the mmap
+    /// region is kept alive so the next write avoids the allocation cost.
+    /// </summary>
+    /// <remarks>
+    /// Intended for owners (e.g. <c>DatumFileWriter</c>) that reuse a single arena
+    /// across distinct lifecycle phases such as row-group flushes. Pool-managed
+    /// arenas use <see cref="Pool"/>/<see cref="Unpool"/> instead, which handle
+    /// the reset as part of the pool transition.
+    /// </remarks>
+    public void Reset()
+    {
+        ThrowIfPooled();
+        lock (_writeLock)
+        {
+            _position = 0;
+            _objects?.Clear();
+        }
+    }
+
     // ───────────────────────── Pooling ─────────────────────────
 
     /// <summary>
